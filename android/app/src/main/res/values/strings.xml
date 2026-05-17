@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">spendvault</string>
+    <string name="title_activity_main">spendvault</string>
+    <string name="package_name">com.spendvault.app</string>
+    <string name="custom_url_scheme">com.spendvault.app</string>
+</resources>

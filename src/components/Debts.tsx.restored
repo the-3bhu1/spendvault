@@ -1,0 +1,38 @@
+import { useState, useMemo } from 'react';
+import { useFinance } from '../FinanceContext';
+import { 
+  Plus, 
+  User as UserIcon, 
+  ArrowUpRight, 
+  ArrowDownLeft, 
+  Trash2, 
+  CheckCircle2, 
+  History, 
+  HandCoins,
+  ChevronRight,
+  Search,
+  UserPlus,
+  Wallet,
+  CreditCard,
+  Landmark,
+  Coins,
+  Smartphone,
+  Gift
+} from 'lucide-react';
+import ConfirmDialog from './ConfirmDialog';
+import { generateId, formatCurrency, calculateBalance, getCurrentMonthStr } from '../utils';
+import type { Debt, DebtTransaction, Account } from '../types';
+import { CustomPicker } from './CustomPicker';
+
+export default function Debts() {
+  const { data, addDebt, updateDebt, deleteDebt, addTransaction } = useFinance();
+  const [activeDebtId, setActiveDebtId] = useState<string | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [confirmConfig, setConfirmConfig] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    confirmLabel?: string;
+    isDanger?: boolean;
+  } | null>(null);

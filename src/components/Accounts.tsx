@@ -1,0 +1,844 @@
+import { useState, useRef, useEffect } from 'react';
+import { useFinance } from '../FinanceContext';
+import { Pencil, Trash2, Plus, FileText, CreditCard } from 'lucide-react';
+import { CustomPicker } from './CustomPicker';
+import ConfirmDialog from './ConfirmDialog';
+import type { Account, AccountType, CardDetails, CardNetwork } from '../types';
+import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, getOrdinalSuffix } from '../utils';
+import { CardNetworkLogo } from './CardNetworkLogo';
+import { ViewCardOverlay } from './ViewCardOverlay';
+
+export default function Accounts({ onViewStatement }: { onViewStatement: (acc: Account) => void }) {
+  const { data, setPendingTransfer, addAccount, updateAccount, deleteAccount } = useFinance();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [viewingCard, setViewingCard] = useState<Account | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleGlobalBack = (e: Event) => {
+      if (viewingCard) {
+        setViewingCard(null);
+        e.preventDefault();
+      } else if (isModalOpen) {
+        setIsModalOpen(false);
+        e.preventDefault();
+      } else if (deleteConfirmId) {
+        setDeleteConfirmId(null);
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('appBackButton', handleGlobalBack);
+    return () => window.removeEventListener('appBackButton', handleGlobalBack);
+  }, [viewingCard, isModalOpen, deleteConfirmId]);
+
+  const handleLiquidate = (acc: Account) => {
+    const currentMonth = getCurrentMonthStr();
+    const bal = calculateBalance(acc, data.transactions, currentMonth);
+    if (bal <= 0) {
+      alert('Account balance is zero.');
+      return;
+    }
+    setPendingTransfer({ fromAccountId: acc.id, amount: bal, triggerTabSwitch: true });
+  };
+
+  const accountTypeOptions = [
+    { id: 'bank_account', name: 'Bank Account', subtext: 'Savings or Current' },
+    { id: 'credit_card', name: 'Credit Card', subtext: 'Credit line with cycles' },
+    { id: 'debit_card', name: 'Debit Card', subtext: 'Linked to bank account' },
+    { id: 'e_wallet', name: 'E-Wallet', subtext: 'Digital Currency' },
+    { id: 'stocks', name: 'Stocks', subtext: 'Market Investments' },
+    { id: 'sips', name: 'SIPs', subtext: 'Systematic Investment Plan' },
+    { id: 'rewards', name: 'Rewards', subtext: 'Cashback & Points' },
+    { id: 'cash', name: 'Cash', subtext: 'Physical wallet' },
+    ...(data.customAccountTypes || []).map(type => ({
+      id: type,
+      name: type,
+      subtext: 'Custom account type'
+    }))
+  ];
+
+  const [newAccount, setNewAccount] = useState<Partial<Account>>({
+    name: '', type: 'bank_account', openingBalances: {}, cashbackRates: []
+  });
+
+  const [openingBalanceInput, setOpeningBalanceInput] = useState('');
+  const [newCbName, setNewCbName] = useState('');
+  const [newCbRate, setNewCbRate] = useState('');
+  const [travelOpeningBalanceInput, setTravelOpeningBalanceInput] = useState('');
+  const cardDetailsRef = useRef<HTMLDivElement>(null);
+
+  const [newCbRoundOff, setNewCbRoundOff] = useState(false);
+  const [showCvv, setShowCvv] = useState(false);
+  const [expiryInput, setExpiryInput] = useState('');
+
+  const openAddModal = () => {
+    setEditId(null);
+    setNewAccount({ name: '', type: 'bank_account', openingBalances: {}, cashbackRates: [], isCashbackEnabled: false });
+    setOpeningBalanceInput('');
+    setNewCbName('');
+    setNewCbRate('');
+    setNewCbRoundOff(false);
+    setTravelOpeningBalanceInput('');
+    setExpiryInput('');
+    setShowCvv(false);
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (acc: Account) => {
+    const month = getCurrentMonthStr();
+    setEditId(acc.id);
+    setNewAccount({ 
+      ...acc,
+      isCashbackEnabled: acc.isCashbackEnabled ?? (acc.defaultCashbackRate !== undefined || (acc.cashbackRates && acc.cashbackRates.length > 0))
+    });
+    setNewCbName('');
+    setNewCbRate('');
+    setNewCbRoundOff(false);
+
+    let defaultOpening = acc.openingBalances[month];
+    if (defaultOpening === undefined) {
+      const prevMonthDate = new Date();
+      prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+      const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
+      defaultOpening = calculateBalance(acc, data.transactions, prevMonthStr);
+    }
+    setOpeningBalanceInput(defaultOpening.toString());
+
+    let defaultTravelOpening = acc.travelOpeningBalances?.[month];
+    if (defaultTravelOpening === undefined && acc.isNcmcEnabled) {
+      const prevMonthDate = new Date();
+      prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+      const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
+      defaultTravelOpening = calculateBalance(acc, data.transactions, prevMonthStr, true);
+    }
+    setTravelOpeningBalanceInput((defaultTravelOpening || 0).toString());
+
+    // Pre-fill expiry string from saved cardDetails
+    const cd = acc.cardDetails;
+    if (cd?.expiryMonth && cd?.expiryYear) {
+      setExpiryInput(`${String(cd.expiryMonth).padStart(2, '0')}/${String(cd.expiryYear).padStart(2, '0')}`);
+    } else {
+      setExpiryInput('');
+    }
+    setShowCvv(false);
+
+    setIsModalOpen(true);
+  };
+
+  const handleSave = () => {
+    if (!newAccount.name || !newAccount.type) return;
+    const month = getCurrentMonthStr();
+
+    const accountData: Account = {
+      id: editId || generateId(),
+      name: newAccount.name,
+      type: newAccount.type as AccountType,
+      openingBalances: {
+        ...(newAccount.openingBalances || {}),
+        [month]: parseFloat(openingBalanceInput) || 0
+      },
+      defaultCashbackRate: (newAccount.type === 'credit_card' || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.defaultCashbackRate : undefined,
+      cashbackRates: (newAccount.type === 'credit_card' || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.cashbackRates : undefined,
+      roundOffCashback: (newAccount.type === 'credit_card' || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.roundOffCashback : undefined,
+      isCashbackEnabled: newAccount.type === 'debit_card' ? newAccount.isCashbackEnabled : undefined,
+      statementDay: newAccount.type === 'credit_card' ? newAccount.statementDay : undefined,
+      dueDay: newAccount.type === 'credit_card' ? newAccount.dueDay : undefined,
+      cashbackCreditCycle: newAccount.type === 'credit_card' ? (newAccount.cashbackCreditCycle || 'next_cycle') : undefined,
+      isNcmcEnabled: newAccount.isNcmcEnabled,
+      travelOpeningBalances: newAccount.isNcmcEnabled ? {
+        ...(newAccount.travelOpeningBalances || {}),
+        [month]: parseFloat(travelOpeningBalanceInput) || 0
+      } : undefined,
+      cardDetails: (newAccount.type === 'credit_card' || newAccount.type === 'debit_card')
+        ? newAccount.cardDetails
+        : undefined,
+      statementRounding: newAccount.statementRounding || 'none',
+    };
+
+    if (editId) {
+      updateAccount(accountData);
+    } else {
+      addAccount(accountData);
+    }
+
+    setIsModalOpen(false);
+  };
+
+  const addCashbackRate = () => {
+    if (!newCbName || !newCbRate) return;
+    setNewAccount(prev => ({
+      ...prev,
+      cashbackRates: [...(prev.cashbackRates || []), { id: generateId(), name: newCbName, rate: parseFloat(newCbRate), roundOffCashback: newCbRoundOff }]
+    }));
+    setNewCbName('');
+    setNewCbRate('');
+    setNewCbRoundOff(false);
+  };
+
+  const removeCashbackRate = (id: string) => {
+    setNewAccount(prev => ({
+      ...prev,
+      cashbackRates: prev.cashbackRates?.filter(r => r.id !== id)
+    }));
+  };
+
+  const currentMonth = getCurrentMonthStr();
+
+  const getAccountIcon = (acc: Account) => {
+    if (acc.isNcmcEnabled) return '🪪';
+    switch (acc.type) {
+      case 'credit_card': return '💳';
+      case 'debit_card': return '🪪';
+      case 'bank_account': return '🏦';
+      case 'e_wallet': return '🪙';
+      case 'stocks': return '📈';
+      case 'sips': return '💹';
+      case 'rewards': return '🎁';
+      case 'cash': return '💵';
+      default: return '💼';
+    }
+  };
+
+  return (
+    <div className="flex-col gap-6" style={{ maxWidth: '600px', margin: '0 auto', width: '100%' }}>
+      <div className="flex justify-between align-center" style={{ marginBottom: '1rem' }}>
+        <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>accounts</h2>
+        <button className="btn btn-primary" onClick={openAddModal} style={{ padding: '0.6rem 1.25rem' }}>
+          + Add New
+        </button>
+      </div>
+
+      <div className="flex-col gap-10">
+        {(() => {
+          const TYPE_LABELS: Record<string, string> = {
+            bank_account: 'Bank Accounts',
+            credit_card: 'Credit Cards',
+            debit_card: 'Debit Cards',
+            e_wallet: 'E-Wallets',
+            stocks: 'Stocks & Investments',
+            sips: 'SIPs',
+            rewards: 'Rewards & Cashback',
+            cash: 'Physical Cash'
+          };
+
+          const TYPE_ORDER = [
+            'bank_account',
+            'credit_card',
+            'debit_card',
+            'cash',
+            'e_wallet',
+            'rewards',
+            'stocks',
+            'sips'
+          ];
+
+          const grouped = data.accounts.reduce((acc, account) => {
+            if (!acc[account.type]) acc[account.type] = [];
+            acc[account.type].push(account);
+            return acc;
+          }, {} as Record<string, Account[]>);
+
+          // Sort groups based on TYPE_ORDER, then append any remaining custom types
+          const sortedTypes = [...TYPE_ORDER.filter(t => grouped[t]), ...Object.keys(grouped).filter(t => !TYPE_ORDER.includes(t))];
+
+          return sortedTypes.map((type, index) => (
+            <div key={type} className="flex-col gap-4" style={{ marginTop: index === 0 ? '0' : '2.5rem' }}>
+              <div className="flex align-center gap-3" style={{ padding: '0 0.5rem', marginBottom: '0.5rem' }}>
+                <span className="text-mono" style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--accent)', opacity: 0.8 }}>
+                  {TYPE_LABELS[type] || type.replace('_', ' ')}
+                </span>
+                <div style={{ flex: 1, height: '1px', background: 'linear-gradient(to right, var(--accent), transparent)', opacity: 0.2 }}></div>
+              </div>
+
+              <div className="flex-col gap-6">
+                {grouped[type].map(acc => {
+                  const rawBal = calculateBalance(acc, data.transactions, currentMonth);
+                  let bal = rawBal;
+                  if (acc.type === 'credit_card') {
+                    const rounding = acc.statementRounding || 'none';
+                    if (rounding === 'round') bal = Math.round(rawBal);
+                    else if (rounding === 'floor') bal = Math.floor(rawBal);
+                    else if (rounding === 'ceil') bal = Math.ceil(rawBal);
+                  }
+                  
+                  let openingBal = acc.openingBalances[currentMonth];
+                  if (openingBal === undefined) {
+                    const prevMonthDate = new Date();
+                    prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+                    const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
+                    openingBal = calculateBalance(acc, data.transactions, prevMonthStr);
+                  }
+
+                  return (
+                    <div key={acc.id} className="card flex-col" style={{ padding: '0' }}>
+                      {/* Top Section - Hardware / Branding */}
+                      <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                        <div className="flex-col gap-1">
+                          <span className="text-mono text-muted">{getAccountIcon(acc)} {acc.type.replace('_', ' ')}</span>
+                          <span className="text-serif" style={{ fontSize: '1.15rem', color: 'var(--text-primary)' }}>{acc.name}</span>
+                        </div>
+                        <div className="flex gap-3">
+                          <button
+                            className="btn btn-secondary"
+                            style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
+                            onClick={() => openEditModal(acc)}
+                            title="Edit"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }}
+                            onClick={() => setDeleteConfirmId(acc.id)}
+                            title="Delete"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Middle Section - Balance */}
+                      <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
+                        <div className="flex-col gap-1">
+                          <span className="text-mono text-muted text-xs">
+                            {acc.isNcmcEnabled ? 'PAYMENTS BALANCE' : 'TOTAL BALANCE'}
+                          </span>
+                          <span className="text-serif" style={{
+                            fontSize: '1.8rem',
+                            color: acc.type === 'credit_card'
+                              ? (bal > 0 ? 'var(--danger)' : 'var(--success)')
+                              : (bal >= 0 ? 'var(--success)' : 'var(--danger)'),
+                            lineHeight: '1.2'
+                          }}>
+                            {formatCurrency(bal)}
+                          </span>
+                          {(acc.type === 'credit_card' || acc.type === 'debit_card') && acc.defaultCashbackRate ? (
+                            <span className="text-muted text-xs" style={{ marginTop: '4px' }}>Base Reward Rate: {acc.defaultCashbackRate}%</span>
+                          ) : null}
+                        </div>
+
+                        <div className="flex gap-4 align-start">
+                          {(acc.type === 'rewards' || acc.type === 'e_wallet') && (
+                            <button
+                              className="btn btn-secondary flex align-center gap-2"
+                              style={{ fontSize: '0.8rem', padding: '0.5rem 1rem', marginTop: '1.2rem' }}
+                              onClick={() => handleLiquidate(acc)}
+                            >
+                              <span>Send to Bank</span>
+                            </button>
+                          )}
+                          <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
+                            <span className="text-mono text-muted text-xs">OPENING BAL</span>
+                            <span className="text-serif" style={{ 
+                              fontSize: '1.4rem', 
+                              color: 'var(--text-secondary)',
+                              marginTop: '0.1rem'
+                            }}>
+                              {formatCurrency(openingBal)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Bottom Section - Auxiliary Details */}
+                      {acc.isNcmcEnabled && (
+                        <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                          <span className="text-mono text-muted text-xs">TRAVEL WALLET</span>
+                          <div className="flex align-center gap-3">
+                            <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>
+                              {formatCurrency(calculateBalance(acc, data.transactions, currentMonth, true))}
+                            </span>
+                            {acc.cardDetails?.cardNumber && (
+                              <>
+                                <div style={{ width: '1px', height: '18px', background: 'var(--border-color)', margin: '0 4px', opacity: 0.5 }} />
+                                <button
+                                  className="btn btn-secondary flex align-center gap-2"
+                                  style={{ fontSize: '0.7rem', padding: '0.35rem 0.75rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, color: 'var(--accent)' }}
+                                  onClick={() => setViewingCard(acc)}
+                                >
+                                  <CreditCard size={14} />
+                                  <span>Card</span>
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {acc.type === 'credit_card' && (
+                        <div className="flex justify-between align-center gap-4" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)' }}>
+                          <div className="flex-col gap-1">
+                            <span className="text-mono text-muted" style={{ fontSize: '10px' }}>STATEMENT CYCLE</span>
+                            <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{acc.statementDay ? getOrdinalSuffix(acc.statementDay) : 'N/A'}</span>
+                          </div>
+                          <div className="flex-col gap-1">
+                            <span className="text-mono text-muted" style={{ fontSize: '10px' }}>PAY DUE BY</span>
+                            <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{acc.dueDay ? getOrdinalSuffix(acc.dueDay) : 'N/A'}</span>
+                          </div>
+
+                          <div className="flex gap-2" style={{ marginLeft: 'auto' }}>
+                            <button
+                              className="btn btn-secondary flex align-center gap-2"
+                              style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700 }}
+                              onClick={() => onViewStatement(acc)}
+                            >
+                              <FileText size={14} />
+                              <span>Statement</span>
+                            </button>
+
+                            {acc.cardDetails?.cardNumber && (
+                              <button
+                                className="btn btn-secondary flex align-center gap-2"
+                                style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, color: 'var(--accent)' }}
+                                onClick={() => setViewingCard(acc)}
+                              >
+                                <CreditCard size={14} />
+                                <span>Card</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {acc.type === 'debit_card' && !acc.isNcmcEnabled && acc.cardDetails?.cardNumber && (
+                        <div className="flex justify-end align-center gap-4" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)' }}>
+                          <button
+                            className="btn btn-secondary flex align-center gap-2"
+                            style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, color: 'var(--accent)' }}
+                            onClick={() => setViewingCard(acc)}
+                          >
+                            <CreditCard size={14} />
+                            <span>Card</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ));
+        })()}
+      </div>
+
+      {isModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3>{editId ? 'Edit Account' : 'Add New Account'}</h3>
+              <button onClick={() => setIsModalOpen(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="input-group">
+                <label>Account Name</label>
+                <input
+                  className="input-field"
+                  value={newAccount.name}
+                  onChange={e => setNewAccount({ ...newAccount, name: e.target.value })}
+                  placeholder="e.g. HDFC Millenia"
+                />
+              </div>
+              <CustomPicker
+                label="Account Type"
+                value={newAccount.type || ''}
+                options={accountTypeOptions}
+                onChange={val => setNewAccount({ ...newAccount, type: val as AccountType })}
+                iconGetter={id => {
+                  switch (id) {
+                    case 'bank_account': return '🏦';
+                    case 'credit_card': return '💳';
+                    case 'debit_card': return '🪪';
+                    case 'e_wallet': return '🪙';
+                    case 'stocks': return '📈';
+                    case 'sips': return '💹';
+                    case 'rewards': return '🎁';
+                    case 'cash': return '💵';
+                    default: return '💼';
+                  }
+                }}
+              />
+              <div className="input-group">
+                <label>Opening Balance (Current Month)</label>
+                <input
+                  type="number"
+                  className="input-field"
+                  value={openingBalanceInput}
+                  onChange={e => setOpeningBalanceInput(e.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
+
+              {newAccount.type === 'debit_card' && (
+                <>
+                  <div className="input-group">
+                    <label className="flex align-center" style={{ cursor: 'pointer', margin: '0.5rem 0', fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
+                      <input
+                        type="checkbox"
+                        style={{ margin: 0, width: '16px', height: '16px' }}
+                        checked={newAccount.isNcmcEnabled || false}
+                        onChange={e => setNewAccount({ ...newAccount, isNcmcEnabled: e.target.checked })}
+                      />
+                      <span style={{ display: 'inline-flex', alignItems: 'center', transform: 'translateY(1px)' }}>Enable NCMC Travel Wallet?</span>
+                    </label>
+                  </div>
+
+                  {newAccount.isNcmcEnabled && (
+                    <div className="input-group">
+                      <label>Travel Wallet Opening Balance</label>
+                      <input
+                        type="number"
+                        className="input-field"
+                        value={travelOpeningBalanceInput}
+                        onChange={e => setTravelOpeningBalanceInput(e.target.value)}
+                        placeholder="0.00"
+                      />
+                    </div>
+                  )}
+
+                  <div className="input-group">
+                    <label className="flex align-center" style={{ cursor: 'pointer', margin: '0.5rem 0', fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
+                      <input
+                        type="checkbox"
+                        style={{ margin: 0, width: '16px', height: '16px' }}
+                        checked={newAccount.isCashbackEnabled || false}
+                        onChange={e => {
+                          const checked = e.target.checked;
+                          setNewAccount({ 
+                            ...newAccount, 
+                            isCashbackEnabled: checked,
+                            defaultCashbackRate: checked ? newAccount.defaultCashbackRate : undefined,
+                            cashbackRates: checked ? newAccount.cashbackRates : [],
+                            roundOffCashback: checked ? newAccount.roundOffCashback : false
+                          });
+                        }}
+                      />
+                      <span style={{ display: 'inline-flex', alignItems: 'center', transform: 'translateY(1px)' }}>Enable Cashback?</span>
+                    </label>
+                  </div>
+                </>
+              )}
+
+              {newAccount.type === 'credit_card' && (
+                <>
+                  <div className="input-group">
+                    <label>Statement Generation Day (1-31)</label>
+                    <input
+                      type="number"
+                      className="input-field"
+                      value={newAccount.statementDay || ''}
+                      onChange={e => setNewAccount({ ...newAccount, statementDay: parseInt(e.target.value) })}
+                      placeholder="e.g. 5"
+                      min="1" max="31"
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label>Payment Due Day (1-31)</label>
+                    <input
+                      type="number"
+                      className="input-field"
+                      value={newAccount.dueDay || ''}
+                      onChange={e => setNewAccount({ ...newAccount, dueDay: parseInt(e.target.value) })}
+                      placeholder="e.g. 25"
+                      min="1" max="31"
+                    />
+                  </div>
+                  <div style={{ marginTop: '0.5rem' }}>
+                    <CustomPicker
+                      label="Apply Statement Credits To"
+                      value={newAccount.cashbackCreditCycle || 'next_cycle'}
+                      options={[
+                        { id: 'next_cycle', name: 'Next Cycle', subtext: 'Reduces the upcoming statement (Default)' },
+                        { id: 'same_cycle', name: 'Same Cycle', subtext: 'Reduces the current statement' }
+                      ]}
+                      onChange={val => setNewAccount({ ...newAccount, cashbackCreditCycle: val as 'same_cycle' | 'next_cycle' })}
+                      iconGetter={id => id === 'next_cycle' ? '➡️' : '🔄'}
+                    />
+                  </div>
+                  <div style={{ marginTop: '0.5rem' }}>
+                    <CustomPicker
+                      label="Statement Bill Rounding"
+                      value={newAccount.statementRounding || 'none'}
+                      options={[
+                        { id: 'none', name: 'No Rounding', subtext: 'Keep exact decimals (e.g. 1538.92)' },
+                        { id: 'floor', name: 'Round Down (Floor)', subtext: 'Drop decimals (e.g. 1538.00)' },
+                        { id: 'round', name: 'Nearest Integer', subtext: 'Round to closest (e.g. 1539.00)' },
+                        { id: 'ceil', name: 'Round Up (Ceil)', subtext: 'Always round up (e.g. 1539.00)' }
+                      ]}
+                      onChange={val => setNewAccount({ ...newAccount, statementRounding: val as any })}
+                      iconGetter={id => {
+                        if (id === 'none') return '🔢';
+                        if (id === 'floor') return '⬇️';
+                        if (id === 'round') return '🎯';
+                        return '⬆️';
+                      }}
+                    />
+                  </div>
+                </>
+              )}
+
+              {(newAccount.type === 'credit_card' || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) && (
+                <>
+                  <div className="input-group">
+                    <label>Default Cashback Rate (%)</label>
+                    <input
+                      type="number"
+                      className="input-field"
+                      value={newAccount.defaultCashbackRate || ''}
+                      onChange={e => setNewAccount({ ...newAccount, defaultCashbackRate: parseFloat(e.target.value) })}
+                      placeholder="e.g. 1.5"
+                      step="0.1"
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label className="flex align-center" style={{ cursor: 'pointer', margin: '0.5rem 0', fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
+                      <input
+                        type="checkbox"
+                        style={{ margin: 0, width: '16px', height: '16px' }}
+                        checked={newAccount.roundOffCashback || false}
+                        onChange={e => setNewAccount({ ...newAccount, roundOffCashback: e.target.checked })}
+                      />
+                      <span style={{ display: 'inline-flex', alignItems: 'center', transform: 'translateY(1px)' }}>Round off cashback?</span>
+                    </label>
+                  </div>
+
+                  <div className="flex-col gap-3" style={{ marginTop: '1.25rem' }}>
+                    <label className="text-sm" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Custom Cashback Levels (Optional)</label>
+
+                    {newAccount.cashbackRates && newAccount.cashbackRates.length > 0 && (
+                      <div className="flex-col gap-2" style={{ marginBottom: '0.5rem' }}>
+                        {newAccount.cashbackRates.map((cr, idx) => (
+                          <div key={cr.id} className="flex-col gap-2" style={{ padding: '0.75rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                            <div className="flex justify-between align-center">
+                              <span className="text-sm" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{cr.name} <span className="text-muted">({cr.rate}%)</span></span>
+                              <button 
+                                className="btn btn-danger" 
+                                style={{ 
+                                  fontSize: '0.75rem', 
+                                  padding: '0.2rem 0.5rem',
+                                  minHeight: 'auto',
+                                  boxShadow: '2px 2px 0 #000'
+                                }} 
+                                onClick={() => removeCashbackRate(cr.id)}
+                              >
+                                ✕ Remove
+                              </button>
+                            </div>
+                            <label className="flex align-center text-sm text-secondary" style={{ cursor: 'pointer', fontWeight: 500, gap: '10px' }}>
+                              <input
+                                type="checkbox"
+                                style={{ margin: 0, width: '16px', height: '16px' }}
+                                checked={cr.roundOffCashback || false}
+                                onChange={e => {
+                                  if (!newAccount.cashbackRates) return;
+                                  const updated = [...newAccount.cashbackRates];
+                                  updated[idx] = { ...updated[idx], roundOffCashback: e.target.checked };
+                                  setNewAccount({ ...newAccount, cashbackRates: updated });
+                                }}
+                              />
+                              <span style={{ display: 'inline-flex', alignItems: 'center', transform: 'translateY(1px)' }}>Round off cashback?</span>
+                            </label>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex-col gap-2">
+                      <div className="flex gap-2" style={{ alignItems: 'stretch' }}>
+                        <input className="input-field" style={{ flex: 1, minWidth: '100px' }} placeholder="Label (e.g. UPI)" value={newCbName} onChange={e => setNewCbName(e.target.value)} />
+                        <input className="input-field" style={{ width: '70px', flexShrink: 0, textAlign: 'center' }} placeholder="%" type="number" step="0.1" value={newCbRate} onChange={e => setNewCbRate(e.target.value)} />
+                        <button className="btn btn-secondary" style={{ padding: '0.75rem', minWidth: '54px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={addCashbackRate} aria-label="Add Cashback Rate"><Plus size={18} /></button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── Card Details (Optional) ───────────────────────────── */}
+                  <div
+                    ref={cardDetailsRef}
+                    className="flex-col gap-3"
+                    style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}
+                  >
+                    <div className="flex justify-between align-center">
+                      <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>💳 Card Details <span className="text-muted" style={{ fontWeight: 400 }}>(Optional)</span></span>
+                      {newAccount.cardDetails ? (
+                        <button
+                          className="btn btn-danger flex align-center gap-1"
+                          style={{ 
+                            fontSize: '0.75rem', 
+                            padding: '0.25rem 0.6rem',
+                            minHeight: 'auto',
+                            boxShadow: '2px 2px 0 #000'
+                          }}
+                          onClick={() => setNewAccount({ ...newAccount, cardDetails: undefined })}
+                        >
+                          ✕ Remove
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '0.3rem 0.75rem' }}
+                          onClick={() => {
+                            setNewAccount({ ...newAccount, cardDetails: {} });
+                            setTimeout(() => {
+                              cardDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }, 100);
+                          }}
+                        >
+                          + Add Details
+                        </button>
+                      )}
+                    </div>
+
+                    {newAccount.cardDetails && (
+                      <div className="flex-col gap-3">
+                        <p className="text-xs text-muted" style={{ margin: 0 }}>Stored locally on your device, protected by your app PIN.</p>
+
+                        <div className="flex-col gap-1">
+                          <label className="text-xs text-muted font-bold">CARDHOLDER NAME</label>
+                          <input
+                            className="input-field"
+                            placeholder="e.g. TRIBHUVAN K"
+                            value={newAccount.cardDetails.cardholderName || ''}
+                            onChange={e => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cardholderName: e.target.value.toUpperCase() } as CardDetails })}
+                            style={{ textTransform: 'uppercase' }}
+                          />
+                        </div>
+
+                        <div className="flex-col gap-1">
+                          <label className="text-xs text-muted font-bold">CARD NUMBER</label>
+                          <input
+                            className="input-field"
+                            placeholder="1234 5678 9012 3456"
+                            inputMode="numeric"
+                            maxLength={19}
+                            value={newAccount.cardDetails.cardNumber
+                              ? newAccount.cardDetails.cardNumber.replace(/\D/g, '').replace(/(\d{4})/g, '$1 ').trim()
+                              : ''}
+                            onChange={e => {
+                              const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
+                              setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cardNumber: digits } as CardDetails });
+                            }}
+                            style={{ fontFamily: 'monospace', letterSpacing: '3px' }}
+                          />
+                        </div>
+
+                        <div className="flex gap-2">
+                          <div className="flex-col gap-1" style={{ width: '90px' }}>
+                            <label className="text-xs text-muted font-bold">EXPIRY</label>
+                            <input
+                              className="input-field"
+                              placeholder="MM/YY"
+                              inputMode="numeric"
+                              maxLength={5}
+                              value={expiryInput}
+                              onChange={e => {
+                                let val = e.target.value;
+                                // Strip non-digits/slash, rebuild
+                                const digits = val.replace(/\D/g, '');
+                                let formatted = digits.slice(0, 4);
+                                // Auto-insert slash after 2 digits
+                                if (formatted.length > 2) {
+                                  formatted = formatted.slice(0, 2) + '/' + formatted.slice(2);
+                                }
+                                setExpiryInput(formatted);
+                                // Sync to cardDetails
+                                const mm = digits.length >= 2 ? parseInt(digits.slice(0, 2)) || undefined : undefined;
+                                const yy = digits.length >= 4 ? parseInt(digits.slice(2, 4)) || undefined : undefined;
+                                setNewAccount(prev => ({ ...prev, cardDetails: { ...prev.cardDetails, expiryMonth: mm, expiryYear: yy } as CardDetails }));
+                              }}
+                              style={{ fontFamily: 'monospace', letterSpacing: '2px' }}
+                            />
+                          </div>
+                          <div className="flex-col gap-1" style={{ flex: 1, position: 'relative' }}>
+                            <label className="text-xs text-muted font-bold">CVV</label>
+                            <div style={{ position: 'relative' }}>
+                              <input
+                                className="input-field"
+                                placeholder="•••"
+                                type={showCvv ? 'text' : 'password'}
+                                inputMode="numeric"
+                                maxLength={4}
+                                value={newAccount.cardDetails.cvv || ''}
+                                onChange={e => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cvv: e.target.value.replace(/\D/g, '') } as CardDetails })}
+                                style={{ fontFamily: 'monospace', letterSpacing: '4px', width: '100%', paddingRight: '2.5rem' }}
+                              />
+                              <button
+                                onClick={() => setShowCvv(v => !v)}
+                                style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.5, fontSize: '0.75rem', cursor: 'pointer' }}
+                                title={showCvv ? 'Hide CVV' : 'Show CVV'}
+                              >
+                                {showCvv ? '🙈' : '👁️'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex-col gap-1">
+                          <label className="text-xs text-muted font-bold">NETWORK</label>
+                          <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+                            {(['visa', 'mastercard', 'rupay', 'amex', 'diners'] as CardNetwork[]).map(net => {
+                              const isSelected = newAccount.cardDetails?.network === net;
+                              return (
+                                <button
+                                  key={net}
+                                  onClick={() => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, network: isSelected ? undefined : net } as CardDetails })}
+                                  style={{
+                                    width: '56px',
+                                    height: '32px',
+                                    padding: 0,
+                                    borderRadius: '10px',
+                                    border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border-color)'}`,
+                                    background: isSelected ? 'rgba(var(--accent-rgb, 20,184,166), 0.12)' : 'var(--bg-color)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s',
+                                    boxShadow: isSelected ? '0 0 0 1px var(--accent)' : 'none',
+                                    color: isSelected ? 'var(--accent)' : 'var(--text-muted)',
+                                  }}
+                                >
+                                  <CardNetworkLogo network={net} size="sm" />
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleSave}>Save Account</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewingCard && (
+        <ViewCardOverlay
+          account={viewingCard}
+          onClose={() => setViewingCard(null)}
+        />
+      )}
+      {/* Custom Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!deleteConfirmId}
+        title="Delete Account?"
+        message="Are you sure you want to remove this account? This will also remove its associated transaction history."
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          if (deleteConfirmId) {
+            deleteAccount(deleteConfirmId);
+            setDeleteConfirmId(null);
+          }
+        }}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
+    </div>
+  );
+}
