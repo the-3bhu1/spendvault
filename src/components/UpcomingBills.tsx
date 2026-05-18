@@ -193,11 +193,7 @@ export default function UpcomingBills() {
         const lastStatementCycle = getLatestBilledCycle(statementDay);
         const { netPayable } = calculateTotalSpendPerCycle(data.transactions, acc.id, lastStatementCycle, statementDay, acc.statementRounding);
 
-        const isPaid = data.transactions.some(t =>
-          t.accountId === acc.id &&
-          t.category === 'CC Payment' &&
-          new Date(t.date) >= lastStatementDate
-        ) || netPayable <= 0;
+        const isPaid = netPayable <= 0;
 
         return {
           id: `cc-${acc.id}`,

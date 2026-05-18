@@ -711,7 +711,6 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
             <div className="flex align-center gap-3 input-field" style={{ borderColor: exactMatch ? 'var(--success)' : 'var(--border-color)' }}>
               <UserPlus size={20} className={exactMatch ? 'text-success' : 'text-muted'} />
               <input
-                autoFocus
                 placeholder="Who is this?"
                 value={name}
                 onChange={e => setName(e.target.value)}
@@ -1158,7 +1157,6 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
             <div className="input-group">
               <label>Amount</label>
               <input
-                autoFocus
                 className="input-field"
                 type="number"
                 placeholder="0.00"

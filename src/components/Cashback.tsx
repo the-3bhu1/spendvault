@@ -272,8 +272,8 @@ export default function Cashback() {
 
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
-  const toggleGroup = (name: string) => {
-    setCollapsedGroups(prev => ({ ...prev, [name]: !prev[name] }));
+  const toggleGroup = (name: string, currentCollapsed: boolean) => {
+    setCollapsedGroups(prev => ({ ...prev, [name]: !currentCollapsed }));
   };
 
   const [consolidatedFeedback, setConsolidatedFeedback] = useState<string[]>([]);
@@ -390,7 +390,51 @@ export default function Cashback() {
                     <div key={accName} className="flex-col" style={{ borderBottom: isLastCycle ? 'none' : '1px solid var(--border-color)' }}>
                       <div
                         className="flex justify-between clickable"
-                        onClick={() => toggleGroup(accName)}
+                        onClick={(e) => {
+                          toggleGroup(accName, isCollapsed);
+                          if (isCollapsed) {
+                            const header = e.currentTarget;
+                            setTimeout(() => {
+                              const itemsContainer = header.nextElementSibling;
+                              if (itemsContainer) {
+                                const headerRect = header.getBoundingClientRect();
+                                const itemsRect = itemsContainer.getBoundingClientRect();
+                                
+                                const itemsBottom = itemsRect.bottom;
+                                const visibleBottom = window.innerHeight - 100; // Account for bottom tab bar
+                                
+                                if (itemsBottom > visibleBottom) {
+                                  const amountToScroll = itemsBottom - visibleBottom;
+                                  const maxScroll = headerRect.top - 80; // Keep header below sticky navbar
+                                  const finalScroll = Math.min(amountToScroll, Math.max(0, maxScroll));
+                                  
+                                  if (finalScroll > 0) {
+                                    const appRoot = document.querySelector('.app-root');
+                                    if (appRoot) {
+                                      const start = appRoot.scrollTop;
+                                      const duration = 600;
+                                      const startTime = performance.now();
+                                      
+                                      const easeInOutQuart = (t: number) => t < 0.5 ? 8 * t * t * t * t : 1 - Math.pow(-2 * t + 2, 4) / 2;
+                                      
+                                      const animateScroll = (currentTime: number) => {
+                                        const elapsed = currentTime - startTime;
+                                        const progress = Math.min(elapsed / duration, 1);
+                                        appRoot.scrollTop = start + (finalScroll * easeInOutQuart(progress));
+                                        
+                                        if (progress < 1) {
+                                          requestAnimationFrame(animateScroll);
+                                        }
+                                      };
+                                      
+                                      requestAnimationFrame(animateScroll);
+                                    }
+                                  }
+                                }
+                              }
+                            }, 550);
+                          }
+                        }}
                         style={{ padding: '1rem 1.5rem', background: 'var(--bg-hover)', borderBottom: isCollapsed ? 'none' : '1px solid var(--border-color)', transition: '0.2s', alignItems: 'flex-start' }}
                       >
                         <span className="text-mono font-bold" style={{ textTransform: 'uppercase', color: 'var(--text-primary)', letterSpacing: '1px', fontSize: '0.85rem', flex: 1, marginRight: '1.5rem', marginTop: '0.15rem' }}>
@@ -430,14 +474,20 @@ export default function Cashback() {
                           </div>
                           <ChevronDown size={18} style={{
                             transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-                            transition: '0.3s ease',
+                            transition: '0.5s cubic-bezier(0.4, 0, 0.2, 1)',
                             opacity: 0.5,
                             marginTop: '0.1rem'
                           }} />
                         </div>
                       </div>
-                      {!isCollapsed && (
-                        <div className="flex-col animate-in">
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateRows: isCollapsed ? '0fr' : '1fr',
+                          transition: 'grid-template-rows 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+                        }}
+                      >
+                        <div className="flex-col" style={{ overflow: 'hidden' }}>
                           {sts.map((st, index) => {
                             const txId = st.transaction.id;
                             const isEditing = editingId === txId;
@@ -513,7 +563,7 @@ export default function Cashback() {
                             );
                           })}
                         </div>
-                      )}
+                      </div>
                     </div>
                   );
                 })}
