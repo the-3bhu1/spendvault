@@ -20,6 +20,20 @@ object SmsParser {
     fun parse(message: String, sender: String): Transaction? {
         // 1. Filtering
         val lowerMessage = message.lowercase(Locale.ROOT)
+
+        // Exclude request/approval spam messages
+        val requestKeywords = listOf(
+            "requested money", 
+            "requesting money", 
+            "has requested", 
+            "request from", 
+            "request to pay", 
+            "click here to approve", 
+            "on approving the request", 
+            "request pending"
+        )
+        if (requestKeywords.any { lowerMessage.contains(it) }) return null
+
         val transactionKeywords = listOf("upi", "debited", "credited", "spent", "paid", "received", "txn", "sent", "top up", "topped up", "deducted", "card", "vpa")
         if (!transactionKeywords.any { lowerMessage.contains(it) }) return null
 
@@ -155,7 +169,7 @@ object SmsParser {
             Pattern.compile("a/c\\s*x*(\\d+)"),
             Pattern.compile("acc\\s*x*(\\d+)"),
             Pattern.compile("x{2,}(\\d+)"),
-            Pattern.compile("ending\\s+(\\d+)")
+            Pattern.compile("ending\\s+(?:with\\s+)?(\\d+)")
         )
         for (pattern in patterns) {
             val matcher = pattern.matcher(text)

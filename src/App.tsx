@@ -28,6 +28,10 @@ function App() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const scrollPositions = useRef<Record<string, number>>({});
   const addToSmsQueueRef = useRef(addToSmsQueue);
+  addToSmsQueueRef.current = addToSmsQueue;
+
+  const autoLogSmsRef = useRef(data.user?.autoLogSms);
+  autoLogSmsRef.current = data.user?.autoLogSms;
 
 
 
@@ -121,7 +125,22 @@ function App() {
     // Register active state resume change listener (warm restarts)
     const listener = CapApp.addListener('appStateChange', async (state) => {
       if (state.isActive) {
-        console.log("SpendVaultSms: App resumed to active foreground. Checking launch intent...");
+        console.log("SpendVaultSms: App resumed to active foreground. Checking launch intent and draining transactions...");
+        
+        // Proactively drain any pending SMS transactions when app is resumed
+        if (autoLogSmsRef.current) {
+          try {
+            console.log("SpendVaultSms: Resume detected. Draining native pending SMS queue...");
+            const { transactions } = await SmsReader.drainPendingTransactions();
+            transactions.forEach((tx) => {
+              console.log("SpendVaultSms: Drained transaction on warm resume:", tx);
+              addToSmsQueueRef.current(tx);
+            });
+          } catch (err) {
+            console.error("SpendVaultSms: Failed to drain transactions on warm resume:", err);
+          }
+        }
+
         setTimeout(() => {
           checkAndOpenPending();
         }, 150);

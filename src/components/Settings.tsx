@@ -145,6 +145,13 @@ export default function Settings() {
       }
     };
     window.addEventListener('appBackButton', handleGlobalBack);
+    
+    // Reset scroll position when changing views
+    const appRoot = document.querySelector('.app-root');
+    if (appRoot) {
+      appRoot.scrollTop = 0;
+    }
+    
     return () => window.removeEventListener('appBackButton', handleGlobalBack);
   }, [activeView]);
 

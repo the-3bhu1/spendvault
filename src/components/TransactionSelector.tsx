@@ -113,12 +113,18 @@ export const TransactionSelector: React.FC<TransactionSelectorProps> = ({
 
                           return Object.entries(groupedByDate)
                             .sort((a, b) => b[0].localeCompare(a[0]))
-                            .map(([date, txs]) => (
+                            .map(([date, txs]) => {
+                              const sortedTxs = [...txs].sort((a, b) => {
+                                const orderA = a.order !== undefined ? a.order : txs.indexOf(a);
+                                const orderB = b.order !== undefined ? b.order : txs.indexOf(b);
+                                return orderA - orderB;
+                              });
+                              return (
                               <div key={date} className="flex-col">
                                 <div style={{ padding: '0.4rem 1.5rem', background: 'var(--bg-color)', borderBottom: '1px solid var(--border-color)', fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '0.5px' }}>
                                   {formatDateString(date)}
                                 </div>
-                                {txs.map(t => (
+                                {sortedTxs.map(t => (
                                   <div
                                     key={t.id}
                                     className="flex justify-between align-center clickable"
@@ -142,7 +148,8 @@ export const TransactionSelector: React.FC<TransactionSelectorProps> = ({
                                   </div>
                                 ))}
                               </div>
-                            ));
+                              );
+                            });
                         })()}
                       </div>
                     )}

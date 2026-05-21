@@ -49,7 +49,7 @@ export default function Cashback() {
     // Only show "Delayed" rewards or legacy expectedCashback that isn't instant
     const isDelayed = tx.rewardEarnedType === 'delayed' || (!tx.rewardEarnedType && (tx.expectedCashback || 0) > 0);
 
-    if (isDelayed && tx.type === 'debit' && tx.category !== 'Transfer' && tx.category !== 'CC Payment' && !tx.isTravelTransaction) {
+    if (isDelayed && tx.type === 'debit' && tx.category !== 'Transfer' && tx.category !== 'CC Payment' && tx.category !== 'NCMC Travel Recharge' && !tx.isTravelTransaction) {
       let expected = tx.rewardEarned || tx.expectedCashback || 0;
       if (expected === 0 && account) {
         const rate = account.defaultCashbackRate || 0;

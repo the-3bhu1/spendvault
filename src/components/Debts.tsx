@@ -8,6 +8,7 @@ import {
   ArrowUpRight,
   ArrowDownLeft,
   Trash2,
+  Check,
   CheckCircle2,
   History,
   HandCoins,
@@ -393,13 +394,52 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
   return (
     <>
       <div className="flex-col gap-6 fade-in" style={{ paddingBottom: '180px' }}>
-        <div className="flex align-center gap-4">
-          <button className="btn-secondary" style={{ width: '40px', height: '40px', borderRadius: '12px' }} onClick={onBack}>
-            <ChevronLeft size={20} />
-          </button>
-          <div className="flex-col">
-            <h2 style={{ margin: 0, fontSize: '1.5rem' }}>{debt.personName}</h2>
-            <span className="text-xs text-muted uppercase font-bold text-mono">History</span>
+        <div className="flex justify-between align-center">
+          <div className="flex align-center gap-4">
+            <button className="btn-secondary" style={{ width: '40px', height: '40px', borderRadius: '12px' }} onClick={onBack}>
+              <ChevronLeft size={20} />
+            </button>
+            <div className="flex-col">
+              <h2 style={{ margin: 0, fontSize: '1.5rem' }}>{debt.personName}</h2>
+              <span className="text-xs text-muted uppercase font-bold text-mono">History</span>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <button
+              className="btn btn-secondary"
+              style={{ 
+                width: '36px', 
+                height: '36px', 
+                padding: 0, 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                color: debt.status === 'settled' ? 'var(--success)' : 'var(--text-muted)',
+                borderColor: debt.status === 'settled' ? 'var(--success)' : undefined,
+                background: debt.status === 'settled' ? 'var(--success-soft)' : undefined
+              }}
+              onClick={toggleSettled}
+              title={debt.status === 'settled' ? "Re-open" : "Mark Settled"}
+            >
+              <Check size={18} strokeWidth={3} />
+            </button>
+            <button 
+              className="btn btn-secondary" 
+              style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }} 
+              onClick={() => setConfirmConfig({
+                title: "Delete History?",
+                message: "Are you sure you want to delete the entire history with this person? This cannot be undone.",
+                confirmLabel: "Delete All",
+                isDanger: true,
+                onConfirm: () => {
+                  onDelete();
+                  setConfirmConfig(null);
+                }
+              })}
+              title="Delete History"
+            >
+              <Trash2 size={18} />
+            </button>
           </div>
         </div>
 
@@ -439,7 +479,11 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
         <div className="flex-col gap-4">
           <span className="text-xs text-muted font-bold uppercase" style={{ letterSpacing: '1px' }}>Transaction Log</span>
           <div className="flex-col gap-3">
-            {[...debt.transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(tx => (
+            {[...debt.transactions].sort((a, b) => {
+              const timeDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+              if (timeDiff !== 0) return timeDiff;
+              return debt.transactions.indexOf(b) - debt.transactions.indexOf(a);
+            }).map(tx => (
               <div key={tx.id} className="card flex align-center justify-between" style={{ padding: '0.75rem 1rem', background: 'var(--bg-color)' }}>
                 <div className="flex align-center gap-3" style={{ minWidth: 0, flex: 1 }}>
                   <div className="flex-center" style={{
@@ -534,36 +578,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
         </div>
       </div>
 
-      <div style={{
-        position: 'fixed',
-        left: '0.5rem',
-        right: '0.5rem',
-        bottom: 'calc(88px + env(safe-area-inset-bottom, 0px))',
-        zIndex: 90,
-        background: 'transparent'
-      }}>
-        <div className="flex gap-3" style={{ paddingTop: '0.5rem' }}>
-          <button
-            className="btn btn-secondary flex-1 flex align-center justify-center gap-2"
-            onClick={toggleSettled}
-            style={{ color: debt.status === 'settled' ? 'var(--accent)' : 'inherit' }}
-          >
-            <CheckCircle2 size={18} /> {debt.status === 'settled' ? 'Re-open' : 'Mark Settled'}
-          </button>
-          <button className="btn btn-secondary" style={{ color: 'var(--danger)', width: '54px' }} onClick={() => setConfirmConfig({
-            title: "Delete History?",
-            message: "Are you sure you want to delete the entire history with this person? This cannot be undone.",
-            confirmLabel: "Delete All",
-            isDanger: true,
-            onConfirm: () => {
-              onDelete();
-              setConfirmConfig(null);
-            }
-          })}>
-            <Trash2 size={18} />
-          </button>
-        </div>
-      </div>
+
 
       {showActionModal && (
         <DebtTransactionModal

@@ -59,7 +59,7 @@ export default function Insights() {
       const acc: Record<string, number> = {};
       let biggest: Transaction | null = null;
       txs.forEach(t => {
-        const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment';
+        const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge';
         if (isSystemType) return;
         const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
         
@@ -86,14 +86,14 @@ export default function Insights() {
     
     const weekendSpend = monthTxs.filter(t => {
       const d = new Date(t.date).getDay();
-      const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment';
+      const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge';
       if (isSystemType) return false;
       const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
       return (d === 0 || d === 6) && t.type === 'debit' && effectiveAmount > 0;
     }).reduce((s, t) => s + (t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0))), 0);
 
     const recurringSpend = monthTxs.filter(t => {
-      const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment';
+      const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge';
       if (isSystemType) return false;
       const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
       return t.isRecurring && t.type === 'debit' && effectiveAmount > 0;
@@ -121,7 +121,7 @@ export default function Insights() {
       streakDays: Array.from({ length: daysInMonth }, (_, i) => {
         const dStr = `${y}-${m.toString().padStart(2, '0')}-${(i + 1).toString().padStart(2, '0')}`;
         const dayTxs = monthTxs.filter(t => {
-          const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment';
+          const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge';
           if (isSystemType) return false;
           const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
           return t.date === dStr && t.type === 'debit' && effectiveAmount > 0;
@@ -143,7 +143,7 @@ export default function Insights() {
     return last6Months.map(m => {
       const txs = data.transactions.filter(t => t.date.startsWith(m));
       const spend = txs.reduce((s, t) => {
-        const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment';
+        const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge';
         if (isSystemType) return s;
         const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
         return (t.type === 'debit' && effectiveAmount > 0) ? s + effectiveAmount : s;
@@ -620,7 +620,7 @@ export default function Insights() {
             </div>
 
             {/* Account legend — same pattern as categories */}
-            <div className="flex-col">
+            <div className="flex-col gap-4">
               {accPieData.map((entry, index) => {
                 const txCount = insights.monthTxs.filter((t: Transaction) => {
                   const account = data.accounts.find(a => a.id === t.accountId);
