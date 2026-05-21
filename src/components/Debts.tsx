@@ -394,86 +394,99 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
   return (
     <>
       <div className="flex-col gap-6 fade-in" style={{ paddingBottom: '180px' }}>
-        <div className="flex justify-between align-center">
-          <div className="flex align-center gap-4">
-            <button className="btn-secondary" style={{ width: '40px', height: '40px', borderRadius: '12px' }} onClick={onBack}>
-              <ChevronLeft size={20} />
-            </button>
-            <div className="flex-col">
-              <h2 style={{ margin: 0, fontSize: '1.5rem' }}>{debt.personName}</h2>
-              <span className="text-xs text-muted uppercase font-bold text-mono">History</span>
+        <div 
+          className="flex-col gap-6" 
+          style={{ 
+            position: 'sticky', 
+            top: '-2rem', 
+            background: 'var(--bg-color)', 
+            zIndex: 10, 
+            padding: '2rem 1.5rem 1rem 1.5rem',
+            margin: '-2rem -1.5rem 0 -1.5rem',
+            borderBottom: '1px solid var(--border-color)'
+          }}
+        >
+          <div className="flex justify-between align-center">
+            <div className="flex align-center gap-4">
+              <button className="btn btn-secondary" style={{ padding: '0.5rem' }} onClick={onBack}>
+                <ChevronLeft size={20} />
+              </button>
+              <div className="flex-col">
+                <h2 style={{ margin: 0, fontSize: '1.5rem' }}>{debt.personName}</h2>
+                <span className="text-xs text-muted uppercase font-bold text-mono">History</span>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button
+                className="btn btn-secondary"
+                style={{ 
+                  width: '36px', 
+                  height: '36px', 
+                  padding: 0, 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  color: debt.status === 'settled' ? 'var(--success)' : 'var(--text-muted)',
+                  borderColor: debt.status === 'settled' ? 'var(--success)' : undefined,
+                  background: debt.status === 'settled' ? 'var(--success-soft)' : undefined
+                }}
+                onClick={toggleSettled}
+                title={debt.status === 'settled' ? "Re-open" : "Mark Settled"}
+              >
+                <Check size={18} strokeWidth={3} />
+              </button>
+              <button 
+                className="btn btn-secondary" 
+                style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }} 
+                onClick={() => setConfirmConfig({
+                  title: "Delete History?",
+                  message: "Are you sure you want to delete the entire history with this person? This cannot be undone.",
+                  confirmLabel: "Delete All",
+                  isDanger: true,
+                  onConfirm: () => {
+                    onDelete();
+                    setConfirmConfig(null);
+                  }
+                })}
+                title="Delete History"
+              >
+                <Trash2 size={18} />
+              </button>
             </div>
           </div>
-          <div className="flex gap-3">
-            <button
-              className="btn btn-secondary"
-              style={{ 
-                width: '36px', 
-                height: '36px', 
-                padding: 0, 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center', 
-                color: debt.status === 'settled' ? 'var(--success)' : 'var(--text-muted)',
-                borderColor: debt.status === 'settled' ? 'var(--success)' : undefined,
-                background: debt.status === 'settled' ? 'var(--success-soft)' : undefined
-              }}
-              onClick={toggleSettled}
-              title={debt.status === 'settled' ? "Re-open" : "Mark Settled"}
-            >
-              <Check size={18} strokeWidth={3} />
+
+          <div className="card flex-col align-center gap-4" style={{ padding: '2rem 1.5rem', background: 'var(--bg-hover)', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: '-20px', right: '-20px', opacity: 0.05 }}>
+              <HandCoins size={120} />
+            </div>
+
+            <span className="text-xs text-muted font-bold uppercase" style={{ letterSpacing: '2px' }}>Current Net Balance</span>
+            <h1 style={{ margin: 0, fontSize: '2.5rem', color: netBalance === 0 ? 'var(--text-primary)' : (netBalance > 0 ? 'var(--success)' : 'var(--danger)') }}>
+              {formatCurrency(netBalance)}
+            </h1>
+            <div className="flex gap-2">
+              {netBalance !== 0 && (
+                <div className={`metric-pill ${netBalance > 0 ? 'border-success text-success' : 'border-danger text-danger'}`}>
+                  {netBalance > 0 ? 'They owe you' : 'You owe them'}
+                </div>
+              )}
+              {debt.status === 'settled' && (
+                <div className="metric-pill border-muted text-muted">Settled</div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
+            <button className="btn btn-primary" onClick={() => setShowActionModal('lent')} style={{ background: 'var(--success)', border: 'none', color: '#000' }}>
+              <ArrowUpRight size={18} /> Lent Money
             </button>
-            <button 
-              className="btn btn-secondary" 
-              style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }} 
-              onClick={() => setConfirmConfig({
-                title: "Delete History?",
-                message: "Are you sure you want to delete the entire history with this person? This cannot be undone.",
-                confirmLabel: "Delete All",
-                isDanger: true,
-                onConfirm: () => {
-                  onDelete();
-                  setConfirmConfig(null);
-                }
-              })}
-              title="Delete History"
-            >
-              <Trash2 size={18} />
+            <button className="btn btn-primary" onClick={() => setShowActionModal('borrowed')} style={{ background: 'var(--danger)', border: 'none', color: '#fff' }}>
+              <ArrowDownLeft size={18} /> Borrowed
+            </button>
+            <button className="btn btn-secondary" onClick={() => setShowActionModal('repayment')} style={{ gridColumn: 'span 2' }}>
+              <History size={18} /> Repayment
             </button>
           </div>
-        </div>
-
-        <div className="card flex-col align-center gap-4" style={{ padding: '2rem 1.5rem', background: 'var(--bg-hover)', position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: '-20px', right: '-20px', opacity: 0.05 }}>
-            <HandCoins size={120} />
-          </div>
-
-          <span className="text-xs text-muted font-bold uppercase" style={{ letterSpacing: '2px' }}>Current Net Balance</span>
-          <h1 style={{ margin: 0, fontSize: '2.5rem', color: netBalance === 0 ? 'var(--text-primary)' : (netBalance > 0 ? 'var(--success)' : 'var(--danger)') }}>
-            {formatCurrency(netBalance)}
-          </h1>
-          <div className="flex gap-2">
-            {netBalance !== 0 && (
-              <div className={`metric-pill ${netBalance > 0 ? 'border-success text-success' : 'border-danger text-danger'}`}>
-                {netBalance > 0 ? 'They owe you' : 'You owe them'}
-              </div>
-            )}
-            {debt.status === 'settled' && (
-              <div className="metric-pill border-muted text-muted">Settled</div>
-            )}
-          </div>
-        </div>
-
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-          <button className="btn btn-primary" onClick={() => setShowActionModal('lent')} style={{ background: 'var(--success)', border: 'none', color: '#000' }}>
-            <ArrowUpRight size={18} /> Lent Money
-          </button>
-          <button className="btn btn-primary" onClick={() => setShowActionModal('borrowed')} style={{ background: 'var(--danger)', border: 'none', color: '#fff' }}>
-            <ArrowDownLeft size={18} /> Borrowed
-          </button>
-          <button className="btn btn-secondary" onClick={() => setShowActionModal('repayment')} style={{ gridColumn: 'span 2' }}>
-            <History size={18} /> Repayment
-          </button>
         </div>
 
         <div className="flex-col gap-4">
