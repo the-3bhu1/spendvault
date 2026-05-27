@@ -801,7 +801,7 @@ tr:hover td {
 .modal-content {
   background-color: var(--bg-card);
   width: 100%;
-  max-width: 500px;
+  max-width: 100%;
   position: relative;
   max-height: 90vh;
   border-radius: 24px 24px 0 0;

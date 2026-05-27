@@ -1694,73 +1694,74 @@ export default function Settings() {
             />
           </div>
 
-          <SectionHeader title="Smart Features" />
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-            {/* Auto-Log SMS: Android-only — iOS has no SMS access API */}
-            {Capacitor.getPlatform() === 'android' && (
-              <GridToggleButton 
-                icon={Sparkles} 
-                label="Auto-Log SMS" 
-                active={!!data.user?.autoLogSms} 
-                onClick={async () => {
-                  if (!data.user?.autoLogSms) {
-                    setConfirmConfig({
-                      title: "SMS Permissions",
-                      message: "SpendVault only reads financial SMS from banks to help you log spends offline. No personal messages are ever accessed or uploaded. Grant SMS permission?",
-                      confirmLabel: "Grant Permission",
-                      onConfirm: async () => {
-                        try {
-                          const status = await SmsReader.checkPermissions();
-                          if (status.sms === 'denied') {
-                            showAlert("SMS permission is permanently denied. Please enable it in your phone's App Settings to use this feature.", "Permission Required");
-                            setConfirmConfig(null);
-                            return;
-                          }
-                          
-                          // 1. Request SMS permission first
-                          const result = await SmsReader.requestPermissions();
-                          if (result.sms === 'granted') {
-                            // SMS granted! Immediately enable SMS auto-logging
-                            updateUser({ ...data.user!, autoLogSms: true });
+          {Capacitor.getPlatform() === 'android' && (
+            <>
+              <SectionHeader title="Smart Features" />
+              <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
+                <GridToggleButton 
+                  icon={Sparkles} 
+                  label="Auto-Log SMS" 
+                  active={!!data.user?.autoLogSms} 
+                  onClick={async () => {
+                    if (!data.user?.autoLogSms) {
+                      setConfirmConfig({
+                        title: "SMS Permissions",
+                        message: "SpendVault only reads financial SMS from banks to help you log spends offline. No personal messages are ever accessed or uploaded. Grant SMS permission?",
+                        confirmLabel: "Grant Permission",
+                        onConfirm: async () => {
+                          try {
+                            const status = await SmsReader.checkPermissions();
+                            if (status.sms === 'denied') {
+                              showAlert("SMS permission is permanently denied. Please enable it in your phone's App Settings to use this feature.", "Permission Required");
+                              setConfirmConfig(null);
+                              return;
+                            }
+                            
+                            // 1. Request SMS permission first
+                            const result = await SmsReader.requestPermissions();
+                            if (result.sms === 'granted') {
+                              // SMS granted! Immediately enable SMS auto-logging
+                              updateUser({ ...data.user!, autoLogSms: true });
 
-                            // 2. Show background notification rationale
-                            setConfirmConfig({
-                              title: "Notification Alerts",
-                              message: "Would you also like to receive push-style local alerts when new transactions are auto-detected in the background?",
-                              confirmLabel: "Enable Alerts",
-                              cancelLabel: "Skip",
-                              onConfirm: async () => {
-                                try {
-                                  if (Capacitor.isNativePlatform()) {
-                                    await SmsReader.requestPermissions({ permissions: ['notifications'] });
+                              // 2. Show background notification rationale
+                              setConfirmConfig({
+                                title: "Notification Alerts",
+                                message: "Would you also like to receive push-style local alerts when new transactions are auto-detected in the background?",
+                                confirmLabel: "Enable Alerts",
+                                cancelLabel: "Skip",
+                                onConfirm: async () => {
+                                  try {
+                                    if (Capacitor.isNativePlatform()) {
+                                      await SmsReader.requestPermissions({ permissions: ['notifications'] });
+                                    }
+                                  } catch (e) {
+                                    console.error("Notification permission skipped/failed:", e);
                                   }
-                                } catch (e) {
-                                  console.error("Notification permission skipped/failed:", e);
+                                  setConfirmConfig(null);
                                 }
-                                setConfirmConfig(null);
-                              }
-                            });
-                          } else {
-                            showAlert("Permission denied. Auto-logging cannot be enabled.", "Permission Denied");
+                              });
+                            } else {
+                              showAlert("Permission denied. Auto-logging cannot be enabled.", "Permission Denied");
+                              setConfirmConfig(null);
+                            }
+                          } catch (e) {
+                            console.error("SMS permission flow failed:", e);
+                            updateUser({ ...data.user!, autoLogSms: true });
                             setConfirmConfig(null);
                           }
-                        } catch (e) {
-                          console.error("SMS permission flow failed:", e);
-                          updateUser({ ...data.user!, autoLogSms: true });
-                          setConfirmConfig(null);
                         }
-                      }
-                    });
-                  } else {
-                    updateUser({ ...data.user!, autoLogSms: false });
-                  }
-                }} 
-              />
-            )}
-            {Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android' && (
-              <GridButton icon={ShieldAlert} label="Background Guide" onClick={() => setActiveView('oem')} />
-            )}
-          </div>
+                      });
+                    } else {
+                      updateUser({ ...data.user!, autoLogSms: false });
+                    }
+                  }} 
+                />
+                {Capacitor.isNativePlatform() && (
+                  <GridButton icon={ShieldAlert} label="Background Guide" onClick={() => setActiveView('oem')} />
+                )}
+              </div>
+            </>
+          )}
 
           <SectionHeader title="data management" />
           <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
@@ -1783,7 +1784,7 @@ export default function Settings() {
       {viewContent}
 
       {isActionSheetOpen && (
-        <div className="modal-overlay" style={{ alignItems: 'flex-end', padding: '0 1rem 1rem' }} onClick={() => setIsActionSheetOpen(false)}>
+        <div className="modal-overlay" style={{ alignItems: 'flex-end' }} onClick={() => setIsActionSheetOpen(false)}>
           <div className="action-sheet fade-in-up" onClick={e => e.stopPropagation()}>
             <div style={{ width: '40px', height: '4px', background: 'var(--border-color)', borderRadius: '2px', margin: '0.5rem auto 1.5rem' }} />
             <SectionHeader title="Profile Photo" first={true} />
@@ -1823,7 +1824,7 @@ export default function Settings() {
 
       {isCropperOpen && tempImage && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '400px' }}>
+          <div className="modal-content">
             <div className="modal-header">
               <h3>Crop Profile Picture</h3>
               <button onClick={() => setIsCropperOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)' }}><CloseIcon size={20} /></button>
@@ -1880,10 +1881,11 @@ export default function Settings() {
         .action-sheet {
           background: var(--bg-card);
           border: 1px solid var(--border-color);
-          border-radius: 20px 20px 16px 16px;
-          padding: 1rem 1.5rem 2rem;
+          border-radius: 24px 24px 0 0;
+          border-bottom: none;
+          padding: 1rem 1.5rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
           width: 100%;
-          max-width: 500px;
+          max-width: 100%;
           box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
         }
         .action-sheet-btn {
