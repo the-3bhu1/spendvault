@@ -32,12 +32,16 @@ export const formatDateString = (dateStr: string) => {
 };
 
 export const formatCurrency = (amount: number) => {
+  let cleanAmount = amount;
+  if (Math.round(amount * 100) / 100 === 0) {
+    cleanAmount = 0;
+  }
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
     minimumFractionDigits: 0,
     maximumFractionDigits: 2
-  }).format(amount);
+  }).format(cleanAmount);
 };
 
 export const getCurrentMonthStr = () => format(new Date(), 'yyyy-MM'); // "2023-10"
@@ -170,3 +174,5 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork) => {
   const index = Math.abs(themeIndex) % themes.length;
   return themes[index];
 };
+
+export const APP_VERSION = 'v2.0.0';

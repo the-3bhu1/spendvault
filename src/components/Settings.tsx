@@ -10,6 +10,7 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import SmsReader from '../services/SmsService';
+import { APP_VERSION } from '../utils';
 
 const GridButton = ({ icon: Icon, label, onClick }: { icon: React.ElementType, label: string, onClick?: () => void }) => (
   <div className="card flex-col align-center justify-center" style={{ padding: '1.25rem 0.5rem', gap: '0.75rem', cursor: 'pointer', height: '100%' }} onClick={onClick}>
@@ -132,6 +133,10 @@ export default function Settings() {
     biometricsEnabled: data.user?.biometricsEnabled || false
   });
 
+  const [showOldPin, setShowOldPin] = useState(false);
+  const [showPin, setShowPin] = useState(false);
+  const [showConfirmPin, setShowConfirmPin] = useState(false);
+
   const [setupStep, setSetupStep] = useState<'form' | 'recovery'>('form');
   const [generatedKey, setGeneratedKey] = useState('');
   const [hasConfirmedKey, setHasConfirmedKey] = useState(false);
@@ -189,6 +194,9 @@ export default function Settings() {
   useEffect(() => {
     if (activeView !== 'profile') {
       setIsOldPinVerified(false);
+      setShowOldPin(false);
+      setShowPin(false);
+      setShowConfirmPin(false);
       setProfileForm(prev => ({ ...prev, oldPin: '', pin: '', confirmPin: '' }));
     }
   }, [activeView]);
@@ -218,21 +226,21 @@ export default function Settings() {
         if (data.user?.pinHash) {
           const legacyHash = await hashString(profileForm.oldPin);
           if (legacyHash !== data.user.pinHash) {
-            alert("Current PIN is incorrect.");
+            showAlert("Current PIN is incorrect.", "Error");
             return;
           }
         } else if (data.user?.pin && profileForm.oldPin !== data.user.pin) {
-          alert("Current PIN is incorrect.");
+          showAlert("Current PIN is incorrect.", "Error");
           return;
         }
       }
 
       if (profileForm.pin.length !== 4 || !/^\d+$/.test(profileForm.pin)) {
-        alert("PIN must be exactly 4 digits.");
+        showAlert("PIN must be exactly 4 digits.", "Error");
         return;
       }
       if (profileForm.pin !== profileForm.confirmPin) {
-        alert("PINs do not match!");
+        showAlert("PINs do not match!", "Error");
         return;
       }
 
@@ -257,10 +265,28 @@ export default function Settings() {
     if (updatedUser && 'pin' in updatedUser) delete (updatedUser as { pin?: string }).pin;
     updateUser(updatedUser);
 
+    const hadPinChange = !!profileForm.pin;
+
     setProfileForm(prev => ({ ...prev, oldPin: '', pin: '', confirmPin: '' }));
     setIsOldPinVerified(false);
-    setAuthenticated(false);
-    alert("Profile and Security settings updated. Please unlock with your new PIN.");
+    setShowOldPin(false);
+    setShowPin(false);
+    setShowConfirmPin(false);
+
+    if (hadPinChange) {
+      setConfirmConfig({
+        title: "Success",
+        message: "Profile and Security settings updated. Please unlock with your new PIN.",
+        confirmLabel: "OK",
+        isAlert: true,
+        onConfirm: () => {
+          setConfirmConfig(null);
+          setAuthenticated(false);
+        }
+      });
+    } else {
+      showAlert("Profile settings updated successfully.", "Success");
+    }
   };
 
   const handleBiometricVerify = async () => {
@@ -307,7 +333,7 @@ export default function Settings() {
 
   const finalizeSetupWithKey = async () => {
     if (!hasConfirmedKey) {
-      alert("Please confirm you have saved your recovery key.");
+      showAlert("Please confirm you have saved your recovery key.", "Warning");
       return;
     }
 
@@ -325,8 +351,17 @@ export default function Settings() {
     setSetupStep('form');
     setGeneratedKey('');
     setProfileForm(prev => ({ ...prev, oldPin: '', pin: '', confirmPin: '' }));
-    setAuthenticated(false);
-    alert("Security setup complete! Please unlock with your new PIN.");
+    
+    setConfirmConfig({
+      title: "Success",
+      message: "Security setup complete! Please unlock with your new PIN.",
+      confirmLabel: "OK",
+      isAlert: true,
+      onConfirm: () => {
+        setConfirmConfig(null);
+        setAuthenticated(false);
+      }
+    });
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -430,7 +465,7 @@ export default function Settings() {
   const handleRemoveAccountType = (accountType: string) => {
     const isInUse = data.accounts.some(acc => acc.type === accountType);
     if (isInUse) {
-      alert(`"${accountType}" is already used by an account and cannot be deleted yet.`);
+      showAlert(`"${accountType}" is already used by an account and cannot be deleted yet.`, "In Use");
       return;
     }
     setConfirmConfig({
@@ -517,6 +552,9 @@ export default function Settings() {
     version: 'v', exportedAt: 't', user: 'u', accounts: 'A', transactions: 'T',
     categories: 'C', customAccountTypes: 'X', cashbackStatements: 'S',
     splitEvents: 'E', recurringBills: 'R', theme: 'm', debts: 'H',
+    // User fields
+    email: 'ue', profileImage: 'upi', pinHash: 'uph', recoveryKeyHash: 'urk',
+    biometricsEnabled: 'ube', autoLogSms: 'uas', enablePassiveTransactions: 'uep',
     // Object keys (Accounts/Transactions/Debts)
     id: 'i', amount: 'a', date: 'd', description: 's', type: 'y',
     accountId: 'x', category: 'k', excludeFromStats: 'e', excludedAmount: 'ea', 
@@ -524,21 +562,25 @@ export default function Settings() {
     rewardEarned: 're', rewardEarnedType: 'ret', rewardEarnedAccountId: 'rea',
     order: 'or', linkedTransactionId: 'lt', linkedTransactionIds: 'lts',
     cashbackLevelId: 'cl', linkedTxId: 'lx',
+    appliedBillingCycleYearMonth: 'abc', recurringBillId: 'rbid',
+    paymentSourceAccountId: 'psid', ccPaymentCycleTarget: 'ctar', isCCPaymentRecord: 'iscr',
+    isRecurring: 'isrc', transactionId: 'txid',
     name: 'n', balance: 'b', color: 'c', icon: 'o', isNcmcEnabled: 'z', 
     openingBalances: 'ob', statementDay: 'sd', dueDay: 'dd',
     defaultCashbackRate: 'dr', cashbackRates: 'cr', roundOffCashback: 'ro',
     cashbackCreditCycle: 'cc', travelOpeningBalances: 'tob', statementRounding: 'sr',
+    isCashbackEnabled: 'ice',
     cardDetails: 'D', cardholderName: 'ch', cardNumber: 'cn', rate: 'rt',
     expiryMonth: 'em', expiryYear: 'ey', cvv: 'cv', network: 'nt',
-    // Hub specific keys
+    // Hub / SplitEvent / SplitItem keys
     people: 'pp', items: 'it', involvedPeople: 'ip', includeMe: 'im',
-    splitType: 'st', personName: 'pn', frequency: 'fq', nextDueDate: 'nd',
+    splitType: 'st', paidBy: 'pb', shares: 'sh', customDays: 'cd',
+    personName: 'pn', frequency: 'fq', nextDueDate: 'nd',
     isActive: 'ia', status: 'ss', createdAt: 'ca', updatedAt: 'ua',
     billingCycleYearMonth: 'bc', expected: 'ex', realized: 'rl',
     confirmed: 'cf', realizedIntoAccountId: 'ri', paidPeople: 'pd',
-    recurringBillId: 'rbid', paymentSourceAccountId: 'psid',
-    ccPaymentCycleTarget: 'ctar', isCCPaymentRecord: 'iscr',
-    isRecurring: 'isrc', transactionId: 'txid'
+    // RecurringBill keys
+    lastPaidDate: 'lpd',
   };
 
   const minifyPayload = (obj: any): any => {
@@ -902,12 +944,19 @@ export default function Settings() {
 
   const [clipboardText, setClipboardText] = useState('');
 
+  const isEditingPin = profileForm.oldPin !== '' || profileForm.pin !== '' || profileForm.confirmPin !== '' || isOldPinVerified;
+  const isPinFormComplete =
+    (!isEditingPin) ||
+    ((isOldPinVerified || profileForm.oldPin.length === 4) &&
+     profileForm.pin.length === 4 &&
+     profileForm.confirmPin.length === 4);
+
   const hasProfileChanges =
-    profileForm.name !== (data.user?.name || '') ||
-    profileForm.biometricsEnabled !== (data.user?.biometricsEnabled || false) ||
-    profileForm.oldPin !== '' ||
-    profileForm.pin !== '' ||
-    profileForm.confirmPin !== '';
+    isPinFormComplete && (
+      profileForm.name !== (data.user?.name || '') ||
+      profileForm.biometricsEnabled !== (data.user?.biometricsEnabled || false) ||
+      (profileForm.pin !== '' && profileForm.pin.length === 4 && profileForm.confirmPin.length === 4)
+    );
 
   let viewContent;
 
@@ -1272,7 +1321,7 @@ export default function Settings() {
             <div
               className="logo-container"
               style={{ cursor: 'pointer', transition: 'transform 0.2s' }}
-              onClick={() => showAlert(`SpendVault v2.0.0\nRunning on ${Capacitor.getPlatform()}`, 'App Information')}
+              onClick={() => showAlert(`SpendVault ${APP_VERSION}\nRunning on ${Capacitor.getPlatform()}`, 'App Information')}
               onPointerDown={(e) => e.currentTarget.style.transform = 'scale(0.92)'}
               onPointerUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
             >
@@ -1281,7 +1330,7 @@ export default function Settings() {
             <div className="flex-col">
               <h3 style={{ margin: 0, fontSize: '1.5rem', letterSpacing: '-0.5px' }}>spendvault</h3>
               <span className="text-accent font-bold text-xs uppercase" style={{ letterSpacing: '2px' }}>Personal Finance Oracle</span>
-              <span className="text-muted text-xs" style={{ marginTop: '4px' }}>Build v2.0.0 (Stable)</span>
+              <span className="text-muted text-xs" style={{ marginTop: '4px' }}>Build {APP_VERSION} (Stable)</span>
             </div>
           </div>
 
@@ -1351,7 +1400,7 @@ export default function Settings() {
             <div style={{ padding: '1.5rem', background: 'var(--bg-color)', borderRadius: '12px', border: '2px dashed var(--accent)', fontSize: '1.2rem', fontWeight: 800, color: 'var(--accent)' }}>
               {generatedKey}
             </div>
-            <button className="btn btn-secondary" onClick={() => { navigator.clipboard.writeText(generatedKey); alert("copied!"); }}>copy key</button>
+            <button className="btn btn-secondary" onClick={() => { navigator.clipboard.writeText(generatedKey); showAlert("Recovery Key copied to clipboard!", "Success"); }}>copy key</button>
             <label className="flex align-center gap-3 cursor-pointer">
               <input type="checkbox" checked={hasConfirmedKey} onChange={e => setHasConfirmedKey(e.target.checked)} />
               <span className="text-sm">I have saved my key</span>
@@ -1407,16 +1456,37 @@ export default function Settings() {
                   <div className="flex-col gap-1">
                     <span className="text-xs text-muted font-bold">CURRENT PIN</span>
                     <div className="flex gap-2 align-center">
-                      <input
-                        type="password"
-                        maxLength={4}
-                        className={`input-field ${isOldPinVerified ? 'border-success' : ''}`}
-                        style={{ flex: 1 }}
-                        value={isOldPinVerified ? '••••' : profileForm.oldPin}
-                        onChange={e => setProfileForm(prev => ({ ...prev, oldPin: e.target.value.replace(/\D/g, '') }))}
-                        placeholder={isOldPinVerified ? "VERIFIED" : "••••"}
-                        disabled={isOldPinVerified}
-                      />
+                      <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
+                        <input
+                          type={showOldPin ? "text" : "password"}
+                          maxLength={4}
+                          className={`input-field ${isOldPinVerified ? 'border-success' : ''}`}
+                          style={{ flex: 1, paddingRight: '2.5rem' }}
+                          value={isOldPinVerified ? '••••' : profileForm.oldPin}
+                          onChange={e => setProfileForm(prev => ({ ...prev, oldPin: e.target.value.replace(/\D/g, '') }))}
+                          placeholder={isOldPinVerified ? "VERIFIED" : "••••"}
+                          disabled={isOldPinVerified}
+                        />
+                        {!isOldPinVerified && profileForm.oldPin && (
+                          <button
+                            type="button"
+                            onClick={() => setShowOldPin(!showOldPin)}
+                            style={{
+                              position: 'absolute',
+                              right: '10px',
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--text-secondary)',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              padding: '0.25rem'
+                            }}
+                          >
+                            <span style={{ fontSize: '1rem', lineHeight: 1 }}>{showOldPin ? '🙈' : '👁️'}</span>
+                          </button>
+                        )}
+                      </div>
                       {data.user?.biometricsEnabled && (
                         <button
                           onClick={handleBiometricVerify}
@@ -1433,12 +1503,70 @@ export default function Settings() {
                 )}
                 <div className="flex-col gap-1">
                   <span className="text-xs text-muted font-bold">{(data.user?.pinHash || data.user?.pin) ? 'CHANGE PIN' : 'SET PIN'}</span>
-                  <input type="password" maxLength={4} className="input-field" value={profileForm.pin} onChange={e => setProfileForm(prev => ({ ...prev, pin: e.target.value.replace(/\D/g, '') }))} placeholder="••••" />
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <input
+                      type={showPin ? "text" : "password"}
+                      maxLength={4}
+                      className="input-field"
+                      style={{ flex: 1, paddingRight: '2.5rem' }}
+                      value={profileForm.pin}
+                      onChange={e => setProfileForm(prev => ({ ...prev, pin: e.target.value.replace(/\D/g, '') }))}
+                      placeholder="••••"
+                    />
+                    {profileForm.pin && (
+                      <button
+                        type="button"
+                        onClick={() => setShowPin(!showPin)}
+                        style={{
+                          position: 'absolute',
+                          right: '10px',
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--text-secondary)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '0.25rem'
+                        }}
+                      >
+                        <span style={{ fontSize: '1rem', lineHeight: 1 }}>{showPin ? '🙈' : '👁️'}</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {profileForm.pin && (
                   <div className="flex-col gap-1">
                     <span className="text-xs text-muted font-bold">CONFIRM PIN</span>
-                    <input type="password" maxLength={4} className="input-field" value={profileForm.confirmPin} onChange={e => setProfileForm(prev => ({ ...prev, confirmPin: e.target.value.replace(/\D/g, '') }))} placeholder="••••" />
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <input
+                        type={showConfirmPin ? "text" : "password"}
+                        maxLength={4}
+                        className="input-field"
+                        style={{ flex: 1, paddingRight: '2.5rem' }}
+                        value={profileForm.confirmPin}
+                        onChange={e => setProfileForm(prev => ({ ...prev, confirmPin: e.target.value.replace(/\D/g, '') }))}
+                        placeholder="••••"
+                      />
+                      {profileForm.confirmPin && (
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmPin(!showConfirmPin)}
+                          style={{
+                            position: 'absolute',
+                            right: '10px',
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--text-secondary)',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            padding: '0.25rem'
+                          }}
+                        >
+                          <span style={{ fontSize: '1rem', lineHeight: 1 }}>{showConfirmPin ? '🙈' : '👁️'}</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -1544,69 +1672,92 @@ export default function Settings() {
             <GridButton icon={Tags} label="Categories" onClick={() => setActiveView('categories')} />
             <GridButton icon={Briefcase} label="Account Types" onClick={() => setActiveView('accountTypes')} />
             <GridButton icon={Moon} label="App Theme" onClick={() => setActiveView('theme')} />
+            <GridToggleButton 
+              icon={RotateCcw} 
+              label="Passive Logs" 
+              active={!!data.user?.enablePassiveTransactions} 
+              onClick={() => {
+                if (!data.user?.enablePassiveTransactions) {
+                  setConfirmConfig({
+                    title: "Enable Passive Logs?",
+                    message: "Passive Logs allow you to flag specific transactions to be excluded from your main Spends and Income analytics. This is perfect for tracking passive movements, investments, or pass-through expenses without distorting your actual budget statistics.",
+                    confirmLabel: "Enable",
+                    onConfirm: () => {
+                      updateUser({ ...data.user!, enablePassiveTransactions: true });
+                      setConfirmConfig(null);
+                    }
+                  });
+                } else {
+                  updateUser({ ...data.user!, enablePassiveTransactions: false });
+                }
+              }} 
+            />
           </div>
 
           <SectionHeader title="Smart Features" />
           <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-            <GridToggleButton 
-              icon={Sparkles} 
-              label="Auto-Log SMS" 
-              active={!!data.user?.autoLogSms} 
-              onClick={async () => {
-                if (!data.user?.autoLogSms) {
-                  setConfirmConfig({
-                    title: "SMS Permissions",
-                    message: "SpendVault only reads financial SMS from banks to help you log spends offline. No personal messages are ever accessed or uploaded. Grant SMS permission?",
-                    confirmLabel: "Grant Permission",
-                    onConfirm: async () => {
-                      try {
-                        const status = await SmsReader.checkPermissions();
-                        if (status.sms === 'denied') {
-                          showAlert("SMS permission is permanently denied. Please enable it in your phone's App Settings to use this feature.", "Permission Required");
-                          setConfirmConfig(null);
-                          return;
-                        }
-                        
-                        // 1. Request SMS permission first
-                        const result = await SmsReader.requestPermissions();
-                        if (result.sms === 'granted') {
-                          // SMS granted! Immediately enable SMS auto-logging
-                          updateUser({ ...data.user!, autoLogSms: true });
+            {/* Auto-Log SMS: Android-only — iOS has no SMS access API */}
+            {Capacitor.getPlatform() === 'android' && (
+              <GridToggleButton 
+                icon={Sparkles} 
+                label="Auto-Log SMS" 
+                active={!!data.user?.autoLogSms} 
+                onClick={async () => {
+                  if (!data.user?.autoLogSms) {
+                    setConfirmConfig({
+                      title: "SMS Permissions",
+                      message: "SpendVault only reads financial SMS from banks to help you log spends offline. No personal messages are ever accessed or uploaded. Grant SMS permission?",
+                      confirmLabel: "Grant Permission",
+                      onConfirm: async () => {
+                        try {
+                          const status = await SmsReader.checkPermissions();
+                          if (status.sms === 'denied') {
+                            showAlert("SMS permission is permanently denied. Please enable it in your phone's App Settings to use this feature.", "Permission Required");
+                            setConfirmConfig(null);
+                            return;
+                          }
+                          
+                          // 1. Request SMS permission first
+                          const result = await SmsReader.requestPermissions();
+                          if (result.sms === 'granted') {
+                            // SMS granted! Immediately enable SMS auto-logging
+                            updateUser({ ...data.user!, autoLogSms: true });
 
-                          // 2. Show background notification rationale
-                          setConfirmConfig({
-                            title: "Notification Alerts",
-                            message: "Would you also like to receive push-style local alerts when new transactions are auto-detected in the background?",
-                            confirmLabel: "Enable Alerts",
-                            cancelLabel: "Skip",
-                            onConfirm: async () => {
-                              try {
-                                if (Capacitor.isNativePlatform()) {
-                                  await SmsReader.requestPermissions({ permissions: ['notifications'] });
+                            // 2. Show background notification rationale
+                            setConfirmConfig({
+                              title: "Notification Alerts",
+                              message: "Would you also like to receive push-style local alerts when new transactions are auto-detected in the background?",
+                              confirmLabel: "Enable Alerts",
+                              cancelLabel: "Skip",
+                              onConfirm: async () => {
+                                try {
+                                  if (Capacitor.isNativePlatform()) {
+                                    await SmsReader.requestPermissions({ permissions: ['notifications'] });
+                                  }
+                                } catch (e) {
+                                  console.error("Notification permission skipped/failed:", e);
                                 }
-                              } catch (e) {
-                                console.error("Notification permission skipped/failed:", e);
+                                setConfirmConfig(null);
                               }
-                              setConfirmConfig(null);
-                            }
-                          });
-                        } else {
-                          showAlert("Permission denied. Auto-logging cannot be enabled.", "Permission Denied");
+                            });
+                          } else {
+                            showAlert("Permission denied. Auto-logging cannot be enabled.", "Permission Denied");
+                            setConfirmConfig(null);
+                          }
+                        } catch (e) {
+                          console.error("SMS permission flow failed:", e);
+                          updateUser({ ...data.user!, autoLogSms: true });
                           setConfirmConfig(null);
                         }
-                      } catch (e) {
-                        console.error("SMS permission flow failed:", e);
-                        updateUser({ ...data.user!, autoLogSms: true });
-                        setConfirmConfig(null);
                       }
-                    }
-                  });
-                } else {
-                  updateUser({ ...data.user!, autoLogSms: false });
-                }
-              }} 
-            />
-            {Capacitor.isNativePlatform() && (
+                    });
+                  } else {
+                    updateUser({ ...data.user!, autoLogSms: false });
+                  }
+                }} 
+              />
+            )}
+            {Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android' && (
               <GridButton icon={ShieldAlert} label="Background Guide" onClick={() => setActiveView('oem')} />
             )}
           </div>

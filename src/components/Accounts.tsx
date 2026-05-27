@@ -71,6 +71,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const [newCbRoundOff, setNewCbRoundOff] = useState(false);
   const [showCvv, setShowCvv] = useState(false);
   const [expiryInput, setExpiryInput] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const openAddModal = () => {
     setEditId(null);
@@ -82,13 +83,15 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setTravelOpeningBalanceInput('');
     setExpiryInput('');
     setShowCvv(false);
+    setErrors({});
     setIsModalOpen(true);
   };
 
   const openEditModal = (acc: Account) => {
     const month = getCurrentMonthStr();
     setEditId(acc.id);
-    setNewAccount({ 
+    setErrors({});
+    setNewAccount({
       ...acc,
       isCashbackEnabled: acc.isCashbackEnabled ?? (acc.defaultCashbackRate !== undefined || (acc.cashbackRates && acc.cashbackRates.length > 0))
     });
@@ -126,22 +129,56 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setIsModalOpen(true);
   };
 
+  const validate = () => {
+    const newErrors: Record<string, string> = {};
+    if (!newAccount.name?.trim()) {
+      newErrors.name = 'Account Name is required';
+    }
+    if (!newAccount.type) {
+      newErrors.type = 'Account Type is required';
+    }
+    if (!openingBalanceInput.trim()) {
+      newErrors.openingBalance = 'Opening Balance is required';
+    }
+    if (newAccount.type === 'credit_card') {
+      if (!newAccount.statementDay || newAccount.statementDay < 1 || newAccount.statementDay > 31) {
+        newErrors.statementDay = 'Statement Generation Day is required';
+      }
+      if (!newAccount.dueDay || newAccount.dueDay < 1 || newAccount.dueDay > 31) {
+        newErrors.dueDay = 'Payment Due Day is required';
+      }
+    }
+    if (newAccount.isNcmcEnabled) {
+      if (!travelOpeningBalanceInput.trim()) {
+        newErrors.travelOpeningBalance = 'Travel Wallet Opening Balance is required';
+      }
+    }
+    if (((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled))) {
+      if (newAccount.defaultCashbackRate === undefined || isNaN(newAccount.defaultCashbackRate) || newAccount.defaultCashbackRate < 0) {
+        newErrors.defaultCashbackRate = 'Default Cashback Rate is required';
+      }
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const handleSave = () => {
-    if (!newAccount.name || !newAccount.type) return;
+    if (!validate()) return;
     const month = getCurrentMonthStr();
 
     const accountData: Account = {
       id: editId || generateId(),
-      name: newAccount.name,
+      name: newAccount.name || '',
       type: newAccount.type as AccountType,
       openingBalances: {
         ...(newAccount.openingBalances || {}),
         [month]: parseFloat(openingBalanceInput) || 0
       },
-      defaultCashbackRate: (newAccount.type === 'credit_card' || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.defaultCashbackRate : undefined,
-      cashbackRates: (newAccount.type === 'credit_card' || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.cashbackRates : undefined,
-      roundOffCashback: (newAccount.type === 'credit_card' || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.roundOffCashback : undefined,
-      isCashbackEnabled: newAccount.type === 'debit_card' ? newAccount.isCashbackEnabled : undefined,
+      defaultCashbackRate: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.defaultCashbackRate : undefined,
+      cashbackRates: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.cashbackRates : undefined,
+      roundOffCashback: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.roundOffCashback : undefined,
+      isCashbackEnabled: (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') ? newAccount.isCashbackEnabled : undefined,
       statementDay: newAccount.type === 'credit_card' ? newAccount.statementDay : undefined,
       dueDay: newAccount.type === 'credit_card' ? newAccount.dueDay : undefined,
       cashbackCreditCycle: newAccount.type === 'credit_card' ? (newAccount.cashbackCreditCycle || 'next_cycle') : undefined,
@@ -242,6 +279,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
           // Sort groups based on TYPE_ORDER, then append any remaining custom types
           const sortedTypes = [...TYPE_ORDER.filter(t => grouped[t]), ...Object.keys(grouped).filter(t => !TYPE_ORDER.includes(t))];
 
+          if (sortedTypes.length === 0) {
+            return (
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                <p className="text-muted text-center" style={{ padding: '2rem' }}>No accounts added yet.</p>
+              </div>
+            );
+          }
+
           return sortedTypes.map((type, index) => (
             <div key={type} className="flex-col gap-4" style={{ marginTop: index === 0 ? '0' : '2.5rem' }}>
               <div className="flex align-center gap-3" style={{ padding: '0 0.5rem', marginBottom: '0.5rem' }}>
@@ -261,7 +306,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     else if (rounding === 'floor') bal = Math.floor(rawBal);
                     else if (rounding === 'ceil') bal = Math.ceil(rawBal);
                   }
-                  
+
+                  const roundedBal = Math.round(bal * 100) / 100;
+
                   let openingBal = acc.openingBalances[currentMonth];
                   if (openingBal === undefined) {
                     const prevMonthDate = new Date();
@@ -307,8 +354,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           <span className="text-serif" style={{
                             fontSize: '1.8rem',
                             color: acc.type === 'credit_card'
-                              ? (bal > 0 ? 'var(--danger)' : 'var(--success)')
-                              : (bal >= 0 ? 'var(--success)' : 'var(--danger)'),
+                              ? (roundedBal > 0 ? 'var(--danger)' : 'var(--success)')
+                              : (roundedBal >= 0 ? 'var(--success)' : 'var(--danger)'),
                             lineHeight: '1.2'
                           }}>
                             {formatCurrency(bal)}
@@ -330,8 +377,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           )}
                           <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
                             <span className="text-mono text-muted text-xs">OPENING BAL</span>
-                            <span className="text-serif" style={{ 
-                              fontSize: '1.4rem', 
+                            <span className="text-serif" style={{
+                              fontSize: '1.4rem',
                               color: 'var(--text-secondary)',
                               marginTop: '0.1rem'
                             }}>
@@ -433,17 +480,25 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
               <div className="input-group">
                 <label>Account Name</label>
                 <input
-                  className="input-field"
+                  className={`input-field ${errors.name ? 'border-danger' : ''}`}
                   value={newAccount.name}
-                  onChange={e => setNewAccount({ ...newAccount, name: e.target.value })}
+                  onChange={e => {
+                    setNewAccount({ ...newAccount, name: e.target.value });
+                    if (errors.name) setErrors(prev => ({ ...prev, name: '' }));
+                  }}
                   placeholder="e.g. HDFC Millenia"
                 />
+                {errors.name && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.name}</span>}
               </div>
               <CustomPicker
                 label="Account Type"
                 value={newAccount.type || ''}
                 options={accountTypeOptions}
-                onChange={val => setNewAccount({ ...newAccount, type: val as AccountType })}
+                onChange={val => {
+                  setNewAccount({ ...newAccount, type: val as AccountType });
+                  if (errors.type) setErrors(prev => ({ ...prev, type: '' }));
+                }}
+                error={errors.type}
                 iconGetter={id => {
                   switch (id) {
                     case 'bank_account': return '🏦';
@@ -462,11 +517,15 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                 <label>Opening Balance (Current Month)</label>
                 <input
                   type="number"
-                  className="input-field"
+                  className={`input-field ${errors.openingBalance ? 'border-danger' : ''}`}
                   value={openingBalanceInput}
-                  onChange={e => setOpeningBalanceInput(e.target.value)}
+                  onChange={e => {
+                    setOpeningBalanceInput(e.target.value);
+                    if (errors.openingBalance) setErrors(prev => ({ ...prev, openingBalance: '' }));
+                  }}
                   placeholder="0.00"
                 />
+                {errors.openingBalance && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.openingBalance}</span>}
               </div>
 
               {newAccount.type === 'debit_card' && (
@@ -488,11 +547,15 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       <label>Travel Wallet Opening Balance</label>
                       <input
                         type="number"
-                        className="input-field"
+                        className={`input-field ${errors.travelOpeningBalance ? 'border-danger' : ''}`}
                         value={travelOpeningBalanceInput}
-                        onChange={e => setTravelOpeningBalanceInput(e.target.value)}
+                        onChange={e => {
+                          setTravelOpeningBalanceInput(e.target.value);
+                          if (errors.travelOpeningBalance) setErrors(prev => ({ ...prev, travelOpeningBalance: '' }));
+                        }}
                         placeholder="0.00"
                       />
+                      {errors.travelOpeningBalance && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.travelOpeningBalance}</span>}
                     </div>
                   )}
 
@@ -504,8 +567,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         checked={newAccount.isCashbackEnabled || false}
                         onChange={e => {
                           const checked = e.target.checked;
-                          setNewAccount({ 
-                            ...newAccount, 
+                          setNewAccount({
+                            ...newAccount,
                             isCashbackEnabled: checked,
                             defaultCashbackRate: checked ? newAccount.defaultCashbackRate : undefined,
                             cashbackRates: checked ? newAccount.cashbackRates : [],
@@ -525,23 +588,31 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     <label>Statement Generation Day (1-31)</label>
                     <input
                       type="number"
-                      className="input-field"
+                      className={`input-field ${errors.statementDay ? 'border-danger' : ''}`}
                       value={newAccount.statementDay || ''}
-                      onChange={e => setNewAccount({ ...newAccount, statementDay: parseInt(e.target.value) })}
+                      onChange={e => {
+                        setNewAccount({ ...newAccount, statementDay: parseInt(e.target.value) });
+                        if (errors.statementDay) setErrors(prev => ({ ...prev, statementDay: '' }));
+                      }}
                       placeholder="e.g. 5"
                       min="1" max="31"
                     />
+                    {errors.statementDay && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.statementDay}</span>}
                   </div>
                   <div className="input-group">
                     <label>Payment Due Day (1-31)</label>
                     <input
                       type="number"
-                      className="input-field"
+                      className={`input-field ${errors.dueDay ? 'border-danger' : ''}`}
                       value={newAccount.dueDay || ''}
-                      onChange={e => setNewAccount({ ...newAccount, dueDay: parseInt(e.target.value) })}
+                      onChange={e => {
+                        setNewAccount({ ...newAccount, dueDay: parseInt(e.target.value) });
+                        if (errors.dueDay) setErrors(prev => ({ ...prev, dueDay: '' }));
+                      }}
                       placeholder="e.g. 25"
                       min="1" max="31"
                     />
+                    {errors.dueDay && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.dueDay}</span>}
                   </div>
                   <div style={{ marginTop: '0.5rem' }}>
                     <CustomPicker
@@ -574,21 +645,45 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       }}
                     />
                   </div>
+                  <div className="input-group" style={{ marginTop: '0.5rem' }}>
+                    <label className="flex align-center" style={{ cursor: 'pointer', margin: '0.5rem 0', fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
+                      <input
+                        type="checkbox"
+                        style={{ margin: 0, width: '16px', height: '16px' }}
+                        checked={newAccount.isCashbackEnabled || false}
+                        onChange={e => {
+                          const checked = e.target.checked;
+                          setNewAccount({
+                            ...newAccount,
+                            isCashbackEnabled: checked,
+                            defaultCashbackRate: checked ? newAccount.defaultCashbackRate : undefined,
+                            cashbackRates: checked ? newAccount.cashbackRates : [],
+                            roundOffCashback: checked ? newAccount.roundOffCashback : false
+                          });
+                        }}
+                      />
+                      <span style={{ display: 'inline-flex', alignItems: 'center', transform: 'translateY(1px)' }}>Enable Cashback / Rewards?</span>
+                    </label>
+                  </div>
                 </>
               )}
 
-              {(newAccount.type === 'credit_card' || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) && (
+              {((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) && (
                 <>
                   <div className="input-group">
                     <label>Default Cashback Rate (%)</label>
                     <input
                       type="number"
-                      className="input-field"
+                      className={`input-field ${errors.defaultCashbackRate ? 'border-danger' : ''}`}
                       value={newAccount.defaultCashbackRate || ''}
-                      onChange={e => setNewAccount({ ...newAccount, defaultCashbackRate: parseFloat(e.target.value) })}
+                      onChange={e => {
+                        setNewAccount({ ...newAccount, defaultCashbackRate: parseFloat(e.target.value) });
+                        if (errors.defaultCashbackRate) setErrors(prev => ({ ...prev, defaultCashbackRate: '' }));
+                      }}
                       placeholder="e.g. 1.5"
                       step="0.1"
                     />
+                    {errors.defaultCashbackRate && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.defaultCashbackRate}</span>}
                   </div>
                   <div className="input-group">
                     <label className="flex align-center" style={{ cursor: 'pointer', margin: '0.5rem 0', fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
@@ -611,14 +706,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           <div key={cr.id} className="flex-col gap-2" style={{ padding: '0.75rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
                             <div className="flex justify-between align-center">
                               <span className="text-sm" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{cr.name} <span className="text-muted">({cr.rate}%)</span></span>
-                              <button 
-                                className="btn btn-danger" 
-                                style={{ 
-                                  fontSize: '0.75rem', 
+                              <button
+                                className="btn btn-danger"
+                                style={{
+                                  fontSize: '0.75rem',
                                   padding: '0.2rem 0.5rem',
                                   minHeight: 'auto',
                                   boxShadow: '2px 2px 0 #000'
-                                }} 
+                                }}
                                 onClick={() => removeCashbackRate(cr.id)}
                               >
                                 ✕ Remove
@@ -651,7 +746,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       </div>
                     </div>
                   </div>
+                </>
+              )}
 
+              {(newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && (
+                <>
                   {/* ── Card Details (Optional) ───────────────────────────── */}
                   <div
                     ref={cardDetailsRef}
@@ -663,8 +762,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       {newAccount.cardDetails ? (
                         <button
                           className="btn btn-danger flex align-center gap-1"
-                          style={{ 
-                            fontSize: '0.75rem', 
+                          style={{
+                            fontSize: '0.75rem',
                             padding: '0.25rem 0.6rem',
                             minHeight: 'auto',
                             boxShadow: '2px 2px 0 #000'

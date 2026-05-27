@@ -101,6 +101,7 @@ export interface User {
   recoveryKeyHash?: string;
   biometricsEnabled: boolean;
   autoLogSms?: boolean;
+  enablePassiveTransactions?: boolean;
 }
 
 export interface SplitItem {
@@ -110,7 +111,9 @@ export interface SplitItem {
   description: string;
   involvedPeople: string[]; // List of names from the parent event
   includeMe: boolean;
-  splitType: 'equal';
+  splitType: 'equal' | 'unequal';
+  shares?: Record<string, number>; // Maps participant name (or 'me') to their custom share amount
+  paidBy?: string; // Who paid for this expense: 'me' or name of friend
 }
 
 export interface SplitEvent {
@@ -121,6 +124,9 @@ export interface SplitEvent {
   items: SplitItem[];
   createdAt: number;
   status?: 'active' | 'settled';
+  isRecurring?: boolean;
+  frequency?: RecurringFrequency;
+  customDays?: number;
 }
 
 export type RecurringFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'custom';

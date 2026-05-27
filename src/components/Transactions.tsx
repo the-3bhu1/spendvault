@@ -369,14 +369,21 @@ export default function Transactions() {
         if (dateComparison !== 0) return dateComparison;
         return (b.order ?? 0) - (a.order ?? 0);
       })[0];
+
+    const isAmountUnselected = !newTx.amount || newTx.amount === 0;
+    const isCategoryUnselected = !newTx.category;
+    const isAccountIdUnselected = !newTx.accountId;
+    const isTypeUnselected = !processingSms; // SMS-detected transactions already have their type selected
+    const isTravelUnselected = !newTx.isTravelTransaction;
+
     const updatedTx = {
       ...newTx,
       description: suggestion,
-      amount: pastTx?.amount ?? newTx.amount,
-      category: pastTx?.category || newTx.category,
-      accountId: pastTx?.accountId || newTx.accountId,
-      type: pastTx?.type || newTx.type,
-      isTravelTransaction: pastTx?.isTravelTransaction ?? newTx.isTravelTransaction
+      amount: !isAmountUnselected ? (newTx.amount ?? 0) : (pastTx?.amount ?? newTx.amount ?? 0),
+      category: !isCategoryUnselected ? (newTx.category || '') : (pastTx?.category || newTx.category || ''),
+      accountId: !isAccountIdUnselected ? (newTx.accountId || '') : (pastTx?.accountId || newTx.accountId || ''),
+      type: !isTypeUnselected ? (newTx.type || 'debit') : (pastTx?.type || newTx.type || 'debit'),
+      isTravelTransaction: !isTravelUnselected ? (newTx.isTravelTransaction ?? false) : (pastTx?.isTravelTransaction ?? newTx.isTravelTransaction ?? false)
     };
     setNewTx(updatedTx);
     syncInputStrings(updatedTx);
@@ -431,6 +438,30 @@ export default function Transactions() {
     if (!newTx.category) newErrors.category = 'Category is required';
     if (newTx.excludeFromStats && (newTx.excludedAmount || 0) > (newTx.amount || 0)) {
       newErrors.excludedAmount = 'Cannot exclude more than total amount';
+    }
+
+    if (newTx.accountId && newTx.type === 'debit' && !newTx.isTravelTransaction && newTx.category?.toLowerCase() === 'ncmc travel recharge') {
+      const account = data.accounts.find(a => a.id === newTx.accountId);
+      if (account?.isNcmcEnabled) {
+        const currentMonth = getCurrentMonthStr();
+        const currentBalance = calculateBalance(account, data.transactions, currentMonth, false);
+        const transferAmount = Number(newTx.amount) || 0;
+
+        let availableBalance = currentBalance;
+        if (editId) {
+          const oldTx = data.transactions.find(t => t.id === editId);
+          if (oldTx && oldTx.accountId === account.id && oldTx.type === 'debit' && !oldTx.isTravelTransaction) {
+            availableBalance += oldTx.amount;
+          }
+        }
+
+        const roundedAmount = Math.round(transferAmount * 100) / 100;
+        const roundedBalance = Math.round(availableBalance * 100) / 100;
+
+        if (roundedAmount > roundedBalance) {
+          newErrors.amount = `Insufficient balance. Available Payments balance is ${formatCurrency(availableBalance)}`;
+        }
+      }
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -551,6 +582,23 @@ export default function Transactions() {
       });
     }
 
+    if (account?.isNcmcEnabled && newTx.type === 'debit' && !newTx.isTravelTransaction && finalCategory === 'NCMC Travel Recharge' && !editId) {
+      const counterpartId = generateId();
+      currentLinkedIds.push(counterpartId);
+      addTransaction({
+        id: counterpartId,
+        date: newTx.date as string,
+        description: `NCMC Travel Recharge`,
+        accountId: account.id,
+        type: 'credit',
+        amount: Number(newTx.amount),
+        category: 'NCMC Travel Recharge',
+        isRecurring: false,
+        isTravelTransaction: true,
+        linkedTransactionIds: [mainTxId]
+      });
+    }
+
     let finalRewardEarned = Number(newTx.rewardEarned) || 0;
     if (newTx.rewardEarnedType === 'delayed' && !finalRewardEarned) {
       if ((account?.type === 'credit_card' || account?.type === 'debit_card') && newTx.type === 'debit' && !newTx.isTravelTransaction && finalCategory !== 'Transfer' && finalCategory !== 'CC Payment' && finalCategory !== 'NCMC Travel Recharge') {
@@ -657,13 +705,13 @@ export default function Transactions() {
       type: (tx.type as string) === 'expense' ? 'debit' : ((tx.type as string) === 'income' ? 'credit' : tx.type)
     };
     setNewTx(sanitizedTx);
-    
+
     // Find linked counterpart account (Transfer/CC payment)
     const linkedIds = tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []);
-    const counterpartTx = data.transactions.find(t => 
-      linkedIds.includes(t.id) && 
-      t.id !== tx.id && 
-      t.category !== 'Cashback' && 
+    const counterpartTx = data.transactions.find(t =>
+      linkedIds.includes(t.id) &&
+      t.id !== tx.id &&
+      t.category !== 'Cashback' &&
       t.accountId !== tx.rewardUsedAccountId
     );
     if (counterpartTx) {
@@ -748,6 +796,7 @@ export default function Transactions() {
 
   const isTransfer = newTx.category?.toLowerCase() === 'transfer';
   const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
+  const hasRewardsOrWallet = data.accounts.some(a => a.type === 'rewards' || a.type === 'e_wallet');
 
   return (
     <div className="flex-col gap-6">
@@ -1117,7 +1166,7 @@ export default function Transactions() {
                 {errors.date && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.date}</span>}
               </div>
 
-              <CustomDatePicker 
+              <CustomDatePicker
                 isOpen={isDatePickerOpen}
                 onClose={() => setIsDatePickerOpen(false)}
                 value={newTx.date || ''}
@@ -1178,10 +1227,10 @@ export default function Transactions() {
                       if (val === '' || /^\d*\.?\d*$/.test(val)) {
                         const numVal = parseFloat(val);
                         const finalAmount = isNaN(numVal) ? 0 : numVal;
-                        
+
                         setNewTx(prev => ({ ...prev, amount: finalAmount }));
                         setInputStrings(s => ({ ...s, amount: val }));
-                        
+
                         if (errors.amount) setErrors(prev => ({ ...prev, amount: '' }));
                         if (errors.excludedAmount && finalAmount >= (newTx.excludedAmount || 0)) {
                           setErrors(prev => ({ ...prev, excludedAmount: '' }));
@@ -1223,7 +1272,31 @@ export default function Transactions() {
                           : 'CC Bill Payment';
                       }
                     }
-                    setNewTx({ ...newTx, type: newType, description: updatedDesc });
+                    let updatedAccountId = newTx.accountId;
+                    if (isCCCat && updatedAccountId) {
+                      const selectedAcc = data.accounts.find(a => a.id === updatedAccountId);
+                      if (newType === 'debit' && selectedAcc?.type === 'credit_card') {
+                        updatedAccountId = '';
+                        setPaymentSourceAccountId('');
+                      } else if (newType === 'credit' && selectedAcc?.type !== 'credit_card') {
+                        updatedAccountId = '';
+                        setPaymentSourceAccountId('');
+                      }
+                    }
+                    let updatedIsTravel = newTx.isTravelTransaction;
+                    const selectedAcc = updatedAccountId ? data.accounts.find(a => a.id === updatedAccountId) : null;
+                    if (newType === 'credit' && selectedAcc?.type === 'debit_card' && selectedAcc?.isNcmcEnabled && newTx.category?.toLowerCase() === 'ncmc travel recharge') {
+                      updatedIsTravel = true;
+                      if (updatedDesc === '' || updatedDesc === 'NCMC Travel Recharge' || updatedDesc === 'Transfer to Travel Wallet') {
+                        updatedDesc = 'NCMC Travel Recharge';
+                      }
+                    } else if (newType === 'debit' && selectedAcc?.type === 'debit_card' && selectedAcc?.isNcmcEnabled && newTx.category?.toLowerCase() === 'ncmc travel recharge') {
+                      updatedIsTravel = false;
+                      if (updatedDesc === '' || updatedDesc === 'NCMC Travel Recharge' || updatedDesc === 'Transfer to Travel Wallet') {
+                        updatedDesc = 'Transfer to Travel Wallet';
+                      }
+                    }
+                    setNewTx({ ...newTx, type: newType, description: updatedDesc, accountId: updatedAccountId, isTravelTransaction: updatedIsTravel });
                   }}
                   iconGetter={_id => _id === 'debit' ? '📉' : '📈'}
                   style={{ marginBottom: 0 }}
@@ -1234,17 +1307,28 @@ export default function Transactions() {
                 label="Account"
                 value={newTx.accountId || ''}
                 placeholder="Select an account"
-                options={data.accounts.map(acc => ({
-                  id: acc.id,
-                  name: acc.name,
-                  subtext: acc.type.replace('_', ' ')
-                }))}
+                options={data.accounts
+                  .filter(acc => {
+                    if (isCCPayment) {
+                      return newTx.type === 'debit' ? acc.type !== 'credit_card' : acc.type === 'credit_card';
+                    }
+                    return true;
+                  })
+                  .map(acc => ({
+                    id: acc.id,
+                    name: acc.name,
+                    subtext: acc.type.replace('_', ' ')
+                  }))}
                 onChange={val => {
                   const selectedAcc = data.accounts.find(a => a.id === val);
+                  const isNcmcRecharge = newTx.category?.toLowerCase() === 'ncmc travel recharge';
+                  const shouldAutoTravel = newTx.type === 'credit' && selectedAcc?.type === 'debit_card' && selectedAcc?.isNcmcEnabled && isNcmcRecharge;
+                  const shouldAutoDebitDesc = newTx.type === 'debit' && selectedAcc?.type === 'debit_card' && selectedAcc?.isNcmcEnabled && isNcmcRecharge;
                   setNewTx({
                     ...newTx,
                     accountId: val,
-                    isTravelTransaction: selectedAcc?.isNcmcEnabled ? newTx.isTravelTransaction : false
+                    isTravelTransaction: shouldAutoTravel ? true : (selectedAcc?.isNcmcEnabled ? newTx.isTravelTransaction : false),
+                    description: shouldAutoDebitDesc ? 'Transfer to Travel Wallet' : (shouldAutoTravel ? 'NCMC Travel Recharge' : newTx.description)
                   });
                   if (errors.accountId) {
                     const newErr = { ...errors };
@@ -1291,7 +1375,7 @@ export default function Transactions() {
                   } else if (wasCC && !isNowCC && isCCAutoFilled) {
                     // Leaving CC Payment — clear CC auto-fill
                     updatedDesc = '';
-                  } else if (wasNcmc && !isNowNcmc && isNcmcAutoFilled) {
+                  } else if (wasNcmc && !isNowNcmc && (isNcmcAutoFilled || currentDesc === 'Transfer to Travel Wallet')) {
                     updatedDesc = '';
                   } else if (isNowCC && paymentSourceAccountId) {
                     // Switching TO CC Payment with counterpart already selected — auto-fill
@@ -1303,13 +1387,34 @@ export default function Transactions() {
                           : 'CC Bill Payment';
                       }
                     }
-                  } else if (isNowNcmc && isNcmcAccount && newTx.isTravelTransaction && newTx.type === 'credit') {
+                  }
+                  const selectedAccForTravel = data.accounts.find(a => a.id === newTx.accountId);
+                  const shouldAutoTravel = newTx.type === 'credit' && selectedAccForTravel?.type === 'debit_card' && selectedAccForTravel?.isNcmcEnabled && isNowNcmc;
+                  const updatedIsTravel = shouldAutoTravel ? true : newTx.isTravelTransaction;
+
+                  if (isNowNcmc && isNcmcAccount && updatedIsTravel && newTx.type === 'credit') {
                     if (currentDesc === '' || isNcmcAutoFilled || isTransferAutoFilled) {
                       updatedDesc = 'NCMC Travel Recharge';
                     }
+                  } else if (isNowNcmc && isNcmcAccount && !updatedIsTravel && newTx.type === 'debit') {
+                    if (currentDesc === '' || currentDesc === 'Transfer to Travel Wallet' || isTransferAutoFilled) {
+                      updatedDesc = 'Transfer to Travel Wallet';
+                    }
                   }
 
-                  setNewTx({ ...newTx, category: val, description: updatedDesc });
+                  let updatedAccountId = newTx.accountId;
+                  if (isNowCC && updatedAccountId) {
+                    const selectedAcc = data.accounts.find(a => a.id === updatedAccountId);
+                    if (newTx.type === 'debit' && selectedAcc?.type === 'credit_card') {
+                      updatedAccountId = '';
+                      setPaymentSourceAccountId('');
+                    } else if (newTx.type === 'credit' && selectedAcc?.type !== 'credit_card') {
+                      updatedAccountId = '';
+                      setPaymentSourceAccountId('');
+                    }
+                  }
+
+                  setNewTx({ ...newTx, category: val, description: updatedDesc, accountId: updatedAccountId, isTravelTransaction: updatedIsTravel });
                   if (errors.category) {
                     const newErr = { ...errors };
                     delete newErr.category;
@@ -1321,8 +1426,13 @@ export default function Transactions() {
               />
 
               {(
-                newTx.type === 'credit' && (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' || (data.accounts.find(a => a.id === newTx.accountId)?.type === 'debit_card' && !newTx.isTravelTransaction))
-                || (isTransfer || isCCPayment)
+                (newTx.type === 'credit' && (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' || (data.accounts.find(a => a.id === newTx.accountId)?.type === 'debit_card' && !newTx.isTravelTransaction)))
+                || isTransfer
+                || (isCCPayment && newTx.accountId && (
+                  newTx.type === 'debit'
+                    ? data.accounts.find(a => a.id === newTx.accountId)?.type !== 'credit_card'
+                    : data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card'
+                ))
               ) && (
                   <CustomPicker
                     label={
@@ -1383,7 +1493,8 @@ export default function Transactions() {
                         const isNcmcCat = newTx.category?.toLowerCase() === 'ncmc travel recharge';
                         // Clear NCMC auto-fill when switching away from Travel section
                         const updatedDesc = isNcmcCat && currentDesc === 'NCMC Travel Recharge' ? '' : currentDesc;
-                        setNewTx({ ...newTx, isTravelTransaction: false, description: updatedDesc });
+                        const updatedType = isNcmcCat ? 'debit' : newTx.type;
+                        setNewTx({ ...newTx, isTravelTransaction: false, description: updatedDesc, type: updatedType });
                       }}
                     >
                       💳 Payments
@@ -1395,10 +1506,11 @@ export default function Transactions() {
                         const currentDesc = newTx.description || '';
                         const isNcmcCat = newTx.category?.toLowerCase() === 'ncmc travel recharge';
                         const isNcmcAccount = !!data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled;
+                        const updatedType = isNcmcCat ? 'credit' : newTx.type;
                         // Auto-fill when switching to Travel section with NCMC Travel Recharge category
-                        const shouldAutoFill = isNcmcCat && isNcmcAccount && newTx.type === 'credit' && (currentDesc === '' || currentDesc === 'NCMC Travel Recharge');
+                        const shouldAutoFill = isNcmcCat && isNcmcAccount && updatedType === 'credit' && (currentDesc === '' || currentDesc === 'NCMC Travel Recharge');
                         const updatedDesc = shouldAutoFill ? 'NCMC Travel Recharge' : currentDesc;
-                        setNewTx({ ...newTx, isTravelTransaction: true, description: updatedDesc });
+                        setNewTx({ ...newTx, isTravelTransaction: true, description: updatedDesc, type: updatedType });
                       }}
                     >
                       🚇 Travel
@@ -1414,6 +1526,13 @@ export default function Transactions() {
                 </div>
               )}
 
+              {!editId && newTx.type === 'debit' && data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled && !newTx.isTravelTransaction && newTx.category?.toLowerCase() === 'ncmc travel recharge' && (
+                <div className="text-xs text-accent flex align-center" style={{ marginTop: '0.5rem', marginBottom: '1rem', padding: '0.75rem', border: '1px dashed var(--accent)', borderRadius: '12px', background: 'rgba(56, 189, 248, 0.05)' }}>
+                  <span style={{ marginRight: '0.5rem', fontSize: '1rem' }}>ℹ️</span>
+                  <span>This will automatically credit <strong>{data.accounts.find(a => a.id === newTx.accountId)?.name} (Travel)</strong></span>
+                </div>
+              )}
+
               {(() => {
                 const activeAcc = data.accounts.find(a => a.id === newTx.accountId);
                 const isCard = activeAcc?.type === 'credit_card' || activeAcc?.type === 'debit_card';
@@ -1423,12 +1542,14 @@ export default function Transactions() {
 
                 const isTransfer = newTx.category?.toLowerCase() === 'transfer';
                 const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
+                const isNcmcRecharge = newTx.category?.toLowerCase() === 'ncmc travel recharge';
 
-                if (isTransfer || isCCPayment) return null;
+                if (isTransfer || isCCPayment || isNcmcRecharge) return null;
                 if (newTx.isTravelTransaction) return null;
 
                 if (!isCard && !showInstantUI) return null;
                 if (newTx.type !== 'debit') return null;
+                if (showInstantUI && !hasRewardsOrWallet) return null;
 
                 return (
                   <div className="flex-col gap-3" style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}>
@@ -1470,10 +1591,10 @@ export default function Transactions() {
                             if (val === '' || /^\d*\.?\d*$/.test(val)) {
                               setInputStrings(prev => ({ ...prev, rewardEarned: val }));
                               const numVal = parseFloat(val);
-                              setNewTx({ 
-                                ...newTx, 
+                              setNewTx({
+                                ...newTx,
                                 rewardEarned: isNaN(numVal) ? 0 : numVal,
-                                rewardEarnedType: 'instant' 
+                                rewardEarnedType: 'instant'
                               });
                             }
                           }}
@@ -1507,10 +1628,10 @@ export default function Transactions() {
 
 
 
-              {newTx.type === 'debit' && !showRewardSplit && !isCCPayment && (
+              {!showRewardSplit && isCCPayment && paymentSourceAccountId && hasRewardsOrWallet && (
                 <button
                   className="btn btn-secondary w-100 flex align-center justify-center gap-2"
-                  style={{ marginTop: '0.5rem', padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}
+                  style={{ marginTop: '0.25rem', marginBottom: '1.25rem', padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}
                   onClick={() => {
                     setShowRewardSplit(true);
                     setTimeout(() => {
@@ -1523,19 +1644,19 @@ export default function Transactions() {
                 </button>
               )}
 
-              {((newTx.type === 'debit' && showRewardSplit) || (isCCPayment && paymentSourceAccountId)) && (
+              {showRewardSplit && isCCPayment && paymentSourceAccountId && hasRewardsOrWallet && (
                 <div
                   ref={rewardSplitRef}
                   className="grid grid-cols-2 gap-4"
-                  style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}
+                  style={{ marginTop: '0.25rem', marginBottom: '1.25rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}
                 >
                   <div className="flex justify-between align-center col-span-2">
                     <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>Split Payment</span>
                     {showRewardSplit && (
                       <button
                         className="btn btn-danger flex align-center gap-1"
-                        style={{ 
-                          fontSize: '0.75rem', 
+                        style={{
+                          fontSize: '0.75rem',
                           padding: '0.25rem 0.6rem',
                           minHeight: 'auto',
                           boxShadow: '2px 2px 0 #000'
@@ -1587,23 +1708,23 @@ export default function Transactions() {
 
               {((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') ||
                 (newTx.type === 'debit' && isCCPayment && paymentSourceAccountId && data.accounts.find(a => a.id === paymentSourceAccountId)?.type === 'credit_card')) && (
-                <div style={{ marginTop: '0.5rem' }}>
-                  <CustomPicker
-                    label="Apply Payment To"
-                    value={ccPaymentCycleTarget}
-                    options={[
-                      { id: 'previous_statement', name: 'Previous Statement', subtext: 'Reduce already billed dues' },
-                      { id: 'current_cycle', name: 'Current Open Cycle', subtext: 'Count as an early payment for the active cycle' }
-                    ]}
-                    onChange={val => setCcPaymentCycleTarget(val as 'current_cycle' | 'previous_statement')}
-                    iconGetter={id => id === 'current_cycle' ? '🟦' : '🧾'}
-                  />
-                </div>
-              )}
+                  <div style={{ marginTop: '0.5rem' }}>
+                    <CustomPicker
+                      label="Apply Payment To"
+                      value={ccPaymentCycleTarget}
+                      options={[
+                        { id: 'previous_statement', name: 'Previous Statement', subtext: 'Reduce already billed dues' },
+                        { id: 'current_cycle', name: 'Current Open Cycle', subtext: 'Count as an early payment for the active cycle' }
+                      ]}
+                      onChange={val => setCcPaymentCycleTarget(val as 'current_cycle' | 'previous_statement')}
+                      iconGetter={id => id === 'current_cycle' ? '🟦' : '🧾'}
+                    />
+                  </div>
+                )}
 
 
 
-              {newTx.category?.toLowerCase() !== 'transfer' && newTx.category?.toLowerCase() !== 'cc payment' && newTx.category?.toLowerCase() !== 'ncmc travel recharge' && (
+              {data.user?.enablePassiveTransactions && newTx.category?.toLowerCase() !== 'transfer' && newTx.category?.toLowerCase() !== 'cc payment' && newTx.category?.toLowerCase() !== 'ncmc travel recharge' && (
                 <div ref={passiveLogRef} className="flex-col gap-3" style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-hover)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
                   <div className="flex justify-between align-center">
                     <div className="flex-col">

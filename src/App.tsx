@@ -15,9 +15,11 @@ import Debts from './components/Debts';
 
 import { useFinance } from './FinanceContext';
 import AuthScreen from './components/AuthScreen';
+import OnboardingScreen from './components/OnboardingScreen';
 import AccountStatement from './components/AccountStatement';
 import type { Account } from './types';
 import SmsReader, { startSmsListener } from './services/SmsService';
+import { Capacitor } from '@capacitor/core';
 
 type Tab = 'dashboard' | 'accounts' | 'transactions' | 'cashback' | 'insights' | 'settings' | 'splits' | 'bills' | 'debts';
 
@@ -65,17 +67,23 @@ function App() {
   }, [activeTab]);
 
   useEffect(() => {
-    // Force initialize the plugin
-    SmsReader.ping().catch(() => {});
+    // Force initialize the plugin — Android only (SMS not available on iOS)
+    if (Capacitor.getPlatform() === 'android') {
+      SmsReader.ping().catch(() => {});
+    }
   }, []);
 
   useEffect(() => {
+    // SmsReader plugin only exists on Android
+    if (Capacitor.getPlatform() !== 'android') return;
     SmsReader.setEnabled({ enabled: !!data.user?.autoLogSms }).catch((e) => {
       console.error("Failed to sync SMS auto-log setting to native:", e);
     });
   }, [data.user?.autoLogSms]);
 
   useEffect(() => {
+    // SMS listener is Android-only — iOS has no SMS access API
+    if (Capacitor.getPlatform() !== 'android') return;
     if (!data.user?.autoLogSms) return;
 
     console.log("Auto-Log SMS enabled. Registering SMS listener.");
@@ -105,6 +113,8 @@ function App() {
 
   useEffect(() => {
     const checkAndOpenPending = async () => {
+      // Launch intent check is Android-only (SMS notification deep-link)
+      if (Capacitor.getPlatform() !== 'android') return;
       try {
         const { openPending } = await SmsReader.checkLaunchIntent();
         if (openPending) {
@@ -127,8 +137,8 @@ function App() {
       if (state.isActive) {
         console.log("SpendVaultSms: App resumed to active foreground. Checking launch intent and draining transactions...");
         
-        // Proactively drain any pending SMS transactions when app is resumed
-        if (autoLogSmsRef.current) {
+        // Proactively drain any pending SMS transactions when app is resumed (Android only)
+        if (autoLogSmsRef.current && Capacitor.getPlatform() === 'android') {
           try {
             console.log("SpendVaultSms: Resume detected. Draining native pending SMS queue...");
             const { transactions } = await SmsReader.drainPendingTransactions();
@@ -211,7 +221,10 @@ function App() {
             setShowExitToast(false);
           }, 2000);
         } else {
-          CapApp.exitApp();
+          // iOS: don't call exitApp() — Apple App Store prohibits programmatic termination
+          if (Capacitor.getPlatform() === 'android') {
+            CapApp.exitApp();
+          }
         }
       } else {
         // If on another tab, maybe go back to dashboard?
@@ -253,10 +266,15 @@ function App() {
     };
   }, [data.user?.pinHash, isAuthenticated, setAuthenticated]);
 
+  const needsOnboarding = !data.user?.pinHash;
   const needsAuth = data.user?.pinHash && !isAuthenticated;
 
   if (showSplash) {
     return <SplashScreen />;
+  }
+
+  if (needsOnboarding) {
+    return <OnboardingScreen />;
   }
 
   if (needsAuth) {
@@ -341,20 +359,25 @@ function App() {
                 <ChevronRight size={18} className="text-muted" />
               </div>
 
-              <div
-                className="card flex align-center gap-4 clickable"
-                onClick={() => { setActiveTab('cashback'); setIsHubOpen(false); }}
-                style={{ padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}
-              >
-                <div className="flex-center" style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'linear-gradient(135deg, #10b981, #3b82f6)', color: 'white', flexShrink: 0 }}>
-                  <Gift size={22} />
+              {data.accounts.some(acc => 
+                acc.type === 'credit_card' && 
+                (acc.isCashbackEnabled === true || (acc.isCashbackEnabled === undefined && (acc.defaultCashbackRate !== undefined || (acc.cashbackRates && acc.cashbackRates.length > 0))))
+              ) && (
+                <div
+                  className="card flex align-center gap-4 clickable"
+                  onClick={() => { setActiveTab('cashback'); setIsHubOpen(false); }}
+                  style={{ padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}
+                >
+                  <div className="flex-center" style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'linear-gradient(135deg, #10b981, #3b82f6)', color: 'white', flexShrink: 0 }}>
+                    <Gift size={22} />
+                  </div>
+                  <div className="flex-col flex-1">
+                    <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Rewards & Offers</span>
+                    <span className="text-xs text-muted">Cashback & credit card perks</span>
+                  </div>
+                  <ChevronRight size={18} className="text-muted" />
                 </div>
-                <div className="flex-col flex-1">
-                  <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Rewards & Offers</span>
-                  <span className="text-xs text-muted">Cashback & credit card perks</span>
-                </div>
-                <ChevronRight size={18} className="text-muted" />
-              </div>
+              )}
 
               <div
                 className="card flex align-center gap-4 clickable"

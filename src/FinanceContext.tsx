@@ -200,11 +200,14 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
 
         if (!parsed.user) {
-          parsed.user = { id: 'default', name: 'spendvault user', biometricsEnabled: false };
+          parsed.user = { id: 'default', name: 'spendvault user', biometricsEnabled: false, enablePassiveTransactions: true };
         } else {
           // Migration: Remove old password if it exists
           if ((parsed.user as any).password) {
             delete (parsed.user as any).password;
+          }
+          if (parsed.user.enablePassiveTransactions === undefined) {
+            parsed.user.enablePassiveTransactions = true;
           }
         }
 
@@ -498,7 +501,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       }
     }
     return { 
-      user: { id: 'default', name: 'spendvault user', biometricsEnabled: false },
+      user: { id: 'default', name: 'spendvault user', biometricsEnabled: false, enablePassiveTransactions: false },
       accounts: [], 
       transactions: [], 
       cashbackStatements: [], 
