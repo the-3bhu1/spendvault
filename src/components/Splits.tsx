@@ -366,6 +366,19 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
   const [splitType, setSplitType] = useState<'equal' | 'unequal'>('equal');
   const [customShares, setCustomShares] = useState<Record<string, string>>({});
 
+  const resetForm = () => {
+    setSelectedTxId(null);
+    setEditingItemId(null);
+    setSelectorSearch('');
+    setInvolvedPeople(event.people);
+    setIncludeMe(true);
+    setPaidBy('me');
+    setCustomDescription('');
+    setCustomAmount('');
+    setSplitType('equal');
+    setCustomShares({});
+  };
+
   const selectedTx = selectedTxId === 'custom'
     ? { id: 'custom', description: customDescription, amount: parseFloat(customAmount) || 0 }
     : data.transactions.find(t => t.id === selectedTxId);
@@ -421,16 +434,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
     }
 
     setIsItemModalOpen(false);
-    setSelectedTxId(null);
-    setEditingItemId(null);
-    setSelectorSearch('');
-    setInvolvedPeople(event.people);
-    setIncludeMe(true);
-    setPaidBy('me');
-    setCustomDescription('');
-    setCustomAmount('');
-    setSplitType('equal');
-    setCustomShares({});
+    resetForm();
   };
 
   const calculateTotals = () => {
@@ -692,14 +696,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                 className="btn btn-primary flex align-center gap-2 text-xs"
                 style={{ padding: '0.4rem 0.8rem' }}
                 onClick={() => {
-                  setEditingItemId(null);
-                  setSelectedTxId(null);
-                  setSelectorSearch('');
-                  setInvolvedPeople(event.people);
-                  setIncludeMe(true);
-                  setPaidBy('me');
-                  setCustomDescription('');
-                  setCustomAmount('');
+                  resetForm();
                   setIsItemModalOpen(true);
                 }}
               >
@@ -777,7 +774,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
               <div className="flex justify-between align-center" style={{ padding: 'calc(1.5rem + env(safe-area-inset-top, 0px)) 1.75rem 1rem', borderBottom: '2px solid #000', width: '100%' }}>
                 <div className="flex align-center gap-3">
                   {selectedTxId && !editingItemId && (
-                    <button className="btn-circle" onClick={() => setSelectedTxId(null)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', padding: 0 }}>
+                    <button className="btn-circle" onClick={() => { setSelectedTxId(null); setSplitType('equal'); setCustomShares({}); }} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', padding: 0 }}>
                       <ChevronRight size={20} style={{ transform: 'rotate(180deg)' }} />
                     </button>
                   )}
@@ -785,7 +782,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                     {editingItemId ? 'Edit Split' : (selectedTxId ? 'Split Details' : 'Select Transaction')}
                   </h3>
                 </div>
-                <button onClick={() => { setIsItemModalOpen(false); setSelectedTxId(null); setEditingItemId(null); }} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.25rem', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center' }}>
+                <button onClick={() => { setIsItemModalOpen(false); resetForm(); }} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.25rem', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center' }}>
                   ✕
                 </button>
               </div>
@@ -933,273 +930,321 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                     })()}
                   </div>
                 </div>
-              ) : (
-                /* View 2: Split Details */
-                <div className="flex-col flex-1 overflow-y no-scrollbar" style={{ padding: '1.5rem', overflowY: 'auto' }}>
-                  <div className="card text-center flex-col align-center gap-2" style={{ background: 'var(--bg-hover)', border: 'none', marginBottom: '1.5rem' }}>
-                    <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>Split Result</span>
-                    {selectedTxId === 'custom' ? (
-                      <div className="flex-col gap-3 w-100" style={{ padding: '0.5rem' }}>
-                        <div className="input-group text-left" style={{ width: '100%' }}>
-                          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Description</label>
-                          <input
-                            type="text"
-                            className="input-field"
-                            placeholder="e.g. Dinner, Cab, Tickets"
-                            value={customDescription}
-                            onChange={e => setCustomDescription(e.target.value)}
-                            style={{ background: 'var(--bg-color)', width: '100%', borderRadius: '8px' }}
-                          />
-                        </div>
-                        <div className="input-group text-left" style={{ width: '100%' }}>
-                          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Amount (₹)</label>
-                          <input
-                            type="number"
-                            className="input-field"
-                            placeholder="0.00"
-                            value={customAmount}
-                            onChange={e => setCustomAmount(e.target.value)}
-                            style={{ background: 'var(--bg-color)', width: '100%', borderRadius: '8px' }}
-                          />
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="flex align-center gap-2">
-                          <Receipt size={16} className="text-primary" />
-                          <span className="font-medium">{selectedTx?.description}</span>
-                        </div>
-                        <span className="text-2xl font-bold text-primary">
-                          ₹{selectedTx?.amount.toFixed(2)}
-                        </span>
-                      </>
-                    )}
-                    {splitType === 'equal' && (
-                      <>
-                        <span className="text-2xl font-bold text-accent" style={{ marginTop: '0.5rem' }}>
-                          ₹{((selectedTxId === 'custom' ? (parseFloat(customAmount) || 0) : (selectedTx?.amount || 0)) / (involvedPeople.length + (includeMe ? 1 : 0)) || 0).toFixed(2)}
-                        </span>
-                        <span className="text-xs text-muted">per person</span>
-                      </>
-                    )}
-                  </div>
-
-                  <div className="input-group" style={{ marginBottom: '1.5rem' }}>
-                    <label>Who Paid?</label>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', marginTop: '0.5rem', width: '100%' }}>
-                      <button
-                        type="button"
-                        className={`btn ${paidBy === 'me' ? 'btn-primary' : 'btn-secondary'}`}
-                        style={{ borderRadius: '12px', padding: '0.5rem 0', fontSize: '0.85rem', width: '100%', display: 'block', textAlign: 'center' }}
-                        onClick={() => setPaidBy('me')}
-                      >
-                        Me
-                      </button>
-                      {event.people.map(person => (
-                        <button
-                          key={person}
-                          type="button"
-                          className={`btn ${paidBy === person ? 'btn-primary' : 'btn-secondary'}`}
-                          style={{ borderRadius: '12px', padding: '0.5rem 0', fontSize: '0.85rem', width: '100%', display: 'block', textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                          onClick={() => setPaidBy(person)}
-                          title={person}
-                        >
-                          {person}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="input-group" style={{ marginBottom: '1.5rem', width: '100%' }}>
-                    <label>Split Type</label>
-                    <div className="flex gap-2" style={{ marginTop: '0.5rem', width: '100%' }}>
-                      <button
-                        type="button"
-                        className={`btn ${splitType === 'equal' ? 'btn-primary' : 'btn-secondary'}`}
-                        style={{ borderRadius: '12px', padding: '0.6rem 0.5rem', fontSize: '0.85rem', flex: 1, width: '100%', textTransform: 'uppercase', letterSpacing: '0.5px' }}
-                        onClick={() => setSplitType('equal')}
-                      >
-                        Split Equally
-                      </button>
-                      <button
-                        type="button"
-                        className={`btn ${splitType === 'unequal' ? 'btn-primary' : 'btn-secondary'}`}
-                        style={{ borderRadius: '12px', padding: '0.6rem 0.5rem', fontSize: '0.85rem', flex: 1, width: '100%', textTransform: 'uppercase', letterSpacing: '0.5px' }}
-                        onClick={() => setSplitType('unequal')}
-                      >
-                        Split Unequally
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="input-group">
-                    <label>{splitType === 'equal' ? "Who's involved?" : "Enter individual shares"}</label>
-                    <div className="flex flex-col gap-2" style={{ marginTop: '0.5rem' }}>
-                      {splitType === 'equal' ? (
-                        <>
-                          <div
-                            className={`flex justify-between align-center clickable ${includeMe ? 'bg-primary-soft' : ''}`}
-                            style={{
-                              padding: '1.25rem 1rem',
-                              borderRadius: '16px',
-                              border: `1px solid ${includeMe ? 'var(--primary-color)' : 'var(--border-color)'}`,
-                              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                              marginBottom: '0.5rem'
-                            }}
-                            onClick={() => setIncludeMe(!includeMe)}
-                          >
-                            <span className="font-bold" style={{ fontSize: '1rem' }}>Me (Include myself)</span>
-                            <div className="flex-center" style={{ width: '24px', height: '24px', borderRadius: '8px', border: '2px solid var(--primary-color)', background: includeMe ? 'var(--primary-color)' : 'transparent' }}>
-                              {includeMe && <Check size={16} color="white" strokeWidth={4} />}
-                            </div>
+              ) : (() => {
+                const totalAmount = selectedTxId === 'custom' ? (parseFloat(customAmount) || 0) : (selectedTx?.amount || 0);
+                const sumOfShares = (parseFloat(customShares['me']) || 0) + event.people.reduce((sum, p) => sum + (parseFloat(customShares[p]) || 0), 0);
+                const remainingAmount = totalAmount - sumOfShares;
+                return (
+                  /* View 2: Split Details */
+                  <div className="flex-col flex-1 overflow-y no-scrollbar" style={{ padding: '1.5rem', overflowY: 'auto' }}>
+                    <div className="card text-center flex-col align-center gap-2" style={{ background: 'var(--bg-hover)', border: 'none', marginBottom: '1.5rem' }}>
+                      <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>Split Result</span>
+                      {selectedTxId === 'custom' ? (
+                        <div className="flex-col gap-3 w-100" style={{ padding: '0.5rem' }}>
+                          <div className="input-group text-left" style={{ width: '100%' }}>
+                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Description</label>
+                            <input
+                              type="text"
+                              className="input-field"
+                              placeholder="e.g. Dinner, Cab, Tickets"
+                              value={customDescription}
+                              onChange={e => setCustomDescription(e.target.value)}
+                              style={{ background: 'var(--bg-color)', width: '100%', borderRadius: '8px' }}
+                            />
                           </div>
+                          <div className="input-group text-left" style={{ width: '100%' }}>
+                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Amount (₹)</label>
+                            <input
+                              type="number"
+                              className="input-field"
+                              placeholder="0.00"
+                              value={customAmount}
+                              onChange={e => setCustomAmount(e.target.value)}
+                              style={{ background: 'var(--bg-color)', width: '100%', borderRadius: '8px' }}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex align-center gap-2">
+                            <Receipt size={16} className="text-primary" />
+                            <span className="font-medium">{selectedTx?.description}</span>
+                          </div>
+                          <span className="text-2xl font-bold text-primary">
+                            ₹{selectedTx?.amount.toFixed(2)}
+                          </span>
+                        </>
+                      )}
+                      {splitType === 'equal' && (
+                        <>
+                          <span className="text-2xl font-bold text-accent" style={{ marginTop: '0.5rem' }}>
+                            ₹{(totalAmount / (involvedPeople.length + (includeMe ? 1 : 0)) || 0).toFixed(2)}
+                          </span>
+                          <span className="text-xs text-muted">per person</span>
+                        </>
+                      )}
+                    </div>
 
-                          {event.people.map(person => (
+                    <div className="input-group" style={{ marginBottom: '1.5rem' }}>
+                      <label>Who Paid?</label>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', marginTop: '0.5rem', width: '100%' }}>
+                        <button
+                          type="button"
+                          className={`btn ${paidBy === 'me' ? 'btn-primary' : 'btn-secondary'}`}
+                          style={{ borderRadius: '0px', padding: '0.5rem 0', fontSize: '0.85rem', width: '100%', display: 'block', textAlign: 'center' }}
+                          onClick={() => setPaidBy('me')}
+                        >
+                          Me
+                        </button>
+                        {event.people.map(person => (
+                          <button
+                            key={person}
+                            type="button"
+                            className={`btn ${paidBy === person ? 'btn-primary' : 'btn-secondary'}`}
+                            style={{ borderRadius: '0px', padding: '0.5rem 0', fontSize: '0.85rem', width: '100%', display: 'block', textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                            onClick={() => setPaidBy(person)}
+                            title={person}
+                          >
+                            {person}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="input-group" style={{ marginBottom: '1.5rem', width: '100%' }}>
+                      <label>Split Type</label>
+                      <div className="flex gap-2" style={{ marginTop: '0.5rem', width: '100%' }}>
+                        <button
+                          type="button"
+                          className={`btn ${splitType === 'equal' ? 'btn-primary' : 'btn-secondary'}`}
+                          style={{ borderRadius: '0px', padding: '0.6rem 0.5rem', fontSize: '0.85rem', flex: 1, width: '100%', textTransform: 'uppercase', letterSpacing: '0.5px' }}
+                        onClick={() => { setSplitType('equal'); setCustomShares({}); }}
+                        >
+                          Split Equally
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn ${splitType === 'unequal' ? 'btn-primary' : 'btn-secondary'}`}
+                          style={{ borderRadius: '0px', padding: '0.6rem 0.5rem', fontSize: '0.85rem', flex: 1, width: '100%', textTransform: 'uppercase', letterSpacing: '0.5px' }}
+                          onClick={() => setSplitType('unequal')}
+                        >
+                          Split Unequally
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="input-group">
+                      <label>{splitType === 'equal' ? "Who's involved?" : "Enter individual shares"}</label>
+                    <div className="flex flex-col gap-2" style={{ marginTop: '0.5rem' }}>
+                        {splitType === 'equal' ? (
+                          <>
                             <div
-                              key={person}
-                              className={`flex justify-between align-center clickable ${involvedPeople.includes(person) ? 'bg-primary-soft' : ''}`}
+                              className={`flex justify-between align-center clickable ${includeMe ? 'bg-primary-soft' : ''}`}
                               style={{
                                 padding: '1.25rem 1rem',
-                                borderRadius: '16px',
-                                border: `1px solid ${involvedPeople.includes(person) ? 'var(--primary-color)' : 'var(--border-color)'}`,
+                                borderRadius: '0px',
+                                border: `1px solid ${includeMe ? 'var(--primary-color)' : 'var(--border-color)'}`,
                                 transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
                                 marginBottom: '0.5rem'
                               }}
-                              onClick={() => {
-                                if (involvedPeople.includes(person)) {
-                                  setInvolvedPeople(involvedPeople.filter(p => p !== person));
-                                } else {
-                                  setInvolvedPeople([...involvedPeople, person]);
-                                }
-                              }}
+                              onClick={() => setIncludeMe(!includeMe)}
                             >
-                              <span className="font-bold" style={{ fontSize: '1rem' }}>{person}</span>
-                              <div className="flex-center" style={{ width: '24px', height: '24px', borderRadius: '8px', border: '2px solid var(--primary-color)', background: involvedPeople.includes(person) ? 'var(--primary-color)' : 'transparent' }}>
-                                {involvedPeople.includes(person) && <Check size={16} color="white" strokeWidth={4} />}
+                              <span className="font-bold" style={{ fontSize: '1rem' }}>Me (Include myself)</span>
+                              <div className="flex-center" style={{ width: '24px', height: '24px', borderRadius: '0px', border: '2px solid var(--primary-color)', background: includeMe ? 'var(--primary-color)' : 'transparent' }}>
+                                {includeMe && <Check size={16} color="white" strokeWidth={4} />}
                               </div>
                             </div>
-                          ))}
-                        </>
-                      ) : (
-                        <>
-                          <div
-                            className="flex justify-between align-center"
-                            style={{
-                              padding: '0.75rem 1rem',
-                              borderRadius: '16px',
-                              border: '1px solid var(--border-color)',
-                              background: 'var(--bg-hover)',
-                              marginBottom: '0.5rem',
-                              gap: '1rem'
-                            }}
-                          >
-                            <span className="font-bold" style={{ fontSize: '1rem' }}>Me (Include myself)</span>
-                            <div style={{ position: 'relative', width: '120px' }}>
-                              <span style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.85rem', color: 'var(--text-muted)' }}>₹</span>
-                              <input
-                                type="number"
-                                className="input-field"
-                                placeholder="0.00"
-                                value={customShares['me'] || ''}
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  setCustomShares(prev => ({ ...prev, me: val }));
-                                  setIncludeMe((parseFloat(val) || 0) > 0);
-                                }}
-                                style={{ paddingLeft: '1.75rem', borderRadius: '10px', textAlign: 'right', width: '100%', height: '36px', background: 'var(--bg-color)' }}
-                              />
-                            </div>
-                          </div>
 
-                          {event.people.map(person => (
+                            {event.people.map(person => (
+                              <div
+                                key={person}
+                                className={`flex justify-between align-center clickable ${involvedPeople.includes(person) ? 'bg-primary-soft' : ''}`}
+                                style={{
+                                  padding: '1.25rem 1rem',
+                                  borderRadius: '0px',
+                                  border: `1px solid ${involvedPeople.includes(person) ? 'var(--primary-color)' : 'var(--border-color)'}`,
+                                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                  marginBottom: '0.5rem'
+                                }}
+                                onClick={() => {
+                                  if (involvedPeople.includes(person)) {
+                                    setInvolvedPeople(involvedPeople.filter(p => p !== person));
+                                  } else {
+                                    setInvolvedPeople([...involvedPeople, person]);
+                                  }
+                                }}
+                              >
+                                <span className="font-bold" style={{ fontSize: '1rem' }}>{person}</span>
+                                <div className="flex-center" style={{ width: '24px', height: '24px', borderRadius: '0px', border: '2px solid var(--primary-color)', background: involvedPeople.includes(person) ? 'var(--primary-color)' : 'transparent' }}>
+                                  {involvedPeople.includes(person) && <Check size={16} color="white" strokeWidth={4} />}
+                                </div>
+                              </div>
+                            ))}
+                          </>
+                        ) : (
+                          <>
                             <div
-                              key={person}
                               className="flex justify-between align-center"
                               style={{
                                 padding: '0.75rem 1rem',
-                                borderRadius: '16px',
+                                borderRadius: '0px',
                                 border: '1px solid var(--border-color)',
                                 background: 'var(--bg-hover)',
                                 marginBottom: '0.5rem',
                                 gap: '1rem'
                               }}
                             >
-                              <span className="font-bold" style={{ fontSize: '1rem' }}>{person}</span>
+                              <span className="font-bold" style={{ fontSize: '1rem' }}>Me (Include myself)</span>
                               <div style={{ position: 'relative', width: '120px' }}>
                                 <span style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.85rem', color: 'var(--text-muted)' }}>₹</span>
                                 <input
                                   type="number"
                                   className="input-field"
                                   placeholder="0.00"
-                                  value={customShares[person] || ''}
+                                  value={customShares['me'] || ''}
                                   onChange={e => {
                                     const val = e.target.value;
-                                    setCustomShares(prev => ({ ...prev, [person]: val }));
-                                    const floatVal = parseFloat(val) || 0;
-                                    if (floatVal > 0) {
-                                      if (!involvedPeople.includes(person)) {
-                                        setInvolvedPeople(prev => [...prev, person]);
-                                      }
-                                    } else {
-                                      setInvolvedPeople(prev => prev.filter(p => p !== person));
-                                    }
+                                    setCustomShares(prev => ({ ...prev, me: val }));
+                                    setIncludeMe((parseFloat(val) || 0) > 0);
                                   }}
-                                  style={{ paddingLeft: '1.75rem', borderRadius: '10px', textAlign: 'right', width: '100%', height: '36px', background: 'var(--bg-color)' }}
+                                  style={{ paddingLeft: '1.75rem', borderRadius: '0px', textAlign: 'right', width: '100%', height: '36px', background: 'var(--bg-color)' }}
                                 />
                               </div>
                             </div>
-                          ))}
-                        </>
-                      )}
-                    </div>
-                  </div>
 
-                  {(() => {
-                    const totalAmount = selectedTxId === 'custom' ? (parseFloat(customAmount) || 0) : (selectedTx?.amount || 0);
-                    const sumOfShares = (parseFloat(customShares['me']) || 0) + event.people.reduce((sum, p) => sum + (parseFloat(customShares[p]) || 0), 0);
-                    const remainingAmount = totalAmount - sumOfShares;
-                    const isSplitValid = splitType === 'equal' 
-                      ? (includeMe || involvedPeople.length > 0) 
-                      : (Math.abs(remainingAmount) < 0.01 && sumOfShares > 0);
-
-                    return (
-                      <>
-                        {splitType === 'unequal' && (
-                          <div 
-                            className="card flex justify-between align-center" 
-                            style={{ 
-                              background: isSplitValid ? 'rgba(34, 197, 94, 0.1)' : 'rgba(245, 158, 11, 0.1)', 
-                              borderColor: isSplitValid ? 'var(--success)' : 'var(--accent-color)', 
-                              marginTop: '1rem',
-                              padding: '0.75rem 1rem',
-                              borderRadius: '12px',
-                              border: '1px solid'
-                            }}
-                          >
-                            <span className="text-xs font-bold" style={{ color: isSplitValid ? 'var(--success)' : 'var(--accent-color)' }}>
-                              {isSplitValid 
-                                ? '✅\u00A0\u00A0All split shares match the total perfectly!' 
-                                : `⚠️\u00A0\u00A0Sum matches: ₹${sumOfShares.toFixed(2)} / ₹${totalAmount.toFixed(2)} (${remainingAmount > 0 ? `₹${remainingAmount.toFixed(2)} remaining` : `₹${Math.abs(remainingAmount).toFixed(2)} over`})`
-                              }
-                            </span>
-                          </div>
+                            {event.people.map(person => (
+                              <div
+                                key={person}
+                                className="flex justify-between align-center"
+                                style={{
+                                  padding: '0.75rem 1rem',
+                                  borderRadius: '0px',
+                                  border: '1px solid var(--border-color)',
+                                  background: 'var(--bg-hover)',
+                                  marginBottom: '0.5rem',
+                                  gap: '1rem'
+                                }}
+                              >
+                                <span className="font-bold" style={{ fontSize: '1rem' }}>{person}</span>
+                                <div style={{ position: 'relative', width: '120px' }}>
+                                  <span style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.85rem', color: 'var(--text-muted)' }}>₹</span>
+                                  <input
+                                    type="number"
+                                    className="input-field"
+                                    placeholder="0.00"
+                                    value={customShares[person] || ''}
+                                    onChange={e => {
+                                      const val = e.target.value;
+                                      setCustomShares(prev => ({ ...prev, [person]: val }));
+                                      const floatVal = parseFloat(val) || 0;
+                                      if (floatVal > 0) {
+                                        if (!involvedPeople.includes(person)) {
+                                          setInvolvedPeople(prev => [...prev, person]);
+                                        }
+                                      } else {
+                                        setInvolvedPeople(prev => prev.filter(p => p !== person));
+                                      }
+                                    }}
+                                    style={{ paddingLeft: '1.75rem', borderRadius: '0px', textAlign: 'right', width: '100%', height: '36px', background: 'var(--bg-color)' }}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </>
                         )}
+                      </div>
+                    </div>
 
-                        <div className="modal-footer" style={{ marginTop: 'auto', paddingTop: '2rem' }}>
-                          <button
-                            className="btn btn-primary w-100"
-                            style={{ padding: '1rem' }}
-                            onClick={handleSaveItem}
-                            disabled={!isSplitValid}
-                          >
-                            {editingItemId ? 'Save Split' : 'Confirm Split'}
-                          </button>
-                        </div>
-                      </>
-                    );
-                  })()}
-                </div>
-              )}
+                    {(() => {
+                      const isSplitValid = splitType === 'equal' 
+                        ? (includeMe || involvedPeople.length > 0) 
+                        : (Math.abs(remainingAmount) < 0.01 && sumOfShares > 0);
+
+                      return (
+                        <>
+                          {splitType === 'unequal' && (
+                            <div 
+                              className="card flex-col gap-2" 
+                              style={{ 
+                                background: isSplitValid ? 'rgba(34, 197, 94, 0.1)' : 'rgba(245, 158, 11, 0.1)', 
+                                borderColor: isSplitValid ? 'var(--success)' : 'var(--accent-color)', 
+                                marginTop: '1rem',
+                                padding: '0.75rem 1rem',
+                                borderRadius: '0px',
+                                border: '1px solid',
+                                alignItems: 'stretch'
+                              }}
+                            >
+                              <span className="text-xs font-bold" style={{ color: isSplitValid ? 'var(--success)' : 'var(--accent-color)' }}>
+                                {isSplitValid 
+                                  ? '✅\u00A0\u00A0All split shares match the total perfectly!' 
+                                  : `⚠️\u00A0\u00A0Sum matches: ₹${sumOfShares.toFixed(2)} / ₹${totalAmount.toFixed(2)} (${remainingAmount > 0 ? `₹${remainingAmount.toFixed(2)} remaining` : `₹${Math.abs(remainingAmount).toFixed(2)} over`})`
+                                }
+                              </span>
+                              {!isSplitValid && remainingAmount > 0.01 && (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary text-xs"
+                                  style={{
+                                    padding: '8px 10px',
+                                    fontSize: '9px',
+                                    borderRadius: '0px',
+                                    border: '1px solid var(--accent)',
+                                    boxShadow: 'none',
+                                    width: '100%',
+                                    cursor: 'pointer',
+                                    fontFamily: 'var(--font-mono)',
+                                    fontWeight: 800,
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.5px',
+                                    textAlign: 'center'
+                                  }}
+                                  onClick={() => {
+                                    const allCandidates = ['me', ...event.people];
+                                    const emptyCandidates = allCandidates.filter(p => !customShares[p] || customShares[p].trim() === '' || parseFloat(customShares[p]) === 0);
+                                    if (emptyCandidates.length > 0) {
+                                      const sharePerPerson = (remainingAmount / emptyCandidates.length).toFixed(2);
+                                      const updatedShares = { ...customShares };
+                                      emptyCandidates.forEach(p => {
+                                        updatedShares[p] = sharePerPerson;
+                                      });
+                                      setCustomShares(updatedShares);
+                                      
+                                      const newInvolved = [...involvedPeople];
+                                      emptyCandidates.forEach(p => {
+                                        if (p !== 'me' && !newInvolved.includes(p)) {
+                                          newInvolved.push(p);
+                                        }
+                                      });
+                                      setInvolvedPeople(newInvolved);
+                                      if (emptyCandidates.includes('me')) {
+                                        setIncludeMe(true);
+                                      }
+                                    }
+                                  }}
+                                >
+                                  Auto-Split Remaining
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="modal-footer" style={{ marginTop: 'auto', paddingTop: '2rem' }}>
+                            <button
+                              className="btn btn-primary w-100"
+                              style={{ padding: '1rem', borderRadius: '0px' }}
+                              onClick={handleSaveItem}
+                              disabled={!isSplitValid}
+                            >
+                              {editingItemId ? 'Save Split' : 'Confirm Split'}
+                            </button>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}

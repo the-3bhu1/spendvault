@@ -259,7 +259,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         description: desc,
         category: lastTx.category,
         type: lastTx.type,
-        accountId: lastTx.accountId
+        accountId: lastTx.accountId,
+        cashbackLevelId: lastTx.cashbackLevelId,
+        rewardEarnedType: lastTx.rewardEarnedType,
+        rewardEarnedAccountId: lastTx.rewardEarnedAccountId
       });
     } else {
       setNewTx({ ...newTx, description: desc });
@@ -370,7 +373,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   placeholder="0.00" 
                 />
               </div>
-              <CustomPicker label="From Rewards" value={newTx.rewardUsedAccountId || ''} placeholder="Select Reward Account" options={data.accounts.filter(a => a.type === 'rewards').map(acc => ({ id: acc.id, name: acc.name }))} onChange={val => setNewTx({ ...newTx, rewardUsedAccountId: val })} iconGetter={id => getAccountIcon(id, data.accounts)} />
+              <CustomPicker label="From Rewards" value={newTx.rewardUsedAccountId || ''} placeholder="Select Reward Account" options={data.accounts.filter(a => a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points')).map(acc => ({ id: acc.id, name: acc.name }))} onChange={val => setNewTx({ ...newTx, rewardUsedAccountId: val })} iconGetter={id => getAccountIcon(id, data.accounts)} />
             </div>
           )}
 

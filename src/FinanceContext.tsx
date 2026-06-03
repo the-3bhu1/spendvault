@@ -634,6 +634,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
               updated.amount = Number(updatedTransaction.rewardUsed) || 0;
               const isCCPayment = updatedTransaction.category?.toLowerCase() === 'cc payment';
               updated.description = isCCPayment ? t.description : `Rewards applied to: ${updatedTransaction.description}`;
+              const rewardsSourceAcc = prev.accounts.find(a => a.id === updatedTransaction.rewardUsedAccountId);
+              updated.isRewardTransaction = !!(rewardsSourceAcc?.isCashbackEnabled && rewardsSourceAcc?.rewardType === 'points');
             } 
             // Otherwise it's a Transfer counterpart or CC payment bank portion
             else {

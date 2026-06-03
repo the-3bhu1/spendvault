@@ -15,6 +15,28 @@ export default function Cashback() {
   const [depositAccountId, setDepositAccountId] = useState('');
   const [showCreditedCycles, setShowCreditedCycles] = useState(false);
 
+  const getRewardUnitAndRate = (account: any) => {
+    if (!account) return { unit: '', rate: 1 };
+    if (account.rewardUnit) {
+      return { unit: account.rewardUnit, rate: account.pointsConversionRate || 1 };
+    }
+    if (account.cashbackDestinationAccountId) {
+      const dest = data.accounts.find(a => a.id === account.cashbackDestinationAccountId);
+      if (dest && dest.rewardUnit) {
+        return { unit: dest.rewardUnit, rate: dest.pointsConversionRate || 1 };
+      }
+    }
+    return { unit: '', rate: 1 };
+  };
+
+  const formatCashback = (value: number, account: any) => {
+    const { unit } = getRewardUnitAndRate(account);
+    if (unit) {
+      return `${Math.round(value * 100) / 100} ${unit.toLowerCase()}`;
+    }
+    return formatCurrency(value);
+  };
+
   const getBillingCycleLabel = (txDateStr: string, statementDay?: number) => {
     if (!statementDay) {
       const d = new Date(txDateStr);
@@ -97,7 +119,21 @@ export default function Cashback() {
 
     const first = confirmedSts[0];
     const acc = first.account;
+    const isInternalRewards = !!(acc?.isCashbackEnabled && acc?.rewardType === 'points');
+    if (isInternalRewards) {
+      const legacyTxs = data.transactions.filter(t =>
+        t.accountId === accId &&
+        t.type === 'credit' &&
+        t.category === 'Cashback' &&
+        t.linkedTransactionIds?.some(id => allStIds.includes(id))
+      );
+      legacyTxs.forEach(t => deleteTransaction(t.id));
+      return;
+    }
     const isCC = acc?.type === 'credit_card';
+
+    const finalDepositAccountId = acc?.cashbackDestinationAccountId || (isCC ? accId : (first.realizedIntoAccountId || accId));
+    const isStatementCredit = finalDepositAccountId === accId;
 
     // Determine target date and description
     let targetDate = format(new Date(), 'yyyy-MM-dd');
@@ -108,7 +144,7 @@ export default function Cashback() {
       consolidatedDescription = `${format(txDate, "MMM ''yy")} Real Cashback`;
     }
 
-    if (isCC && acc.statementDay) {
+    if (isCC && acc.statementDay && isStatementCredit) {
       const originalCycle = getBillingCycleForDate(first.transaction.date, acc.statementDay);
       const { endDate } = getBillingCycleDates(originalCycle, acc.statementDay);
 
@@ -124,7 +160,6 @@ export default function Cashback() {
 
     const totalRealized = confirmedSts.reduce((sum, s) => sum + s.realized, 0);
     const allLinkedIds = confirmedSts.map(s => s.transaction.id);
-    const finalDepositAccountId = isCC ? accId : (first.realizedIntoAccountId || accId);
 
     // Find ALL existing transactions in the ledger that are linked to ANY of these confirmed cashbacks
     const existingRelatedTxs = data.transactions.filter(t =>
@@ -140,6 +175,25 @@ export default function Cashback() {
         ))
       )
     );
+
+    const destAcc = data.accounts.find(a => a.id === finalDepositAccountId);
+    const { unit: cardUnit, rate: cardRate } = getRewardUnitAndRate(acc);
+    const convertValue = (val: number) => {
+      if (cardUnit) {
+        if (destAcc?.type !== 'rewards') {
+          return val / cardRate;
+        }
+        return val;
+      } else {
+        if (destAcc?.type === 'rewards') {
+          const destRate = destAcc.pointsConversionRate || 1;
+          return val * destRate;
+        }
+        return val;
+      }
+    };
+
+    const mainAmount = convertValue(totalRealized);
 
     if (existingRelatedTxs.length > 0) {
       const [mainTx, ...toDelete] = existingRelatedTxs;
@@ -159,9 +213,10 @@ export default function Cashback() {
       // If the transaction was found via date/description but had NO linked IDs, 
       // we preserve its full amount as a "manual" entry.
       const belongsToAnyGroup = (mainTx.linkedTransactionIds || []).length > 0;
+      const isInternalRewards = !!(destAcc?.isCashbackEnabled && destAcc?.rewardType === 'points');
       const newAmount = belongsToAnyGroup 
-        ? totalForOtherGroups + totalRealized 
-        : (mainTx.amount || 0) + totalRealized;
+        ? convertValue(totalForOtherGroups + totalRealized)
+        : (mainTx.amount || 0) + mainAmount;
 
       if (newAmount > 0) {
         updateTransaction({
@@ -169,21 +224,24 @@ export default function Cashback() {
           date: targetDate,
           amount: newAmount,
           description: consolidatedDescription,
+          isRewardTransaction: isInternalRewards,
           linkedTransactionIds: combinedIds
         });
       } else {
         deleteTransaction(mainTx.id);
       }
-    } else if (totalRealized > 0) {
+    } else if (mainAmount > 0) {
+      const isInternalRewards = !!(destAcc?.isCashbackEnabled && destAcc?.rewardType === 'points');
       addTransaction({
         id: generateId(),
         date: targetDate,
         description: consolidatedDescription,
         accountId: finalDepositAccountId,
         type: 'credit',
-        amount: totalRealized,
+        amount: mainAmount,
         category: 'Cashback',
         isRecurring: false,
+        isRewardTransaction: isInternalRewards,
         linkedTransactionIds: allLinkedIds
       });
     }
@@ -194,13 +252,13 @@ export default function Cashback() {
     const { txId, expected, prevId, accountId } = confirmingStatement;
     const acc = data.accounts.find(a => a.id === accountId);
     const isCC = acc?.type === 'credit_card';
-    const isAutomatic = isCC || acc?.type === 'bank_account' || acc?.type === 'debit_card';
+    const isAutomatic = isCC || acc?.type === 'bank_account' || acc?.type === 'debit_card' || !!acc?.cashbackDestinationAccountId;
 
     if (!isAutomatic && !depositAccountId) return;
 
     const realized = editingId === txId ? editingValue : expected;
     const st = statements[txId];
-    const finalDepositAccountId = isAutomatic ? accountId : depositAccountId;
+    const finalDepositAccountId = acc?.cashbackDestinationAccountId || (isAutomatic ? accountId : depositAccountId);
 
     const statement: CashbackStatement = {
       id: prevId || generateId(),
@@ -383,6 +441,7 @@ export default function Cashback() {
                     allLinkedIds.length > 0 &&
                     allLinkedIds.every(id => t.linkedTransactionIds?.includes(id))
                   );
+                  const isInternalRewards = !!(sts[0]?.account?.isCashbackEnabled && sts[0]?.account?.rewardType === 'points');
 
                   const isLastCycle = cycleIndex === card.cycles.length - 1;
 
@@ -443,7 +502,7 @@ export default function Cashback() {
 
                         <div className="flex align-center gap-3" style={{ flexShrink: 0 }}>
                           <div className="flex align-center gap-2">
-                            {confirmedSts.length > 1 && !isPerfectlyConsolidated && (
+                            {confirmedSts.length > 1 && !isPerfectlyConsolidated && !isInternalRewards && (
                               <button
                                 className="btn-text text-accent text-mono"
                                 style={{
@@ -469,7 +528,7 @@ export default function Cashback() {
                               </button>
                             )}
                             <span className="text-mono font-bold" style={{ fontSize: '1rem', color: 'var(--text-primary)' }}>
-                              {formatCurrency(total)}
+                              {formatCashback(total, sts[0]?.account)}
                             </span>
                           </div>
                           <ChevronDown size={18} style={{
@@ -508,10 +567,10 @@ export default function Cashback() {
                                     ><Info size={14} /></button>
                                   </div>
                                   <span className="text-mono text-xs text-muted">
-                                    Exp: {formatCurrency(st.expected)}
+                                    Exp: {formatCashback(st.expected, st.account)}
                                   </span>
                                 </div>
-
+ 
                                 <div className="flex-col align-end gap-2" style={{ flexShrink: 0 }}>
                                   <div className="flex align-center gap-2">
                                     {isEditing ? (
@@ -525,7 +584,7 @@ export default function Cashback() {
                                       />
                                     ) : (
                                       <span className="text-mono" style={{ fontSize: '1.2rem', fontWeight: 700, color: st.confirmed ? 'var(--success)' : 'var(--warning)' }}>
-                                        {formatCurrency(st.confirmed ? st.realized : st.expected)}
+                                        {formatCashback(st.confirmed ? st.realized : st.expected, st.account)}
                                       </span>
                                     )}
                                   </div>
@@ -575,8 +634,9 @@ export default function Cashback() {
 
       {confirmingStatement && (() => {
         const acc = data.accounts.find(a => a.id === confirmingStatement.accountId);
+        const destAcc = acc?.cashbackDestinationAccountId ? data.accounts.find(a => a.id === acc.cashbackDestinationAccountId) : null;
         const isCC = acc?.type === 'credit_card';
-        const isAutomatic = isCC || acc?.type === 'bank_account' || acc?.type === 'debit_card';
+        const isAutomatic = isCC || acc?.type === 'bank_account' || acc?.type === 'debit_card' || !!destAcc;
 
         return (
           <div className="modal-overlay">
@@ -589,7 +649,13 @@ export default function Cashback() {
                 {isAutomatic ? (
                   <div className="text-xs text-accent flex align-center" style={{ padding: '0.75rem', border: '1px dashed var(--accent)', borderRadius: '12px', background: 'rgba(56, 189, 248, 0.05)' }}>
                     <span style={{ marginRight: '0.5rem', fontSize: '1rem' }}>ℹ️</span>
-                    <span>This will be automatically applied as a credit to <strong>{acc?.name}</strong>.</span>
+                    <span>
+                      {destAcc ? (
+                        <>This will be automatically deposited into <strong>{destAcc.name}</strong>.</>
+                      ) : (
+                        <>This will be automatically applied as a credit to <strong>{acc?.name}</strong>.</>
+                      )}
+                    </span>
                   </div>
                 ) : (
                   <>

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useFinance } from '../FinanceContext';
-import { Pencil, Trash2, Plus, FileText, CreditCard } from 'lucide-react';
+import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardNetwork } from '../types';
@@ -66,12 +66,48 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const [newCbName, setNewCbName] = useState('');
   const [newCbRate, setNewCbRate] = useState('');
   const [travelOpeningBalanceInput, setTravelOpeningBalanceInput] = useState('');
+  const [rewardOpeningBalanceInput, setRewardOpeningBalanceInput] = useState('');
   const cardDetailsRef = useRef<HTMLDivElement>(null);
 
   const [newCbRoundOff, setNewCbRoundOff] = useState(false);
   const [showCvv, setShowCvv] = useState(false);
   const [expiryInput, setExpiryInput] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const [editingCashbackRateId, setEditingCashbackRateId] = useState<string | null>(null);
+  const [isEditingCardDetails, setIsEditingCardDetails] = useState(false);
+
+  const addCashbackRate = () => {
+    if (!newCbName || !newCbRate) return;
+    if (editingCashbackRateId) {
+      setNewAccount(prev => ({
+        ...prev,
+        cashbackRates: prev.cashbackRates?.map(r => r.id === editingCashbackRateId ? { ...r, name: newCbName, rate: parseFloat(newCbRate), roundOffCashback: newCbRoundOff } : r)
+      }));
+      setEditingCashbackRateId(null);
+    } else {
+      setNewAccount(prev => ({
+        ...prev,
+        cashbackRates: [...(prev.cashbackRates || []), { id: generateId(), name: newCbName, rate: parseFloat(newCbRate), roundOffCashback: newCbRoundOff }]
+      }));
+    }
+    setNewCbName('');
+    setNewCbRate('');
+    setNewCbRoundOff(false);
+  };
+
+  const removeCashbackRate = (id: string) => {
+    if (editingCashbackRateId === id) {
+      setEditingCashbackRateId(null);
+      setNewCbName('');
+      setNewCbRate('');
+      setNewCbRoundOff(false);
+    }
+    setNewAccount(prev => ({
+      ...prev,
+      cashbackRates: prev.cashbackRates?.filter(r => r.id !== id)
+    }));
+  };
 
   const openAddModal = () => {
     setEditId(null);
@@ -80,7 +116,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setNewCbName('');
     setNewCbRate('');
     setNewCbRoundOff(false);
+    setEditingCashbackRateId(null);
+    setIsEditingCardDetails(false);
     setTravelOpeningBalanceInput('');
+    setRewardOpeningBalanceInput('');
     setExpiryInput('');
     setShowCvv(false);
     setErrors({});
@@ -98,24 +137,17 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setNewCbName('');
     setNewCbRate('');
     setNewCbRoundOff(false);
+    setEditingCashbackRateId(null);
+    setIsEditingCardDetails(false);
 
-    let defaultOpening = acc.openingBalances[month];
-    if (defaultOpening === undefined) {
-      const prevMonthDate = new Date();
-      prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
-      const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
-      defaultOpening = calculateBalance(acc, data.transactions, prevMonthStr);
-    }
-    setOpeningBalanceInput(defaultOpening.toString());
+    const currentBalance = calculateBalance(acc, data.transactions, month);
+    setOpeningBalanceInput(currentBalance.toString());
 
-    let defaultTravelOpening = acc.travelOpeningBalances?.[month];
-    if (defaultTravelOpening === undefined && acc.isNcmcEnabled) {
-      const prevMonthDate = new Date();
-      prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
-      const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
-      defaultTravelOpening = calculateBalance(acc, data.transactions, prevMonthStr, true);
-    }
-    setTravelOpeningBalanceInput((defaultTravelOpening || 0).toString());
+    const currentTravelBalance = calculateBalance(acc, data.transactions, month, true);
+    setTravelOpeningBalanceInput(currentTravelBalance.toString());
+
+    const currentRewardBalance = calculateBalance(acc, data.transactions, month, false, true, data.cashbackStatements);
+    setRewardOpeningBalanceInput(currentRewardBalance.toString());
 
     // Pre-fill expiry string from saved cardDetails
     const cd = acc.cardDetails;
@@ -157,6 +189,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       if (newAccount.defaultCashbackRate === undefined || isNaN(newAccount.defaultCashbackRate) || newAccount.defaultCashbackRate < 0) {
         newErrors.defaultCashbackRate = 'Default Cashback Rate is required';
       }
+      if (newAccount.rewardType === 'points') {
+        if (!newAccount.rewardUnit?.trim()) {
+          newErrors.rewardUnit = 'Reward Unit Name is required';
+        }
+        if (!rewardOpeningBalanceInput.trim()) {
+          newErrors.rewardOpeningBalance = 'Reward Points Opening Balance is required';
+        }
+      }
     }
 
     setErrors(newErrors);
@@ -167,14 +207,127 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     if (!validate()) return;
     const month = getCurrentMonthStr();
 
+    let updatedOpeningBalances = { ...(newAccount.openingBalances || {}) };
+    let updatedBalanceAdjustments = { ...(newAccount.balanceAdjustments || {}) };
+    let updatedTravelOpeningBalances = newAccount.isNcmcEnabled ? { ...(newAccount.travelOpeningBalances || {}) } : undefined;
+    let updatedTravelBalanceAdjustments = newAccount.isNcmcEnabled ? { ...(newAccount.travelBalanceAdjustments || {}) } : undefined;
+    
+    const hasInternalRewards = (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.isCashbackEnabled && newAccount.rewardType === 'points';
+    let updatedRewardOpeningBalances = hasInternalRewards ? { ...(newAccount.rewardOpeningBalances || {}) } : undefined;
+    let updatedRewardBalanceAdjustments = hasInternalRewards ? { ...(newAccount.rewardBalanceAdjustments || {}) } : undefined;
+
+    if (editId) {
+      const originalAcc = data.accounts.find(a => a.id === editId);
+      if (originalAcc) {
+        // 1. Standard Wallet Opening Balance setup/rollover folding
+        let opening = originalAcc.openingBalances[month];
+        if (opening === undefined) {
+          const prevMonthDate = new Date();
+          prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+          const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
+          opening = calculateBalance(originalAcc, data.transactions, prevMonthStr);
+          updatedOpeningBalances[month] = opening;
+        }
+
+        // Calculate standard transactions change for the current month
+        const currentMonthTransactions = data.transactions.filter(t => {
+          if (t.accountId !== editId) return false;
+          const tMonth = t.date.slice(0, 7);
+          return tMonth === month && !t.isTravelTransaction && !t.isRewardTransaction;
+        });
+        const standardChange = currentMonthTransactions.reduce((acc, t) => {
+          let effectiveAmount = t.amount;
+          if (t.type === 'debit' && t.rewardUsed && t.rewardUsed > 0 && t.rewardUsedAccountId) {
+            effectiveAmount = t.amount - t.rewardUsed;
+          }
+          if (originalAcc.type === 'credit_card') {
+            return t.type === 'debit' ? acc + effectiveAmount : acc - effectiveAmount;
+          } else {
+            return t.type === 'credit' ? acc + effectiveAmount : acc - effectiveAmount;
+          }
+        }, 0);
+
+        const enteredCurrentBalance = parseFloat(openingBalanceInput) || 0;
+        updatedBalanceAdjustments[month] = enteredCurrentBalance - opening - standardChange;
+
+        // 2. Travel Wallet Setup
+        if (newAccount.isNcmcEnabled && updatedTravelOpeningBalances) {
+          let travelOpening = originalAcc.travelOpeningBalances?.[month];
+          if (travelOpening === undefined) {
+            const prevMonthDate = new Date();
+            prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+            const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
+            travelOpening = calculateBalance(originalAcc, data.transactions, prevMonthStr, true);
+            updatedTravelOpeningBalances[month] = travelOpening;
+          }
+
+          const travelTransactions = data.transactions.filter(t => {
+            if (t.accountId !== editId) return false;
+            const tMonth = t.date.slice(0, 7);
+            return tMonth === month && !!t.isTravelTransaction;
+          });
+          const travelChange = travelTransactions.reduce((acc, t) => {
+            if (originalAcc.type === 'credit_card') {
+              return t.type === 'debit' ? acc + t.amount : acc - t.amount;
+            } else {
+              return t.type === 'credit' ? acc + t.amount : acc - t.amount;
+            }
+          }, 0);
+
+          const enteredCurrentTravelBalance = parseFloat(travelOpeningBalanceInput) || 0;
+          if (!updatedTravelBalanceAdjustments) updatedTravelBalanceAdjustments = {};
+          updatedTravelBalanceAdjustments[month] = enteredCurrentTravelBalance - travelOpening - travelChange;
+        }
+
+        // 3. Rewards Wallet Setup
+        if (hasInternalRewards && updatedRewardOpeningBalances) {
+          let rewardOpening = originalAcc.rewardOpeningBalances?.[month];
+          if (rewardOpening === undefined) {
+            const prevMonthDate = new Date();
+            prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+            const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
+            rewardOpening = calculateBalance(originalAcc, data.transactions, prevMonthStr, false, true, data.cashbackStatements);
+            updatedRewardOpeningBalances[month] = rewardOpening;
+          }
+
+          const rewardTransactions = data.transactions.filter(t => {
+            if (t.accountId !== editId) return false;
+            const tMonth = t.date.slice(0, 7);
+            return tMonth === month && !!t.isRewardTransaction;
+          });
+          const rewardChange = rewardTransactions.reduce((acc, t) => {
+            return t.type === 'credit' ? acc + t.amount : acc - t.amount;
+          }, 0);
+
+          const enteredCurrentRewardBalance = parseFloat(rewardOpeningBalanceInput) || 0;
+          if (!updatedRewardBalanceAdjustments) updatedRewardBalanceAdjustments = {};
+          updatedRewardBalanceAdjustments[month] = enteredCurrentRewardBalance - rewardOpening - rewardChange;
+        }
+      }
+    } else {
+      // In add mode, set opening balance as input and reset adjustment for standard
+      updatedOpeningBalances[month] = parseFloat(openingBalanceInput) || 0;
+      updatedBalanceAdjustments[month] = 0;
+
+      if (newAccount.isNcmcEnabled && updatedTravelOpeningBalances) {
+        updatedTravelOpeningBalances[month] = parseFloat(travelOpeningBalanceInput) || 0;
+        if (!updatedTravelBalanceAdjustments) updatedTravelBalanceAdjustments = {};
+        updatedTravelBalanceAdjustments[month] = 0;
+      }
+
+      if (hasInternalRewards && updatedRewardOpeningBalances) {
+        updatedRewardOpeningBalances[month] = parseFloat(rewardOpeningBalanceInput) || 0;
+        if (!updatedRewardBalanceAdjustments) updatedRewardBalanceAdjustments = {};
+        updatedRewardBalanceAdjustments[month] = 0;
+      }
+    }
+
     const accountData: Account = {
       id: editId || generateId(),
       name: newAccount.name || '',
       type: newAccount.type as AccountType,
-      openingBalances: {
-        ...(newAccount.openingBalances || {}),
-        [month]: parseFloat(openingBalanceInput) || 0
-      },
+      openingBalances: updatedOpeningBalances,
+      balanceAdjustments: updatedBalanceAdjustments,
       defaultCashbackRate: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.defaultCashbackRate : undefined,
       cashbackRates: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.cashbackRates : undefined,
       roundOffCashback: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.roundOffCashback : undefined,
@@ -182,15 +335,19 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       statementDay: newAccount.type === 'credit_card' ? newAccount.statementDay : undefined,
       dueDay: newAccount.type === 'credit_card' ? newAccount.dueDay : undefined,
       cashbackCreditCycle: newAccount.type === 'credit_card' ? (newAccount.cashbackCreditCycle || 'next_cycle') : undefined,
+      cashbackDestinationAccountId: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.cashbackDestinationAccountId : undefined,
       isNcmcEnabled: newAccount.isNcmcEnabled,
-      travelOpeningBalances: newAccount.isNcmcEnabled ? {
-        ...(newAccount.travelOpeningBalances || {}),
-        [month]: parseFloat(travelOpeningBalanceInput) || 0
-      } : undefined,
+      travelOpeningBalances: updatedTravelOpeningBalances,
+      travelBalanceAdjustments: updatedTravelBalanceAdjustments,
       cardDetails: (newAccount.type === 'credit_card' || newAccount.type === 'debit_card')
         ? newAccount.cardDetails
         : undefined,
       statementRounding: newAccount.statementRounding || 'none',
+      rewardUnit: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.rewardUnit : undefined,
+      pointsConversionRate: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.pointsConversionRate : undefined,
+      rewardType: (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.isCashbackEnabled ? (newAccount.rewardType || 'rupee') : undefined,
+      rewardOpeningBalances: updatedRewardOpeningBalances,
+      rewardBalanceAdjustments: updatedRewardBalanceAdjustments,
     };
 
     if (editId) {
@@ -200,24 +357,6 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     }
 
     setIsModalOpen(false);
-  };
-
-  const addCashbackRate = () => {
-    if (!newCbName || !newCbRate) return;
-    setNewAccount(prev => ({
-      ...prev,
-      cashbackRates: [...(prev.cashbackRates || []), { id: generateId(), name: newCbName, rate: parseFloat(newCbRate), roundOffCashback: newCbRoundOff }]
-    }));
-    setNewCbName('');
-    setNewCbRate('');
-    setNewCbRoundOff(false);
-  };
-
-  const removeCashbackRate = (id: string) => {
-    setNewAccount(prev => ({
-      ...prev,
-      cashbackRates: prev.cashbackRates?.filter(r => r.id !== id)
-    }));
   };
 
   const currentMonth = getCurrentMonthStr();
@@ -235,6 +374,15 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       case 'cash': return '💵';
       default: return '💼';
     }
+  };
+
+  const getDestAccountUnit = (acc: Partial<Account>) => {
+    if (acc.rewardUnit) return acc.rewardUnit;
+    if (acc.cashbackDestinationAccountId) {
+      const dest = data.accounts.find(a => a.id === acc.cashbackDestinationAccountId);
+      if (dest && dest.rewardUnit) return dest.rewardUnit;
+    }
+    return '';
   };
 
   return (
@@ -358,18 +506,25 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               : (roundedBal >= 0 ? 'var(--success)' : 'var(--danger)'),
                             lineHeight: '1.2'
                           }}>
-                            {formatCurrency(bal)}
+                            {acc.type === 'rewards' && acc.rewardUnit ? (
+                              <span className="flex-col" style={{ alignItems: 'flex-start', gap: '6px', lineHeight: '1' }}>
+                                <span>{bal}</span>
+                                <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 800, opacity: 0.7 }}>{acc.rewardUnit}</span>
+                              </span>
+                            ) : (
+                              formatCurrency(bal)
+                            )}
                           </span>
                           {(acc.type === 'credit_card' || acc.type === 'debit_card') && acc.defaultCashbackRate ? (
                             <span className="text-muted text-xs" style={{ marginTop: '4px' }}>Base Reward Rate: {acc.defaultCashbackRate}%</span>
                           ) : null}
                         </div>
-
-                        <div className="flex gap-4 align-start">
+ 
+                        <div className="flex gap-4 align-end">
                           {(acc.type === 'rewards' || acc.type === 'e_wallet') && (
                             <button
                               className="btn btn-secondary flex align-center gap-2"
-                              style={{ fontSize: '0.8rem', padding: '0.5rem 1rem', marginTop: '1.2rem' }}
+                              style={{ fontSize: '0.8rem', padding: '0.5rem 1rem' }}
                               onClick={() => handleLiquidate(acc)}
                             >
                               <span>Send to Bank</span>
@@ -382,11 +537,20 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               color: 'var(--text-secondary)',
                               marginTop: '0.1rem'
                             }}>
-                              {formatCurrency(openingBal)}
+                              {acc.type === 'rewards' && acc.rewardUnit ? (
+                                <span className="flex-col" style={{ alignItems: 'flex-end', gap: '6px', lineHeight: '1' }}>
+                                  <span>{openingBal}</span>
+                                  <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 800, opacity: 0.7 }}>{acc.rewardUnit}</span>
+                                </span>
+                              ) : (
+                                formatCurrency(openingBal)
+                              )}
                             </span>
                           </div>
                         </div>
                       </div>
+
+
 
                       {/* Bottom Section - Auxiliary Details */}
                       {acc.isNcmcEnabled && (
@@ -424,7 +588,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                             <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{acc.dueDay ? getOrdinalSuffix(acc.dueDay) : 'N/A'}</span>
                           </div>
 
-                          <div className="flex gap-2" style={{ marginLeft: 'auto' }}>
+                          <div className="flex gap-3" style={{ marginLeft: 'auto' }}>
                             <button
                               className="btn btn-secondary flex align-center gap-2"
                               style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700 }}
@@ -450,14 +614,23 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
                       {acc.type === 'debit_card' && !acc.isNcmcEnabled && acc.cardDetails?.cardNumber && (
                         <div className="flex justify-end align-center gap-4" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)' }}>
-                          <button
-                            className="btn btn-secondary flex align-center gap-2"
-                            style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, color: 'var(--accent)' }}
-                            onClick={() => setViewingCard(acc)}
-                          >
-                            <CreditCard size={14} />
-                            <span>Card</span>
-                          </button>
+                           <button
+                             className="btn btn-secondary flex align-center gap-2"
+                             style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, color: 'var(--accent)' }}
+                             onClick={() => setViewingCard(acc)}
+                           >
+                             <CreditCard size={14} />
+                             <span>Card</span>
+                           </button>
+                        </div>
+                      )}
+
+                      {acc.isCashbackEnabled && acc.rewardType === 'points' && acc.rewardUnit && (
+                        <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                          <span className="text-mono text-muted text-xs" style={{ textTransform: 'uppercase', fontWeight: 800 }}>{acc.rewardUnit}</span>
+                          <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.2rem', fontWeight: 700 }}>
+                            {calculateBalance(acc, data.transactions, currentMonth, false, true, data.cashbackStatements)}
+                          </span>
                         </div>
                       )}
                     </div>
@@ -514,7 +687,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                 }}
               />
               <div className="input-group">
-                <label>Opening Balance (Current Month)</label>
+                <label>{editId ? 'Current Balance (Current Month)' : 'Opening Balance (Current Month)'}</label>
                 <input
                   type="number"
                   className={`input-field ${errors.openingBalance ? 'border-danger' : ''}`}
@@ -544,7 +717,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
                   {newAccount.isNcmcEnabled && (
                     <div className="input-group">
-                      <label>Travel Wallet Opening Balance</label>
+                      <label>{editId ? 'Travel Wallet Current Balance' : 'Travel Wallet Opening Balance'}</label>
                       <input
                         type="number"
                         className={`input-field ${errors.travelOpeningBalance ? 'border-danger' : ''}`}
@@ -581,6 +754,37 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   </div>
                 </>
               )}
+ 
+              {newAccount.type === 'rewards' && (
+                <>
+                  <div className="input-group">
+                    <label>Reward Unit Name (Optional)</label>
+                    <input
+                      className="input-field"
+                      value={newAccount.rewardUnit || ''}
+                      onChange={e => setNewAccount({ ...newAccount, rewardUnit: e.target.value })}
+                      placeholder="e.g. Jewels, Points, Miles"
+                    />
+                  </div>
+                  {newAccount.rewardUnit && (
+                    <div className="input-group">
+                      <label>Points to ₹1 Conversion Rate (Optional)</label>
+                      <input
+                        type="number"
+                        className="input-field"
+                        value={newAccount.pointsConversionRate || ''}
+                        onChange={e => setNewAccount({ ...newAccount, pointsConversionRate: parseFloat(e.target.value) || undefined })}
+                        placeholder="e.g. 5 (means 5 Jewels = ₹1)"
+                        step="any"
+                        min="0.0001"
+                      />
+                      <p className="text-xs text-muted" style={{ marginTop: '0.25rem' }}>
+                        Used to automatically convert cashback rupees to points, and display estimated Rupee value in statements.
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
 
               {newAccount.type === 'credit_card' && (
                 <>
@@ -613,18 +817,6 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       min="1" max="31"
                     />
                     {errors.dueDay && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.dueDay}</span>}
-                  </div>
-                  <div style={{ marginTop: '0.5rem' }}>
-                    <CustomPicker
-                      label="Apply Statement Credits To"
-                      value={newAccount.cashbackCreditCycle || 'next_cycle'}
-                      options={[
-                        { id: 'next_cycle', name: 'Next Cycle', subtext: 'Reduces the upcoming statement (Default)' },
-                        { id: 'same_cycle', name: 'Same Cycle', subtext: 'Reduces the current statement' }
-                      ]}
-                      onChange={val => setNewAccount({ ...newAccount, cashbackCreditCycle: val as 'same_cycle' | 'next_cycle' })}
-                      iconGetter={id => id === 'next_cycle' ? '➡️' : '🔄'}
-                    />
                   </div>
                   <div style={{ marginTop: '0.5rem' }}>
                     <CustomPicker
@@ -670,8 +862,95 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
               {((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) && (
                 <>
+                  <div style={{ marginTop: '0.5rem', marginBottom: '0.5rem' }}>
+                    <CustomPicker
+                      label="Reward Type"
+                      value={newAccount.rewardType || 'rupee'}
+                      options={[
+                        { id: 'rupee', name: 'Rupee (Statement Credit)', subtext: 'Cashback in form of Rupees credited directly to the card' },
+                        { id: 'points', name: 'Custom Reward Points', subtext: 'Cashback in custom reward unit tracked internally' }
+                      ]}
+                      onChange={val => setNewAccount({ 
+                        ...newAccount, 
+                        rewardType: val as 'rupee' | 'points',
+                        rewardUnit: val === 'rupee' ? undefined : newAccount.rewardUnit,
+                        pointsConversionRate: val === 'rupee' ? undefined : newAccount.pointsConversionRate
+                      })}
+                      iconGetter={id => id === 'rupee' ? '💵' : '🎁'}
+                    />
+                  </div>
+
+                  {newAccount.rewardType === 'rupee' && newAccount.type === 'credit_card' && (
+                    <div style={{ marginTop: '0.5rem', marginBottom: '0.5rem' }}>
+                      <CustomPicker
+                        label="Apply Statement Credits To"
+                        value={newAccount.cashbackCreditCycle || 'next_cycle'}
+                        options={[
+                          { id: 'next_cycle', name: 'Next Cycle', subtext: 'Reduces the upcoming statement (Default)' },
+                          { id: 'same_cycle', name: 'Same Cycle', subtext: 'Reduces the current statement' }
+                        ]}
+                        onChange={val => setNewAccount({ ...newAccount, cashbackCreditCycle: val as 'same_cycle' | 'next_cycle' })}
+                        iconGetter={id => id === 'next_cycle' ? '➡️' : '🔄'}
+                      />
+                    </div>
+                  )}
+
+                  {newAccount.rewardType === 'points' && (
+                    <>
+                      <div className="input-group">
+                        <label>Reward Unit Name</label>
+                        <input
+                          className={`input-field ${errors.rewardUnit ? 'border-danger' : ''}`}
+                          value={newAccount.rewardUnit || ''}
+                          onChange={e => {
+                            setNewAccount({ ...newAccount, rewardUnit: e.target.value });
+                            if (errors.rewardUnit) setErrors(prev => ({ ...prev, rewardUnit: '' }));
+                          }}
+                          placeholder="e.g. Jewels, Points, Miles"
+                        />
+                        {errors.rewardUnit && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.rewardUnit}</span>}
+                      </div>
+                      <div className="input-group">
+                        <label>Points to ₹1 Conversion Rate (Optional)</label>
+                        <input
+                          type="number"
+                          className="input-field"
+                          value={newAccount.pointsConversionRate || ''}
+                          onChange={e => setNewAccount({ ...newAccount, pointsConversionRate: parseFloat(e.target.value) || undefined })}
+                          placeholder="e.g. 5 (means 5 Jewels = ₹1)"
+                          step="any"
+                          min="0.0001"
+                        />
+                        <p className="text-xs text-muted" style={{ marginTop: '0.25rem' }}>
+                          Used to automatically convert cashback rupees to points.
+                        </p>
+                      </div>
+                      <div className="input-group">
+                        <label>{editId ? 'Reward Points Current Balance' : 'Reward Points Opening Balance'}</label>
+                        <input
+                          type="number"
+                          className={`input-field ${errors.rewardOpeningBalance ? 'border-danger' : ''}`}
+                          value={rewardOpeningBalanceInput}
+                          onChange={e => {
+                            setRewardOpeningBalanceInput(e.target.value);
+                            if (errors.rewardOpeningBalance) setErrors(prev => ({ ...prev, rewardOpeningBalance: '' }));
+                          }}
+                          placeholder="0"
+                        />
+                        {errors.rewardOpeningBalance && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.rewardOpeningBalance}</span>}
+                      </div>
+                    </>
+                  )}
+
+
+
                   <div className="input-group">
-                    <label>Default Cashback Rate (%)</label>
+                    <label>
+                      Default Cashback Rate (%{(() => {
+                        const unit = getDestAccountUnit(newAccount);
+                        return unit ? ` in ${unit.toLowerCase()}` : '';
+                      })()})
+                    </label>
                     <input
                       type="number"
                       className={`input-field ${errors.defaultCashbackRate ? 'border-danger' : ''}`}
@@ -706,18 +985,49 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           <div key={cr.id} className="flex-col gap-2" style={{ padding: '0.75rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
                             <div className="flex justify-between align-center">
                               <span className="text-sm" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{cr.name} <span className="text-muted">({cr.rate}%)</span></span>
-                              <button
-                                className="btn btn-danger"
-                                style={{
-                                  fontSize: '0.75rem',
-                                  padding: '0.2rem 0.5rem',
-                                  minHeight: 'auto',
-                                  boxShadow: '2px 2px 0 #000'
-                                }}
-                                onClick={() => removeCashbackRate(cr.id)}
-                              >
-                                ✕ Remove
-                              </button>
+                              <div className="flex gap-3">
+                                <button
+                                  className="btn btn-secondary"
+                                  style={{
+                                    width: '30px',
+                                    height: '30px',
+                                    padding: 0,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: 'var(--text-muted)',
+                                    minHeight: 'auto',
+                                    boxShadow: '2px 2px 0 #000'
+                                  }}
+                                  onClick={() => {
+                                    setEditingCashbackRateId(cr.id);
+                                    setNewCbName(cr.name);
+                                    setNewCbRate(cr.rate.toString());
+                                    setNewCbRoundOff(cr.roundOffCashback || false);
+                                  }}
+                                  title="Edit"
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                                <button
+                                  className="btn btn-secondary"
+                                  style={{
+                                    width: '30px',
+                                    height: '30px',
+                                    padding: 0,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: 'var(--danger)',
+                                    minHeight: 'auto',
+                                    boxShadow: '2px 2px 0 #000'
+                                  }}
+                                  onClick={() => removeCashbackRate(cr.id)}
+                                  title="Remove"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
                             </div>
                             <label className="flex align-center text-sm text-secondary" style={{ cursor: 'pointer', fontWeight: 500, gap: '10px' }}>
                               <input
@@ -741,14 +1051,31 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     <div className="flex-col gap-2">
                       <div className="flex gap-2" style={{ alignItems: 'stretch' }}>
                         <input className="input-field" style={{ flex: 1, minWidth: '100px' }} placeholder="Label (e.g. UPI)" value={newCbName} onChange={e => setNewCbName(e.target.value)} />
-                        <input className="input-field" style={{ width: '70px', flexShrink: 0, textAlign: 'center' }} placeholder="%" type="number" step="0.1" value={newCbRate} onChange={e => setNewCbRate(e.target.value)} />
-                        <button className="btn btn-secondary" style={{ padding: '0.75rem', minWidth: '54px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={addCashbackRate} aria-label="Add Cashback Rate"><Plus size={18} /></button>
+                        <input
+                          className="input-field"
+                          style={{ width: '70px', flexShrink: 0, textAlign: 'center' }}
+                          placeholder={(() => {
+                            const unit = getDestAccountUnit(newAccount);
+                            return unit ? `% ${unit.slice(0, 3).toLowerCase()}` : "%";
+                          })()}
+                          type="number"
+                          step="0.1"
+                          value={newCbRate}
+                          onChange={e => setNewCbRate(e.target.value)}
+                        />
+                        {editingCashbackRateId ? (
+                          <div className="flex gap-2">
+                            <button className="btn btn-secondary" style={{ padding: '0.75rem', minWidth: '54px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--success)', boxShadow: 'none' }} onClick={addCashbackRate} aria-label="Save Cashback Rate"><Check size={18} /></button>
+                            <button className="btn btn-secondary" style={{ padding: '0.75rem', minWidth: '54px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)', boxShadow: 'none' }} onClick={() => { setEditingCashbackRateId(null); setNewCbName(''); setNewCbRate(''); setNewCbRoundOff(false); }} aria-label="Cancel Edit"><X size={18} /></button>
+                          </div>
+                        ) : (
+                          <button className="btn btn-secondary" style={{ padding: '0.75rem', minWidth: '54px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'none' }} onClick={addCashbackRate} aria-label="Add Cashback Rate"><Plus size={18} /></button>
+                        )}
                       </div>
                     </div>
                   </div>
                 </>
               )}
-
               {(newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && (
                 <>
                   {/* ── Card Details (Optional) ───────────────────────────── */}
@@ -760,30 +1087,100 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     <div className="flex justify-between align-center">
                       <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>💳 Card Details <span className="text-muted" style={{ fontWeight: 400 }}>(Optional)</span></span>
                       {newAccount.cardDetails ? (
-                        <button
-                          className="btn btn-danger flex align-center gap-1"
-                          style={{
-                            fontSize: '0.75rem',
-                            padding: '0.25rem 0.6rem',
-                            minHeight: 'auto',
-                            boxShadow: '2px 2px 0 #000'
-                          }}
-                          onClick={() => setNewAccount({ ...newAccount, cardDetails: undefined })}
-                        >
-                          ✕ Remove
-                        </button>
+                        <div className="flex gap-3">
+                          {isEditingCardDetails ? (
+                            <button
+                              className="btn btn-secondary"
+                              style={{
+                                width: '30px',
+                                height: '30px',
+                                padding: 0,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: 'var(--success)',
+                                minHeight: 'auto',
+                                boxShadow: '2px 2px 0 #000'
+                              }}
+                              onClick={() => setIsEditingCardDetails(false)}
+                              title="Save Details"
+                            >
+                              <Check size={14} />
+                            </button>
+                          ) : (
+                            <button
+                              className="btn btn-secondary"
+                              style={{
+                                width: '30px',
+                                height: '30px',
+                                padding: 0,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: 'var(--text-muted)',
+                                minHeight: 'auto',
+                                boxShadow: '2px 2px 0 #000'
+                              }}
+                              onClick={() => {
+                                setIsEditingCardDetails(true);
+                                if (newAccount.cardDetails?.expiryMonth && newAccount.cardDetails?.expiryYear) {
+                                  setExpiryInput(`${newAccount.cardDetails.expiryMonth.toString().padStart(2, '0')}/${newAccount.cardDetails.expiryYear.toString().padStart(2, '0')}`);
+                                } else {
+                                  setExpiryInput('');
+                                }
+                              }}
+                              title="Edit Details"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                          )}
+                          <button
+                            className="btn btn-secondary"
+                            style={{
+                              width: '30px',
+                              height: '30px',
+                              padding: 0,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: 'var(--danger)',
+                              minHeight: 'auto',
+                              boxShadow: '2px 2px 0 #000'
+                            }}
+                            onClick={() => {
+                              setNewAccount({ ...newAccount, cardDetails: undefined });
+                              setIsEditingCardDetails(false);
+                            }}
+                            title="Remove Details"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       ) : (
                         <button
                           className="btn btn-secondary"
-                          style={{ fontSize: '0.75rem', padding: '0.3rem 0.75rem' }}
+                          style={{
+                            width: '30px',
+                            height: '30px',
+                            padding: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: 'var(--text-muted)',
+                            minHeight: 'auto',
+                            boxShadow: '2px 2px 0 #000'
+                          }}
                           onClick={() => {
                             setNewAccount({ ...newAccount, cardDetails: {} });
+                            setIsEditingCardDetails(true);
+                            setExpiryInput('');
                             setTimeout(() => {
                               cardDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                             }, 100);
                           }}
+                          title="Add Details"
                         >
-                          + Add Details
+                          <Plus size={14} />
                         </button>
                       )}
                     </div>
@@ -794,114 +1191,173 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
                         <div className="flex-col gap-1">
                           <label className="text-xs text-muted font-bold">CARDHOLDER NAME</label>
-                          <input
-                            className="input-field"
-                            placeholder="e.g. TRIBHUVAN K"
-                            value={newAccount.cardDetails.cardholderName || ''}
-                            onChange={e => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cardholderName: e.target.value.toUpperCase() } as CardDetails })}
-                            style={{ textTransform: 'uppercase' }}
-                          />
+                          {isEditingCardDetails ? (
+                            <input
+                              className="input-field"
+                              placeholder="e.g. TRIBHUVAN K"
+                              value={newAccount.cardDetails.cardholderName || ''}
+                              onChange={e => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cardholderName: e.target.value.toUpperCase() } as CardDetails })}
+                              style={{ textTransform: 'uppercase', height: '48px', fontWeight: 'normal' }}
+                            />
+                          ) : (
+                            <div style={{ padding: '0.85rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '4px', textTransform: 'uppercase', fontFamily: "'Overpass Mono', monospace", fontSize: '1rem', lineHeight: '1.5', color: 'var(--text-primary)', boxShadow: 'inset 3px 3px 0 rgba(0, 0, 0, 0.4)', height: '48px', display: 'flex', alignItems: 'center' }}>
+                              {newAccount.cardDetails.cardholderName || 'N/A'}
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex-col gap-1">
                           <label className="text-xs text-muted font-bold">CARD NUMBER</label>
-                          <input
-                            className="input-field"
-                            placeholder="1234 5678 9012 3456"
-                            inputMode="numeric"
-                            maxLength={19}
-                            value={newAccount.cardDetails.cardNumber
-                              ? newAccount.cardDetails.cardNumber.replace(/\D/g, '').replace(/(\d{4})/g, '$1 ').trim()
-                              : ''}
-                            onChange={e => {
-                              const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
-                              setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cardNumber: digits } as CardDetails });
-                            }}
-                            style={{ fontFamily: 'monospace', letterSpacing: '3px' }}
-                          />
+                          {isEditingCardDetails ? (
+                            <input
+                              className="input-field"
+                              placeholder="1234 5678 9012 3456"
+                              inputMode="numeric"
+                              maxLength={19}
+                              value={newAccount.cardDetails.cardNumber
+                                ? newAccount.cardDetails.cardNumber.replace(/\D/g, '').replace(/(\d{4})/g, '$1 ').trim()
+                                : ''}
+                              onChange={e => {
+                                const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
+                                setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cardNumber: digits } as CardDetails });
+                              }}
+                              style={{ fontFamily: "'Overpass Mono', monospace", letterSpacing: '3px', height: '48px', fontWeight: 'normal' }}
+                            />
+                          ) : (
+                            <div style={{ padding: '0.85rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '4px', fontFamily: "'Overpass Mono', monospace", letterSpacing: '3px', fontSize: '1rem', lineHeight: '1.5', color: 'var(--text-primary)', boxShadow: 'inset 3px 3px 0 rgba(0, 0, 0, 0.4)', height: '48px', display: 'flex', alignItems: 'center' }}>
+                              {newAccount.cardDetails.cardNumber
+                                ? newAccount.cardDetails.cardNumber.replace(/\D/g, '').replace(/(\d{4})/g, '$1 ').trim()
+                                : '•••• •••• •••• ••••'}
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex gap-2">
                           <div className="flex-col gap-1" style={{ width: '90px' }}>
                             <label className="text-xs text-muted font-bold">EXPIRY</label>
-                            <input
-                              className="input-field"
-                              placeholder="MM/YY"
-                              inputMode="numeric"
-                              maxLength={5}
-                              value={expiryInput}
-                              onChange={e => {
-                                let val = e.target.value;
-                                // Strip non-digits/slash, rebuild
-                                const digits = val.replace(/\D/g, '');
-                                let formatted = digits.slice(0, 4);
-                                // Auto-insert slash after 2 digits
-                                if (formatted.length > 2) {
-                                  formatted = formatted.slice(0, 2) + '/' + formatted.slice(2);
-                                }
-                                setExpiryInput(formatted);
-                                // Sync to cardDetails
-                                const mm = digits.length >= 2 ? parseInt(digits.slice(0, 2)) || undefined : undefined;
-                                const yy = digits.length >= 4 ? parseInt(digits.slice(2, 4)) || undefined : undefined;
-                                setNewAccount(prev => ({ ...prev, cardDetails: { ...prev.cardDetails, expiryMonth: mm, expiryYear: yy } as CardDetails }));
-                              }}
-                              style={{ fontFamily: 'monospace', letterSpacing: '2px' }}
-                            />
+                            {isEditingCardDetails ? (
+                              <input
+                                className="input-field"
+                                placeholder="MM/YY"
+                                inputMode="numeric"
+                                maxLength={5}
+                                value={expiryInput}
+                                onChange={e => {
+                                  let val = e.target.value;
+                                  const digits = val.replace(/\D/g, '');
+                                  let formatted = digits.slice(0, 4);
+                                  if (formatted.length > 2) {
+                                    formatted = formatted.slice(0, 2) + '/' + formatted.slice(2);
+                                  }
+                                  setExpiryInput(formatted);
+                                  const mm = digits.length >= 2 ? parseInt(digits.slice(0, 2)) || undefined : undefined;
+                                  const yy = digits.length >= 4 ? parseInt(digits.slice(2, 4)) || undefined : undefined;
+                                  setNewAccount(prev => ({ ...prev, cardDetails: { ...prev.cardDetails, expiryMonth: mm, expiryYear: yy } as CardDetails }));
+                                }}
+                                style={{ fontFamily: "'Overpass Mono', monospace", letterSpacing: '2px', height: '48px', fontWeight: 'normal' }}
+                              />
+                            ) : (
+                              <div style={{ padding: '0.85rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '4px', fontFamily: "'Overpass Mono', monospace", letterSpacing: '2px', fontSize: '1rem', lineHeight: '1.5', color: 'var(--text-primary)', boxShadow: 'inset 3px 3px 0 rgba(0, 0, 0, 0.4)', height: '48px', display: 'flex', alignItems: 'center' }}>
+                                {newAccount.cardDetails.expiryMonth && newAccount.cardDetails.expiryYear
+                                  ? `${newAccount.cardDetails.expiryMonth.toString().padStart(2, '0')}/${newAccount.cardDetails.expiryYear.toString().padStart(2, '0')}`
+                                  : 'MM/YY'}
+                              </div>
+                            )}
                           </div>
                           <div className="flex-col gap-1" style={{ flex: 1, position: 'relative' }}>
                             <label className="text-xs text-muted font-bold">CVV</label>
-                            <div style={{ position: 'relative' }}>
-                              <input
-                                className="input-field"
-                                placeholder="•••"
-                                type={showCvv ? 'text' : 'password'}
-                                inputMode="numeric"
-                                maxLength={4}
-                                value={newAccount.cardDetails.cvv || ''}
-                                onChange={e => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cvv: e.target.value.replace(/\D/g, '') } as CardDetails })}
-                                style={{ fontFamily: 'monospace', letterSpacing: '4px', width: '100%', paddingRight: '2.5rem' }}
-                              />
-                              <button
-                                onClick={() => setShowCvv(v => !v)}
-                                style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.5, fontSize: '0.75rem', cursor: 'pointer' }}
-                                title={showCvv ? 'Hide CVV' : 'Show CVV'}
-                              >
-                                {showCvv ? '🙈' : '👁️'}
-                              </button>
-                            </div>
+                            {isEditingCardDetails ? (
+                              <div style={{ position: 'relative' }}>
+                                <input
+                                  className="input-field"
+                                  placeholder="•••"
+                                  type={showCvv ? 'text' : 'password'}
+                                  inputMode="numeric"
+                                  maxLength={4}
+                                  value={newAccount.cardDetails.cvv || ''}
+                                  onChange={e => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cvv: e.target.value.replace(/\D/g, '') } as CardDetails })}
+                                  style={{ fontFamily: "'Overpass Mono', monospace", letterSpacing: '4px', width: '100%', paddingRight: '2.5rem', height: '48px', fontWeight: 'normal' }}
+                                />
+                                <button
+                                  onClick={() => setShowCvv(v => !v)}
+                                  style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.5, fontSize: '0.75rem', cursor: 'pointer' }}
+                                  title={showCvv ? 'Hide CVV' : 'Show CVV'}
+                                >
+                                  {showCvv ? '🙈' : '👁️'}
+                                </button>
+                              </div>
+                            ) : (
+                              <div style={{ position: 'relative' }}>
+                                <div style={{ padding: '0.85rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '4px', fontFamily: "'Overpass Mono', monospace", letterSpacing: '4px', fontSize: '1rem', lineHeight: '1.5', color: 'var(--text-primary)', width: '100%', boxShadow: 'inset 3px 3px 0 rgba(0, 0, 0, 0.4)', paddingRight: '2.5rem', height: '48px', display: 'flex', alignItems: 'center' }}>
+                                  {newAccount.cardDetails.cvv ? (showCvv ? newAccount.cardDetails.cvv : '•••') : 'N/A'}
+                                </div>
+                                {newAccount.cardDetails.cvv && (
+                                  <button
+                                    onClick={() => setShowCvv(v => !v)}
+                                    style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.5, fontSize: '0.75rem', cursor: 'pointer' }}
+                                    title={showCvv ? 'Hide CVV' : 'Show CVV'}
+                                  >
+                                    {showCvv ? '🙈' : '👁️'}
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
 
                         <div className="flex-col gap-1">
                           <label className="text-xs text-muted font-bold">NETWORK</label>
-                          <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-                            {(['visa', 'mastercard', 'rupay', 'amex', 'diners'] as CardNetwork[]).map(net => {
-                              const isSelected = newAccount.cardDetails?.network === net;
-                              return (
-                                <button
-                                  key={net}
-                                  onClick={() => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, network: isSelected ? undefined : net } as CardDetails })}
-                                  style={{
-                                    width: '56px',
-                                    height: '32px',
-                                    padding: 0,
-                                    borderRadius: '10px',
-                                    border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border-color)'}`,
-                                    background: isSelected ? 'rgba(var(--accent-rgb, 20,184,166), 0.12)' : 'var(--bg-color)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s',
-                                    boxShadow: isSelected ? '0 0 0 1px var(--accent)' : 'none',
-                                    color: isSelected ? 'var(--accent)' : 'var(--text-muted)',
-                                  }}
-                                >
-                                  <CardNetworkLogo network={net} size="sm" />
-                                </button>
-                              );
-                            })}
-                          </div>
+                          {isEditingCardDetails ? (
+                            <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+                              {(['visa', 'mastercard', 'rupay', 'amex', 'diners'] as CardNetwork[]).map(net => {
+                                const isSelected = newAccount.cardDetails?.network === net;
+                                return (
+                                  <button
+                                    key={net}
+                                    onClick={() => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, network: isSelected ? undefined : net } as CardDetails })}
+                                    style={{
+                                      width: '56px',
+                                      height: '32px',
+                                      padding: 0,
+                                      borderRadius: '10px',
+                                      border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border-color)'}`,
+                                      background: isSelected ? 'rgba(var(--accent-rgb, 20,184,166), 0.12)' : 'var(--bg-color)',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      cursor: 'pointer',
+                                      transition: 'all 0.2s',
+                                      boxShadow: isSelected ? '0 0 0 1px var(--accent)' : 'none',
+                                      color: isSelected ? 'var(--accent)' : 'var(--text-muted)',
+                                    }}
+                                  >
+                                    <CardNetworkLogo network={net} size="sm" />
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex' }}>
+                              <div
+                                style={{
+                                  width: '56px',
+                                  height: '32px',
+                                  borderRadius: '10px',
+                                  border: '1px solid var(--border-color)',
+                                  background: 'var(--bg-color)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                {newAccount.cardDetails.network ? (
+                                  <CardNetworkLogo network={newAccount.cardDetails.network} size="sm" />
+                                ) : (
+                                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>N/A</span>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}

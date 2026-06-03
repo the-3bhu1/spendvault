@@ -294,6 +294,10 @@ select {
   align-items: center;
 }
 
+.align-start {
+  align-items: flex-start;
+}
+
 .grid {
   display: grid;
 }

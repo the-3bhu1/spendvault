@@ -25,6 +25,8 @@ export interface Account {
   name: string;
   type: AccountType;
   openingBalances: Record<string, number>; // key: 'YYYY-MM', value: number
+  balanceAdjustments?: Record<string, number>; // key: 'YYYY-MM', value: number
+  travelBalanceAdjustments?: Record<string, number>; // key: 'YYYY-MM', value: number
 
   // Specific to credit_card
   statementDay?: number;
@@ -42,6 +44,12 @@ export interface Account {
   // Optional saved card details (credit_card / debit_card only)
   cardDetails?: CardDetails;
   statementRounding?: RoundingRule;
+  cashbackDestinationAccountId?: string;
+  rewardUnit?: string;
+  pointsConversionRate?: number;
+  rewardType?: 'rupee' | 'points';
+  rewardOpeningBalances?: Record<string, number>;
+  rewardBalanceAdjustments?: Record<string, number>;
 }
 
 export type TransactionType = 'credit' | 'debit';
@@ -68,6 +76,7 @@ export interface Transaction {
   rewardUsedAccountId?: string;
 
   isTravelTransaction?: boolean;
+  isRewardTransaction?: boolean;
   order?: number; // Added to support manual ordering
   linkedTransactionId?: string; // Legacy: ID of the auto-generated counterpart
   linkedTransactionIds?: string[]; // Multiple counterparts (e.g. Bank + Reward Account)

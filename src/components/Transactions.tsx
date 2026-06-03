@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account } from '../types';
-import { generateId, formatCurrency, formatDateString, getBillingCycleForDate, calculateBalance, getCurrentMonthStr } from '../utils';
+import { generateId, formatCurrency, formatAmount, formatDateString, getBillingCycleForDate, calculateBalance, getCurrentMonthStr } from '../utils';
 import { ShoppingBag, Utensils, Zap, Car, HeartPulse, Film, CreditCard, Wallet, ArrowRightLeft, MoreHorizontal, Coins, BadgeDollarSign, Calendar, Activity, X, Search, Home, Gift, Landmark, Smartphone, Sparkles, ChevronRight } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
@@ -188,7 +188,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveUp, 
 
       <div className="flex-col align-end" style={{ flexShrink: 0, marginLeft: '1rem' }}>
         <span className="text-mono" style={{ fontWeight: 800, fontSize: '1rem', color: tx.type === 'credit' ? '#10b981' : '#ef4444' }}>
-          {tx.type === 'credit' ? '+' : '-'}{formatCurrency(tx.amount)}
+          {tx.type === 'credit' ? '+' : '-'}{formatAmount(tx.amount, acc)}
         </span>
         {acc?.isNcmcEnabled && tx.isTravelTransaction && <span className="metric-pill" style={{ marginTop: '6px', backgroundColor: 'var(--accent)', color: 'var(--bg-color)', borderColor: 'var(--accent)' }}>TRAVEL</span>}
       </div>
@@ -383,9 +383,13 @@ export default function Transactions() {
       category: !isCategoryUnselected ? (newTx.category || '') : (pastTx?.category || newTx.category || ''),
       accountId: !isAccountIdUnselected ? (newTx.accountId || '') : (pastTx?.accountId || newTx.accountId || ''),
       type: !isTypeUnselected ? (newTx.type || 'debit') : (pastTx?.type || newTx.type || 'debit'),
-      isTravelTransaction: !isTravelUnselected ? (newTx.isTravelTransaction ?? false) : (pastTx?.isTravelTransaction ?? newTx.isTravelTransaction ?? false)
+      isTravelTransaction: !isTravelUnselected ? (newTx.isTravelTransaction ?? false) : (pastTx?.isTravelTransaction ?? newTx.isTravelTransaction ?? false),
+      cashbackLevelId: pastTx?.cashbackLevelId ?? newTx.cashbackLevelId,
+      rewardEarnedType: pastTx?.rewardEarnedType ?? newTx.rewardEarnedType,
+      rewardEarnedAccountId: pastTx?.rewardEarnedAccountId ?? newTx.rewardEarnedAccountId
     };
     setNewTx(updatedTx);
+    setSelectedCashbackLevelId(pastTx?.cashbackLevelId || '');
     syncInputStrings(updatedTx);
     setDescriptionSuggestions([]);
   };
@@ -532,6 +536,8 @@ export default function Transactions() {
     if (rewardUsed > 0 && newTx.rewardUsedAccountId && !editId) {
       const rewardCounterpartId = generateId();
       currentLinkedIds.push(rewardCounterpartId);
+      const rewardsSourceAcc = data.accounts.find(a => a.id === newTx.rewardUsedAccountId);
+      const isInternalPoints = !!(rewardsSourceAcc?.isCashbackEnabled && rewardsSourceAcc?.rewardType === 'points');
       addTransaction({
         id: rewardCounterpartId,
         date: newTx.date as string,
@@ -541,6 +547,7 @@ export default function Transactions() {
         amount: rewardUsed,
         category: isCCPayment ? 'CC Payment' : (newTx.category as string),
         isRecurring: false,
+        isRewardTransaction: isInternalPoints,
         linkedTransactionIds: [mainTxId]
       });
     }
@@ -1570,8 +1577,24 @@ export default function Transactions() {
                             value={selectedCashbackLevelId || 'none'}
                             options={[
                               { id: 'none', name: 'None' },
-                              { id: 'default', name: `Default (${activeAcc?.defaultCashbackRate || 0}%)` },
-                              ...(activeAcc?.cashbackRates || []).map(r => ({ id: r.id, name: `${r.name} (${r.rate}%)` }))
+                              { 
+                                id: 'default', 
+                                name: (() => {
+                                  const unit = activeAcc?.rewardUnit || (activeAcc?.cashbackDestinationAccountId ? data.accounts.find(a => a.id === activeAcc.cashbackDestinationAccountId)?.rewardUnit : '');
+                                  return unit 
+                                    ? `Default (${activeAcc?.defaultCashbackRate || 0}% ${unit.toLowerCase()})`
+                                    : `Default (${activeAcc?.defaultCashbackRate || 0}%)`;
+                                })()
+                              },
+                              ...(activeAcc?.cashbackRates || []).map(r => ({ 
+                                id: r.id, 
+                                name: (() => {
+                                  const unit = activeAcc?.rewardUnit || (activeAcc?.cashbackDestinationAccountId ? data.accounts.find(a => a.id === activeAcc.cashbackDestinationAccountId)?.rewardUnit : '');
+                                  return unit 
+                                    ? `${r.name} (${r.rate}% ${unit.toLowerCase()})`
+                                    : `${r.name} (${r.rate}%)`;
+                                })()
+                              }))
                             ]}
                             onChange={val => {
                               setSelectedCashbackLevelId(val === 'none' ? '' : val);
@@ -1692,10 +1715,12 @@ export default function Transactions() {
                     label="From Rewards"
                     value={newTx.rewardUsedAccountId || ''}
                     placeholder="Select Reward Account"
-                    options={data.accounts.filter(a => a.type === 'rewards').map(acc => ({
+                    options={data.accounts.filter(a => a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points')).map(acc => ({
                       id: acc.id,
                       name: acc.name,
-                      subtext: formatCurrency(calculateBalance(acc, data.transactions, getCurrentMonthStr()))
+                      subtext: acc.rewardType === 'points'
+                        ? `${calculateBalance(acc, data.transactions, getCurrentMonthStr(), false, true, data.cashbackStatements)} ${acc.rewardUnit || ''}`
+                        : formatCurrency(calculateBalance(acc, data.transactions, getCurrentMonthStr(), false, false, data.cashbackStatements))
                     }))}
                     onChange={val => setNewTx({ ...newTx, rewardUsedAccountId: val })}
                     iconGetter={id => getAccountIcon(id)}

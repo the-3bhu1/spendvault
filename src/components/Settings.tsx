@@ -581,6 +581,11 @@ export default function Settings() {
     confirmed: 'cf', realizedIntoAccountId: 'ri', paidPeople: 'pd',
     // RecurringBill keys
     lastPaidDate: 'lpd',
+    // New fields for custom reward points and balances
+    balanceAdjustments: 'ba', travelBalanceAdjustments: 'tba',
+    rewardType: 'ryt', rewardUnit: 'ryu', pointsConversionRate: 'pcr',
+    rewardOpeningBalances: 'rob', rewardBalanceAdjustments: 'rba',
+    isRewardTransaction: 'irt', cashbackDestinationAccountId: 'cda',
   };
 
   const minifyPayload = (obj: any): any => {
@@ -797,10 +802,11 @@ export default function Settings() {
       return min;
     });
 
-    // 3. Process accounts
+     // 3. Process accounts
     const minifiedAccs = payload.accounts.map(a => {
       const min = minifyPayload(a);
       if (min.i) min.i = getTinyId(min.i);
+      if (min.cda) min.cda = getTinyId(min.cda);
       return min;
     });
 
@@ -890,6 +896,7 @@ export default function Settings() {
             });
             expanded.accounts = (expanded.accounts || []).map((a: any) => {
               if (a.id) a.id = expandId(a.id);
+              if (a.cashbackDestinationAccountId) a.cashbackDestinationAccountId = expandId(a.cashbackDestinationAccountId);
               return a;
             });
             expanded.debts = (expanded.debts || []).map((d: any) => {

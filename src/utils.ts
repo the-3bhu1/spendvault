@@ -1,5 +1,5 @@
 import { format, parseISO, addMonths, subMonths, addDays, setDate, isAfter, startOfDay } from 'date-fns';
-import type { Account, Transaction, CardNetwork, RoundingRule } from './types';
+import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement } from './types';
 
 export const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -42,6 +42,21 @@ export const formatCurrency = (amount: number) => {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2
   }).format(cleanAmount);
+};
+ 
+export const formatAmount = (amount: number, account?: Account) => {
+  if (account && account.type === 'rewards' && account.rewardUnit) {
+    let cleanAmount = amount;
+    if (Math.round(amount * 100) / 100 === 0) {
+      cleanAmount = 0;
+    }
+    const formatted = new Intl.NumberFormat('en-IN', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    }).format(cleanAmount);
+    return `${formatted} ${account.rewardUnit}`;
+  }
+  return formatCurrency(amount);
 };
 
 export const getCurrentMonthStr = () => format(new Date(), 'yyyy-MM'); // "2023-10"
@@ -87,45 +102,105 @@ export const getMostRecentStatementDate = (statementDay: number) => {
   return candidate;
 };
 
-export const calculateBalance = (account: Account, transactions: Transaction[], monthStr: string, isTravel: boolean = false) => {
-  const balancesMap = isTravel ? (account.travelOpeningBalances || {}) : (account.openingBalances || {});
+export const calculateBalance = (
+  account: Account,
+  transactions: Transaction[],
+  monthStr: string,
+  isTravel: boolean = false,
+  isRewardPoints: boolean = false,
+  cashbackStatements: CashbackStatement[] = []
+) => {
+  const balancesMap = isRewardPoints 
+    ? (account.rewardOpeningBalances || {}) 
+    : isTravel 
+      ? (account.travelOpeningBalances || {}) 
+      : (account.openingBalances || {});
   
   // Find the most recent opening balance at or before monthStr
   const candidateMonths = Object.keys(balancesMap).filter(m => m <= monthStr).sort();
   const baseMonth = candidateMonths.length > 0 ? candidateMonths[candidateMonths.length - 1] : null;
   const opening = baseMonth ? balancesMap[baseMonth] : 0;
-  
-  const relevantTransactions = transactions.filter(t => {
-    if (t.accountId !== account.id) return false;
-    const tMonth = format(parseISO(t.date), 'yyyy-MM');
-    
-    // Only count transactions from the baseMonth up to the target monthStr
-    if (baseMonth && tMonth < baseMonth) return false;
-    if (tMonth > monthStr) return false;
-    
-    // If we're looking for travel balance, only count travel transactions.
-    // If not, only count standard transactions.
-    return !!t.isTravelTransaction === isTravel;
-  });
 
-  const change = relevantTransactions.reduce((acc, t) => {
-    let effectiveAmount = t.amount;
-    
-    // For standard split expenses, the primary account only pays the out-of-pocket amount
-    if (t.type === 'debit' && t.rewardUsed && t.rewardUsed > 0 && t.rewardUsedAccountId) {
-      effectiveAmount = t.amount - t.rewardUsed;
-    }
+  let change = 0;
 
-    if (account.type === 'credit_card') {
-      // Credit card logic: debit means spending (adds to balance), credit means payment (reduces balance)
-      return t.type === 'debit' ? acc + effectiveAmount : acc - effectiveAmount;
-    } else {
-      // Bank account/Cash/Debit Card logic: credit adds, debit subtracts
-      return t.type === 'credit' ? acc + effectiveAmount : acc - effectiveAmount;
-    }
-  }, 0);
+  if (isRewardPoints) {
+    // 1. Point redemptions (debit reward transactions)
+    const rewardDebits = transactions.filter(t => {
+      if (t.accountId !== account.id) return false;
+      if (!t.isRewardTransaction || t.type !== 'debit') return false;
+      const tMonth = format(parseISO(t.date), 'yyyy-MM');
+      if (baseMonth && tMonth < baseMonth) return false;
+      if (tMonth > monthStr) return false;
+      return true;
+    });
+    const debitsTotal = rewardDebits.reduce((sum, t) => sum + t.amount, 0);
 
-  return opening + change;
+    // 2. Confirmed cashbacks (realized points) from cashbackStatements
+    const confirmedCredits = cashbackStatements.filter(s => {
+      if (s.accountId !== account.id || !s.confirmed) return false;
+      
+      // Determine the month of the statement
+      let sMonth = '';
+      if (s.billingCycleYearMonth.length === 7) {
+        sMonth = s.billingCycleYearMonth;
+      } else {
+        const tx = transactions.find(t => t.id === s.billingCycleYearMonth);
+        if (tx) {
+          sMonth = format(parseISO(tx.date), 'yyyy-MM');
+        }
+      }
+      
+      if (!sMonth) return false;
+      if (baseMonth && sMonth < baseMonth) return false;
+      if (sMonth > monthStr) return false;
+      return true;
+    });
+    const creditsTotal = confirmedCredits.reduce((sum, s) => sum + s.realized, 0);
+
+    change = creditsTotal - debitsTotal;
+  } else {
+    const relevantTransactions = transactions.filter(t => {
+      if (t.accountId !== account.id) return false;
+      const tMonth = format(parseISO(t.date), 'yyyy-MM');
+      
+      // Only count transactions from the baseMonth up to the target monthStr
+      if (baseMonth && tMonth < baseMonth) return false;
+      if (tMonth > monthStr) return false;
+      
+      if (isTravel) {
+        return !!t.isTravelTransaction;
+      }
+      return !t.isTravelTransaction && !t.isRewardTransaction;
+    });
+
+    change = relevantTransactions.reduce((acc, t) => {
+      let effectiveAmount = t.amount;
+      
+      // For standard split expenses, the primary account only pays the out-of-pocket amount
+      if (t.type === 'debit' && t.rewardUsed && t.rewardUsed > 0 && t.rewardUsedAccountId) {
+        effectiveAmount = t.amount - t.rewardUsed;
+      }
+
+      if (account.type === 'credit_card') {
+        // Credit card logic: debit means spending (adds to balance), credit means payment (reduces balance)
+        return t.type === 'debit' ? acc + effectiveAmount : acc - effectiveAmount;
+      } else {
+        // Bank account/Cash/Debit Card logic: credit adds, debit subtracts
+        return t.type === 'credit' ? acc + effectiveAmount : acc - effectiveAmount;
+      }
+    }, 0);
+  }
+
+  const adjustmentsMap = isRewardPoints
+    ? (account.rewardBalanceAdjustments || {})
+    : isTravel 
+      ? (account.travelBalanceAdjustments || {}) 
+      : (account.balanceAdjustments || {});
+  const adjustment = Object.keys(adjustmentsMap)
+    .filter(m => (!baseMonth || m >= baseMonth) && m <= monthStr)
+    .reduce((sum, m) => sum + (adjustmentsMap[m] || 0), 0);
+
+  return opening + change + adjustment;
 };
 
 export const calculateTotalSpendPerCycle = (transactions: Transaction[], accountId: string, cycle: string, statementDay: number, rounding: RoundingRule = 'none') => {
