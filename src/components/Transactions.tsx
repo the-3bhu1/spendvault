@@ -1598,7 +1598,7 @@ export default function Transactions() {
                             ]}
                             onChange={val => {
                               setSelectedCashbackLevelId(val === 'none' ? '' : val);
-                              setNewTx({ ...newTx, rewardEarnedType: 'delayed', rewardEarned: 0 });
+                              setNewTx({ ...newTx, rewardEarnedType: val === 'none' ? 'none' : 'delayed', rewardEarned: 0 });
                             }}
                             iconGetter={() => '✨'}
                           />
