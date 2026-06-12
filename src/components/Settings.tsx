@@ -1673,38 +1673,42 @@ export default function Settings() {
           <button className="btn btn-secondary text-xs" style={{ borderRadius: '20px' }} onClick={() => setActiveView('profile')}>details</button>
         </div>
 
-        <div style={{ paddingBottom: '2rem' }}>
+        <div style={{ paddingBottom: '2rem' }} className="tour-profile-features">
           <SectionHeader title="preferences" first={true} />
           <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
             <GridButton icon={Tags} label="Categories" onClick={() => setActiveView('categories')} />
             <GridButton icon={Briefcase} label="Account Types" onClick={() => setActiveView('accountTypes')} />
             <GridButton icon={Moon} label="App Theme" onClick={() => setActiveView('theme')} />
-            <GridToggleButton 
-              icon={RotateCcw} 
-              label="Passive Logs" 
-              active={!!data.user?.enablePassiveTransactions} 
-              onClick={() => {
-                if (!data.user?.enablePassiveTransactions) {
-                  setConfirmConfig({
-                    title: "Enable Passive Logs?",
-                    message: "Passive Logs allow you to flag specific transactions to be excluded from your main Spends and Income analytics. This is perfect for tracking passive movements, investments, or pass-through expenses without distorting your actual budget statistics.",
-                    confirmLabel: "Enable",
-                    onConfirm: () => {
-                      updateUser({ ...data.user!, enablePassiveTransactions: true });
-                      setConfirmConfig(null);
-                    }
-                  });
-                } else {
-                  updateUser({ ...data.user!, enablePassiveTransactions: false });
-                }
-              }} 
-            />
+            {/* tour-passive-logs: spotlight target in the union rect */}
+            <div className="tour-passive-logs">
+              <GridToggleButton 
+                icon={RotateCcw} 
+                label="Passive Logs" 
+                active={!!data.user?.enablePassiveTransactions} 
+                onClick={() => {
+                  if (!data.user?.enablePassiveTransactions) {
+                    setConfirmConfig({
+                      title: "Enable Passive Logs?",
+                      message: "Passive Logs allow you to flag specific transactions to be excluded from your main Spends and Income analytics. This is perfect for tracking passive movements, investments, or pass-through expenses without distorting your actual budget statistics.",
+                      confirmLabel: "Enable",
+                      onConfirm: () => {
+                        updateUser({ ...data.user!, enablePassiveTransactions: true });
+                        setConfirmConfig(null);
+                      }
+                    });
+                  } else {
+                    updateUser({ ...data.user!, enablePassiveTransactions: false });
+                  }
+                }} 
+              />
+            </div>
           </div>
 
+          {/* Android-only: Auto-Log SMS + Background Guide (tour-smart-features-android for union rect) */}
           {Capacitor.getPlatform() === 'android' && (
             <>
               <SectionHeader title="Smart Features" />
-              <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
+              <div className="grid tour-smart-features-android" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
                 <GridToggleButton 
                   icon={Sparkles} 
                   label="Auto-Log SMS" 

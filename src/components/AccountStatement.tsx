@@ -63,7 +63,7 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
   };
   const relevantAccountTransactions = transactions.filter(t => {
     if (t.accountId !== acc.id) return false;
-    return t.category.toLowerCase() !== 'transfer' && t.category.toLowerCase() !== 'ncmc travel recharge';
+    return t.category.toLowerCase() !== 'transfer' && t.category.toLowerCase() !== 'ncmc travel recharge' && t.category.toLowerCase() !== 'sip';
   });
   const cycleOptions = Array.from(new Set([
     currentCycle,

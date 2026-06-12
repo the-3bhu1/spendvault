@@ -1,13 +1,77 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useFinance } from '../FinanceContext';
-import { Shield, Key, User as UserIcon, Check, Copy, AlertTriangle, ArrowRight, ArrowLeft } from 'lucide-react';
+import { Shield, Key, User as UserIcon, Check, Copy, AlertTriangle, ArrowRight, ArrowLeft, Upload, Database } from 'lucide-react';
 import type { User } from '../types';
 import { APP_VERSION } from '../utils';
+
+const KEY_MAP: Record<string, string> = {
+  version: 'v', exportedAt: 't', user: 'u', accounts: 'A', transactions: 'T',
+  categories: 'C', customAccountTypes: 'X', cashbackStatements: 'S',
+  splitEvents: 'E', recurringBills: 'R', theme: 'm', debts: 'H',
+  email: 'ue', profileImage: 'upi', pinHash: 'uph', recoveryKeyHash: 'urk',
+  biometricsEnabled: 'ube', autoLogSms: 'uas', enablePassiveTransactions: 'uep',
+  id: 'i', amount: 'a', date: 'd', description: 's', type: 'y',
+  accountId: 'x', category: 'k', excludeFromStats: 'e', excludedAmount: 'ea',
+  rewardUsed: 'r', rewardUsedAccountId: 'w', isTravelTransaction: 'l',
+  rewardEarned: 're', rewardEarnedType: 'ret', rewardEarnedAccountId: 'rea',
+  order: 'or', linkedTransactionId: 'lt', linkedTransactionIds: 'lts',
+  cashbackLevelId: 'cl', linkedTxId: 'lx',
+  appliedBillingCycleYearMonth: 'abc', recurringBillId: 'rbid',
+  paymentSourceAccountId: 'psid', ccPaymentCycleTarget: 'ctar', isCCPaymentRecord: 'iscr',
+  isRecurring: 'isrc', transactionId: 'txid',
+  name: 'n', balance: 'b', color: 'c', icon: 'o', isNcmcEnabled: 'z',
+  openingBalances: 'ob', statementDay: 'sd', dueDay: 'dd',
+  defaultCashbackRate: 'dr', cashbackRates: 'cr', roundOffCashback: 'ro',
+  cashbackCreditCycle: 'cc', travelOpeningBalances: 'tob', statementRounding: 'sr',
+  isCashbackEnabled: 'ice',
+  cardDetails: 'D', cardholderName: 'ch', cardNumber: 'cn', rate: 'rt',
+  expiryMonth: 'em', expiryYear: 'ey', cvv: 'cv', network: 'nt',
+  people: 'pp', items: 'it', involvedPeople: 'ip', includeMe: 'im',
+  splitType: 'st', paidBy: 'pb', shares: 'sh', customDays: 'cd',
+  personName: 'pn', frequency: 'fq', nextDueDate: 'nd',
+  isActive: 'ia', status: 'ss', createdAt: 'ca', updatedAt: 'ua',
+  billingCycleYearMonth: 'bc', expected: 'ex', realized: 'rl',
+  confirmed: 'cf', realizedIntoAccountId: 'ri', paidPeople: 'pd',
+  lastPaidDate: 'lpd',
+  balanceAdjustments: 'ba', travelBalanceAdjustments: 'tba',
+  rewardType: 'ryt', rewardUnit: 'ryu', pointsConversionRate: 'pcr',
+  rewardOpeningBalances: 'rob', rewardBalanceAdjustments: 'rba',
+  isRewardTransaction: 'irt', cashbackDestinationAccountId: 'cda',
+};
+
+const REVERSE_MAP = Object.fromEntries(Object.entries(KEY_MAP).map(([k, v]) => [v, k]));
+
+function expandPayload(obj: any): any {
+  if (Array.isArray(obj)) return obj.map(expandPayload);
+  if (obj !== null && typeof obj === 'object') {
+    const expanded: any = {};
+    for (const key in obj) {
+      const originalKey = REVERSE_MAP[key] || key;
+      expanded[originalKey] = expandPayload(obj[key]);
+    }
+    return expanded;
+  }
+  return obj;
+}
+
+function validateBackup(parsed: any): string | null {
+  if (typeof parsed !== 'object' || parsed === null) return 'File is not a valid JSON object.';
+  if (!Array.isArray(parsed.accounts)) return "Missing or invalid 'accounts' field.";
+  if (!Array.isArray(parsed.transactions)) return "Missing or invalid 'transactions' field.";
+  if (parsed.version !== undefined && typeof parsed.version !== 'number') return 'Invalid version field.';
+  return null;
+}
 
 export default function OnboardingScreen() {
   const { updateUser, setAuthenticated } = useFinance();
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  
+  const [showImport, setShowImport] = useState(false);
+
+  // Import state
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const [importPreview, setImportPreview] = useState<{ txCount: number; accountCount: number; sizeKb: string; raw: string } | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
   // Step 1: Name
   const [name, setName] = useState('');
   const [nameError, setNameError] = useState(false);
@@ -107,6 +171,47 @@ export default function OnboardingScreen() {
     });
   };
 
+  const handleImportFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setImportError(null);
+    setImportPreview(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const sizeKb = (file.size / 1024).toFixed(1);
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = reader.result as string;
+        let parsed = JSON.parse(text);
+        // Try expanding if minified (keys like 'A', 'T' instead of 'accounts', 'transactions')
+        if (!Array.isArray(parsed.accounts) && Array.isArray(parsed.A)) {
+          parsed = expandPayload(parsed);
+        }
+        const err = validateBackup(parsed);
+        if (err) { setImportError(err); return; }
+        setImportPreview({
+          txCount: parsed.transactions.length,
+          accountCount: parsed.accounts.length,
+          sizeKb,
+          raw: JSON.stringify(parsed),
+        });
+      } catch {
+        setImportError('Could not parse file. Make sure it is a valid SpendVault backup (.json).');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleConfirmImport = () => {
+    if (!importPreview) return;
+    try {
+      localStorage.setItem('minimalist_finance_data_v1', importPreview.raw);
+      window.location.reload();
+    } catch {
+      setImportError('Restore failed. The file may be corrupted.');
+    }
+  };
+
   const handleCompleteSetup = async () => {
     if (!hasSavedKey) return;
 
@@ -131,6 +236,95 @@ export default function OnboardingScreen() {
       console.error('Failed to hash user credentials during onboarding:', e);
     }
   };
+
+  if (showImport) {
+    return (
+      <div className="onboarding-root flex-col align-center justify-between fade-in" style={{
+        position: 'fixed', inset: 0, background: 'var(--bg-color)', zIndex: 10000,
+        paddingTop: 'calc(3rem + env(safe-area-inset-top, 24px))',
+        paddingLeft: '2rem', paddingRight: '2rem',
+        paddingBottom: 'calc(2rem + env(safe-area-inset-bottom, 16px))',
+        overflowY: 'auto'
+      }}>
+        <div className="flex align-center w-100" style={{ maxWidth: '400px' }}>
+          <button
+            onClick={() => { setShowImport(false); setImportPreview(null); setImportError(null); }}
+            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', padding: 0 }}
+          >
+            <ArrowLeft size={20} /> <span className="text-sm">Back</span>
+          </button>
+        </div>
+
+        <div className="flex-col justify-center align-center w-100 flex-1 gap-6 fade-in" style={{ maxWidth: '400px', margin: '2rem 0' }}>
+          <div className="flex-center" style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid var(--accent)', margin: '0 auto' }}>
+            <Database size={28} className="text-accent" />
+          </div>
+          <div className="text-center">
+            <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>restore from backup</h2>
+            <p className="text-muted text-sm">Select a SpendVault backup file to restore all your accounts, transactions, and settings on this device.</p>
+          </div>
+
+          <input
+            ref={importFileRef}
+            type="file"
+            accept=".json"
+            style={{ display: 'none' }}
+            onChange={handleImportFilePick}
+          />
+
+          {importError && (
+            <div className="flex gap-3" style={{ padding: '0.75rem 1rem', background: 'rgba(239, 68, 68, 0.08)', borderRadius: '12px', border: '1px solid #ef444433', width: '100%' }}>
+              <AlertTriangle size={18} className="text-danger" style={{ flexShrink: 0, marginTop: '1px' }} />
+              <span className="text-xs text-danger">{importError}</span>
+            </div>
+          )}
+
+          {importPreview ? (
+            <div className="flex-col gap-4 w-100">
+              <div className="card flex-col gap-3" style={{ padding: '1rem', background: 'rgba(56, 189, 248, 0.05)', border: '1px solid var(--border-color)', borderRadius: '12px' }}>
+                <span className="text-xs text-muted font-bold uppercase" style={{ letterSpacing: '1px' }}>Backup Preview</span>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">Transactions</span>
+                  <span className="font-bold">{importPreview.txCount}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">Accounts</span>
+                  <span className="font-bold">{importPreview.accountCount}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted">File size</span>
+                  <span className="font-bold">{importPreview.sizeKb} KB</span>
+                </div>
+              </div>
+              <button className="btn btn-primary flex-center gap-2" style={{ padding: '1rem', width: '100%' }} onClick={handleConfirmImport}>
+                <Check size={18} /> Restore & Continue
+              </button>
+              <button className="btn btn-secondary flex-center gap-2" style={{ padding: '0.75rem', width: '100%' }} onClick={() => { setImportPreview(null); importFileRef.current?.click(); }}>
+                Choose a different file
+              </button>
+            </div>
+          ) : (
+            <button className="btn btn-primary flex-center gap-2" style={{ padding: '1rem', width: '100%' }} onClick={() => importFileRef.current?.click()}>
+              <Upload size={18} /> Select Backup File
+            </button>
+          )}
+
+          <div className="flex gap-3" style={{ padding: '0.75rem 1rem', background: 'rgba(251, 191, 36, 0.05)', borderRadius: '12px', border: '1px solid rgba(251, 191, 36, 0.2)', width: '100%' }}>
+            <AlertTriangle size={16} className="text-warning" style={{ flexShrink: 0, marginTop: '1px' }} />
+            <p className="text-xs text-muted">After restoring, you'll be prompted to enter your existing PIN to unlock the vault.</p>
+          </div>
+        </div>
+
+        <span className="text-mono uppercase text-muted" style={{ fontSize: '0.7rem', letterSpacing: '2px', opacity: 0.5 }}>
+          spendvault {APP_VERSION}
+        </span>
+
+        <style>{`
+          .onboarding-root { background: var(--bg-color); }
+        `}</style>
+      </div>
+    );
+  }
 
   return (
     <div className="onboarding-root flex-col align-center justify-between fade-in" style={{
@@ -191,6 +385,13 @@ export default function OnboardingScreen() {
             </div>
             <button className="btn btn-primary flex-center gap-2" style={{ padding: '1rem', width: '100%', marginTop: '1rem' }} onClick={handleNextStep1}>
               Continue <ArrowRight size={18} />
+            </button>
+            <button
+              className="text-muted text-xs"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', marginTop: '0.25rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', width: '100%', padding: '0.5rem' }}
+              onClick={() => setShowImport(true)}
+            >
+              <Upload size={14} /> Returning user? Restore from backup
             </button>
           </div>
         )}

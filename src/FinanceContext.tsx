@@ -30,7 +30,7 @@ interface FinanceContextType {
   deleteAccount: (id: string) => void;
   addTransaction: (transaction: Transaction) => void;
   updateTransaction: (transaction: Transaction) => void;
-  reorderTransactions: (tx1: Transaction, tx2: Transaction) => void;
+  reorderTransactions: (...txs: Transaction[]) => void;
   deleteTransaction: (id: string) => void;
   updateCashbackStatement: (statement: CashbackStatement) => void;
   updateCategories: (categories: string[]) => void;
@@ -46,6 +46,8 @@ interface FinanceContextType {
   updateDebt: (debt: Debt) => void;
   deleteDebt: (id: string) => void;
   clearAllData: () => void;
+  loadDemoData: () => void;
+  clearDemoData: () => void;
   isAuthenticated: boolean;
   setAuthenticated: (value: boolean) => void;
   setTheme: (theme: 'light' | 'dark') => void;
@@ -152,6 +154,15 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     });
   };
 
+  // Define these before migration hook
+  const updateUser = (user: User) => {
+    setData(prev => ({ ...prev, user }));
+  };
+
+  const setTheme = (theme: 'light' | 'dark') => {
+    setData(prev => ({ ...prev, theme }));
+  };
+
   const [data, setData] = useState<FinanceData>(() => {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (saved) {
@@ -184,18 +195,26 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           }
         });
 
+        // Migration: Rename 'SIP / Mutual Funds' to 'SIP' in categories list
+        if (parsed.categories) {
+          parsed.categories = parsed.categories.map((c: string) => c === 'SIP / Mutual Funds' ? 'SIP' : c);
+        }
+
         if (!parsed.categories || parsed.categories.length === 0) {
           parsed.categories = [...DEFAULT_CATEGORIES];
-        } else if (!parsed.categories.includes('Loans')) {
-          // Auto-add Loans if it's missing from existing data
-          parsed.categories.push('Loans');
         } else {
-          // Data Migration: Inject categories for existing users if missing
+          // Auto-add missing standard categories
+          if (!parsed.categories.includes('Loans')) {
+            parsed.categories.push('Loans');
+          }
           if (!parsed.categories.includes('Cashback')) {
             parsed.categories.push('Cashback');
           }
           if (!parsed.categories.includes('Lending & Borrowing')) {
             parsed.categories.push('Lending & Borrowing');
+          }
+          if (!parsed.categories.includes('SIP')) {
+            parsed.categories.push('SIP');
           }
         }
 
@@ -218,6 +237,9 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         parsed.transactions = (parsed.transactions || []).map((t: any) => {
           if (t.linkedTransactionId && !t.linkedTransactionIds) {
             t = { ...t, linkedTransactionIds: [t.linkedTransactionId] };
+          }
+          if (t.category === 'SIP / Mutual Funds') {
+            t.category = 'SIP';
           }
           // Migration: Map legacy types and strip time from dates
           if (t.type === 'expense') t.type = 'debit';
@@ -522,14 +544,6 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
   }, [data]);
 
-  // Define these before migration hook
-  const updateUser = (user: User) => {
-    setData(prev => ({ ...prev, user }));
-  };
-
-  const setTheme = (theme: 'light' | 'dark') => {
-    setData(prev => ({ ...prev, theme }));
-  };
 
   // Migration: Hash legacy plain PIN
   useEffect(() => {
@@ -569,10 +583,21 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const addTransaction = (transaction: Transaction) => {
-    setData(prev => ({
-      ...prev,
-      transactions: [...prev.transactions, transaction]
-    }));
+    setData(prev => {
+      const txsOnDate = prev.transactions.filter(t => t.date === transaction.date);
+      const maxOrder = txsOnDate.reduce((max, t, idx) => {
+        const ord = t.order !== undefined ? t.order : idx;
+        return ord > max ? ord : max;
+      }, -1);
+      const newTx = {
+        ...transaction,
+        order: transaction.order !== undefined ? transaction.order : (maxOrder + 1)
+      };
+      return {
+        ...prev,
+        transactions: [...prev.transactions, newTx]
+      };
+    });
   };
 
   const updateTransaction = (transaction: Transaction) => {
@@ -581,11 +606,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       const wasTransferOrCC = oldTx && (
         oldTx.category?.toLowerCase() === 'transfer' || 
         oldTx.category?.toLowerCase() === 'cc payment' || 
-        oldTx.category?.toLowerCase() === 'ncmc travel recharge'
+        oldTx.category?.toLowerCase() === 'ncmc travel recharge' ||
+        oldTx.category?.toLowerCase() === 'sip'
       );
       const isNowTransferOrCC = transaction.category?.toLowerCase() === 'transfer' || 
                                  transaction.category?.toLowerCase() === 'cc payment' || 
-                                 transaction.category?.toLowerCase() === 'ncmc travel recharge';
+                                 transaction.category?.toLowerCase() === 'ncmc travel recharge' ||
+                                 transaction.category?.toLowerCase() === 'sip';
       
       let txsToDelete: string[] = [];
       let updatedTransaction = { ...transaction };
@@ -595,7 +622,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         const counterpartTxs = prev.transactions.filter(t => 
           allLinkedIds.includes(t.id) && 
           t.id !== transaction.id &&
-          (t.category?.toLowerCase() === 'transfer' || t.category?.toLowerCase() === 'cc payment' || t.category?.toLowerCase() === 'ncmc travel recharge')
+          (t.category?.toLowerCase() === 'transfer' || t.category?.toLowerCase() === 'cc payment' || t.category?.toLowerCase() === 'ncmc travel recharge' || t.category?.toLowerCase() === 'sip')
         );
         txsToDelete = counterpartTxs.map(t => t.id);
         
@@ -637,10 +664,11 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
               const rewardsSourceAcc = prev.accounts.find(a => a.id === updatedTransaction.rewardUsedAccountId);
               updated.isRewardTransaction = !!(rewardsSourceAcc?.isCashbackEnabled && rewardsSourceAcc?.rewardType === 'points');
             } 
-            // Otherwise it's a Transfer counterpart or CC payment bank portion
+            // Otherwise it's a Transfer counterpart, SIP, or CC payment bank portion
             else {
               const isCCPayment = updatedTransaction.category?.toLowerCase() === 'cc payment';
               const isNcmcRecharge = updatedTransaction.category?.toLowerCase() === 'ncmc travel recharge';
+              const isSip = updatedTransaction.category?.toLowerCase() === 'sip';
               if (isCCPayment) {
                 if (updatedTransaction.rewardUsed && updatedTransaction.rewardUsedAccountId) {
                   // It's the bank portion
@@ -649,6 +677,14 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
                   // Standard 1:1
                   updated.amount = updatedTransaction.amount;
                 }
+              } else if (isSip) {
+                if (updated.type === 'credit') {
+                  updated.amount = Number(updatedTransaction.sipAllottedAmount) || 0;
+                } else {
+                  updated.amount = (Number(updatedTransaction.sipAllottedAmount) || 0) + (Number(updatedTransaction.sipCharges) || 0);
+                }
+                updated.sipAllottedAmount = updatedTransaction.sipAllottedAmount;
+                updated.sipCharges = updatedTransaction.sipCharges;
               } else {
                 // Non-split transfer/payment: 1:1
                 updated.amount = updatedTransaction.amount;
@@ -658,6 +694,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
                 updated.category = 'NCMC Travel Recharge';
               } else if (updatedTransaction.category === 'Transfer') {
                 updated.category = 'Transfer';
+              } else if (isSip) {
+                updated.category = 'SIP';
               }
 
               // Update counterpart account ID if changed
@@ -674,6 +712,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
                     const targetCardName = updatedTransaction.type === 'credit' ? parentAcc?.name : counterpartAcc?.name;
                     updated.description = `CC Payment: ${targetCardName || 'Unknown'}`;
                   }
+                } else if (isSip) {
+                  updated.description = updatedTransaction.description;
                 } else {
                   updated.description = updatedTransaction.type === 'credit' ? `Transfer to ${parentAcc?.name || 'Unknown'}` : `Transfer from ${parentAcc?.name || 'Unknown'}`;
                 }
@@ -704,13 +744,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     });
   };
 
-  const reorderTransactions = (tx1: Transaction, tx2: Transaction) => {
+  const reorderTransactions = (...txs: Transaction[]) => {
+    const txMap = new Map(txs.map(t => [t.id, t]));
     setData(prev => ({
       ...prev,
       transactions: prev.transactions.map(t => {
-        if (t.id === tx1.id) return tx1;
-        if (t.id === tx2.id) return tx2;
-        return t;
+        const updated = txMap.get(t.id);
+        return updated ? updated : t;
       })
     }));
   };
@@ -734,8 +774,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       const linkedTxsToDelete = prev.transactions.filter(t => {
         if (!linkedIds.includes(t.id)) return false;
         
-        // 1. Always delete Transfer, CC Payment, or NCMC Travel Recharge counterpart legs
-        if (tx.category === 'Transfer' || tx.category === 'CC Payment' || tx.category === 'NCMC Travel Recharge') return true;
+        // 1. Always delete Transfer, CC Payment, NCMC Travel Recharge, or SIP counterpart legs
+        if (tx.category === 'Transfer' || tx.category === 'CC Payment' || tx.category === 'NCMC Travel Recharge' || tx.category === 'SIP') return true;
         
         // 2. If parent is deleted, delete linked instant cashback
         if (t.category === 'Cashback' && tx.type === 'debit') return true;
@@ -868,6 +908,297 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     }));
   };
 
+  const loadDemoData = () => {
+    const getRelativeDate = (offsetDays: number): string => {
+      const d = new Date();
+      d.setDate(d.getDate() - offsetDays);
+      return d.toISOString().split('T')[0];
+    };
+
+    const getMonthDate = (monthOffset: number, day: number): string => {
+      const d = new Date();
+      d.setMonth(d.getMonth() + monthOffset, 1);
+      const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      d.setDate(Math.min(day, daysInMonth));
+      return d.toISOString().split('T')[0];
+    };
+
+    const currentMonth = new Date().toISOString().substring(0, 7);
+
+    const demoAccounts: Account[] = [
+      {
+        id: 'demo_hdfc',
+        name: 'HDFC Bank Savings',
+        type: 'bank_account',
+        openingBalances: { [currentMonth]: 45000 }
+      },
+      {
+        id: 'demo_indigo',
+        name: 'Indigo Premium Card',
+        type: 'credit_card',
+        statementDay: 15,
+        dueDay: 5,
+        openingBalances: { [currentMonth]: 0 },
+        defaultCashbackRate: 1.5,
+        cashbackCreditCycle: 'same_cycle',
+        isCashbackEnabled: true
+      }
+    ];
+
+    const demoTransactions: Transaction[] = [
+      {
+        id: 'demo_tx_1',
+        accountId: 'demo_hdfc',
+        date: getRelativeDate(-5),
+        description: 'Salary Credit',
+        amount: 50000,
+        type: 'credit',
+        category: 'Salary',
+        isRecurring: false
+      },
+      {
+        id: 'demo_tx_2',
+        accountId: 'demo_indigo',
+        date: getRelativeDate(0),
+        description: 'Starbucks Coffee',
+        amount: 320,
+        type: 'debit',
+        category: 'Food',
+        isRecurring: false
+      },
+      {
+        id: 'demo_tx_3',
+        accountId: 'demo_hdfc',
+        date: getRelativeDate(0),
+        description: 'Uber Cab Ride',
+        amount: 450,
+        type: 'debit',
+        category: 'Travel',
+        isRecurring: false
+      },
+      {
+        id: 'demo_tx_4',
+        accountId: 'demo_indigo',
+        date: getRelativeDate(0),
+        description: 'Netflix Premium',
+        amount: 649,
+        type: 'debit',
+        category: 'Entertainment',
+        isRecurring: false
+      },
+      {
+        id: 'demo_cb_tx_1',
+        accountId: 'demo_indigo',
+        date: getRelativeDate(3),
+        description: 'Amazon Shopping Haul',
+        amount: 4200,
+        type: 'debit',
+        category: 'Shopping',
+        isRecurring: false,
+        rewardEarned: 63,
+        rewardEarnedType: 'delayed' as const
+      },
+      {
+        id: 'demo_cb_tx_2',
+        accountId: 'demo_indigo',
+        date: getRelativeDate(5),
+        description: 'Swiggy Dinner',
+        amount: 860,
+        type: 'debit',
+        category: 'Food',
+        isRecurring: false,
+        rewardEarned: 12.9,
+        rewardEarnedType: 'delayed' as const
+      },
+      {
+        id: 'demo_insight_tx_1',
+        accountId: 'demo_hdfc',
+        date: getRelativeDate(4),
+        description: 'Grocery Run',
+        amount: 1840,
+        type: 'debit',
+        category: 'Shopping',
+        isRecurring: false
+      },
+      {
+        id: 'demo_insight_tx_2',
+        accountId: 'demo_indigo',
+        date: getRelativeDate(7),
+        description: 'Weekend Brunch',
+        amount: 1260,
+        type: 'debit',
+        category: 'Food',
+        isRecurring: false
+      },
+      {
+        id: 'demo_insight_tx_3',
+        accountId: 'demo_hdfc',
+        date: getRelativeDate(10),
+        description: 'Metro Recharge',
+        amount: 500,
+        type: 'debit',
+        category: 'Travel',
+        isRecurring: false
+      },
+      {
+        id: 'demo_insight_tx_4',
+        accountId: 'demo_indigo',
+        date: getRelativeDate(14),
+        description: 'Phone Bill',
+        amount: 799,
+        type: 'debit',
+        category: 'Bills',
+        isRecurring: true
+      },
+      {
+        id: 'demo_insight_tx_5',
+        accountId: 'demo_hdfc',
+        date: getMonthDate(-1, 4),
+        description: 'Previous Month Groceries',
+        amount: 2100,
+        type: 'debit',
+        category: 'Shopping',
+        isRecurring: false
+      },
+      {
+        id: 'demo_insight_tx_6',
+        accountId: 'demo_indigo',
+        date: getMonthDate(-1, 10),
+        description: 'Movie Night',
+        amount: 950,
+        type: 'debit',
+        category: 'Entertainment',
+        isRecurring: false
+      },
+      {
+        id: 'demo_insight_tx_7',
+        accountId: 'demo_hdfc',
+        date: getMonthDate(-1, 18),
+        description: 'Fuel Stop',
+        amount: 1500,
+        type: 'debit',
+        category: 'Travel',
+        isRecurring: false
+      },
+      {
+        id: 'demo_insight_tx_8',
+        accountId: 'demo_hdfc',
+        date: getMonthDate(-1, 1),
+        description: 'Salary Credit',
+        amount: 50000,
+        type: 'credit',
+        category: 'Salary',
+        isRecurring: true
+      }
+    ];
+
+    const demoSplitEvents: SplitEvent[] = [
+      {
+        id: 'demo_split_1',
+        name: 'Manali Road Trip',
+        // Rahul: owes user ₹1000  |  Priya: user owes ₹450  |  Sanjay: marked paid
+        people: ['Rahul', 'Priya', 'Sanjay'],
+        paidPeople: ['Sanjay'],
+        createdAt: Date.now() - 5 * 24 * 3600 * 1000,
+        status: 'active',
+        items: [
+          {
+            id: 'demo_split_item_1',
+            transactionId: '',
+            amount: 2000,
+            description: 'Cabin Booking',
+            // Only Me + Rahul stayed in the cabin → Rahul owes Me ₹1000
+            involvedPeople: ['Rahul'],
+            includeMe: true,
+            splitType: 'equal',
+            paidBy: 'me'
+          },
+          {
+            id: 'demo_split_item_2',
+            transactionId: '',
+            amount: 1800,
+            description: 'Trekking & Meals',
+            // All 4 people, Priya paid → Me owes Priya ₹450
+            involvedPeople: ['Rahul', 'Sanjay'],
+            includeMe: true,
+            splitType: 'equal',
+            paidBy: 'Priya'
+          }
+        ]
+      }
+    ];
+
+    const demoDebts: Debt[] = [
+      {
+        id: 'demo_debt_1',
+        personName: 'Rohan',
+        status: 'active',
+        createdAt: Date.now() - 6 * 24 * 3600 * 1000,
+        updatedAt: Date.now(),
+        transactions: [
+          {
+            id: 'demo_debt_tx_1',
+            amount: 2000,
+            date: getRelativeDate(5),
+            description: 'Concert Tickets',
+            type: 'lent'
+          },
+          {
+            id: 'demo_debt_tx_2',
+            amount: 500,
+            date: getRelativeDate(1),
+            description: 'Partial Return',
+            type: 'repayment_received'
+          }
+        ]
+      }
+    ];
+
+    const demoBills: RecurringBill[] = [
+      {
+        id: 'demo_bill_1',
+        name: 'Electricity Bill',
+        amount: 2200,
+        category: 'Bills',
+        frequency: 'monthly',
+        nextDueDate: getRelativeDate(-15),
+        accountId: 'demo_hdfc',
+        type: 'debit',
+        isActive: true
+      }
+    ];
+
+    setData(prev => {
+      const otherAccounts = prev.accounts.filter(a => !a.id.startsWith('demo_'));
+      const otherTransactions = prev.transactions.filter(t => !t.id.startsWith('demo_'));
+      const otherSplits = (prev.splitEvents || []).filter(s => !s.id.startsWith('demo_'));
+      const otherDebts = (prev.debts || []).filter(d => !d.id.startsWith('demo_'));
+      const otherBills = (prev.recurringBills || []).filter(b => !b.id.startsWith('demo_'));
+
+      return {
+        ...prev,
+        accounts: [...otherAccounts, ...demoAccounts],
+        transactions: [...otherTransactions, ...demoTransactions],
+        splitEvents: [...otherSplits, ...demoSplitEvents],
+        debts: [...otherDebts, ...demoDebts],
+        recurringBills: [...otherBills, ...demoBills],
+        cashbackStatements: (prev.cashbackStatements || []).filter(s => !s.id.startsWith('demo_'))
+      };
+    });
+  };
+
+  const clearDemoData = () => {
+    setData(prev => ({
+      ...prev,
+      accounts: prev.accounts.filter(a => !a.id.startsWith('demo_')),
+      transactions: prev.transactions.filter(t => !t.id.startsWith('demo_')),
+      splitEvents: (prev.splitEvents || []).filter(s => !s.id.startsWith('demo_')),
+      debts: (prev.debts || []).filter(d => !d.id.startsWith('demo_')),
+      recurringBills: (prev.recurringBills || []).filter(b => !b.id.startsWith('demo_')),
+      cashbackStatements: (prev.cashbackStatements || []).filter(s => !s.id.startsWith('demo_')),
+    }));
+  };
+
   const clearAllData = () => {
     localStorage.removeItem(LOCAL_STORAGE_KEY);
     setData({ user: { id: 'default', name: 'spendvault user', biometricsEnabled: false }, accounts: [], transactions: [], cashbackStatements: [], categories: DEFAULT_CATEGORIES, customAccountTypes: DEFAULT_CUSTOM_ACCOUNT_TYPES, theme: 'dark' });
@@ -903,6 +1234,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       updateDebt,
       deleteDebt,
       clearAllData,
+      loadDemoData,
+      clearDemoData,
       updateUser,
       isAuthenticated,
       setAuthenticated,

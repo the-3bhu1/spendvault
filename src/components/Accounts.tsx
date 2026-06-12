@@ -465,8 +465,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     openingBal = calculateBalance(acc, data.transactions, prevMonthStr);
                   }
 
+                  const isFirstAccount = index === 0 && acc.id === grouped[type][0].id;
+
                   return (
-                    <div key={acc.id} className="card flex-col" style={{ padding: '0' }}>
+                    <div key={acc.id} className={`card flex-col ${isFirstAccount ? 'tour-first-account' : ''}`} style={{ padding: '0' }}>
                       {/* Top Section - Hardware / Branding */}
                       <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                         <div className="flex-col gap-1">
@@ -880,7 +882,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     />
                   </div>
 
-                  {newAccount.rewardType === 'rupee' && newAccount.type === 'credit_card' && (
+                  {(newAccount.rewardType || 'rupee') === 'rupee' && newAccount.type === 'credit_card' && (
                     <div style={{ marginTop: '0.5rem', marginBottom: '0.5rem' }}>
                       <CustomPicker
                         label="Apply Statement Credits To"

@@ -370,7 +370,7 @@ export default function Cashback() {
   });
 
   return (
-    <div className="flex-col gap-6" style={{ maxWidth: '600px', margin: '0 auto', width: '100%' }}>
+    <div className="flex-col gap-6 cashback-tab-root" style={{ maxWidth: '600px', margin: '0 auto', width: '100%' }}>
       <div className="flex justify-between align-center gap-4">
         <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>cashback vault</h2>
         {statementArray.length > 0 && (
@@ -426,7 +426,7 @@ export default function Cashback() {
         ) : (
           <div className="flex-col gap-6">
             {cardsData.map((card) => (
-              <div key={card.cardName} className="card flex-col" style={{ padding: 0, overflow: 'hidden' }}>
+              <div key={card.cardName} className="card flex-col tour-cashback-statement" style={{ padding: 0, overflow: 'hidden' }}>
                 {card.cycles.map((cycle, cycleIndex) => {
                   const { accKey: accName, sts } = cycle;
                   const isFullyCredited = sts.every(st => st.confirmed);

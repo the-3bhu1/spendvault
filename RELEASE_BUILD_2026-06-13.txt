@@ -1,0 +1,60 @@
+================================================================================
+                     SPENDVAULT RELEASE BUILD SUMMARY
+                              2026-06-13
+================================================================================
+
+BUILD STATUS: ✓ SUCCESSFUL
+
+BUILD DETAILS:
+  Build Tool: Gradle (Android App Bundle)
+  Build Type: Release (Signed)
+  Build Time: 4m 27s
+  Gradle Tasks Executed: 10 / 321 total
+
+ARTIFACT INFORMATION:
+  File: app-release.apk
+  Size: 9.1 MB
+  Location: android/app/build/outputs/apk/release/app-release.apk
+  SHA256: 0260205ed0960afd8d6d7275c1c5ef88d43d3666de4af4a70769220c7f537875
+  MD5: c502bc1d28a3578b1fba5fa955fa03c5
+
+APK METADATA:
+  Application ID: com.spendvault.app
+  Version Code: 1
+  Version Name: 1.0
+  Min SDK: 23 (Android 6.0)
+  Signing: Production Release Keystore (Signed)
+
+BRANCHES UPDATED:
+  ✓ build-ver-2.1
+  ✓ build-ver-2
+
+LATEST COMMIT (Both Branches):
+  SHA: b0c2672 (on build-ver-2.1), 8170bd6 (on build-ver-2)
+  Message: fix: improve SMS transaction parsing and account matching
+  Date: 2026-06-13 01:35:44 IST
+  
+  Changes:
+    - Add promotional SMS filtering (valid till, cashback awaits, etc.)
+    - Implement 5-minute time-window deduplication for duplicate bank SMS
+    - Prioritize card number match over bank name when prefilling account
+    - Fix settings tab scroll position restoration on tab switch
+
+FILES MODIFIED IN COMMIT:
+  - android/app/src/main/java/com/spendvault/app/SmsParser.kt (+36 lines)
+  - android/app/src/main/java/com/spendvault/app/SmsReaderPlugin.kt (+47 lines)
+  - src/App.tsx (-1 line)
+  - src/components/Transactions.tsx (+589 lines, -121 lines)
+  Total: 582 insertions, 121 deletions
+
+BUILD OUTPUTS AVAILABLE:
+  ✓ Release APK (Signed)
+  ✓ Output Metadata (output-metadata.json)
+  ✓ Baseline Profiles (Android 12+ optimization)
+
+READY FOR:
+  ✓ Google Play Store Submission
+  ✓ Distribution to Beta Testers
+  ✓ Production Release
+
+================================================================================

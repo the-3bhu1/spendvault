@@ -106,6 +106,7 @@ export default function AuthScreen() {
 
   if (view === 'forgot') {
     return (
+      <>
       <div className="flex-col align-center justify-center fade-in bg-main" style={{ position: 'fixed', inset: 0, zIndex: 10000, padding: '2rem' }}>
         <div className="card flex-col gap-6 w-100" style={{ maxWidth: '360px' }}>
           <div className="flex justify-between align-center">
@@ -139,6 +140,19 @@ export default function AuthScreen() {
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        isOpen={isWipeConfirmOpen}
+        title="Wipe & Reset?"
+        message="FINAL WARNING: This will permanently delete ALL your accounts, transactions, and settings. This cannot be undone."
+        confirmLabel="Wipe Everything"
+        cancelLabel="Cancel"
+        onConfirm={() => {
+          clearAllData();
+          setIsWipeConfirmOpen(false);
+        }}
+        onCancel={() => setIsWipeConfirmOpen(false)}
+      />
+      </>
     );
   }
 

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import {
@@ -22,7 +22,8 @@ import {
   Smartphone,
   Gift,
   Edit2,
-  Calendar
+  Calendar,
+  BarChart3
 } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
@@ -31,6 +32,13 @@ import type { Debt, DebtTransaction, Account } from '../types';
 import { CustomPicker } from './CustomPicker';
 import { TransactionSelector } from './TransactionSelector';
 import { SubviewWrapper } from './SubviewWrapper';
+
+const calcDebtBalance = (transactions: DebtTransaction[]) =>
+  transactions.reduce((sum, t) => {
+    if (t.type === 'lent' || t.type === 'repayment_sent') return sum + t.amount;
+    if (t.type === 'borrowed' || t.type === 'repayment_received') return sum - t.amount;
+    return sum;
+  }, 0);
 
 export default function Debts() {
   const { data, addDebt, updateDebt, deleteDebt, addTransaction, updateTransaction } = useFinance();
@@ -78,6 +86,28 @@ export default function Debts() {
     window.addEventListener('appBackButton', handleGlobalBack);
     return () => window.removeEventListener('appBackButton', handleGlobalBack);
   }, [activeDebtId, showAddModal]);
+
+  useEffect(() => {
+    const openTourDebtDetail = () => {
+      const demoDebt = debts.find(debt => debt.id === 'demo_debt_1') || debts[0];
+      if (!demoDebt) return;
+      setShowAddModal(false);
+      setActiveDebtId(demoDebt.id);
+      document.body.classList.add('tour-debt-inside-active');
+    };
+    const closeTourDebtDetail = () => {
+      setActiveDebtId(null);
+      setShowAddModal(false);
+      document.body.classList.remove('tour-debt-inside-active');
+    };
+
+    window.addEventListener('tour-open-debt-detail', openTourDebtDetail);
+    window.addEventListener('tour-close-debt-detail', closeTourDebtDetail);
+    return () => {
+      window.removeEventListener('tour-open-debt-detail', openTourDebtDetail);
+      window.removeEventListener('tour-close-debt-detail', closeTourDebtDetail);
+    };
+  }, [debts]);
 
   const stats = useMemo(() => {
     let owedToMe = 0;
@@ -192,11 +222,17 @@ export default function Debts() {
       }
     }
 
+    const updatedTransactions = [...debt.transactions, newTx];
+    const balanced = calcDebtBalance(updatedTransactions) === 0;
+    const finalTransactions = balanced
+      ? updatedTransactions.map(t => ({ ...t, markedDone: true }))
+      : updatedTransactions;
     const updatedDebt = {
       ...debt,
-      transactions: [...debt.transactions, newTx],
+      transactions: finalTransactions,
+      status: balanced ? 'settled' : 'active',
       updatedAt: Date.now()
-    };
+    } as Debt;
 
     updateDebt(updatedDebt);
   };
@@ -211,6 +247,7 @@ export default function Debts() {
           onUpdateDebt={updateDebt}
           onDelete={() => { deleteDebt(activeDebtId); setActiveDebtId(null); }}
           setConfirmConfig={setConfirmConfig}
+          existingNames={debts.map(d => d.personName).filter(n => n !== activeDebt.personName)}
         />
       ) : showAddModal ? (
         <AddDebtModal
@@ -220,7 +257,7 @@ export default function Debts() {
           onClose={() => setShowAddModal(false)}
         />
       ) : (
-        <div className="flex-col gap-6 fade-in">
+        <div className="flex-col gap-6 fade-in debts-tab-root">
           <div className="flex justify-between align-center">
             <div className="flex-col">
               <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>money owed</h2>
@@ -278,7 +315,7 @@ export default function Debts() {
                 return (
                   <div
                     key={debt.id}
-                    className="card flex align-center justify-between clickable"
+                    className="card flex align-center justify-between clickable tour-debt-record-card"
                     style={{
                       padding: '1rem',
                       opacity: isSettled ? 0.6 : 1,
@@ -328,15 +365,36 @@ export default function Debts() {
   );
 }
 
-function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmConfig }: {
+function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmConfig, existingNames }: {
   debt: Debt,
   onBack: () => void,
   onAddTx: (amt: number, type: DebtTransaction['type'], desc: string, date: string, accountId: string, logInLedger: boolean, linkedTxId?: string) => void,
   onUpdateDebt: (debt: Debt) => void,
   onDelete: () => void,
-  setConfirmConfig: (config: any) => void
+  setConfirmConfig: (config: any) => void,
+  existingNames: string[]
 }) {
   const { data, deleteTransaction, updateTransaction } = useFinance();
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(debt.personName);
+  const [nameError, setNameError] = useState('');
+
+  useEffect(() => {
+    document.querySelector('.app-root')?.scrollTo({ top: 0, behavior: 'auto' });
+  }, []);
+
+  const handleSaveName = () => {
+    const trimmed = nameInput.trim();
+    if (!trimmed) { setNameError('Name cannot be empty.'); return; }
+    if (existingNames.map(n => n.toLowerCase()).includes(trimmed.toLowerCase())) {
+      setNameError('A log with this name already exists.');
+      return;
+    }
+    onUpdateDebt({ ...debt, personName: trimmed, updatedAt: Date.now() });
+    setIsEditingName(false);
+    setNameError('');
+  };
   const [showActionModal, setShowActionModal] = useState<'lent' | 'borrowed' | 'repayment' | null>(null);
   const [editingTx, setEditingTx] = useState<DebtTransaction | null>(null);
   const netBalance = debt.transactions.reduce((sum, t) => {
@@ -391,22 +449,40 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
   const hasLent = debt.transactions.some(t => t.type === 'lent');
   const hasBorrowed = debt.transactions.some(t => t.type === 'borrowed');
 
+  // Measure real navbar height (varies with safe-area-inset-top per device)
+  const [navbarHeight, setNavbarHeight] = useState(56);
+  useLayoutEffect(() => {
+    const navbar = document.querySelector('.navbar') as HTMLElement | null;
+    if (!navbar) return;
+    const update = () => setNavbarHeight(navbar.clientHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(navbar);
+    return () => ro.disconnect();
+  }, []);
+
+  // Compact bar visibility — true when action buttons have scrolled out of view
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const [isCompact, setIsCompact] = useState(false);
+  useEffect(() => {
+    const el = actionsRef.current;
+    if (!el) return;
+    const root = document.querySelector('.app-root');
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsCompact(!entry.isIntersecting),
+      { root, rootMargin: `-${navbarHeight}px 0px 0px 0px`, threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [navbarHeight]);
+
   return (
     <>
       <div className="flex-col gap-6 fade-in" style={{ paddingBottom: '180px' }}>
-        <div 
-          className="flex-col gap-6" 
-          style={{ 
-            position: 'sticky', 
-            top: '-2rem', 
-            background: 'var(--bg-color)', 
-            zIndex: 10, 
-            padding: '2rem 1.5rem 1rem 1.5rem',
-            margin: '-2rem -1.5rem 0 -1.5rem',
-            borderBottom: '1px solid var(--border-color)'
-          }}
-        >
-          <div className="flex justify-between align-center">
+
+        {/* Balance card + action buttons — scroll away normally */}
+        <div className="flex-col gap-6 tour-debt-detail-summary">
+          <div className="flex justify-between align-center debt-detail-header-row">
             <div className="flex align-center gap-4">
               <button className="btn btn-secondary" style={{ padding: '0.5rem' }} onClick={onBack}>
                 <ChevronLeft size={20} />
@@ -419,13 +495,9 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
             <div className="flex gap-3">
               <button
                 className="btn btn-secondary"
-                style={{ 
-                  width: '36px', 
-                  height: '36px', 
-                  padding: 0, 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center', 
+                style={{
+                  width: '36px', height: '36px', padding: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
                   color: debt.status === 'settled' ? 'var(--success)' : 'var(--text-muted)',
                   borderColor: debt.status === 'settled' ? 'var(--success)' : undefined,
                   background: debt.status === 'settled' ? 'var(--success-soft)' : undefined
@@ -435,18 +507,23 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
               >
                 <Check size={18} strokeWidth={3} />
               </button>
-              <button 
-                className="btn btn-secondary" 
-                style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }} 
+              <button
+                className="btn btn-secondary"
+                style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                onClick={() => { setNameInput(debt.personName); setNameError(''); setIsEditingName(true); }}
+                title="Edit Name"
+              >
+                <Edit2 size={18} />
+              </button>
+              <button
+                className="btn btn-secondary"
+                style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }}
                 onClick={() => setConfirmConfig({
                   title: "Delete History?",
                   message: "Are you sure you want to delete the entire history with this person? This cannot be undone.",
                   confirmLabel: "Delete All",
                   isDanger: true,
-                  onConfirm: () => {
-                    onDelete();
-                    setConfirmConfig(null);
-                  }
+                  onConfirm: () => { onDelete(); setConfirmConfig(null); }
                 })}
                 title="Delete History"
               >
@@ -459,7 +536,6 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
             <div style={{ position: 'absolute', top: '-20px', right: '-20px', opacity: 0.05 }}>
               <HandCoins size={120} />
             </div>
-
             <span className="text-xs text-muted font-bold uppercase" style={{ letterSpacing: '2px' }}>Current Net Balance</span>
             <h1 style={{ margin: 0, fontSize: '2.5rem', color: netBalance === 0 ? 'var(--text-primary)' : (netBalance > 0 ? 'var(--success)' : 'var(--danger)') }}>
               {formatCurrency(netBalance)}
@@ -476,7 +552,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
             </div>
           </div>
 
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
+          <div ref={actionsRef} className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
             <button className="btn btn-primary" onClick={() => setShowActionModal('lent')} style={{ background: 'var(--success)', border: 'none', color: '#000' }}>
               <ArrowUpRight size={18} /> Lent Money
             </button>
@@ -489,7 +565,32 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
           </div>
         </div>
 
-        <div className="flex-col gap-4">
+        {/* Compact bar — fixed, slides in from behind navbar when action buttons leave viewport */}
+        <div
+          style={{
+            position: 'fixed',
+            top: navbarHeight,
+            left: 0,
+            right: 0,
+            zIndex: 10,
+            background: 'var(--bg-color)',
+            borderBottom: '1px solid var(--border-color)',
+            padding: '0.6rem 1.5rem',
+            transform: isCompact ? 'translateY(0)' : 'translateY(-110%)',
+            opacity: isCompact ? 1 : 0,
+            transition: 'transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease',
+            pointerEvents: isCompact ? 'auto' : 'none',
+          }}
+        >
+          <div className="flex justify-between align-center">
+            <span className="font-bold" style={{ fontSize: '1rem' }}>{debt.personName}</span>
+            <span className={`font-bold text-sm ${netBalance === 0 ? '' : (netBalance > 0 ? 'text-success' : 'text-danger')}`}>
+              {formatCurrency(netBalance)}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex-col gap-4 tour-debt-tx-log">
           <span className="text-xs text-muted font-bold uppercase" style={{ letterSpacing: '1px' }}>Transaction Log</span>
           <div className="flex-col gap-3">
             {[...debt.transactions].sort((a, b) => {
@@ -497,29 +598,55 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
               if (timeDiff !== 0) return timeDiff;
               return debt.transactions.indexOf(b) - debt.transactions.indexOf(a);
             }).map(tx => (
-              <div key={tx.id} className="card flex align-center justify-between" style={{ padding: '0.75rem 1rem', background: 'var(--bg-color)' }}>
+              <div key={tx.id} className="card flex align-center justify-between" style={{
+                padding: '0.75rem 1rem',
+                background: 'var(--bg-color)',
+                opacity: tx.markedDone ? 0.45 : 1,
+                transition: 'opacity 0.2s ease'
+              }}>
                 <div className="flex align-center gap-3" style={{ minWidth: 0, flex: 1 }}>
                   <div className="flex-center" style={{
                     width: '32px', height: '32px', borderRadius: '8px', flexShrink: 0,
-                    background: (tx.type === 'lent' || tx.type === 'repayment_received') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                    color: (tx.type === 'lent' || tx.type === 'repayment_received') ? 'var(--success)' : 'var(--danger)'
+                    background: tx.markedDone ? 'rgba(120,120,120,0.1)' : ((tx.type === 'lent' || tx.type === 'repayment_received') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)'),
+                    color: tx.markedDone ? 'var(--text-muted)' : ((tx.type === 'lent' || tx.type === 'repayment_received') ? 'var(--success)' : 'var(--danger)')
                   }}>
-                    {tx.type.includes('repayment') ? <History size={14} /> : (tx.type === 'lent' ? <ArrowUpRight size={14} /> : <ArrowDownLeft size={14} />)}
+                    {tx.markedDone ? <Check size={14} /> : (tx.type.includes('repayment') ? <History size={14} /> : (tx.type === 'lent' ? <ArrowUpRight size={14} /> : <ArrowDownLeft size={14} />))}
                   </div>
                   <div className="flex-col" style={{ minWidth: 0 }}>
                     <span className="text-sm font-bold" style={{
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis'
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      textDecoration: tx.markedDone ? 'line-through' : 'none',
+                      color: tx.markedDone ? 'var(--text-muted)' : undefined
                     }}>{tx.description}</span>
                     <span className="text-xs text-muted" style={{ fontSize: '10px' }}>{new Date(tx.date).toLocaleDateString()}</span>
                   </div>
                 </div>
                 <div className="flex align-center gap-3" style={{ flexShrink: 0, marginLeft: '0.5rem' }}>
-                  <span className={`font-bold ${(tx.type === 'lent' || tx.type === 'repayment_received') ? 'text-success' : 'text-danger'}`} style={{ whiteSpace: 'nowrap' }}>
+                  <span className={`font-bold ${tx.markedDone ? 'text-muted' : ((tx.type === 'lent' || tx.type === 'repayment_received') ? 'text-success' : 'text-danger')}`} style={{
+                    whiteSpace: 'nowrap',
+                    textDecoration: tx.markedDone ? 'line-through' : 'none'
+                  }}>
                     {formatCurrency(tx.amount)}
                   </span>
                   <div className="flex gap-3">
+                    <button
+                      className="btn btn-secondary flex-center"
+                      style={{
+                        width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: tx.markedDone ? 'var(--success)' : 'var(--text-muted)',
+                        borderColor: tx.markedDone ? 'var(--success)' : undefined,
+                        background: tx.markedDone ? 'var(--success-soft)' : undefined,
+                      }}
+                      title={tx.markedDone ? 'Unmark as done' : 'Mark as done'}
+                      onClick={() => {
+                        const updated = debt.transactions.map(t =>
+                          t.id === tx.id ? { ...t, markedDone: !t.markedDone } : t
+                        );
+                        onUpdateDebt({ ...debt, transactions: updated, updatedAt: Date.now() });
+                      }}
+                    >
+                      <Check size={14} strokeWidth={3} />
+                    </button>
                     <button
                       className="btn btn-secondary flex-center"
                       style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -533,7 +660,6 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
                       onClick={() => {
                         const ledgerTx = data.transactions.find(t => t.linkedTransactionIds?.includes(tx.id));
                         const isLendingCategory = ledgerTx?.category === 'Lending & Borrowing';
-
                         setConfirmConfig({
                           title: (ledgerTx && !isLendingCategory) ? "Delete Linked Transaction?" : "Delete Transaction?",
                           message: (ledgerTx && !isLendingCategory)
@@ -544,36 +670,24 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
                           isDanger: true,
                           onConfirm: () => {
                             if (ledgerTx) deleteTransaction(ledgerTx.id);
-
                             const updatedTransactions = debt.transactions.filter(t => t.id !== tx.id);
                             if (updatedTransactions.length === 0) {
                               onDelete();
                             } else {
-                              onUpdateDebt({
-                                ...debt,
-                                transactions: updatedTransactions,
-                                updatedAt: Date.now()
-                              });
+                              onUpdateDebt({ ...debt, transactions: updatedTransactions, status: calcDebtBalance(updatedTransactions) === 0 ? 'settled' : 'active', updatedAt: Date.now() });
                             }
                             setConfirmConfig(null);
                           },
                           onThirdAction: (ledgerTx && !isLendingCategory) ? () => {
-                            // UNLINK FIRST: Remove the debt ID from the ledger transaction
                             updateTransaction({
                               ...ledgerTx,
                               linkedTransactionIds: ledgerTx.linkedTransactionIds?.filter(id => id !== tx.id)
                             });
-
-                            // THEN delete from debt history
                             const updatedTransactions = debt.transactions.filter(t => t.id !== tx.id);
                             if (updatedTransactions.length === 0) {
                               onDelete();
                             } else {
-                              onUpdateDebt({
-                                ...debt,
-                                transactions: updatedTransactions,
-                                updatedAt: Date.now()
-                              });
+                              onUpdateDebt({ ...debt, transactions: updatedTransactions, status: calcDebtBalance(updatedTransactions) === 0 ? 'settled' : 'active', updatedAt: Date.now() });
                             }
                             setConfirmConfig(null);
                           } : undefined,
@@ -590,8 +704,6 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
           </div>
         </div>
       </div>
-
-
 
       {showActionModal && (
         <DebtTransactionModal
@@ -638,15 +750,45 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
             const updatedTxs = debt.transactions.map(t =>
               t.id === editingTx.id ? { ...t, amount: amt, type, description: desc, date, linkedTxId } : t
             );
+            const balanced = calcDebtBalance(updatedTxs) === 0;
+            const finalTxs = balanced ? updatedTxs.map(t => ({ ...t, markedDone: true })) : updatedTxs;
             onUpdateDebt({
               ...debt,
-              transactions: updatedTxs,
+              transactions: finalTxs,
+              status: balanced ? 'settled' : 'active',
               updatedAt: Date.now()
             });
             setEditingTx(null);
           }}
           onClose={() => setEditingTx(null)}
         />
+      )}
+
+      {isEditingName && (
+        <div className="modal-overlay" onClick={() => setIsEditingName(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ padding: 0 }}>
+            <div className="modal-header">
+              <h3>Edit Name</h3>
+              <button onClick={() => setIsEditingName(false)}>✕</button>
+            </div>
+            <div className="modal-body flex-col gap-4" style={{ padding: '1rem 1.5rem 2rem' }}>
+              <div className="input-group">
+                <label>Person / Group Name</label>
+                <input
+                  className={`input-field ${nameError ? 'border-danger' : ''}`}
+                  value={nameInput}
+                  onChange={e => { setNameInput(e.target.value); setNameError(''); }}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveName(); }}
+                  autoFocus
+                />
+                {nameError && <span className="text-xs text-danger">{nameError}</span>}
+              </div>
+              <button className="btn btn-primary" style={{ padding: '1rem' }} onClick={handleSaveName}>
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
@@ -695,6 +837,8 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
         return <Gift size={18} />;
       case 'cash':
         return <Coins size={18} />;
+      case 'sips':
+        return <BarChart3 size={18} />;
       default:
         return <Wallet size={18} />;
     }
@@ -978,7 +1122,8 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
   const [accountId, setAccountId] = useState(ledgerTx ? ledgerTx.accountId : (accounts[0]?.id || ''));
   const [logInLedger, setLogInLedger] = useState(initialTx ? !!ledgerTx : true);
   const [isLinking, setIsLinking] = useState(false);
-  const [linkedTxId, setLinkedTxId] = useState<string | null>(initialTx?.linkedTxId || null);
+  // If a ledgerTx already exists (auto-synced), don't also show the manual link as active
+  const [linkedTxId, setLinkedTxId] = useState<string | null>(ledgerTx ? null : (initialTx?.linkedTxId || null));
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
 
   const getAccountIcon = (accountId: string) => {
@@ -997,6 +1142,8 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
         return <Gift size={18} />;
       case 'cash':
         return <Coins size={18} />;
+      case 'sips':
+        return <BarChart3 size={18} />;
       default:
         return <Wallet size={18} />;
     }
@@ -1126,61 +1273,92 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
               </div>
             )}
 
-            <div className="input-group">
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <button
-                  className="flex-col align-center justify-center"
-                  style={{
-                    flex: 1,
-                    height: "74px",
-                    padding: '0.5rem',
-                    background: logInLedger ? 'var(--success)' : 'var(--bg-hover)',
-                    borderRadius: '6px',
-                    border: '1.5px solid #000',
-                    boxShadow: logInLedger ? 'none' : '3px 3px 0 #000',
-                    transform: logInLedger ? 'translate(3px, 3px)' : 'none',
-                    color: logInLedger ? '#000' : 'var(--text-secondary)',
-                    transition: 'all 0.1s ease',
-                    cursor: 'pointer',
-                    gap: '8px'
-                  }}
-                  onClick={() => setLogInLedger(!logInLedger)}
-                >
-                  <div className="flex align-center gap-2">
-                    <History size={14} />
-                    <span className="text-mono font-bold uppercase" style={{ fontSize: '9px', letterSpacing: '1px', lineHeight: 1, transform: 'translateY(1.5px)' }}>{initialTx ? (logInLedger ? 'Ledger Active' : 'Enable Ledger') : 'Log in Ledger'}</span>
+            {initialTx ? (
+              ledgerTx ? (
+                <div className="input-group">
+                  <label>Linked Ledger Transaction</label>
+                  <div style={{ padding: '0.75rem 1rem', background: 'rgba(56,189,248,0.06)', borderRadius: '8px', border: '1px solid rgba(56,189,248,0.2)' }}>
+                    <div className="flex justify-between align-center" style={{ marginBottom: '0.35rem' }}>
+                      <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{ledgerTx.description}</span>
+                      <span className="text-sm font-bold text-accent">{formatCurrency(ledgerTx.amount)}</span>
+                    </div>
+                    <div className="flex justify-between align-center">
+                      <span className="text-xs text-muted">{format(parseISO(ledgerTx.date), 'dd MMM yyyy')}</span>
+                      <span className="text-xs text-muted">{data.accounts.find(a => a.id === ledgerTx.accountId)?.name ?? '—'}</span>
+                    </div>
+                    {ledgerTx.description !== initialTx.description && (
+                      <div className="flex align-center gap-1" style={{ marginTop: '0.4rem' }}>
+                        <History size={11} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                        <span className="text-xs text-muted" style={{ fontStyle: 'italic' }}>Debt entry: "{initialTx.description}"</span>
+                      </div>
+                    )}
                   </div>
-                  <span className="text-mono" style={{ fontSize: '10px', opacity: 0.8 }}>{initialTx ? (logInLedger ? 'Synced' : 'Not Synced') : 'Update balance'}</span>
-                </button>
+                </div>
+              ) : (
+                <div className="input-group">
+                  <label>Ledger Link</label>
+                  <div style={{ padding: '0.75rem 1rem', background: 'var(--bg-hover)', borderRadius: '8px', border: '1px dashed var(--border-color)' }}>
+                    <span className="text-xs text-muted">No ledger transaction linked to this entry.</span>
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="input-group">
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                  <button
+                    className="flex-col align-center justify-center"
+                    style={{
+                      flex: 1,
+                      height: "74px",
+                      padding: '0.5rem',
+                      background: logInLedger ? 'var(--success)' : 'var(--bg-hover)',
+                      borderRadius: '6px',
+                      border: '1.5px solid #000',
+                      boxShadow: logInLedger ? 'none' : '3px 3px 0 #000',
+                      transform: logInLedger ? 'translate(3px, 3px)' : 'none',
+                      color: logInLedger ? '#000' : 'var(--text-secondary)',
+                      transition: 'all 0.1s ease',
+                      cursor: 'pointer',
+                      gap: '8px'
+                    }}
+                    onClick={() => setLogInLedger(!logInLedger)}
+                  >
+                    <div className="flex align-center gap-2">
+                      <History size={14} />
+                      <span className="text-mono font-bold uppercase" style={{ fontSize: '9px', letterSpacing: '1px', lineHeight: 1, transform: 'translateY(1.5px)' }}>Log in Ledger</span>
+                    </div>
+                    <span className="text-mono" style={{ fontSize: '10px', opacity: 0.8 }}>Update balance</span>
+                  </button>
 
-                <button
-                  className="flex-col align-center justify-center"
-                  style={{
-                    flex: 1,
-                    height: "74px",
-                    padding: '0.5rem',
-                    background: linkedTxId ? 'var(--success)' : 'var(--bg-hover)',
-                    borderRadius: '6px',
-                    border: '1.5px solid #000',
-                    boxShadow: linkedTxId ? 'none' : '3px 3px 0 #000',
-                    transform: linkedTxId ? 'translate(3px, 3px)' : 'none',
-                    color: linkedTxId ? '#000' : 'var(--text-secondary)',
-                    transition: 'all 0.1s ease',
-                    cursor: 'pointer',
-                    gap: '8px'
-                  }}
-                  onClick={() => linkedTxId ? setLinkedTxId(null) : setIsLinking(true)}
-                >
-                  <div className="flex align-center gap-2">
-                    {linkedTxId ? <CheckCircle2 size={14} /> : <History size={14} />}
-                    <span className="text-mono font-bold uppercase" style={{ fontSize: '9px', letterSpacing: '1px', lineHeight: 1, transform: 'translateY(1.5px)' }}>
-                      {linkedTxId ? 'Linked' : 'Link Ledger'}
-                    </span>
-                  </div>
-                  <span className="text-mono" style={{ fontSize: '10px', opacity: 0.8 }}>{linkedTxId ? 'Click to clear' : 'Pick transaction'}</span>
-                </button>
+                  <button
+                    className="flex-col align-center justify-center"
+                    style={{
+                      flex: 1,
+                      height: "74px",
+                      padding: '0.5rem',
+                      background: linkedTxId ? 'var(--success)' : 'var(--bg-hover)',
+                      borderRadius: '6px',
+                      border: '1.5px solid #000',
+                      boxShadow: linkedTxId ? 'none' : '3px 3px 0 #000',
+                      transform: linkedTxId ? 'translate(3px, 3px)' : 'none',
+                      color: linkedTxId ? '#000' : 'var(--text-secondary)',
+                      transition: 'all 0.1s ease',
+                      cursor: 'pointer',
+                      gap: '8px'
+                    }}
+                    onClick={() => linkedTxId ? setLinkedTxId(null) : setIsLinking(true)}
+                  >
+                    <div className="flex align-center gap-2">
+                      {linkedTxId ? <CheckCircle2 size={14} /> : <History size={14} />}
+                      <span className="text-mono font-bold uppercase" style={{ fontSize: '9px', letterSpacing: '1px', lineHeight: 1, transform: 'translateY(1.5px)' }}>
+                        {linkedTxId ? 'Linked' : 'Link Ledger'}
+                      </span>
+                    </div>
+                    <span className="text-mono" style={{ fontSize: '10px', opacity: 0.8 }}>{linkedTxId ? 'Click to clear' : 'Pick transaction'}</span>
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="input-group">
               <label>Amount</label>

@@ -1,5 +1,5 @@
-import { format, parseISO, addMonths, subMonths, addDays, setDate, isAfter, startOfDay } from 'date-fns';
-import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement } from './types';
+import { format, parseISO, addMonths, subMonths, addDays, addWeeks, addQuarters, addYears, setDate, isAfter, isBefore, startOfDay } from 'date-fns';
+import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitEvent, SplitCycle, RecurringFrequency } from './types';
 
 export const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -251,3 +251,77 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork) => {
 };
 
 export const APP_VERSION = 'v2.0.0';
+
+// ─── Recurring Split Cycle Helpers ──────────────────────────────────────────
+
+/** Returns the end date (start of next cycle) given a cycle's start date + frequency. */
+export const getNextCycleEndDate = (startDate: string, freq: RecurringFrequency, customDays?: number): string => {
+  const d = parseISO(startDate);
+  let next: Date;
+  switch (freq) {
+    case 'daily':     next = addDays(d, 1); break;
+    case 'weekly':    next = addWeeks(d, 1); break;
+    case 'monthly':   next = addMonths(d, 1); break;
+    case 'quarterly': next = addQuarters(d, 1); break;
+    case 'yearly':    next = addYears(d, 1); break;
+    case 'custom':    next = addDays(d, customDays ?? 1); break;
+    default:          next = addMonths(d, 1);
+  }
+  return format(next, 'yyyy-MM-dd');
+};
+
+/** True if today is on or after the current cycle's endDate. */
+export const isCycleDue = (event: SplitEvent): boolean => {
+  if (!event.isRecurring || !event.cycles || event.cycles.length === 0) return false;
+  const current = event.cycles.find(c => c.id === event.currentCycleId);
+  if (!current || current.status === 'settled') return false;
+  const today = startOfDay(new Date());
+  const end = parseISO(current.endDate);
+  return !isBefore(today, end); // today >= endDate
+};
+
+/** Creates a brand-new SplitCycle object for the next period. */
+export const buildNewCycle = (
+  event: SplitEvent,
+  prevCycle?: SplitCycle,
+  copyItems: boolean = false
+): SplitCycle => {
+  const startDate = prevCycle ? prevCycle.endDate : (event.cycleStartDate || format(new Date(event.createdAt), 'yyyy-MM-dd'));
+  const endDate = getNextCycleEndDate(startDate, event.frequency ?? 'monthly', event.customDays);
+  const cycleNumber = prevCycle ? prevCycle.cycleNumber + 1 : 1;
+  return {
+    id: crypto.randomUUID ? crypto.randomUUID() : `cycle-${Date.now()}`,
+    cycleNumber,
+    startDate,
+    endDate,
+    items: copyItems && prevCycle ? [...prevCycle.items.map(i => ({ ...i, id: crypto.randomUUID ? crypto.randomUUID() : `item-${Date.now()}-${i.id}` }))] : [],
+    paidPeople: [],
+    status: 'active',
+  };
+};
+
+/**
+ * One-time migration: takes a legacy recurring event (flat items/paidPeople)
+ * and wraps everything into Cycle 1, returning the updated event.
+ */
+export const migrateEventToCycles = (event: SplitEvent): SplitEvent => {
+  if (!event.isRecurring) return event;
+  if (event.cycles && event.cycles.length > 0) return event; // already migrated
+
+  const startDate = event.cycleStartDate || format(new Date(event.createdAt), 'yyyy-MM-dd');
+  const endDate = getNextCycleEndDate(startDate, event.frequency ?? 'monthly', event.customDays);
+  const cycle1: SplitCycle = {
+    id: crypto.randomUUID ? crypto.randomUUID() : `cycle-${Date.now()}`,
+    cycleNumber: 1,
+    startDate,
+    endDate,
+    items: event.items ?? [],
+    paidPeople: event.paidPeople ?? [],
+    status: event.status ?? 'active',
+  };
+  return {
+    ...event,
+    cycles: [cycle1],
+    currentCycleId: cycle1.id,
+  };
+};

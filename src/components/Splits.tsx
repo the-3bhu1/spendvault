@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
-import { Plus, Users, ChevronRight, Share2, Trash2, Receipt, Check, Search, ChevronDown, Calendar, Edit2, Repeat } from 'lucide-react';
+import { Plus, Users, ChevronRight, Share2, Trash2, Receipt, Check, Search, ChevronDown, Calendar, Edit2, Repeat, ChevronLeft, AlertTriangle, Copy } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 import { useFinance } from '../FinanceContext';
-import type { SplitEvent, SplitItem, RecurringFrequency } from '../types';
-import { generateId, formatDateString } from '../utils';
+import type { SplitEvent, SplitItem, SplitCycle, RecurringFrequency } from '../types';
+import { generateId, formatDateString, isCycleDue, buildNewCycle, migrateEventToCycles } from '../utils';
 import { SubviewWrapper } from './SubviewWrapper.tsx';
 import { CustomPicker } from './CustomPicker';
 
@@ -23,14 +23,50 @@ export default function Splits() {
   const [activeView, setActiveView] = useState<'main' | 'detail' | 'create_event'>('main');
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
-  const [newEvent, setNewEvent] = useState({ name: '', people: [] as string[], isRecurring: false, frequency: 'monthly' as RecurringFrequency, customDays: 1 });
+  const [newEvent, setNewEvent] = useState({ name: '', people: [] as string[], isRecurring: false, frequency: 'monthly' as RecurringFrequency, customDays: 1, cycleStartDate: format(new Date(), 'yyyy-MM-dd') });
   const [newPerson, setNewPerson] = useState('');
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   const selectedEvent = data.splitEvents?.find(e => e.id === selectedEventId);
 
+  useEffect(() => {
+    const openTourSplitDetail = () => {
+      const demoEvent = data.splitEvents?.find(event => event.id === 'demo_split_1') || data.splitEvents?.[0];
+      if (!demoEvent) return;
+      setSelectedEventId(demoEvent.id);
+      setActiveView('detail');
+    };
+    const closeTourSplitDetail = () => {
+      setSelectedEventId(null);
+      setActiveView('main');
+    };
+
+    window.addEventListener('tour-open-split-detail', openTourSplitDetail);
+    window.addEventListener('tour-close-split-detail', closeTourSplitDetail);
+    return () => {
+      window.removeEventListener('tour-open-split-detail', openTourSplitDetail);
+      window.removeEventListener('tour-close-split-detail', closeTourSplitDetail);
+    };
+  }, [data.splitEvents]);
+
   const handleCreateEvent = () => {
     if (!newEvent.name || newEvent.people.length === 0) return;
+
+    // For recurring events, immediately create Cycle 1
+    let cycles: SplitCycle[] | undefined = undefined;
+    let currentCycleId: string | undefined = undefined;
+    if (newEvent.isRecurring) {
+      const cycle1 = buildNewCycle({
+        id: '', name: newEvent.name, people: newEvent.people, items: [],
+        createdAt: Date.now(), isRecurring: true,
+        frequency: newEvent.frequency,
+        customDays: newEvent.frequency === 'custom' ? newEvent.customDays : undefined,
+        cycleStartDate: newEvent.cycleStartDate,
+      });
+      cycles = [cycle1];
+      currentCycleId = cycle1.id;
+    }
+
     const event: SplitEvent = {
       id: generateId(),
       name: newEvent.name,
@@ -39,10 +75,13 @@ export default function Splits() {
       createdAt: Date.now(),
       isRecurring: newEvent.isRecurring,
       frequency: newEvent.isRecurring ? newEvent.frequency : undefined,
-      customDays: (newEvent.isRecurring && newEvent.frequency === 'custom') ? newEvent.customDays : undefined
+      customDays: (newEvent.isRecurring && newEvent.frequency === 'custom') ? newEvent.customDays : undefined,
+      cycleStartDate: newEvent.isRecurring ? newEvent.cycleStartDate : undefined,
+      cycles,
+      currentCycleId,
     };
     addSplitEvent(event);
-    setNewEvent({ name: '', people: [], isRecurring: false, frequency: 'monthly', customDays: 1 });
+    setNewEvent({ name: '', people: [], isRecurring: false, frequency: 'monthly', customDays: 1, cycleStartDate: format(new Date(), 'yyyy-MM-dd') });
     setActiveView('main');
   };
 
@@ -126,7 +165,7 @@ export default function Splits() {
   };
 
   return (
-    <div className="flex-col gap-6 animate-in" style={{ padding: '0.5rem 0' }}>
+    <div className="flex-col gap-6 animate-in splits-tab-root" style={{ padding: '0.5rem 0' }}>
       {activeView === 'main' && (
         <>
           <div className="flex justify-between align-center">
@@ -151,41 +190,54 @@ export default function Splits() {
               data.splitEvents.sort((a, b) => {
                 if (a.status !== b.status) return a.status === 'settled' ? 1 : -1;
                 return b.createdAt - a.createdAt;
-              }).map(event => (
-                <div key={event.id} className="card flex-col gap-4 clickable" onClick={() => {
-                  setSelectedEventId(event.id);
-                  setActiveView('detail');
-                }}>
-                  <div className="flex justify-between align-center">
-                    <div className="flex align-center gap-3">
-                      <div className="flex-center" style={{ 
-                        width: '40px', 
-                        height: '40px', 
-                        borderRadius: '12px', 
-                        background: event.status === 'settled' ? 'var(--bg-hover)' : 'var(--primary-color)', 
-                        color: event.status === 'settled' ? 'var(--text-muted)' : 'white' 
-                      }}>
-                        <Users size={20} />
-                      </div>
-                      <div className="flex-col">
-                        <div className="flex align-center gap-2">
-                          <span className="font-bold" style={{ opacity: event.status === 'settled' ? 0.6 : 1 }}>{event.name}</span>
-                          {event.isRecurring && (
-                            <span className="flex align-center gap-1 text-mono font-bold uppercase" style={{ fontSize: '8px', padding: '1px 5px', background: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary-color)', borderRadius: '4px', border: '1px solid rgba(99, 102, 241, 0.2)', letterSpacing: '0.5px' }}>
-                              <Repeat size={10} /> {event.frequency === 'custom' && event.customDays ? `Every ${event.customDays} Days` : (event.frequency ? FREQUENCY_LABELS[event.frequency] : '')}
-                            </span>
-                          )}
-                          {event.status === 'settled' && (
-                            <span className="text-mono font-bold uppercase" style={{ fontSize: '8px', padding: '1px 5px', background: 'var(--bg-hover)', color: 'var(--text-muted)', borderRadius: '4px', border: '1px solid var(--border-color)', letterSpacing: '0.5px' }}>Settled</span>
-                          )}
+              }).map(event => {
+                const overdue = isCycleDue(event);
+                const currentCycle = event.cycles?.find(c => c.id === event.currentCycleId);
+                const itemsCount = event.isRecurring ? (currentCycle?.items.length ?? 0) : event.items.length;
+                const cycleNum = currentCycle?.cycleNumber;
+
+                return (
+                  <div key={event.id} className="card flex-col gap-4 clickable tour-split-event-card" onClick={() => {
+                    setSelectedEventId(event.id);
+                    setActiveView('detail');
+                  }}>
+                    <div className="flex justify-between align-center">
+                      <div className="flex align-center gap-3">
+                        <div className="flex-center" style={{ 
+                          width: '40px', 
+                          height: '40px', 
+                          borderRadius: '12px', 
+                          background: event.status === 'settled' ? 'var(--bg-hover)' : 'var(--primary-color)', 
+                          color: event.status === 'settled' ? 'var(--text-muted)' : 'white' 
+                        }}>
+                          <Users size={20} />
                         </div>
-                        <span className="text-muted text-xs">{event.people.length} people • {event.items.length} items</span>
+                        <div className="flex-col">
+                          <div className="flex align-center gap-2">
+                            <span className="font-bold" style={{ opacity: event.status === 'settled' ? 0.6 : 1 }}>{event.name}</span>
+                            {event.isRecurring && (
+                              <span className="flex align-center gap-1 text-mono font-bold uppercase" style={{ fontSize: '8px', padding: '1px 5px', background: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary-color)', borderRadius: '4px', border: '1px solid rgba(99, 102, 241, 0.2)', letterSpacing: '0.5px' }}>
+                                <Repeat size={10} /> {event.frequency === 'custom' && event.customDays ? `Every ${event.customDays} Days` : (event.frequency ? FREQUENCY_LABELS[event.frequency] : '')}
+                                {cycleNum && <span style={{ marginLeft: '2px', opacity: 0.8 }}>• C{cycleNum}</span>}
+                              </span>
+                            )}
+                            {event.isRecurring && overdue && (
+                              <span className="flex align-center gap-1 text-mono font-bold uppercase" style={{ fontSize: '8px', padding: '1px 5px', background: 'rgba(251,191,36,0.1)', color: 'var(--warning)', borderRadius: '4px', border: '1px solid rgba(251,191,36,0.2)', letterSpacing: '0.5px' }}>
+                                Cycle Due
+                              </span>
+                            )}
+                            {event.status === 'settled' && (
+                              <span className="text-mono font-bold uppercase" style={{ fontSize: '8px', padding: '1px 5px', background: 'var(--bg-hover)', color: 'var(--text-muted)', borderRadius: '4px', border: '1px solid var(--border-color)', letterSpacing: '0.5px' }}>Settled</span>
+                            )}
+                          </div>
+                          <span className="text-muted text-xs">{event.people.length} people • {itemsCount} items</span>
+                        </div>
                       </div>
+                      <ChevronRight size={20} className="text-muted" />
                     </div>
-                    <ChevronRight size={20} className="text-muted" />
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </>
@@ -273,6 +325,20 @@ export default function Splits() {
               </div>
             )}
 
+            {newEvent.isRecurring && (
+              <div className="input-group fade-in" style={{ marginBottom: 0 }}>
+                <label>Cycle Start Date</label>
+                <input
+                  type="date"
+                  className="input-field"
+                  value={newEvent.cycleStartDate}
+                  onChange={e => setNewEvent(prev => ({ ...prev, cycleStartDate: e.target.value }))}
+                />
+                <p className="text-xs text-muted" style={{ marginTop: '0.5rem' }}>Cycle 1 begins on this date. Each subsequent cycle starts when the previous one ends.</p>
+              </div>
+            )}
+
+
             <div className="input-group" style={{ marginBottom: 0 }}>
               <label>People Involved</label>
               <div className="flex gap-2" style={{ marginBottom: '0.75rem' }}>
@@ -353,6 +419,36 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
   const [editIsRecurring, setEditIsRecurring] = useState(event.isRecurring || false);
   const [editFrequency, setEditFrequency] = useState(event.frequency || 'monthly');
   const [editCustomDays, setEditCustomDays] = useState(event.customDays || 1);
+  const [editCycleStartDate, setEditCycleStartDate] = useState(event.cycleStartDate || format(new Date(), 'yyyy-MM-dd'));
+
+  // ── Cycle state ──────────────────────────────────────────────
+  const [viewingCycleId, setViewingCycleId] = useState<string | null>(null);
+  const [showNewCycleDialog, setShowNewCycleDialog] = useState(false);
+  const [copyItemsOnNewCycle, setCopyItemsOnNewCycle] = useState(false);
+
+  // Migrate legacy recurring events to cycle model on first open
+  useEffect(() => {
+    if (event.isRecurring && (!event.cycles || event.cycles.length === 0)) {
+      const migrated = migrateEventToCycles(event);
+      onUpdate(migrated);
+    }
+  }, [event.id]);
+
+  // Initialise viewingCycleId to current cycle
+  useEffect(() => {
+    setViewingCycleId(event.currentCycleId ?? null);
+  }, [event.currentCycleId]);
+
+  // Derive the cycle being viewed (or fall back to current)
+  const allCycles = event.cycles ?? [];
+  const currentCycle = allCycles.find(c => c.id === event.currentCycleId) ?? null;
+  const viewingCycle: SplitCycle | null = allCycles.find(c => c.id === viewingCycleId) ?? currentCycle;
+  const isViewingCurrentCycle = viewingCycle?.id === event.currentCycleId;
+  const cycleOverdue = isViewingCurrentCycle && isCycleDue(event);
+
+  // For non-recurring events, effective items/paidPeople come from top-level fields
+  const effectiveItems = event.isRecurring ? (viewingCycle?.items ?? []) : event.items;
+  const effectivePaidPeople = event.isRecurring ? (viewingCycle?.paidPeople ?? []) : (event.paidPeople ?? []);
 
   const [selectorSearch, setSelectorSearch] = useState('');
   const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>({
@@ -379,6 +475,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
     setCustomShares({});
   };
 
+
   const selectedTx = selectedTxId === 'custom'
     ? { id: 'custom', description: customDescription, amount: parseFloat(customAmount) || 0 }
     : data.transactions.find(t => t.id === selectedTxId);
@@ -391,46 +488,32 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
     let finalShares: Record<string, number> | undefined = undefined;
     if (splitType === 'unequal') {
       finalShares = {};
-      if (includeMe) {
-        finalShares['me'] = parseFloat(customShares['me']) || 0;
-      }
-      involvedPeople.forEach(p => {
+      finalShares['me'] = parseFloat(customShares['me']) || 0;
+      event.people.forEach(p => {
         finalShares![p] = parseFloat(customShares[p]) || 0;
       });
     }
 
-    if (editingItemId) {
-      onUpdate({
-        ...event,
-        items: event.items.map(item => item.id === editingItemId ? {
-          ...item,
-          transactionId: selectedTxId || '',
-          amount: finalAmount,
-          description: finalDesc,
-          involvedPeople,
-          includeMe,
-          paidBy,
-          splitType,
-          shares: finalShares
-        } : item)
-      });
-    } else {
+    const buildUpdatedItems = (currentItems: SplitItem[]) => {
+      if (editingItemId) {
+        return currentItems.map(item => item.id === editingItemId ? {
+          ...item, transactionId: selectedTxId || '', amount: finalAmount,
+          description: finalDesc, involvedPeople, includeMe, paidBy, splitType, shares: finalShares
+        } : item);
+      }
       const newItem: SplitItem = {
-        id: generateId(),
-        transactionId: selectedTxId || '',
-        amount: finalAmount,
-        description: finalDesc,
-        involvedPeople: involvedPeople,
-        includeMe: includeMe,
-        splitType: splitType,
-        shares: finalShares,
-        paidBy: paidBy
+        id: generateId(), transactionId: selectedTxId || '',
+        amount: finalAmount, description: finalDesc,
+        involvedPeople, includeMe, splitType, shares: finalShares, paidBy
       };
+      return [...currentItems, newItem];
+    };
 
-      onUpdate({
-        ...event,
-        items: [...event.items, newItem]
-      });
+    if (event.isRecurring && viewingCycle) {
+      const updatedCycle: SplitCycle = { ...viewingCycle, items: buildUpdatedItems(viewingCycle.items) };
+      onUpdate({ ...event, cycles: (event.cycles ?? []).map(c => c.id === updatedCycle.id ? updatedCycle : c) });
+    } else {
+      onUpdate({ ...event, items: buildUpdatedItems(event.items) });
     }
 
     setIsItemModalOpen(false);
@@ -446,7 +529,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
     let totalSpent = 0;
     let myTotalShare = 0;
 
-    event.items.forEach(item => {
+    effectiveItems.forEach(item => {
       totalSpent += item.amount;
       const splitCount = item.involvedPeople.length + (item.includeMe ? 1 : 0);
       if (splitCount === 0) return;
@@ -455,7 +538,6 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
       const payer = item.paidBy || 'me';
 
       if (payer === 'me') {
-        // I paid, so others owe me
         item.involvedPeople.forEach(p => {
           if (balances[p]) {
             const friendShare = isUnequal ? (item.shares?.[p] ?? 0) : (item.amount / splitCount);
@@ -467,7 +549,6 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
           myTotalShare += myShare;
         }
       } else {
-        // A friend paid
         if (item.includeMe) {
           const myShare = isUnequal ? (item.shares?.['me'] ?? 0) : (item.amount / splitCount);
           myTotalShare += myShare;
@@ -478,7 +559,6 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
       }
     });
 
-    // Compute net for each person
     event.people.forEach(p => {
       balances[p].net = balances[p].owesMe - balances[p].iOweThem;
     });
@@ -488,11 +568,8 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
 
   const { balances, totalSpent, myTotalShare } = calculateTotals();
   
-  // Calculate total amount I am owed by others (positive net balances)
   const totalYouAreOwed = Object.values(balances).reduce((sum, b) => sum + (b.net > 0 ? b.net : 0), 0);
-  // Calculate total amount I owe others (negative net balances)
   const totalYouOwe = Object.values(balances).reduce((sum, b) => sum + (b.net < 0 ? Math.abs(b.net) : 0), 0);
-
   const netBalance = totalYouAreOwed - totalYouOwe;
 
   const handleSaveEvent = () => {
@@ -504,6 +581,15 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
     }));
     
     const updatedPaid = (event.paidPeople || []).filter(p => editEventPeople.includes(p));
+    // Also update people references inside cycles
+    const updatedCycles = (event.cycles ?? []).map(c => ({
+      ...c,
+      items: c.items.map(item => ({
+        ...item,
+        involvedPeople: item.involvedPeople.filter(p => !removedPeople.includes(p))
+      })),
+      paidPeople: c.paidPeople.filter(p => editEventPeople.includes(p))
+    }));
     
     onUpdate({
       ...event,
@@ -513,30 +599,54 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
       items: updatedItems,
       isRecurring: editIsRecurring,
       frequency: editIsRecurring ? editFrequency : undefined,
-      customDays: (editIsRecurring && editFrequency === 'custom') ? editCustomDays : undefined
+      customDays: (editIsRecurring && editFrequency === 'custom') ? editCustomDays : undefined,
+      cycleStartDate: editIsRecurring ? editCycleStartDate : undefined,
+      cycles: updatedCycles.length > 0 ? updatedCycles : undefined,
     });
     setEditingEvent(false);
   };
 
   const handleTogglePaid = (person: string) => {
-    const isActuallySettled = event.status === 'settled' && (event.paidPeople || []).length === 0;
-    // If manually settled (no paidPeople tracking), don't allow toggling individual ticks
-    if (isActuallySettled) return;
-    
-    const currentPaid = event.paidPeople || [];
-    const isPaid = currentPaid.includes(person);
-    const newPaid = isPaid
-      ? currentPaid.filter(p => p !== person)
-      : [...currentPaid, person];
-    
-    // Auto-settle if all people have paid
-    const allPaid = event.people.every(p => newPaid.includes(p));
-    
-    onUpdate({
-      ...event,
-      paidPeople: newPaid,
-      status: allPaid ? 'settled' : 'active'
-    });
+    if (event.isRecurring && viewingCycle) {
+      // Cycle-aware toggle
+      if (!isViewingCurrentCycle) return; // read-only for past cycles
+      const currentPaid = viewingCycle.paidPeople;
+      const isPaid = currentPaid.includes(person);
+      const newPaid = isPaid ? currentPaid.filter(p => p !== person) : [...currentPaid, person];
+      const allPaid = event.people.every(p => newPaid.includes(p));
+      const updatedCycle: SplitCycle = { ...viewingCycle, paidPeople: newPaid, status: allPaid ? 'settled' : 'active' };
+      onUpdate({ ...event, cycles: (event.cycles ?? []).map(c => c.id === updatedCycle.id ? updatedCycle : c) });
+    } else {
+      // Non-recurring legacy toggle
+      const isActuallySettled = event.status === 'settled' && (event.paidPeople || []).length === 0;
+      if (isActuallySettled) return;
+      const currentPaid = event.paidPeople || [];
+      const isPaid = currentPaid.includes(person);
+      const newPaid = isPaid ? currentPaid.filter(p => p !== person) : [...currentPaid, person];
+      const allPaid = event.people.every(p => newPaid.includes(p));
+      onUpdate({ ...event, paidPeople: newPaid, status: allPaid ? 'settled' : 'active' });
+    }
+  };
+
+  const handleStartNewCycle = (copyItems: boolean) => {
+    if (!currentCycle) return;
+    // Freeze current cycle: mark people still unpaid as carriedOver
+    const unpaid = event.people.filter(p => !currentCycle.paidPeople.includes(p));
+    const frozenCycle: SplitCycle = { ...currentCycle, status: 'settled', carriedOverPeople: unpaid.length > 0 ? unpaid : undefined };
+    const newCycle = buildNewCycle(event, frozenCycle, copyItems);
+    const updatedCycles = [...(event.cycles ?? []).map(c => c.id === frozenCycle.id ? frozenCycle : c), newCycle];
+    onUpdate({ ...event, cycles: updatedCycles, currentCycleId: newCycle.id, status: 'active' });
+    setViewingCycleId(newCycle.id);
+    setShowNewCycleDialog(false);
+  };
+
+  const handleDeleteItem = (itemId: string) => {
+    if (event.isRecurring && viewingCycle) {
+      const updatedCycle: SplitCycle = { ...viewingCycle, items: viewingCycle.items.filter(i => i.id !== itemId) };
+      onUpdate({ ...event, cycles: (event.cycles ?? []).map(c => c.id === updatedCycle.id ? updatedCycle : c) });
+    } else {
+      onUpdate({ ...event, items: event.items.filter(i => i.id !== itemId) });
+    }
   };
 
   return (
@@ -549,11 +659,86 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
       onBack={onBack}
     >
       <div className="flex-col gap-6">
-        <div className="flex justify-between align-center">
+
+        {/* ── Cycle selector (recurring events only) ── */}
+        {event.isRecurring && allCycles.length > 0 && (
+          <div className="card flex-col gap-2" style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)', padding: '0.75rem 1rem' }}>
+            <div className="flex justify-between align-center">
+              <button
+                className="btn btn-secondary"
+                style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                disabled={!viewingCycle || viewingCycle.cycleNumber <= 1}
+                onClick={() => {
+                  const idx = allCycles.findIndex(c => c.id === viewingCycleId);
+                  if (idx > 0) setViewingCycleId(allCycles[idx - 1].id);
+                }}
+              ><ChevronLeft size={16} /></button>
+
+              <div className="flex-col align-center gap-1">
+                <span className="text-mono font-bold" style={{ fontSize: '0.8rem', color: 'var(--accent)' }}>
+                  Cycle {viewingCycle?.cycleNumber ?? '—'} of {allCycles.length}
+                </span>
+                {viewingCycle && (
+                  <span className="text-xs text-muted">
+                    {formatDateString(viewingCycle.startDate)} → {formatDateString(viewingCycle.endDate)}
+                  </span>
+                )}
+                {!isViewingCurrentCycle && (
+                  <span className="text-mono font-bold uppercase" style={{ fontSize: '8px', padding: '1px 5px', background: 'var(--bg-hover)', color: 'var(--text-muted)', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                    Past — Read Only
+                  </span>
+                )}
+              </div>
+
+              <button
+                className="btn btn-secondary"
+                style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                disabled={!viewingCycle || viewingCycle.id === event.currentCycleId}
+                onClick={() => {
+                  const idx = allCycles.findIndex(c => c.id === viewingCycleId);
+                  if (idx < allCycles.length - 1) setViewingCycleId(allCycles[idx + 1].id);
+                }}
+              ><ChevronRight size={16} /></button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Carry-over warning ── */}
+        {event.isRecurring && viewingCycle && (viewingCycle.carriedOverPeople?.length ?? 0) > 0 && (
+          <div className="card flex align-center gap-3" style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', padding: '0.75rem 1rem' }}>
+            <AlertTriangle size={16} style={{ color: 'var(--warning)', flexShrink: 0 }} />
+            <div className="flex-col gap-1">
+              <span className="font-bold text-xs" style={{ color: 'var(--warning)' }}>Carried over from previous cycle</span>
+              <span className="text-xs text-muted">{viewingCycle.carriedOverPeople!.join(', ')} hadn't paid when the last cycle ended.</span>
+            </div>
+          </div>
+        )}
+
+        {/* ── New Cycle Due banner ── */}
+        {cycleOverdue && (
+          <div className="card flex justify-between align-center gap-3" style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', padding: '0.75rem 1rem' }}>
+            <div className="flex align-center gap-3">
+              <Repeat size={16} style={{ color: 'var(--warning)', flexShrink: 0 }} />
+              <div className="flex-col gap-1">
+                <span className="font-bold text-xs" style={{ color: 'var(--warning)' }}>New cycle is due</span>
+                <span className="text-xs text-muted">The current cycle ended on {formatDateString(currentCycle!.endDate)}.</span>
+              </div>
+            </div>
+            <button
+              className="btn btn-primary text-xs"
+              style={{ padding: '0.4rem 0.75rem', flexShrink: 0 }}
+              onClick={() => { setCopyItemsOnNewCycle(false); setShowNewCycleDialog(true); }}
+            >Start New</button>
+          </div>
+        )}
+
+        <div className="flex justify-between align-center tour-split-detail-header">
           <div className="flex-col">
             <div className="flex align-center gap-2">
-              <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>Consolidated Summary</span>
-              {event.status === 'settled' && (
+              <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>
+                {event.isRecurring ? `Cycle ${viewingCycle?.cycleNumber ?? ''} Summary` : 'Consolidated Summary'}
+              </span>
+              {(isViewingCurrentCycle ? viewingCycle?.status : 'settled') === 'settled' && (
                 <span className="text-mono font-bold uppercase" style={{ fontSize: '8px', padding: '1px 5px', background: 'var(--success-soft)', color: 'var(--success)', borderRadius: '4px', border: '1px solid var(--success)', letterSpacing: '0.5px' }}>Settled</span>
               )}
             </div>
@@ -570,6 +755,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                 setEditIsRecurring(event.isRecurring || false);
                 setEditFrequency(event.frequency || 'monthly');
                 setEditCustomDays(event.customDays || 1);
+                setEditCycleStartDate(event.cycleStartDate || format(new Date(), 'yyyy-MM-dd'));
                 setEditingEvent(true);
               }}
               title="Edit Event"
@@ -579,12 +765,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
             <button
               className="btn btn-secondary"
               style={{ 
-                width: '36px', 
-                height: '36px', 
-                padding: 0, 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center', 
+                width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 color: event.status === 'settled' ? 'var(--success)' : 'var(--text-muted)',
                 borderColor: event.status === 'settled' ? 'var(--success)' : undefined,
                 background: event.status === 'settled' ? 'var(--success-soft)' : undefined
@@ -595,7 +776,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
               <Check size={18} strokeWidth={3} />
             </button>
             <button
-              className="btn btn-secondary"
+              className="btn btn-secondary tour-split-share-btn"
               style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
               onClick={onShare}
               title="Share Summary"
@@ -613,7 +794,8 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
           </div>
         </div>
  
-        <div className="card grid grid-cols-2 gap-4" style={{ background: 'var(--bg-hover)', border: 'none' }}>
+
+        <div className="card grid grid-cols-2 gap-4 tour-split-detail-summary" style={{ background: 'var(--bg-hover)', border: 'none' }}>
           <div className="flex-col gap-1">
             <span className="text-xs text-muted">My Share</span>
             <span className="font-bold">₹{myTotalShare.toFixed(2)}</span>
@@ -634,7 +816,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
           </div>
         </div>
  
-        <div className="flex-col">
+        <div className="flex-col tour-split-per-person">
           <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px', marginBottom: '0.5rem', padding: '0 0.5rem' }}>Per Person</span>
           {event.people.map((person, idx) => {
             const isPaid = event.paidPeople?.includes(person);
@@ -671,7 +853,11 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                   }}>{person}</span>
                 </div>
                 <div className="flex-col align-end">
-                  {netVal > 0 ? (
+                  {isPaid ? (
+                    <span className="font-bold text-sm" style={{ color: 'var(--success)' }}>
+                      paid
+                    </span>
+                  ) : netVal > 0 ? (
                     <span className="font-bold text-sm" style={{ color: 'var(--success)' }}>
                       owes you ₹{netVal.toFixed(2)}
                     </span>
@@ -690,8 +876,8 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
 
         <div className="flex-col gap-4">
           <div className="flex justify-between align-center">
-            <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>Expenses ({event.items.length})</span>
-            {event.status !== 'settled' && (
+            <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>Expenses ({effectiveItems.length})</span>
+            {event.status !== 'settled' && isViewingCurrentCycle && (
               <button
                 className="btn btn-primary flex align-center gap-2 text-xs"
                 style={{ padding: '0.4rem 0.8rem' }}
@@ -706,10 +892,10 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
           </div>
 
           <div className="flex-col gap-2">
-            {event.items.length === 0 ? (
+            {effectiveItems.length === 0 ? (
               <p className="text-center text-sm text-muted py-6">No expenses added to this split yet.</p>
             ) : (
-              event.items.map((item, idx) => (
+              effectiveItems.map((item, idx) => (
                 <div key={item.id} className="card flex-col gap-2" style={{ padding: '0.75rem' }}>
                   <div className="flex justify-between align-start">
                     <div className="flex-col" style={{ minWidth: 0, flex: 1 }}>
@@ -720,7 +906,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                       }}>{item.description}</span>
                       <span className="text-xs text-muted">₹{item.amount.toFixed(2)} • {item.involvedPeople.length + (item.includeMe ? 1 : 0)} people • Paid by: {item.paidBy === 'me' || !item.paidBy ? 'Me' : item.paidBy}</span>
                     </div>
-                    {event.status !== 'settled' && (
+                    {event.status !== 'settled' && isViewingCurrentCycle && (
                       <div className="flex gap-3" style={{ flexShrink: 0, marginLeft: '0.5rem' }}>
                         <button
                           className="btn btn-secondary"
@@ -733,6 +919,10 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                             setPaidBy(item.paidBy || 'me');
                             setSplitType(item.splitType || 'equal');
                             const initialShares: Record<string, string> = {};
+                            initialShares['me'] = "0";
+                            event.people.forEach(p => {
+                              initialShares[p] = "0";
+                            });
                             if (item.shares) {
                               Object.entries(item.shares).forEach(([k, v]) => {
                                 initialShares[k] = v.toString();
@@ -749,7 +939,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                         <button
                           className="btn btn-secondary"
                           style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                          onClick={() => onUpdate({ ...event, items: event.items.filter((_, i) => i !== idx) })}
+                          onClick={() => handleDeleteItem(item.id)}
                         >
                           <Trash2 size={14} className="text-danger" />
                         </button>
@@ -1158,7 +1348,8 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                     {(() => {
                       const isSplitValid = splitType === 'equal' 
                         ? (includeMe || involvedPeople.length > 0) 
-                        : (Math.abs(remainingAmount) < 0.01 && sumOfShares > 0);
+                        : (sumOfShares > 0);
+                      const isSumMatched = Math.abs(remainingAmount) < 0.01;
 
                       return (
                         <>
@@ -1166,8 +1357,8 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                             <div 
                               className="card flex-col gap-2" 
                               style={{ 
-                                background: isSplitValid ? 'rgba(34, 197, 94, 0.1)' : 'rgba(245, 158, 11, 0.1)', 
-                                borderColor: isSplitValid ? 'var(--success)' : 'var(--accent-color)', 
+                                background: isSumMatched ? 'rgba(34, 197, 94, 0.1)' : 'rgba(245, 158, 11, 0.1)', 
+                                borderColor: isSumMatched ? 'var(--success)' : 'var(--accent-color)', 
                                 marginTop: '1rem',
                                 padding: '0.75rem 1rem',
                                 borderRadius: '0px',
@@ -1175,13 +1366,13 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                                 alignItems: 'stretch'
                               }}
                             >
-                              <span className="text-xs font-bold" style={{ color: isSplitValid ? 'var(--success)' : 'var(--accent-color)' }}>
-                                {isSplitValid 
+                              <span className="text-xs font-bold" style={{ color: isSumMatched ? 'var(--success)' : 'var(--accent-color)' }}>
+                                {isSumMatched 
                                   ? '✅\u00A0\u00A0All split shares match the total perfectly!' 
-                                  : `⚠️\u00A0\u00A0Sum matches: ₹${sumOfShares.toFixed(2)} / ₹${totalAmount.toFixed(2)} (${remainingAmount > 0 ? `₹${remainingAmount.toFixed(2)} remaining` : `₹${Math.abs(remainingAmount).toFixed(2)} over`})`
+                                  : `⚠️\u00A0\u00A0Sum adjusted: ₹${sumOfShares.toFixed(2)} / ₹${totalAmount.toFixed(2)} (${remainingAmount > 0 ? `₹${remainingAmount.toFixed(2)} remaining` : `₹${Math.abs(remainingAmount).toFixed(2)} over`})`
                                 }
                               </span>
-                              {!isSplitValid && remainingAmount > 0.01 && (
+                              {!isSumMatched && remainingAmount > 0.01 && (
                                 <button
                                   type="button"
                                   className="btn btn-secondary text-xs"
@@ -1201,12 +1392,14 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                                   }}
                                   onClick={() => {
                                     const allCandidates = ['me', ...event.people];
-                                    const emptyCandidates = allCandidates.filter(p => !customShares[p] || customShares[p].trim() === '' || parseFloat(customShares[p]) === 0);
+                                    const emptyCandidates = allCandidates.filter(p => customShares[p] === undefined || customShares[p].trim() === '');
                                     if (emptyCandidates.length > 0) {
-                                      const sharePerPerson = (remainingAmount / emptyCandidates.length).toFixed(2);
+                                      const count = emptyCandidates.length;
+                                      const baseShare = Math.round(remainingAmount / count);
+
                                       const updatedShares = { ...customShares };
                                       emptyCandidates.forEach(p => {
-                                        updatedShares[p] = sharePerPerson;
+                                        updatedShares[p] = baseShare.toString();
                                       });
                                       setCustomShares(updatedShares);
                                       
@@ -1231,7 +1424,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
 
                           <div className="modal-footer" style={{ marginTop: 'auto', paddingTop: '2rem' }}>
                             <button
-                              className="btn btn-primary w-100"
+                               className="btn btn-primary w-100"
                               style={{ padding: '1rem', borderRadius: '0px' }}
                               onClick={handleSaveItem}
                               disabled={!isSplitValid}
@@ -1378,6 +1571,47 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
           </div>
         </div>
         )}
+
+        {showNewCycleDialog && (
+          <div className="modal-overlay flex-center" style={{ zIndex: 2500 }}>
+            <div className="modal-content animate-in flex-col" onClick={e => e.stopPropagation()} style={{ padding: '1.5rem', width: '90%', maxWidth: '400px' }}>
+              <div className="flex justify-between align-center" style={{ marginBottom: '1rem' }}>
+                <h3 style={{ margin: 0 }}>Start New Cycle</h3>
+                <button onClick={() => setShowNewCycleDialog(false)} style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
+              </div>
+              
+              <div className="flex-col gap-4">
+                <p className="text-sm text-muted">
+                  This will freeze the current cycle and start a fresh one from today. Any people who haven't paid yet will be carried over.
+                </p>
+
+                <div className="card flex align-center justify-between clickable" onClick={() => setCopyItemsOnNewCycle(!copyItemsOnNewCycle)} style={{ padding: '1rem' }}>
+                  <div className="flex align-center gap-3">
+                    <Copy size={18} className="text-primary" />
+                    <div className="flex-col">
+                      <span className="font-bold text-sm">Copy previous expenses</span>
+                      <span className="text-xs text-muted">Carry forward last cycle's items as a template</span>
+                    </div>
+                  </div>
+                  <div style={{
+                    width: '24px', height: '24px', borderRadius: '6px',
+                    border: `2px solid ${copyItemsOnNewCycle ? 'var(--primary-color)' : 'var(--border-color)'}`,
+                    background: copyItemsOnNewCycle ? 'var(--primary-color)' : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  }}>
+                    {copyItemsOnNewCycle && <Check size={14} color="white" strokeWidth={4} />}
+                  </div>
+                </div>
+
+                <div className="flex gap-3" style={{ marginTop: '0.5rem' }}>
+                  <button className="btn btn-secondary flex-1" onClick={() => setShowNewCycleDialog(false)}>Cancel</button>
+                  <button className="btn btn-primary flex-1" onClick={() => handleStartNewCycle(copyItemsOnNewCycle)}>Start Cycle</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </SubviewWrapper>
   );

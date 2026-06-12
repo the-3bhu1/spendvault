@@ -9,6 +9,23 @@ import RollingNumber from './RollingNumber';
 import type { Transaction } from '../types';
 import { CustomPicker } from './CustomPicker';
 
+const isCountableTransaction = (tx: Transaction) => {
+  const catLower = (tx.category || '').toLowerCase();
+  // Scenario 1, 2, 3: Transfer, CC Payment, SIP, NCMC Travel Recharge
+  if (['transfer', 'cc payment', 'sip', 'ncmc travel recharge'].includes(catLower)) {
+    return false;
+  }
+  // Scenario 4: Cashback auto log
+  if (catLower === 'cashback') {
+    return false;
+  }
+  // Scenario 5: Reward Split auto log
+  if (tx.isRewardTransaction) {
+    return false;
+  }
+  return true;
+};
+
 export default function Insights() {
   const { data } = useFinance();
   
@@ -23,6 +40,12 @@ export default function Insights() {
   }, [data.transactions]);
 
   const [selectedMonth, setSelectedMonth] = useState<string>(availableMonths[0] || '');
+
+  useEffect(() => {
+    if (availableMonths.length > 0 && (!selectedMonth || !availableMonths.includes(selectedMonth))) {
+      setSelectedMonth(availableMonths[0]);
+    }
+  }, [availableMonths, selectedMonth]);
 
   const insights = useMemo<{
     displayMonth: string;
@@ -45,7 +68,7 @@ export default function Insights() {
 
     if (!selectedMonth) return null;
 
-    const monthsSorted = [...availableMonths].sort();
+    const monthsSorted = [...availableMonths].reverse();
     const currentIdx = monthsSorted.indexOf(selectedMonth);
     const prevMonth = currentIdx > 0 ? monthsSorted[currentIdx - 1] : null;
 
@@ -59,7 +82,7 @@ export default function Insights() {
       const acc: Record<string, number> = {};
       let biggest: Transaction | null = null;
       txs.forEach(t => {
-        const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge';
+        const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge' || t.category.toLowerCase() === 'sip';
         if (isSystemType) return;
         const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
         
@@ -86,14 +109,14 @@ export default function Insights() {
     
     const weekendSpend = monthTxs.filter(t => {
       const d = new Date(t.date).getDay();
-      const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge';
+      const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge' || t.category.toLowerCase() === 'sip';
       if (isSystemType) return false;
       const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
       return (d === 0 || d === 6) && t.type === 'debit' && effectiveAmount > 0;
     }).reduce((s, t) => s + (t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0))), 0);
 
     const recurringSpend = monthTxs.filter(t => {
-      const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge';
+      const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge' || t.category.toLowerCase() === 'sip';
       if (isSystemType) return false;
       const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
       return t.isRecurring && t.type === 'debit' && effectiveAmount > 0;
@@ -110,7 +133,7 @@ export default function Insights() {
       topCategory: topCategory ? { name: topCategory[0], amount: topCategory[1] } : null,
       topAccount: topAccount ? { name: topAccount[0], amount: topAccount[1] } : null,
       biggestTx: currentStats.biggest,
-      txCount: monthTxs.length,
+      txCount: monthTxs.filter(isCountableTransaction).length,
       catSpend: currentStats.cat,
       accSpend: currentStats.acc,
       prevCatSpend: prevStats.cat,
@@ -121,7 +144,7 @@ export default function Insights() {
       streakDays: Array.from({ length: daysInMonth }, (_, i) => {
         const dStr = `${y}-${m.toString().padStart(2, '0')}-${(i + 1).toString().padStart(2, '0')}`;
         const dayTxs = monthTxs.filter(t => {
-          const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge';
+          const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge' || t.category.toLowerCase() === 'sip';
           if (isSystemType) return false;
           const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
           return t.date === dStr && t.type === 'debit' && effectiveAmount > 0;
@@ -143,7 +166,7 @@ export default function Insights() {
     return last6Months.map(m => {
       const txs = data.transactions.filter(t => t.date.startsWith(m));
       const spend = txs.reduce((s, t) => {
-        const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge';
+        const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge' || t.category.toLowerCase() === 'sip';
         if (isSystemType) return s;
         const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
         return (t.type === 'debit' && effectiveAmount > 0) ? s + effectiveAmount : s;
@@ -178,7 +201,7 @@ export default function Insights() {
   const ACC_COLORS = ['#8b5cf6', '#ec4899', '#f59e0b', '#38bdf8', '#10b981', '#ef4444'];
 
   return (
-    <div className="flex-col gap-6">
+    <div className="flex-col gap-6 insights-tab-root">
       <div className="flex justify-between align-center">
         <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>insights</h2>
         {availableMonths.length > 0 && (

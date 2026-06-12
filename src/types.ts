@@ -87,6 +87,8 @@ export interface Transaction {
   paymentSourceAccountId?: string;
   ccPaymentCycleTarget?: 'current_cycle' | 'previous_statement';
   isCCPaymentRecord?: boolean;
+  sipAllottedAmount?: number;
+  sipCharges?: number;
 }
 
 export interface CashbackStatement {
@@ -111,6 +113,8 @@ export interface User {
   biometricsEnabled: boolean;
   autoLogSms?: boolean;
   enablePassiveTransactions?: boolean;
+  hasSeenTour?: boolean;
+  hasSeenFeatureTours?: Record<string, boolean>;
 }
 
 export interface SplitItem {
@@ -125,17 +129,32 @@ export interface SplitItem {
   paidBy?: string; // Who paid for this expense: 'me' or name of friend
 }
 
+export interface SplitCycle {
+  id: string;
+  cycleNumber: number;         // 1-indexed
+  startDate: string;           // 'YYYY-MM-DD'
+  endDate: string;             // 'YYYY-MM-DD' — first day of next cycle (exclusive)
+  items: SplitItem[];          // snapshot of items added in this cycle
+  paidPeople: string[];        // who settled in THIS cycle
+  status: 'active' | 'settled';
+  carriedOverPeople?: string[]; // people still unpaid when this cycle ended
+}
+
 export interface SplitEvent {
   id: string;
   name: string;
   people: string[];
-  paidPeople?: string[]; // Names of people who have settled their share
-  items: SplitItem[];
+  paidPeople?: string[]; // Names of people who have settled their share (non-recurring events)
+  items: SplitItem[];    // Used for non-recurring events; for recurring, use cycles[].items
   createdAt: number;
   status?: 'active' | 'settled';
   isRecurring?: boolean;
   frequency?: RecurringFrequency;
   customDays?: number;
+  // Recurring-only fields:
+  cycleStartDate?: string;   // 'YYYY-MM-DD' — user-set anchor date for cycle 1
+  cycles?: SplitCycle[];     // all cycles (historical + current)
+  currentCycleId?: string;   // ID of the currently active cycle
 }
 
 export type RecurringFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'custom';
@@ -147,6 +166,7 @@ export interface DebtTransaction {
   description: string;
   type: 'lent' | 'borrowed' | 'repayment_received' | 'repayment_sent';
   linkedTxId?: string;
+  markedDone?: boolean;
 }
 
 export interface Debt {
@@ -167,6 +187,7 @@ export interface RecurringBill {
   customDays?: number; // Used when frequency is 'custom'
   nextDueDate: string; // ISO format 'YYYY-MM-DD'
   accountId?: string; // Preferred account to pay from
+  linkedSipAccountId?: string; // SIP account to credit when logging (only for SIP category)
   type: TransactionType;
   isActive: boolean;
   lastPaidDate?: string; // ISO format 'YYYY-MM-DD'

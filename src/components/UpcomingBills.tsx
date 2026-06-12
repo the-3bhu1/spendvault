@@ -94,7 +94,8 @@ export default function UpcomingBills() {
     frequency: 'monthly',
     nextDueDate: format(new Date(), 'yyyy-MM-dd'),
     isActive: true,
-    type: 'debit'
+    type: 'debit',
+    linkedSipAccountId: undefined
   });
 
   const getDaysRemaining = (dateStr: string) => {
@@ -131,7 +132,8 @@ export default function UpcomingBills() {
       frequency: 'monthly',
       nextDueDate: format(new Date(), 'yyyy-MM-dd'),
       isActive: true,
-      type: 'debit'
+      type: 'debit',
+      linkedSipAccountId: undefined
     });
   };
 
@@ -151,6 +153,9 @@ export default function UpcomingBills() {
           if (bill.frequency === 'monthly') return isSameMonth;
           return true; // For non-monthly, any recent link counts
         }
+
+        // Bills with a linked SIP account use only explicit recurringBillId — skip fuzzy
+        if (bill.linkedSipAccountId) return false;
 
         // Fallback to fuzzy match
         const tDate = new Date(t.date);
@@ -219,7 +224,7 @@ export default function UpcomingBills() {
   }, [data.transactions, data.recurringBills, data.accounts]);
 
   return (
-    <div className="flex-col gap-6 animate-in" style={{ padding: '0.5rem 0' }}>
+    <div className="flex-col gap-6 animate-in bills-tab-root" style={{ padding: '0.5rem 0' }}>
       {activeView === 'main' && (
         <>
           <div className="flex justify-between align-center">
@@ -248,14 +253,14 @@ export default function UpcomingBills() {
                 const isPaidCC = ('isPaid' in bill && bill.isPaid);
 
                 return (
-                  <div key={bill.id} className="card flex-col gap-5" style={{
+                  <div key={bill.id} className="card flex-col gap-5 tour-bill-card" style={{
                     opacity: isPaidCC ? 0.7 : 1,
                     border: '2px solid var(--border-color)',
                     boxShadow: '4px 4px 0 var(--border-color)',
                     transition: 'transform 0.2s ease'
                   }}>
                     <div className="flex justify-between align-start">
-                      <div className="flex align-center gap-4">
+                      <div className="flex align-center gap-4" style={{ flex: 1, minWidth: 0 }}>
                         <div className="flex-center" style={{
                           width: '48px',
                           height: '48px',
@@ -273,7 +278,7 @@ export default function UpcomingBills() {
                           </span>
                         </div>
                       </div>
-                      <div className="flex align-start gap-2">
+                      <div className="flex align-start gap-2" style={{ flexShrink: 0, marginLeft: '0.75rem' }}>
                         <div className="flex-col align-end">
                           <span className={`text-xl font-bold ${isOverdue && !isPaidCC ? 'text-negative' : ''}`} style={{ fontFamily: 'var(--font-mono)' }}>
                             {bill.amount > 0 ? `₹${bill.amount.toLocaleString()}` : isPaidCC ? 'PAID' : '--'}
@@ -283,7 +288,8 @@ export default function UpcomingBills() {
                             background: isPaidCC ? 'rgba(16, 185, 129, 0.1)' : isOverdue ? 'var(--negative-color)' : isUrgent ? 'rgba(255, 159, 10, 0.1)' : 'var(--bg-hover)',
                             color: isPaidCC ? 'var(--success-color, #10b981)' : isOverdue ? 'white' : isUrgent ? 'var(--warning-color, #ff9f0a)' : 'var(--text-muted)',
                             marginTop: '6px',
-                            textTransform: 'uppercase'
+                            textTransform: 'uppercase',
+                            whiteSpace: 'nowrap'
                           }}>
                             {isPaidCC ? <Check size={12} /> : isOverdue ? <AlertCircle size={12} /> : <Clock size={12} />}
                             {isPaidCC ? 'No Dues' : formatDays(daysLeft)}
@@ -302,7 +308,7 @@ export default function UpcomingBills() {
                     </div>
 
                     {!isPaidCC && (
-                      <div className="flex gap-2" style={{ width: '100%', marginTop: '0.5rem' }}>
+                      <div className={`flex gap-2 tour-bill-actions${bill.id.startsWith('demo_') ? ' tour-demo-bill-actions' : ''}`} style={{ width: '100%', marginTop: '0.5rem' }}>
                         <button
                           className="btn flex-center gap-1"
                           style={{
@@ -477,10 +483,35 @@ export default function UpcomingBills() {
                 hideLabel={true}
                 value={newBill.category || 'Bills'}
                 options={data.categories.map(cat => ({ id: cat, name: cat }))}
-                onChange={val => setNewBill({ ...newBill, category: val })}
+                onChange={val => setNewBill({ ...newBill, category: val, linkedSipAccountId: val !== 'SIP' ? undefined : newBill.linkedSipAccountId })}
                 iconGetter={(id) => CATEGORY_ICONS[id] || <Wallet size={18} />}
               />
             </div>
+
+            {newBill.category === 'SIP' && (
+              <div className="input-group animate-in">
+                <label>Link to SIP Account</label>
+                <CustomPicker
+                  label="SIP Account"
+                  hideLabel={true}
+                  value={newBill.linkedSipAccountId || ''}
+                  options={[
+                    { id: '', name: 'None (Manual Log)' },
+                    ...data.accounts.filter(a => a.type === 'sips').map(a => ({ id: a.id, name: a.name }))
+                  ]}
+                  onChange={val => {
+                    const sipAcc = val ? data.accounts.find(a => a.id === val) : undefined;
+                    setNewBill({
+                      ...newBill,
+                      linkedSipAccountId: val || undefined,
+                      name: sipAcc ? sipAcc.name : newBill.name
+                    });
+                  }}
+                  iconGetter={() => <PieChart size={18} />}
+                />
+                <p className="text-xs text-muted" style={{ marginTop: '0.5rem' }}>When logging this SIP, the investment amount will automatically be credited to the linked account.</p>
+              </div>
+            )}
           </div>
         </SubviewWrapper>
       )}
@@ -491,14 +522,25 @@ export default function UpcomingBills() {
           setIsLogModalOpen(false);
           setSelectedBill(null);
         }}
-        initialData={selectedBill ? {
-          description: 'isCC' in selectedBill ? 'CC Bill Payment' : selectedBill.name,
-          amount: selectedBill.amount,
-          category: 'isCC' in selectedBill ? 'CC Payment' : (selectedBill.category || 'Bills'),
-          accountId: selectedBill.accountId || data.accounts[0]?.id || '',
-          type: 'isCC' in selectedBill ? 'credit' : (selectedBill.type || 'debit'),
-          recurringBillId: selectedBill.id
-        } : undefined}
+        initialData={selectedBill ? (() => {
+          const isSip = !('isCC' in selectedBill) && selectedBill.category === 'SIP';
+          const sipAccount = isSip && selectedBill.linkedSipAccountId
+            ? data.accounts.find(a => a.id === selectedBill.linkedSipAccountId)
+            : undefined;
+          return {
+            description: 'isCC' in selectedBill ? 'CC Bill Payment' : selectedBill.name,
+            amount: selectedBill.amount,
+            category: 'isCC' in selectedBill ? 'CC Payment' : (selectedBill.category || 'Bills'),
+            accountId: selectedBill.accountId || data.accounts[0]?.id || '',
+            type: 'isCC' in selectedBill ? 'credit' : (selectedBill.type || 'debit'),
+            recurringBillId: selectedBill.id,
+            ...(isSip && sipAccount ? {
+              paymentSourceAccountId: sipAccount.id,
+              sipAllottedAmount: selectedBill.amount,
+              sipCharges: 0
+            } : {})
+          };
+        })() : undefined}
       />
 
       <TransactionSelector

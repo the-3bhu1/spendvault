@@ -96,7 +96,7 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-2 gap-6 tour-dashboard-stats">
         <div className="card flex-col gap-2">
           <span className="text-muted text-sm">Total Spend</span>
           <h3 className="text-serif" style={{ fontSize: '2rem', fontWeight: 700 }}>{formatCurrency(totalSpend)}</h3>
