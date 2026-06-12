@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { format, addMonths } from 'date-fns';
 import { BellRing, X } from 'lucide-react';
 import { useFinance } from '../FinanceContext';

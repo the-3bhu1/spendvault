@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account } from '../types';
 import { generateId, formatCurrency, formatAmount, formatDateString, getBillingCycleForDate, calculateBalance, getCurrentMonthStr } from '../utils';
-import { ShoppingBag, Utensils, Zap, Car, HeartPulse, Film, CreditCard, Wallet, ArrowRightLeft, MoreHorizontal, Coins, BadgeDollarSign, Calendar, Activity, X, Search, Home, Gift, Landmark, Smartphone, Sparkles, ChevronRight, TrendingUp, PiggyBank, Train, PieChart, BarChart, BarChart3 } from 'lucide-react';
+import { ShoppingBag, Utensils, Zap, Car, HeartPulse, Film, CreditCard, Wallet, ArrowRightLeft, MoreHorizontal, Coins, BadgeDollarSign, Calendar, Activity, X, Search, Home, Gift, Landmark, Smartphone, Sparkles, ChevronRight, TrendingUp, Train, BarChart, BarChart3 } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
@@ -622,7 +622,6 @@ export default function Transactions() {
     if (isSip && paymentSourceAccountId && !editId) {
       const bankCounterpartId = generateId();
       currentLinkedIds.push(bankCounterpartId);
-      const destAccount = data.accounts.find(a => a.id === paymentSourceAccountId);
       const counterpartType = newTx.type === 'debit' ? 'credit' : 'debit';
 
       addTransaction({
@@ -1346,7 +1345,7 @@ export default function Transactions() {
                                   }
                                 });
 
-                                return sortedTxs.map((tx, index) => {
+                                return sortedTxs.map((tx) => {
                                   if (collapsedTxIds.has(tx.id)) return null;
 
                                   const linkedIds = tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []);

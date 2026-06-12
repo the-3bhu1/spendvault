@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { Plus, Users, ChevronRight, Share2, Trash2, Receipt, Check, Search, ChevronDown, Calendar, Edit2, Repeat, ChevronLeft, AlertTriangle, Copy } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
@@ -448,7 +448,6 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
 
   // For non-recurring events, effective items/paidPeople come from top-level fields
   const effectiveItems = event.isRecurring ? (viewingCycle?.items ?? []) : event.items;
-  const effectivePaidPeople = event.isRecurring ? (viewingCycle?.paidPeople ?? []) : (event.paidPeople ?? []);
 
   const [selectorSearch, setSelectorSearch] = useState('');
   const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>({
@@ -895,7 +894,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
             {effectiveItems.length === 0 ? (
               <p className="text-center text-sm text-muted py-6">No expenses added to this split yet.</p>
             ) : (
-              effectiveItems.map((item, idx) => (
+              effectiveItems.map((item) => (
                 <div key={item.id} className="card flex-col gap-2" style={{ padding: '0.75rem' }}>
                   <div className="flex justify-between align-start">
                     <div className="flex-col" style={{ minWidth: 0, flex: 1 }}>

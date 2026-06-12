@@ -586,6 +586,12 @@ export default function Settings() {
     rewardType: 'ryt', rewardUnit: 'ryu', pointsConversionRate: 'pcr',
     rewardOpeningBalances: 'rob', rewardBalanceAdjustments: 'rba',
     isRewardTransaction: 'irt', cashbackDestinationAccountId: 'cda',
+    // New fields for tours, sips, recurring splits, and debts
+    sipAllottedAmount: 'saa', sipCharges: 'sc',
+    hasSeenTour: 'hst', hasSeenFeatureTours: 'hsft',
+    cycles: 'cy', currentCycleId: 'cci', cycleStartDate: 'csd',
+    cycleNumber: 'cnm', startDate: 'sdt', endDate: 'edt', carriedOverPeople: 'cop',
+    markedDone: 'md', linkedSipAccountId: 'lsa',
   };
 
   const minifyPayload = (obj: any): any => {
@@ -796,6 +802,8 @@ export default function Settings() {
       if (min.ri) min.ri = getTinyId(min.ri);
       if (min.lts) min.lts = min.lts.map(getTinyId);
       if (min.lt) min.lt = getTinyId(min.lt);
+      if (min.psid) min.psid = getTinyId(min.psid);
+      if (min.rbid) min.rbid = getTinyId(min.rbid);
       if (min.d && min.d.length === 10) {
         min.d = min.d.replace(/-/g, '').substring(2);
       }
@@ -827,11 +835,36 @@ export default function Settings() {
       return min;
     });
 
+    // 5. Process recurring bills
+    const minifiedBills = (payload.recurringBills || []).map(b => {
+      const min = minifyPayload(b);
+      if (min.i) min.i = getTinyId(min.i);
+      if (min.x) min.x = getTinyId(min.x);
+      if (min.lsa) min.lsa = getTinyId(min.lsa);
+      return min;
+    });
+
+    // 6. Process split events
+    const minifiedSplits = (payload.splitEvents || []).map(se => {
+      const min = minifyPayload(se);
+      if (min.i) min.i = getTinyId(min.i);
+      if (min.cci) min.cci = getTinyId(min.cci);
+      if (min.cy) {
+        min.cy = min.cy.map((c: any) => {
+          if (c.i) c.i = getTinyId(c.i);
+          return c;
+        });
+      }
+      return min;
+    });
+
     const finalMinified = {
       ...minifyPayload(payload),
       T: minifiedTxs,
       A: minifiedAccs,
       H: minifiedDebts,
+      R: minifiedBills,
+      E: minifiedSplits,
       _m: idMap // Include the map for reconstruction
     };
 
@@ -891,6 +924,8 @@ export default function Settings() {
               if (t.rewardEarnedAccountId) t.rewardEarnedAccountId = expandId(t.rewardEarnedAccountId);
               if (t.linkedTransactionIds) t.linkedTransactionIds = t.linkedTransactionIds.map(expandId);
               if (t.linkedTransactionId) t.linkedTransactionId = expandId(t.linkedTransactionId);
+              if (t.paymentSourceAccountId) t.paymentSourceAccountId = expandId(t.paymentSourceAccountId);
+              if (t.recurringBillId) t.recurringBillId = expandId(t.recurringBillId);
               if (t.date) t.date = expandDate(t.date);
               return t;
             });
@@ -910,6 +945,23 @@ export default function Settings() {
                 });
               }
               return d;
+            });
+            expanded.recurringBills = (expanded.recurringBills || []).map((b: any) => {
+              if (b.id) b.id = expandId(b.id);
+              if (b.accountId) b.accountId = expandId(b.accountId);
+              if (b.linkedSipAccountId) b.linkedSipAccountId = expandId(b.linkedSipAccountId);
+              return b;
+            });
+            expanded.splitEvents = (expanded.splitEvents || []).map((se: any) => {
+              if (se.id) se.id = expandId(se.id);
+              if (se.currentCycleId) se.currentCycleId = expandId(se.currentCycleId);
+              if (se.cycles) {
+                se.cycles = se.cycles.map((c: any) => {
+                  if (c.id) c.id = expandId(c.id);
+                  return c;
+                });
+              }
+              return se;
             });
             delete (expanded as any)._m;
             jsonToParse = JSON.stringify(expanded);

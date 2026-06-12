@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import {
   ShoppingBag, Utensils, Zap, Car, HeartPulse, Film, CreditCard, Wallet,
   ArrowRightLeft, MoreHorizontal, Coins, BadgeDollarSign, Home, Gift,
-  Landmark, Sparkles, Calendar, TrendingUp, PiggyBank, Train, PieChart, BarChart
+  Landmark, Sparkles, Calendar, TrendingUp, Train, BarChart
 } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 import { useFinance } from '../FinanceContext';

@@ -37,6 +37,12 @@ const KEY_MAP: Record<string, string> = {
   rewardType: 'ryt', rewardUnit: 'ryu', pointsConversionRate: 'pcr',
   rewardOpeningBalances: 'rob', rewardBalanceAdjustments: 'rba',
   isRewardTransaction: 'irt', cashbackDestinationAccountId: 'cda',
+  // New fields for tours, sips, recurring splits, and debts
+  sipAllottedAmount: 'saa', sipCharges: 'sc',
+  hasSeenTour: 'hst', hasSeenFeatureTours: 'hsft',
+  cycles: 'cy', currentCycleId: 'cci', cycleStartDate: 'csd',
+  cycleNumber: 'cnm', startDate: 'sdt', endDate: 'edt', carriedOverPeople: 'cop',
+  markedDone: 'md', linkedSipAccountId: 'lsa',
 };
 
 const REVERSE_MAP = Object.fromEntries(Object.entries(KEY_MAP).map(([k, v]) => [v, k]));
