@@ -228,6 +228,9 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           if (parsed.user.enablePassiveTransactions === undefined) {
             parsed.user.enablePassiveTransactions = true;
           }
+          if (!parsed.user.hasSeenFeatureTours) {
+            parsed.user.hasSeenFeatureTours = {};
+          }
         }
 
         if (!parsed.theme) {
@@ -250,6 +253,11 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           // Fix for "year 0026" bug: convert 00xx-MM-dd to 20xx-MM-dd
           if (t.date && t.date.startsWith('00')) {
             t.date = '20' + t.date.substring(2);
+          }
+          // Migration: Backfill rewardEarnedType for old transactions that predate the field.
+          // Without this, undefined rewardEarnedType triggers fallback cashback recalculations.
+          if (t.rewardEarnedType === undefined) {
+            t.rewardEarnedType = (t.rewardEarned > 0 || t.expectedCashback > 0) ? 'delayed' : 'none';
           }
           return t;
         });

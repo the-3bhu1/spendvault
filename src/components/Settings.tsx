@@ -564,7 +564,7 @@ export default function Settings() {
     cashbackLevelId: 'cl', linkedTxId: 'lx',
     appliedBillingCycleYearMonth: 'abc', recurringBillId: 'rbid',
     paymentSourceAccountId: 'psid', ccPaymentCycleTarget: 'ctar', isCCPaymentRecord: 'iscr',
-    isRecurring: 'isrc', transactionId: 'txid',
+    isRecurring: 'isrc', transactionId: 'txid', expectedCashback: 'exc',
     name: 'n', balance: 'b', color: 'c', icon: 'o', isNcmcEnabled: 'z', 
     openingBalances: 'ob', statementDay: 'sd', dueDay: 'dd',
     defaultCashbackRate: 'dr', cashbackRates: 'cr', roundOffCashback: 'ro',
