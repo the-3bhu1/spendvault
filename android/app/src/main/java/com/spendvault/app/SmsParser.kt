@@ -23,16 +23,38 @@ object SmsParser {
 
         // Exclude request/approval spam messages
         val requestKeywords = listOf(
-            "requested money", 
-            "requesting money", 
-            "has requested", 
-            "request from", 
-            "request to pay", 
-            "click here to approve", 
-            "on approving the request", 
+            "requested money",
+            "requesting money",
+            "has requested",
+            "request from",
+            "request to pay",
+            "click here to approve",
+            "on approving the request",
             "request pending"
         )
         if (requestKeywords.any { lowerMessage.contains(it) }) return null
+
+        // Exclude promotional/offer SMS
+        val promoKeywords = listOf(
+            "valid till",
+            "valid until",
+            "t&c apply",
+            "terms and conditions",
+            "min. spend",
+            "min spends",
+            "minimum spend",
+            "cashback awaits",
+            "get cashback",
+            "earn cashback",
+            "offer ends",
+            "offer valid",
+            "use code",
+            "promo code",
+            "click to avail",
+            "avail now",
+            "limited period"
+        )
+        if (promoKeywords.any { lowerMessage.contains(it) }) return null
 
         val transactionKeywords = listOf("upi", "debited", "credited", "spent", "paid", "received", "txn", "sent", "top up", "topped up", "deducted", "card", "vpa")
         if (!transactionKeywords.any { lowerMessage.contains(it) }) return null

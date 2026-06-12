@@ -17,11 +17,13 @@ import { useFinance } from './FinanceContext';
 import AuthScreen from './components/AuthScreen';
 import OnboardingScreen from './components/OnboardingScreen';
 import AccountStatement from './components/AccountStatement';
+import AppTour from './components/AppTour';
+import BillAlertBanner from './components/BillAlertBanner';
 import type { Account } from './types';
 import SmsReader, { startSmsListener } from './services/SmsService';
 import { Capacitor } from '@capacitor/core';
 
-type Tab = 'dashboard' | 'accounts' | 'transactions' | 'cashback' | 'insights' | 'settings' | 'splits' | 'bills' | 'debts';
+export type Tab = 'dashboard' | 'accounts' | 'transactions' | 'cashback' | 'insights' | 'settings' | 'splits' | 'bills' | 'debts';
 
 import { App as CapApp } from '@capacitor/app';
 
@@ -42,7 +44,7 @@ function App() {
     if (!appRoot) return;
 
     // Define which tabs should reset to top vs resume
-    const resettingTabs = ['dashboard', 'settings', 'insights', 'cashback', 'splits', 'bills', 'debts'];
+    const resettingTabs = ['dashboard', 'insights', 'cashback', 'splits', 'bills', 'debts'];
     
     // 1. Restore scroll position
     const savedPos = resettingTabs.includes(activeTab) ? 0 : (scrollPositions.current[activeTab] || 0);
@@ -281,6 +283,20 @@ function App() {
     return <AuthScreen />;
   }
 
+  const activeTour = (() => {
+    if (!data.user) return null;
+    if (!data.user.hasSeenTour) return 'onboarding';
+
+    const featureTours = data.user.hasSeenFeatureTours || {};
+    if (activeTab === 'splits' && !featureTours.splits) return 'splits';
+    if (activeTab === 'debts' && !featureTours.debts) return 'debts';
+    if (activeTab === 'bills' && !featureTours.bills) return 'bills';
+    if (activeTab === 'cashback' && !featureTours.cashback) return 'cashback';
+    if (activeTab === 'insights' && !featureTours.insights) return 'insights';
+
+    return null;
+  })();
+
   return (
     <div ref={appRootRef} className="app-root fade-in">
       <nav className="navbar">
@@ -302,6 +318,8 @@ function App() {
           </button>
         </div>
       </nav>
+
+      <BillAlertBanner onNavigateToBills={() => setActiveTab('bills')} />
 
       {isHubOpen && (
         <div className="modal-overlay flex-center no-scroll" style={{ zIndex: 3000 }} onClick={() => setIsHubOpen(false)}>
@@ -502,6 +520,15 @@ function App() {
             PRESS BACK AGAIN TO EXIT
           </span>
         </div>
+      )}
+      {activeTour && isAuthenticated && (
+        <AppTour 
+          tourType={activeTour}
+          activeTab={activeTab} 
+          setActiveTab={setActiveTab} 
+          isHubOpen={isHubOpen} 
+          setIsHubOpen={setIsHubOpen} 
+        />
       )}
     </div>
   );

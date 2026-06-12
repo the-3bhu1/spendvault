@@ -51,6 +51,9 @@ class SmsReaderPlugin : Plugin() {
         private const val ENABLED_KEY = "smsAutoLogEnabled"
         private val queueLock = Any()
 
+        private const val RECENT_TX_KEY = "recentTxWindow"
+        private const val DUPLICATE_WINDOW_MS = 5 * 60 * 1000L // 5 minutes
+
         private const val CHANNEL_ID = "spendvault_transaction_alerts"
         private const val CHANNEL_NAME = "Transaction Alerts"
         private const val CHANNEL_DESC = "Notifications for auto-detected SMS bank transactions waiting for confirmation."
@@ -81,6 +84,13 @@ class SmsReaderPlugin : Plugin() {
                 return
             }
 
+            // Time-window dedup: same amount + account arriving within 5 minutes = duplicate SMS from same bank
+            val receivedAt = System.currentTimeMillis()
+            if (isTimedDuplicate(context, tx, receivedAt)) {
+                android.util.Log.d("SpendVaultSms", "Time-window duplicate skipped: amount=${tx.amount}, sourceId=${tx.sourceIdentifier}")
+                return
+            }
+
             // Save to persistent hash list (capped to last 100 entries)
             val newSet = processedSet.toMutableSet()
             newSet.add(dedupeKey)
@@ -91,6 +101,8 @@ class SmsReaderPlugin : Plugin() {
             } else {
                 prefs.edit().putStringSet("processedHashes", newSet).apply()
             }
+
+            recordRecentTx(context, tx, receivedAt)
 
             synchronized(queueLock) {
                 if (isAppInForeground && plugin != null && plugin.hasListeners("onTransaction")) {
@@ -234,6 +246,41 @@ class SmsReaderPlugin : Plugin() {
                 result = result.substring(0, result.length - 3)
             }
             return result
+        }
+
+        private fun isTimedDuplicate(context: Context, tx: Transaction, receivedAt: Long): Boolean {
+            if (tx.sourceIdentifier.isNullOrEmpty()) return false
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val array = JSONArray(prefs.getString(RECENT_TX_KEY, "[]"))
+            val cutoff = receivedAt - DUPLICATE_WINDOW_MS
+            for (i in 0 until array.length()) {
+                val entry = array.getJSONObject(i)
+                if (entry.getLong("receivedAt") < cutoff) continue
+                if (entry.getDouble("amount") == tx.amount &&
+                    entry.getString("sourceId") == tx.sourceIdentifier &&
+                    entry.getString("type") == tx.type) {
+                    return true
+                }
+            }
+            return false
+        }
+
+        private fun recordRecentTx(context: Context, tx: Transaction, receivedAt: Long) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val array = JSONArray(prefs.getString(RECENT_TX_KEY, "[]"))
+            val cutoff = receivedAt - DUPLICATE_WINDOW_MS
+            val fresh = JSONArray()
+            for (i in 0 until array.length()) {
+                val entry = array.getJSONObject(i)
+                if (entry.getLong("receivedAt") >= cutoff) fresh.put(entry)
+            }
+            val entry = JSONObject()
+            entry.put("amount", tx.amount)
+            entry.put("sourceId", tx.sourceIdentifier ?: "")
+            entry.put("type", tx.type)
+            entry.put("receivedAt", receivedAt)
+            fresh.put(entry)
+            prefs.edit().putString(RECENT_TX_KEY, fresh.toString()).apply()
         }
 
         private fun saveToQueue(context: Context, tx: JSONObject) {
