@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useFinance } from '../FinanceContext';
-import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X } from 'lucide-react';
+import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw } from 'lucide-react';
+import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols } from '../services/MarketDataService';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardNetwork } from '../types';
@@ -14,6 +15,15 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const [editId, setEditId] = useState<string | null>(null);
   const [viewingCard, setViewingCard] = useState<Account | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [prices, setPrices] = useState<Record<string, number>>(() => {
+    const symbols = data.accounts
+      .filter(a => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
+      .map(a => a.marketSymbol!);
+    const cached: Record<string, number> = {};
+    symbols.forEach(s => { const p = getCachedPrice(s); if (p !== null) cached[s] = p; });
+    return cached;
+  });
+  const [pricesLoading, setPricesLoading] = useState(false);
 
   useEffect(() => {
     const handleGlobalBack = (e: Event) => {
@@ -31,6 +41,18 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     window.addEventListener('appBackButton', handleGlobalBack);
     return () => window.removeEventListener('appBackButton', handleGlobalBack);
   }, [viewingCard, isModalOpen, deleteConfirmId]);
+
+  useEffect(() => {
+    const items = data.accounts
+      .filter(a => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
+      .map(a => ({ symbol: a.marketSymbol!, kind: (a.type === 'stocks' ? 'stock' : 'sip') as 'stock' | 'sip' }));
+    if (items.length === 0) return;
+    setPricesLoading(true);
+    fetchPricesForSymbols(items).then(result => {
+      setPrices(prev => ({ ...prev, ...result }));
+      setPricesLoading(false);
+    });
+  }, []);
 
   const handleLiquidate = (acc: Account) => {
     const currentMonth = getCurrentMonthStr();
@@ -356,6 +378,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
         : undefined,
       statementRounding: newAccount.statementRounding || 'none',
       numberOfShares: (newAccount.type === 'stocks' || newAccount.type === 'sips') ? newAccount.numberOfShares : undefined,
+      marketSymbol: (newAccount.type === 'stocks' || newAccount.type === 'sips') ? (newAccount.marketSymbol?.trim() || undefined) : undefined,
+      averagePrice: (newAccount.type === 'stocks' || newAccount.type === 'sips') ? newAccount.averagePrice : undefined,
       rewardUnit: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.rewardUnit : undefined,
       pointsConversionRate: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.pointsConversionRate : undefined,
       rewardType: (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.isCashbackEnabled ? (newAccount.rewardType || 'rupee') : undefined,
@@ -654,12 +678,85 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           .filter(t => t.accountId === acc.id && t.numberOfShares !== undefined)
                           .reduce((sum, t) => t.type === 'credit' ? sum + (t.numberOfShares ?? 0) : sum - (t.numberOfShares ?? 0), 0);
                         const totalShares = (acc.numberOfShares ?? 0) + txShares;
-                        if (acc.numberOfShares === undefined && txShares === 0) return null;
+                        const hasShares = acc.numberOfShares !== undefined || txShares !== 0;
+                        const isSip = acc.type === 'sips';
+                        const currentPrice = acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
+                        const hasPnLSetup = !!acc.marketSymbol && acc.averagePrice !== undefined && totalShares > 0;
+
+                        if (!hasShares && !hasPnLSetup) return null;
+
+                        const pnl = hasPnLSetup && currentPrice !== null
+                          ? (currentPrice - acc.averagePrice!) * totalShares
+                          : null;
+                        const pnlPct = hasPnLSetup && currentPrice !== null && acc.averagePrice! > 0
+                          ? ((currentPrice - acc.averagePrice!) / acc.averagePrice!) * 100
+                          : null;
+                        const pnlPos = pnl !== null && pnl >= 0;
+
                         return (
-                          <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                            <span className="text-mono text-muted text-xs">TOTAL SHARES</span>
-                            <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{totalShares}</span>
-                          </div>
+                          <>
+                            {hasShares && (
+                              <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                                <span className="text-mono text-muted text-xs">{isSip ? 'TOTAL UNITS' : 'TOTAL SHARES'}</span>
+                                <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{totalShares}</span>
+                              </div>
+                            )}
+                            {hasPnLSetup && (
+                              <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                                {currentPrice !== null ? (
+                                  <>
+                                    <div className="flex-col gap-0">
+                                      <span className="text-mono text-muted text-xs">{isSip ? 'CURRENT NAV' : 'LTP'}</span>
+                                      <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                        ₹{currentPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </span>
+                                    </div>
+                                    <div className="flex align-center gap-2">
+                                      {pnl !== null && pnlPct !== null && (
+                                        <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
+                                          <span className="text-mono text-muted text-xs">P&amp;L ({pnlPos ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
+                                          <span style={{ color: pnlPos ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                            {pnlPos ? '+' : '-'}₹{Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                          </span>
+                                        </div>
+                                      )}
+                                      <button
+                                        className="btn btn-secondary"
+                                        style={{ width: '28px', height: '28px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                                        title="Refresh price"
+                                        onClick={async () => {
+                                          const sym = acc.marketSymbol!;
+                                          const price = isSip ? await fetchMFNav(sym) : await fetchStockPrice(sym);
+                                          if (price !== null) setPrices(prev => ({ ...prev, [sym]: price }));
+                                        }}
+                                      >
+                                        <RefreshCw size={11} />
+                                      </button>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="text-mono text-muted text-xs">LIVE P&amp;L</span>
+                                    {pricesLoading ? (
+                                      <span className="text-xs text-muted">Fetching...</span>
+                                    ) : (
+                                      <button
+                                        className="btn btn-secondary"
+                                        style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
+                                        onClick={async () => {
+                                          const sym = acc.marketSymbol!;
+                                          const price = isSip ? await fetchMFNav(sym) : await fetchStockPrice(sym);
+                                          if (price !== null) setPrices(prev => ({ ...prev, [sym]: price }));
+                                        }}
+                                      >
+                                        Fetch
+                                      </button>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </>
                         );
                       })()}
                     </div>
@@ -816,18 +913,48 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
               )}
 
               {(newAccount.type === 'stocks' || newAccount.type === 'sips') && (
-                <div className="input-group">
-                  <label>Opening Shares (Optional)</label>
-                  <input
-                    type="number"
-                    className="input-field"
-                    value={newAccount.numberOfShares ?? ''}
-                    onChange={e => setNewAccount({ ...newAccount, numberOfShares: e.target.value ? parseFloat(e.target.value) : undefined })}
-                    placeholder="e.g. 100"
-                    step="any"
-                    min="0"
-                  />
-                </div>
+                <>
+                  <div className="input-group">
+                    <label>{newAccount.type === 'sips' ? 'Opening Units (Optional)' : 'Opening Shares (Optional)'}</label>
+                    <input
+                      type="number"
+                      className="input-field"
+                      value={newAccount.numberOfShares ?? ''}
+                      onChange={e => setNewAccount({ ...newAccount, numberOfShares: e.target.value ? parseFloat(e.target.value) : undefined })}
+                      placeholder="e.g. 100"
+                      step="any"
+                      min="0"
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label>{newAccount.type === 'sips' ? 'MF Scheme Code (Optional)' : 'Market Symbol (Optional)'}</label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      value={newAccount.marketSymbol || ''}
+                      onChange={e => setNewAccount({ ...newAccount, marketSymbol: e.target.value.toUpperCase() || undefined })}
+                      placeholder={newAccount.type === 'sips' ? 'e.g. 120503' : 'e.g. TCS.NS'}
+                      style={{ textTransform: newAccount.type === 'stocks' ? 'uppercase' : 'none' }}
+                    />
+                    <span className="text-xs text-muted" style={{ marginTop: '0.25rem', display: 'block' }}>
+                      {newAccount.type === 'sips'
+                        ? 'Find on mfapi.in — search your fund name to get the scheme code'
+                        : 'NSE stocks use .NS suffix (e.g. RELIANCE.NS, TCS.NS)'}
+                    </span>
+                  </div>
+                  <div className="input-group">
+                    <label>{newAccount.type === 'sips' ? 'Average NAV — ₹/unit (Optional)' : 'Average Buy Price — ₹/share (Optional)'}</label>
+                    <input
+                      type="number"
+                      className="input-field"
+                      value={newAccount.averagePrice ?? ''}
+                      onChange={e => setNewAccount({ ...newAccount, averagePrice: e.target.value ? parseFloat(e.target.value) : undefined })}
+                      placeholder="e.g. 3400.50"
+                      step="any"
+                      min="0"
+                    />
+                  </div>
+                </>
               )}
 
               {newAccount.type === 'credit_card' && (

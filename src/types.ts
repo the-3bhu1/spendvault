@@ -54,6 +54,8 @@ export interface Account {
 
   // Specific to stocks / sips
   numberOfShares?: number;
+  marketSymbol?: string;
+  averagePrice?: number;
   statementRounding?: RoundingRule;
   cashbackDestinationAccountId?: string;
   rewardUnit?: string;
