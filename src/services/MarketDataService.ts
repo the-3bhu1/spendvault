@@ -29,7 +29,12 @@ export async function fetchStockPrice(symbol: string): Promise<number | null> {
   try {
     const res = await fetch(
       `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`,
-      { headers: { Accept: 'application/json' } }
+      {
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+        },
+      }
     );
     const json = await res.json();
     const price: unknown = json?.chart?.result?.[0]?.meta?.regularMarketPrice;
