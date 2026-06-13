@@ -12,6 +12,7 @@ import {
   CreditCard,
   Clock,
   Trash2,
+  Pencil,
   Plus,
   Calendar,
   AlertCircle,
@@ -52,6 +53,7 @@ export default function UpcomingBills() {
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
   const [selectedBill, setSelectedBill] = useState<RecurringBill | null>(null);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [editingBillId, setEditingBillId] = useState<string | null>(null);
 
   const handleLinkTransaction = (transaction: any) => {
     if (!selectedBill) return;
@@ -114,17 +116,7 @@ export default function UpcomingBills() {
     return `In ${days} days`;
   };
 
-  const handleAddBill = () => {
-    if (!newBill.name || !newBill.amount) return;
-    if (newBill.frequency === 'custom' && !newBill.customDays) {
-      alert('Please specify the number of days for custom frequency.');
-      return;
-    }
-    addRecurringBill({
-      ...newBill as RecurringBill,
-      id: crypto.randomUUID()
-    });
-    setActiveView('main');
+  const resetForm = () => {
     setNewBill({
       name: '',
       amount: 0,
@@ -135,6 +127,22 @@ export default function UpcomingBills() {
       type: 'debit',
       linkedSipAccountId: undefined
     });
+    setEditingBillId(null);
+  };
+
+  const handleAddBill = () => {
+    if (!newBill.name || !newBill.amount) return;
+    if (newBill.frequency === 'custom' && !newBill.customDays) {
+      alert('Please specify the number of days for custom frequency.');
+      return;
+    }
+    if (editingBillId) {
+      updateRecurringBill({ ...newBill as RecurringBill, id: editingBillId });
+    } else {
+      addRecurringBill({ ...newBill as RecurringBill, id: crypto.randomUUID() });
+    }
+    setActiveView('main');
+    resetForm();
   };
 
 
@@ -259,51 +267,65 @@ export default function UpcomingBills() {
                     boxShadow: '4px 4px 0 var(--border-color)',
                     transition: 'transform 0.2s ease'
                   }}>
-                    <div className="flex justify-between align-start">
-                      <div className="flex align-center gap-4" style={{ flex: 1, minWidth: 0 }}>
+                    {/* Row 1: icon + name/frequency + action buttons */}
+                    <div className="flex justify-between align-start gap-3">
+                      <div className="flex align-center gap-3" style={{ flex: 1, minWidth: 0 }}>
                         <div className="flex-center" style={{
-                          width: '48px',
-                          height: '48px',
+                          width: '44px',
+                          height: '44px',
+                          flexShrink: 0,
                           borderRadius: '12px',
                           background: isPaidCC ? 'rgba(16, 185, 129, 0.1)' : isOverdue ? 'rgba(255, 59, 48, 0.1)' : 'var(--bg-hover)',
                           color: isPaidCC ? 'var(--success-color, #10b981)' : isOverdue ? 'var(--negative-color)' : 'var(--text-color)',
                           border: '1px solid var(--border-color)'
                         }}>
-                          {isPaidCC ? <CheckCircle2 size={24} /> : (('isCC' in bill) ? <CreditCard size={24} /> : (CATEGORY_ICONS[bill.category as string] || <Clock size={24} />))}
+                          {isPaidCC ? <CheckCircle2 size={22} /> : (('isCC' in bill) ? <CreditCard size={22} /> : (CATEGORY_ICONS[bill.category as string] || <Clock size={22} />))}
                         </div>
-                        <div className="flex-col gap-1">
-                          <span className="font-bold text-lg">{bill.name}</span>
+                        <div className="flex-col gap-1" style={{ minWidth: 0 }}>
+                          <span className="font-bold" style={{ fontSize: '1rem', lineHeight: 1.3 }}>{bill.name}</span>
                           <span className="text-muted text-xs font-medium uppercase tracking-wider">
                             {('isCC' in bill) ? (isPaidCC ? 'Next Statement Coming' : 'Credit Card Bill') : (bill.frequency === 'custom' ? `Every ${bill.customDays} Days` : FREQUENCY_LABELS[bill.frequency as RecurringFrequency])}
                           </span>
                         </div>
                       </div>
-                      <div className="flex align-start gap-2" style={{ flexShrink: 0, marginLeft: '0.75rem' }}>
-                        <div className="flex-col align-end">
-                          <span className={`text-xl font-bold ${isOverdue && !isPaidCC ? 'text-negative' : ''}`} style={{ fontFamily: 'var(--font-mono)' }}>
-                            {bill.amount > 0 ? `₹${bill.amount.toLocaleString()}` : isPaidCC ? 'PAID' : '--'}
-                          </span>
-                          <div className={`flex align-center gap-1 text-xs font-bold px-2 py-1`} style={{
-                            borderRadius: '6px',
-                            background: isPaidCC ? 'rgba(16, 185, 129, 0.1)' : isOverdue ? 'var(--negative-color)' : isUrgent ? 'rgba(255, 159, 10, 0.1)' : 'var(--bg-hover)',
-                            color: isPaidCC ? 'var(--success-color, #10b981)' : isOverdue ? 'white' : isUrgent ? 'var(--warning-color, #ff9f0a)' : 'var(--text-muted)',
-                            marginTop: '6px',
-                            textTransform: 'uppercase',
-                            whiteSpace: 'nowrap'
-                          }}>
-                            {isPaidCC ? <Check size={12} /> : isOverdue ? <AlertCircle size={12} /> : <Clock size={12} />}
-                            {isPaidCC ? 'No Dues' : formatDays(daysLeft)}
-                          </div>
-                        </div>
-                        {!('isCC' in bill) && (
+                      {!('isCC' in bill) && (
+                        <div className="flex gap-3" style={{ flexShrink: 0 }}>
                           <button
                             className="btn btn-secondary"
-                            style={{ color: 'var(--danger)', width: '34px', height: '34px', minHeight: 'auto', padding: 0, marginLeft: '0.5rem' }}
+                            style={{ width: '36px', height: '36px', minHeight: 'auto', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
+                            onClick={() => {
+                              setNewBill({ ...bill });
+                              setEditingBillId(bill.id);
+                              setActiveView('add');
+                            }}
+                          >
+                            <Pencil size={15} />
+                          </button>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ width: '36px', height: '36px', minHeight: 'auto', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }}
                             onClick={() => deleteRecurringBill(bill.id)}
                           >
-                            <Trash2 size={16} />
+                            <Trash2 size={15} />
                           </button>
-                        )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Row 2: amount + due badge */}
+                    <div className="flex justify-end align-center gap-3">
+                      <span className={`text-xl font-bold ${isOverdue && !isPaidCC ? 'text-negative' : ''}`} style={{ fontFamily: 'var(--font-mono)' }}>
+                        {bill.amount > 0 ? `₹${bill.amount.toLocaleString()}` : isPaidCC ? 'PAID' : '--'}
+                      </span>
+                      <div className="flex align-center gap-1 text-xs font-bold px-2 py-1" style={{
+                        borderRadius: '6px',
+                        background: isPaidCC ? 'rgba(16, 185, 129, 0.1)' : isOverdue ? 'var(--negative-color)' : isUrgent ? 'rgba(255, 159, 10, 0.1)' : 'var(--bg-hover)',
+                        color: isPaidCC ? 'var(--success-color, #10b981)' : isOverdue ? 'white' : isUrgent ? 'var(--warning-color, #ff9f0a)' : 'var(--text-muted)',
+                        textTransform: 'uppercase',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {isPaidCC ? <Check size={12} /> : isOverdue ? <AlertCircle size={12} /> : <Clock size={12} />}
+                        {isPaidCC ? 'No Dues' : formatDays(daysLeft)}
                       </div>
                     </div>
 
@@ -391,15 +413,15 @@ export default function UpcomingBills() {
 
       {activeView === 'add' && (
         <SubviewWrapper
-          title="Track New Bill"
-          onBack={() => setActiveView('main')}
+          title={editingBillId ? 'Edit Bill' : 'Track New Bill'}
+          onBack={() => { setActiveView('main'); resetForm(); }}
           footer={
             <button
               className="btn btn-primary w-100"
               style={{ padding: '1rem' }}
               onClick={handleAddBill}
             >
-              Start Tracking
+              {editingBillId ? 'Save Changes' : 'Start Tracking'}
             </button>
           }
         >

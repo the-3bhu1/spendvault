@@ -211,6 +211,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     let updatedBalanceAdjustments = { ...(newAccount.balanceAdjustments || {}) };
     let updatedTravelOpeningBalances = newAccount.isNcmcEnabled ? { ...(newAccount.travelOpeningBalances || {}) } : undefined;
     let updatedTravelBalanceAdjustments = newAccount.isNcmcEnabled ? { ...(newAccount.travelBalanceAdjustments || {}) } : undefined;
+    let updatedBalanceEditHistory = [...(newAccount.balanceEditHistory || [])];
     
     const hasInternalRewards = (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.isCashbackEnabled && newAccount.rewardType === 'points';
     let updatedRewardOpeningBalances = hasInternalRewards ? { ...(newAccount.rewardOpeningBalances || {}) } : undefined;
@@ -248,7 +249,17 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
         }, 0);
 
         const enteredCurrentBalance = parseFloat(openingBalanceInput) || 0;
+        const previousBalance = calculateBalance(originalAcc, data.transactions, month);
         updatedBalanceAdjustments[month] = enteredCurrentBalance - opening - standardChange;
+
+        if (enteredCurrentBalance !== previousBalance) {
+          updatedBalanceEditHistory.push({
+            editedAt: new Date().toISOString(),
+            monthKey: month,
+            previousBalance,
+            newBalance: enteredCurrentBalance,
+          });
+        }
 
         // 2. Travel Wallet Setup
         if (newAccount.isNcmcEnabled && updatedTravelOpeningBalances) {
@@ -328,6 +339,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       type: newAccount.type as AccountType,
       openingBalances: updatedOpeningBalances,
       balanceAdjustments: updatedBalanceAdjustments,
+      balanceEditHistory: updatedBalanceEditHistory.length > 0 ? updatedBalanceEditHistory : undefined,
       defaultCashbackRate: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.defaultCashbackRate : undefined,
       cashbackRates: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.cashbackRates : undefined,
       roundOffCashback: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.roundOffCashback : undefined,
@@ -343,6 +355,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
         ? newAccount.cardDetails
         : undefined,
       statementRounding: newAccount.statementRounding || 'none',
+      numberOfShares: (newAccount.type === 'stocks' || newAccount.type === 'sips') ? newAccount.numberOfShares : undefined,
       rewardUnit: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.rewardUnit : undefined,
       pointsConversionRate: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.pointsConversionRate : undefined,
       rewardType: (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.isCashbackEnabled ? (newAccount.rewardType || 'rupee') : undefined,
@@ -635,6 +648,13 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           </span>
                         </div>
                       )}
+
+                      {(acc.type === 'stocks' || acc.type === 'sips') && acc.numberOfShares !== undefined && (
+                        <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                          <span className="text-mono text-muted text-xs">SHARES</span>
+                          <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{acc.numberOfShares}</span>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -786,6 +806,21 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     </div>
                   )}
                 </>
+              )}
+
+              {(newAccount.type === 'stocks' || newAccount.type === 'sips') && (
+                <div className="input-group">
+                  <label>Number of Shares (Optional)</label>
+                  <input
+                    type="number"
+                    className="input-field"
+                    value={newAccount.numberOfShares ?? ''}
+                    onChange={e => setNewAccount({ ...newAccount, numberOfShares: e.target.value ? parseFloat(e.target.value) : undefined })}
+                    placeholder="e.g. 100"
+                    step="any"
+                    min="0"
+                  />
+                </div>
               )}
 
               {newAccount.type === 'credit_card' && (

@@ -20,6 +20,13 @@ export interface CardDetails {
   network?: CardNetwork;
 }
 
+export interface BalanceEditEntry {
+  editedAt: string;        // ISO datetime of the edit
+  monthKey: string;        // 'YYYY-MM' the edit applies to
+  previousBalance: number;
+  newBalance: number;
+}
+
 export interface Account {
   id: string;
   name: string;
@@ -27,6 +34,7 @@ export interface Account {
   openingBalances: Record<string, number>; // key: 'YYYY-MM', value: number
   balanceAdjustments?: Record<string, number>; // key: 'YYYY-MM', value: number
   travelBalanceAdjustments?: Record<string, number>; // key: 'YYYY-MM', value: number
+  balanceEditHistory?: BalanceEditEntry[];
 
   // Specific to credit_card
   statementDay?: number;
@@ -43,6 +51,9 @@ export interface Account {
 
   // Optional saved card details (credit_card / debit_card only)
   cardDetails?: CardDetails;
+
+  // Specific to stocks / sips
+  numberOfShares?: number;
   statementRounding?: RoundingRule;
   cashbackDestinationAccountId?: string;
   rewardUnit?: string;

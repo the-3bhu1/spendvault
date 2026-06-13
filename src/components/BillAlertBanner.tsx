@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { format, addMonths } from 'date-fns';
+import { format, addMonths, parseISO } from 'date-fns';
 import { BellRing, X } from 'lucide-react';
 import { useFinance } from '../FinanceContext';
 import { calculateTotalSpendPerCycle, getLatestBilledCycle } from '../utils';
+import type { RecurringBill } from '../types';
 
 interface BillAlertBannerProps {
   onNavigateToBills: () => void;
@@ -30,9 +31,31 @@ export default function BillAlertBanner({ onNavigateToBills }: BillAlertBannerPr
     return Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
   };
 
-  // Manual bills
+  const isBillPaid = (bill: RecurringBill): boolean => {
+    const now = new Date();
+    return data.transactions.some(t => {
+      if (t.recurringBillId === bill.id) {
+        const tDate = new Date(t.date);
+        const sameMonth = tDate.getMonth() === now.getMonth() && tDate.getFullYear() === now.getFullYear();
+        return bill.frequency === 'monthly' ? sameMonth : true;
+      }
+      if (bill.linkedSipAccountId) return false;
+      const tDate = new Date(t.date);
+      const sameMonth = tDate.getMonth() === now.getMonth() && tDate.getFullYear() === now.getFullYear();
+      const nameMatch = t.description.toLowerCase().includes(bill.name.toLowerCase()) || bill.name.toLowerCase().includes(t.description.toLowerCase());
+      const catMatch = t.category === bill.category;
+      if (bill.frequency === 'monthly') return sameMonth && nameMatch && catMatch;
+      return Math.abs((tDate.getTime() - now.getTime()) / 86400000) < 10 && nameMatch && catMatch;
+    }) || !!(bill.lastPaidDate && (() => {
+      const lp = parseISO(bill.lastPaidDate!);
+      const sameMonth = lp.getMonth() === now.getMonth() && lp.getFullYear() === now.getFullYear();
+      return bill.frequency === 'monthly' ? sameMonth : Math.abs((lp.getTime() - now.getTime()) / 86400000) < 7;
+    })());
+  };
+
+  // Manual bills — exclude already-paid ones
   const manualAlerts = (data.recurringBills || [])
-    .filter(bill => bill.isActive)
+    .filter(bill => bill.isActive && !isBillPaid(bill))
     .map(bill => ({ name: bill.name, daysLeft: getDaysLeft(bill.nextDueDate) }))
     .filter(b => b.daysLeft <= URGENCY_DAYS);
 

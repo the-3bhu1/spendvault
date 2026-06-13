@@ -106,6 +106,7 @@ export default function Settings() {
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const reorderTimer = useRef<number | null>(null);
   const touchStartY = useRef<number>(0);
+  const savedScrollPos = useRef<number>(0);
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
@@ -151,10 +152,16 @@ export default function Settings() {
     };
     window.addEventListener('appBackButton', handleGlobalBack);
     
-    // Reset scroll position when changing views
+    // Save/restore scroll position when navigating between main and sub-views
     const appRoot = document.querySelector('.app-root');
     if (appRoot) {
-      appRoot.scrollTop = 0;
+      if (activeView === 'main') {
+        const saved = savedScrollPos.current;
+        requestAnimationFrame(() => { appRoot.scrollTop = saved; });
+      } else {
+        savedScrollPos.current = appRoot.scrollTop;
+        appRoot.scrollTop = 0;
+      }
     }
     
     return () => window.removeEventListener('appBackButton', handleGlobalBack);
@@ -583,6 +590,7 @@ export default function Settings() {
     lastPaidDate: 'lpd',
     // New fields for custom reward points and balances
     balanceAdjustments: 'ba', travelBalanceAdjustments: 'tba',
+    balanceEditHistory: 'beh', editedAt: 'eat', monthKey: 'mk', previousBalance: 'prb', newBalance: 'nwb',
     rewardType: 'ryt', rewardUnit: 'ryu', pointsConversionRate: 'pcr',
     rewardOpeningBalances: 'rob', rewardBalanceAdjustments: 'rba',
     isRewardTransaction: 'irt', cashbackDestinationAccountId: 'cda',

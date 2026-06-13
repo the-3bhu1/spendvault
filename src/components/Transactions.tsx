@@ -1324,11 +1324,11 @@ export default function Transactions() {
 
                                     const uncollapsedInGroup = group.filter(other => !collapsedTxIds.has(other.id));
                                     if (uncollapsedInGroup.length > 1) {
-                                      // For SIP groups, prefer the credit leg (investment account) as parent
-                                      const isSipGroup = uncollapsedInGroup.some(other => other.category?.toLowerCase() === 'sip');
                                       const debitParent = uncollapsedInGroup.find(other => other.type === 'debit');
                                       const creditParent = uncollapsedInGroup.find(other => other.type === 'credit');
-                                      const parent = isSipGroup ? (creditParent || uncollapsedInGroup[0]) : (debitParent || uncollapsedInGroup[0]);
+                                      const creditCategories = ['sip', 'cc payment', 'transfer', 'ncmc travel recharge'];
+                                      const isCreditParentGroup = uncollapsedInGroup.some(other => creditCategories.includes(other.category?.toLowerCase() ?? ''));
+                                      const parent = isCreditParentGroup ? (creditParent || uncollapsedInGroup[0]) : (debitParent || uncollapsedInGroup[0]);
                                       const counterpartsList = uncollapsedInGroup.filter(other => other.id !== parent.id);
 
                                       counterpartsList.forEach(cp => {
