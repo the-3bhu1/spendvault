@@ -868,54 +868,17 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                             )}
                             {hasPnLSetup && (
                               (currentPrice !== null || isRefreshing) ? (
-                                <>
-                                  <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem 0.35rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                    <div className="flex-col gap-0">
-                                      <span className="text-mono text-muted text-xs">LTP</span>
-                                      {isRefreshing
-                                        ? <span className="skeleton-bar" style={{ width: '4.5rem', height: '1.1rem', marginTop: '0.2rem' }} />
-                                        : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                            ₹{currentPrice!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                          </span>
-                                      }
-                                    </div>
-                                    <div className="flex align-center" style={{ gap: '0.75rem' }}>
-                                      <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
-                                        <span className="text-mono text-muted text-xs">CURRENT VALUE</span>
-                                        {isRefreshing
-                                          ? <span className="skeleton-bar" style={{ width: '5rem', height: '1.1rem', marginTop: '0.2rem' }} />
-                                          : <span style={{ color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                              ₹{currentValue!.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                                            </span>
-                                        }
-                                      </div>
-                                      {isFailed && !isRefreshing && (
-                                        <span style={{ fontSize: '0.65rem', color: 'var(--danger)', textAlign: 'right' }}>fetch<br/>failed</span>
-                                      )}
-                                      <button
-                                        className="btn btn-secondary"
-                                        style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : undefined }}
-                                        title="Refresh price"
-                                        disabled={isRefreshing}
-                                        onClick={async () => {
-                                          const sym = acc.marketSymbol!;
-                                          setSymbolRefreshing(sym, true);
-                                          const price = await fetchStockPrice(sym);
-                                          if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
-                                          setSymbolRefreshing(sym, false);
-                                        }}
-                                      >
-                                        <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
-                                      </button>
-                                    </div>
+                                <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                                  <div className="flex-col gap-0">
+                                    <span className="text-mono text-muted text-xs">LTP</span>
+                                    {isRefreshing
+                                      ? <span className="skeleton-bar" style={{ width: '4.5rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                      : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                          ₹{currentPrice!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                    }
                                   </div>
-                                  <div className="flex justify-between align-center" style={{ padding: '0.35rem 1rem 0.65rem', backgroundColor: 'var(--bg-hover)' }}>
-                                    <div className="flex-col gap-0">
-                                      <span className="text-mono text-muted text-xs">INVESTED</span>
-                                      <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600 }}>
-                                        ₹{effectiveInvested!.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                                      </span>
-                                    </div>
+                                  <div className="flex align-center" style={{ gap: '0.75rem' }}>
                                     {(pnl !== null && pnlPct !== null && !isRefreshing) && (
                                       <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
                                         <span className="text-mono text-muted text-xs">P&amp;L ({pnlPos ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
@@ -927,8 +890,26 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                     {isRefreshing && (
                                       <span className="skeleton-bar" style={{ width: '5.5rem', height: '1.1rem' }} />
                                     )}
+                                    {isFailed && !isRefreshing && (
+                                      <span style={{ fontSize: '0.65rem', color: 'var(--danger)', textAlign: 'right' }}>fetch<br/>failed</span>
+                                    )}
+                                    <button
+                                      className="btn btn-secondary"
+                                      style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : undefined }}
+                                      title="Refresh price"
+                                      disabled={isRefreshing}
+                                      onClick={async () => {
+                                        const sym = acc.marketSymbol!;
+                                        setSymbolRefreshing(sym, true);
+                                        const price = await fetchStockPrice(sym);
+                                        if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
+                                        setSymbolRefreshing(sym, false);
+                                      }}
+                                    >
+                                      <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
+                                    </button>
                                   </div>
-                                </>
+                                </div>
                               ) : (
                                 <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                                   <span className="text-mono text-muted text-xs">LIVE P&amp;L</span>
