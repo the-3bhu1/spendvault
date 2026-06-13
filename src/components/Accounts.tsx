@@ -202,7 +202,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     if (!newAccount.type) {
       newErrors.type = 'Account Type is required';
     }
-    if (newAccount.type !== 'sips' && !openingBalanceInput.trim()) {
+    if (newAccount.type !== 'sips' && newAccount.type !== 'stocks' && !openingBalanceInput.trim()) {
       newErrors.openingBalance = 'Opening Balance is required';
     }
     if (newAccount.type === 'credit_card') {
@@ -250,7 +250,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     let updatedRewardOpeningBalances = hasInternalRewards ? { ...(newAccount.rewardOpeningBalances || {}) } : undefined;
     let updatedRewardBalanceAdjustments = hasInternalRewards ? { ...(newAccount.rewardBalanceAdjustments || {}) } : undefined;
 
-    if (editId && newAccount.type !== 'sips') {
+    if (editId && newAccount.type !== 'sips' && newAccount.type !== 'stocks') {
       const originalAcc = data.accounts.find(a => a.id === editId);
       if (originalAcc) {
         // 1. Standard Wallet Opening Balance setup/rollover folding
@@ -350,7 +350,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       }
     } else {
       // In add mode, set opening balance as input and reset adjustment for standard
-      updatedOpeningBalances[month] = newAccount.type === 'sips' ? 0 : (parseFloat(openingBalanceInput) || 0);
+      updatedOpeningBalances[month] = (newAccount.type === 'sips' || newAccount.type === 'stocks') ? 0 : (parseFloat(openingBalanceInput) || 0);
       updatedBalanceAdjustments[month] = 0;
 
       if (newAccount.isNcmcEnabled && updatedTravelOpeningBalances) {
@@ -529,6 +529,17 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     ? (acc.investedValue ?? (acc.avgNav && sipTotalUnits > 0 ? acc.avgNav * sipTotalUnits : undefined))
                     : undefined;
 
+                  // Stocks market data — pre-computed once for middle + bottom sections
+                  const stockTxShares = acc.type === 'stocks'
+                    ? data.transactions
+                        .filter(t => t.accountId === acc.id && t.numberOfShares !== undefined)
+                        .reduce((sum, t) => t.type === 'credit' ? sum + (t.numberOfShares ?? 0) : sum - (t.numberOfShares ?? 0), 0)
+                    : 0;
+                  const stockTotalShares = acc.type === 'stocks' ? (acc.numberOfShares ?? 0) + stockTxShares : 0;
+                  const stockCurrentPrice = acc.type === 'stocks' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
+                  const stockCurrentValue = stockCurrentPrice !== null && stockTotalShares > 0 ? stockCurrentPrice * stockTotalShares : null;
+                  const stockEffectiveInvested = acc.type === 'stocks' ? acc.investedValue : undefined;
+
                   return (
                     <div key={acc.id} className={`card flex-col ${isFirstAccount ? 'tour-first-account' : ''}`} style={{ padding: '0' }}>
                       {/* Top Section - Hardware / Branding */}
@@ -577,6 +588,29 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               <span className="text-mono text-muted text-xs">INVESTED</span>
                               <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
                                 {formatCurrency(sipEffectiveInvested)}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ) : acc.type === 'stocks' ? (
+                        <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
+                          <div className="flex-col gap-1">
+                            <span className="text-mono text-muted text-xs">
+                              {stockCurrentValue !== null ? 'CURRENT VALUE' : stockEffectiveInvested !== undefined ? 'INVESTED' : 'CURRENT VALUE'}
+                            </span>
+                            <span className="text-serif" style={{ fontSize: '1.8rem', color: 'var(--success)', lineHeight: '1.2' }}>
+                              {stockCurrentValue !== null
+                                ? formatCurrency(stockCurrentValue)
+                                : stockEffectiveInvested !== undefined
+                                  ? formatCurrency(stockEffectiveInvested)
+                                  : '—'}
+                            </span>
+                          </div>
+                          {stockCurrentValue !== null && stockEffectiveInvested !== undefined && (
+                            <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
+                              <span className="text-mono text-muted text-xs">INVESTED</span>
+                              <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
+                                {formatCurrency(stockEffectiveInvested)}
                               </span>
                             </div>
                           )}
@@ -809,21 +843,18 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       })()}
 
                       {acc.type === 'stocks' && (() => {
-                        const txShares = data.transactions
-                          .filter(t => t.accountId === acc.id && t.numberOfShares !== undefined)
-                          .reduce((sum, t) => t.type === 'credit' ? sum + (t.numberOfShares ?? 0) : sum - (t.numberOfShares ?? 0), 0);
-                        const totalShares = (acc.numberOfShares ?? 0) + txShares;
-                        const hasShares = acc.numberOfShares !== undefined || txShares !== 0;
-                        const currentPrice = acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
-                        const effectiveInvested = acc.investedValue;
+                        const totalShares = stockTotalShares;
+                        const hasShares = acc.numberOfShares !== undefined || stockTxShares !== 0;
+                        const currentPrice = stockCurrentPrice;
+                        const effectiveInvested = stockEffectiveInvested;
                         const hasPnLSetup = !!acc.marketSymbol && effectiveInvested !== undefined && totalShares > 0;
                         const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
                         const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
 
                         if (!hasShares && !hasPnLSetup) return null;
 
-                        const currentValue = hasPnLSetup && currentPrice !== null ? currentPrice * totalShares : null;
-                        const pnl = currentValue !== null ? currentValue - effectiveInvested! : null;
+                        const currentValue = stockCurrentValue;
+                        const pnl = currentValue !== null && effectiveInvested !== undefined ? currentValue - effectiveInvested : null;
                         const pnlPct = pnl !== null && effectiveInvested! > 0 ? (pnl / effectiveInvested!) * 100 : null;
                         const pnlPos = pnl !== null && pnl >= 0;
 
@@ -976,7 +1007,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   }
                 }}
               />
-              {newAccount.type !== 'sips' && (
+              {newAccount.type !== 'sips' && newAccount.type !== 'stocks' && (
                 <div className="input-group">
                   <label>{editId ? 'Current Balance (Current Month)' : 'Opening Balance (Current Month)'}</label>
                   <input
