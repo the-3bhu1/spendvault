@@ -649,12 +649,19 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         </div>
                       )}
 
-                      {(acc.type === 'stocks' || acc.type === 'sips') && acc.numberOfShares !== undefined && (
-                        <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                          <span className="text-mono text-muted text-xs">SHARES</span>
-                          <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{acc.numberOfShares}</span>
-                        </div>
-                      )}
+                      {(acc.type === 'stocks' || acc.type === 'sips') && (() => {
+                        const txShares = data.transactions
+                          .filter(t => t.accountId === acc.id && t.numberOfShares !== undefined)
+                          .reduce((sum, t) => t.type === 'credit' ? sum + (t.numberOfShares ?? 0) : sum - (t.numberOfShares ?? 0), 0);
+                        const totalShares = (acc.numberOfShares ?? 0) + txShares;
+                        if (acc.numberOfShares === undefined && txShares === 0) return null;
+                        return (
+                          <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                            <span className="text-mono text-muted text-xs">TOTAL SHARES</span>
+                            <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{totalShares}</span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}
@@ -810,7 +817,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
               {(newAccount.type === 'stocks' || newAccount.type === 'sips') && (
                 <div className="input-group">
-                  <label>Number of Shares (Optional)</label>
+                  <label>Opening Shares (Optional)</label>
                   <input
                     type="number"
                     className="input-field"
