@@ -505,6 +505,19 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
                   const isFirstAccount = index === 0 && acc.id === grouped[type][0].id;
 
+                  // SIP market data — pre-computed once for middle + bottom sections
+                  const sipTxUnits = acc.type === 'sips'
+                    ? data.transactions
+                        .filter(t => t.accountId === acc.id && t.numberOfShares !== undefined)
+                        .reduce((sum, t) => t.type === 'credit' ? sum + (t.numberOfShares ?? 0) : sum - (t.numberOfShares ?? 0), 0)
+                    : 0;
+                  const sipTotalUnits = acc.type === 'sips' ? (acc.numberOfShares ?? 0) + sipTxUnits : 0;
+                  const sipCurrentPrice = acc.type === 'sips' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
+                  const sipCurrentValue = sipCurrentPrice !== null && sipTotalUnits > 0 ? sipCurrentPrice * sipTotalUnits : null;
+                  const sipEffectiveInvested = acc.type === 'sips'
+                    ? (acc.investedValue ?? (acc.avgNav && sipTotalUnits > 0 ? acc.avgNav * sipTotalUnits : undefined))
+                    : undefined;
+
                   return (
                     <div key={acc.id} className={`card flex-col ${isFirstAccount ? 'tour-first-account' : ''}`} style={{ padding: '0' }}>
                       {/* Top Section - Hardware / Branding */}
@@ -534,61 +547,82 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       </div>
 
                       {/* Middle Section - Balance */}
-                      <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
-                        <div className="flex-col gap-1">
-                          <span className="text-mono text-muted text-xs">
-                            {acc.isNcmcEnabled ? 'PAYMENTS BALANCE' : 'TOTAL BALANCE'}
-                          </span>
-                          <span className="text-serif" style={{
-                            fontSize: '1.8rem',
-                            color: acc.type === 'credit_card'
-                              ? (roundedBal > 0 ? 'var(--danger)' : 'var(--success)')
-                              : (roundedBal >= 0 ? 'var(--success)' : 'var(--danger)'),
-                            lineHeight: '1.2'
-                          }}>
-                            {acc.type === 'rewards' && acc.rewardUnit ? (
-                              <span className="flex-col" style={{ alignItems: 'flex-start', gap: '6px', lineHeight: '1' }}>
-                                <span>{bal}</span>
-                                <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 800, opacity: 0.7 }}>{acc.rewardUnit}</span>
+                      {acc.type === 'sips' ? (
+                        <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
+                          <div className="flex-col gap-1">
+                            <span className="text-mono text-muted text-xs">
+                              {sipCurrentValue !== null ? 'CURRENT VALUE' : sipEffectiveInvested !== undefined ? 'INVESTED' : 'CURRENT VALUE'}
+                            </span>
+                            <span className="text-serif" style={{ fontSize: '1.8rem', color: 'var(--success)', lineHeight: '1.2' }}>
+                              {sipCurrentValue !== null
+                                ? formatCurrency(sipCurrentValue)
+                                : sipEffectiveInvested !== undefined
+                                  ? formatCurrency(sipEffectiveInvested)
+                                  : '—'}
+                            </span>
+                          </div>
+                          {sipCurrentValue !== null && sipEffectiveInvested !== undefined && (
+                            <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
+                              <span className="text-mono text-muted text-xs">INVESTED</span>
+                              <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
+                                {formatCurrency(sipEffectiveInvested)}
                               </span>
-                            ) : (
-                              formatCurrency(bal)
-                            )}
-                          </span>
-                          {(acc.type === 'credit_card' || acc.type === 'debit_card') && acc.defaultCashbackRate ? (
-                            <span className="text-muted text-xs" style={{ marginTop: '4px' }}>Base Reward Rate: {acc.defaultCashbackRate}%</span>
-                          ) : null}
-                        </div>
- 
-                        <div className="flex gap-4 align-end">
-                          {(acc.type === 'rewards' || acc.type === 'e_wallet') && (
-                            <button
-                              className="btn btn-secondary flex align-center gap-2"
-                              style={{ fontSize: '0.8rem', padding: '0.5rem 1rem' }}
-                              onClick={() => handleLiquidate(acc)}
-                            >
-                              <span>Send to Bank</span>
-                            </button>
+                            </div>
                           )}
-                          <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
-                            <span className="text-mono text-muted text-xs">OPENING BAL</span>
+                        </div>
+                      ) : (
+                        <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
+                          <div className="flex-col gap-1">
+                            <span className="text-mono text-muted text-xs">
+                              {acc.isNcmcEnabled ? 'PAYMENTS BALANCE' : 'TOTAL BALANCE'}
+                            </span>
                             <span className="text-serif" style={{
-                              fontSize: '1.4rem',
-                              color: 'var(--text-secondary)',
-                              marginTop: '0.1rem'
+                              fontSize: '1.8rem',
+                              color: acc.type === 'credit_card'
+                                ? (roundedBal > 0 ? 'var(--danger)' : 'var(--success)')
+                                : (roundedBal >= 0 ? 'var(--success)' : 'var(--danger)'),
+                              lineHeight: '1.2'
                             }}>
                               {acc.type === 'rewards' && acc.rewardUnit ? (
-                                <span className="flex-col" style={{ alignItems: 'flex-end', gap: '6px', lineHeight: '1' }}>
-                                  <span>{openingBal}</span>
+                                <span className="flex-col" style={{ alignItems: 'flex-start', gap: '6px', lineHeight: '1' }}>
+                                  <span>{bal}</span>
                                   <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 800, opacity: 0.7 }}>{acc.rewardUnit}</span>
                                 </span>
                               ) : (
-                                formatCurrency(openingBal)
+                                formatCurrency(bal)
                               )}
                             </span>
+                            {(acc.type === 'credit_card' || acc.type === 'debit_card') && acc.defaultCashbackRate ? (
+                              <span className="text-muted text-xs" style={{ marginTop: '4px' }}>Base Reward Rate: {acc.defaultCashbackRate}%</span>
+                            ) : null}
+                          </div>
+
+                          <div className="flex gap-4 align-end">
+                            {(acc.type === 'rewards' || acc.type === 'e_wallet') && (
+                              <button
+                                className="btn btn-secondary flex align-center gap-2"
+                                style={{ fontSize: '0.8rem', padding: '0.5rem 1rem' }}
+                                onClick={() => handleLiquidate(acc)}
+                              >
+                                <span>Send to Bank</span>
+                              </button>
+                            )}
+                            <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
+                              <span className="text-mono text-muted text-xs">OPENING BAL</span>
+                              <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
+                                {acc.type === 'rewards' && acc.rewardUnit ? (
+                                  <span className="flex-col" style={{ alignItems: 'flex-end', gap: '6px', lineHeight: '1' }}>
+                                    <span>{openingBal}</span>
+                                    <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 800, opacity: 0.7 }}>{acc.rewardUnit}</span>
+                                  </span>
+                                ) : (
+                                  formatCurrency(openingBal)
+                                )}
+                              </span>
+                            </div>
                           </div>
                         </div>
-                      </div>
+                      )}
 
 
 
@@ -674,15 +708,83 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         </div>
                       )}
 
-                      {(acc.type === 'stocks' || acc.type === 'sips') && (() => {
+                      {acc.type === 'sips' && (() => {
+                        const sipPnl = sipCurrentValue !== null && sipEffectiveInvested !== undefined ? sipCurrentValue - sipEffectiveInvested : null;
+                        const sipPnlPct = sipPnl !== null && sipEffectiveInvested! > 0 ? (sipPnl / sipEffectiveInvested!) * 100 : null;
+                        const sipPnlPos = sipPnl !== null && sipPnl >= 0;
+                        return (
+                          <>
+                            {sipTotalUnits > 0 && (
+                              <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                                <span className="text-mono text-muted text-xs">TOTAL UNITS</span>
+                                <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{sipTotalUnits}</span>
+                              </div>
+                            )}
+                            {acc.marketSymbol && (
+                              <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                                {sipCurrentPrice !== null ? (
+                                  <>
+                                    <div className="flex-col gap-0">
+                                      <span className="text-mono text-muted text-xs">CURRENT NAV</span>
+                                      <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                        ₹{sipCurrentPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </span>
+                                    </div>
+                                    <div className="flex align-center gap-2">
+                                      {sipPnl !== null && sipPnlPct !== null && (
+                                        <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
+                                          <span className="text-mono text-muted text-xs">P&amp;L ({sipPnlPos ? '+' : ''}{sipPnlPct.toFixed(2)}%)</span>
+                                          <span style={{ color: sipPnlPos ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                            {sipPnlPos ? '+' : '-'}₹{Math.abs(sipPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                          </span>
+                                        </div>
+                                      )}
+                                      <button
+                                        className="btn btn-secondary"
+                                        style={{ width: '28px', height: '28px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                                        title="Refresh NAV"
+                                        onClick={async () => {
+                                          const price = await fetchMFNav(acc.marketSymbol!);
+                                          if (price !== null) setPrices(prev => ({ ...prev, [acc.marketSymbol!]: price }));
+                                        }}
+                                      >
+                                        <RefreshCw size={11} />
+                                      </button>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="text-mono text-muted text-xs">CURRENT NAV</span>
+                                    {pricesLoading ? (
+                                      <span className="text-xs text-muted">Fetching...</span>
+                                    ) : (
+                                      <button
+                                        className="btn btn-secondary"
+                                        style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
+                                        onClick={async () => {
+                                          const price = await fetchMFNav(acc.marketSymbol!);
+                                          if (price !== null) setPrices(prev => ({ ...prev, [acc.marketSymbol!]: price }));
+                                        }}
+                                      >
+                                        Fetch NAV
+                                      </button>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+
+                      {acc.type === 'stocks' && (() => {
                         const txShares = data.transactions
                           .filter(t => t.accountId === acc.id && t.numberOfShares !== undefined)
                           .reduce((sum, t) => t.type === 'credit' ? sum + (t.numberOfShares ?? 0) : sum - (t.numberOfShares ?? 0), 0);
                         const totalShares = (acc.numberOfShares ?? 0) + txShares;
                         const hasShares = acc.numberOfShares !== undefined || txShares !== 0;
-                        const isSip = acc.type === 'sips';
                         const currentPrice = acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
-                        const effectiveInvested = acc.investedValue ?? (acc.avgNav && totalShares > 0 ? acc.avgNav * totalShares : undefined);
+                        const effectiveInvested = acc.investedValue;
                         const hasPnLSetup = !!acc.marketSymbol && effectiveInvested !== undefined && totalShares > 0;
 
                         if (!hasShares && !hasPnLSetup) return null;
@@ -692,26 +794,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         const pnlPct = pnl !== null && effectiveInvested! > 0 ? (pnl / effectiveInvested!) * 100 : null;
                         const pnlPos = pnl !== null && pnl >= 0;
 
-                        const refreshBtn = (
-                          <button
-                            className="btn btn-secondary"
-                            style={{ width: '28px', height: '28px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
-                            title="Refresh price"
-                            onClick={async () => {
-                              const sym = acc.marketSymbol!;
-                              const price = isSip ? await fetchMFNav(sym) : await fetchStockPrice(sym);
-                              if (price !== null) setPrices(prev => ({ ...prev, [sym]: price }));
-                            }}
-                          >
-                            <RefreshCw size={11} />
-                          </button>
-                        );
-
                         return (
                           <>
                             {hasShares && (
                               <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                <span className="text-mono text-muted text-xs">{isSip ? 'TOTAL UNITS' : 'TOTAL SHARES'}</span>
+                                <span className="text-mono text-muted text-xs">TOTAL SHARES</span>
                                 <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{totalShares}</span>
                               </div>
                             )}
@@ -720,7 +807,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                 <>
                                   <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem 0.35rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                                     <div className="flex-col gap-0">
-                                      <span className="text-mono text-muted text-xs">{isSip ? 'CURRENT NAV' : 'LTP'}</span>
+                                      <span className="text-mono text-muted text-xs">LTP</span>
                                       <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
                                         ₹{currentPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                       </span>
@@ -732,14 +819,23 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                           ₹{currentValue!.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                                         </span>
                                       </div>
-                                      {refreshBtn}
+                                      <button
+                                        className="btn btn-secondary"
+                                        style={{ width: '28px', height: '28px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                                        title="Refresh price"
+                                        onClick={async () => {
+                                          const sym = acc.marketSymbol!;
+                                          const price = await fetchStockPrice(sym);
+                                          if (price !== null) setPrices(prev => ({ ...prev, [sym]: price }));
+                                        }}
+                                      >
+                                        <RefreshCw size={11} />
+                                      </button>
                                     </div>
                                   </div>
                                   <div className="flex justify-between align-center" style={{ padding: '0.35rem 1rem 0.65rem', backgroundColor: 'var(--bg-hover)' }}>
                                     <div className="flex-col gap-0">
-                                      <span className="text-mono text-muted text-xs">
-                                        {isSip && acc.avgNav ? `AVG NAV · ₹${acc.avgNav.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'INVESTED'}
-                                      </span>
+                                      <span className="text-mono text-muted text-xs">INVESTED</span>
                                       <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600 }}>
                                         ₹{effectiveInvested!.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                                       </span>
@@ -765,7 +861,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                       style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
                                       onClick={async () => {
                                         const sym = acc.marketSymbol!;
-                                        const price = isSip ? await fetchMFNav(sym) : await fetchStockPrice(sym);
+                                        const price = await fetchStockPrice(sym);
                                         if (price !== null) setPrices(prev => ({ ...prev, [sym]: price }));
                                       }}
                                     >
