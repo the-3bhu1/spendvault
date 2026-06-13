@@ -24,9 +24,15 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     return cached;
   });
   const [refreshingSymbols, setRefreshingSymbols] = useState<Set<string>>(new Set());
+  const [failedSymbols, setFailedSymbols] = useState<Set<string>>(new Set());
 
   const setSymbolRefreshing = (sym: string, on: boolean) => {
     setRefreshingSymbols(prev => { const s = new Set(prev); on ? s.add(sym) : s.delete(sym); return s; });
+  };
+
+  const markSymbolFailed = (sym: string) => {
+    setFailedSymbols(prev => new Set(prev).add(sym));
+    setTimeout(() => setFailedSymbols(prev => { const s = new Set(prev); s.delete(sym); return s; }), 3000);
   };
 
   useEffect(() => {
@@ -718,6 +724,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         const sipPnlPct = sipPnl !== null && sipEffectiveInvested! > 0 ? (sipPnl / sipEffectiveInvested!) * 100 : null;
                         const sipPnlPos = sipPnl !== null && sipPnl >= 0;
                         const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
+                        const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
                         return (
                           <>
                             {sipTotalUnits > 0 && (
@@ -754,16 +761,19 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                           <span className="skeleton-bar" style={{ width: '5rem', height: '1.1rem', marginTop: '0.2rem' }} />
                                         </div>
                                       )}
+                                      {isFailed && !isRefreshing && (
+                                        <span style={{ fontSize: '0.65rem', color: 'var(--danger)', textAlign: 'right' }}>fetch<br/>failed</span>
+                                      )}
                                       <button
                                         className="btn btn-secondary"
-                                        style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                                        style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : undefined }}
                                         title="Refresh NAV"
                                         disabled={isRefreshing}
                                         onClick={async () => {
                                           const sym = acc.marketSymbol!;
                                           setSymbolRefreshing(sym, true);
                                           const price = await fetchMFNav(sym);
-                                          if (price !== null) setPrices(prev => ({ ...prev, [sym]: price }));
+                                          if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
                                           setSymbolRefreshing(sym, false);
                                         }}
                                       >
@@ -774,19 +784,22 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                 ) : (
                                   <>
                                     <span className="text-mono text-muted text-xs">CURRENT NAV</span>
-                                    <button
-                                      className="btn btn-secondary"
-                                      style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
-                                      onClick={async () => {
-                                        const sym = acc.marketSymbol!;
-                                        setSymbolRefreshing(sym, true);
-                                        const price = await fetchMFNav(sym);
-                                        if (price !== null) setPrices(prev => ({ ...prev, [sym]: price }));
-                                        setSymbolRefreshing(sym, false);
-                                      }}
-                                    >
-                                      Fetch NAV
-                                    </button>
+                                    {isFailed && !isRefreshing
+                                      ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Symbol not found · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const price = await fetchMFNav(sym); if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
+                                      : <button
+                                          className="btn btn-secondary"
+                                          style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
+                                          onClick={async () => {
+                                            const sym = acc.marketSymbol!;
+                                            setSymbolRefreshing(sym, true);
+                                            const price = await fetchMFNav(sym);
+                                            if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
+                                            setSymbolRefreshing(sym, false);
+                                          }}
+                                        >
+                                          Fetch NAV
+                                        </button>
+                                    }
                                   </>
                                 )}
                               </div>
@@ -805,6 +818,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         const effectiveInvested = acc.investedValue;
                         const hasPnLSetup = !!acc.marketSymbol && effectiveInvested !== undefined && totalShares > 0;
                         const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
+                        const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
 
                         if (!hasShares && !hasPnLSetup) return null;
 
@@ -844,16 +858,19 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                             </span>
                                         }
                                       </div>
+                                      {isFailed && !isRefreshing && (
+                                        <span style={{ fontSize: '0.65rem', color: 'var(--danger)', textAlign: 'right' }}>fetch<br/>failed</span>
+                                      )}
                                       <button
                                         className="btn btn-secondary"
-                                        style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                                        style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : undefined }}
                                         title="Refresh price"
                                         disabled={isRefreshing}
                                         onClick={async () => {
                                           const sym = acc.marketSymbol!;
                                           setSymbolRefreshing(sym, true);
                                           const price = await fetchStockPrice(sym);
-                                          if (price !== null) setPrices(prev => ({ ...prev, [sym]: price }));
+                                          if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
                                           setSymbolRefreshing(sym, false);
                                         }}
                                       >
@@ -884,19 +901,22 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               ) : (
                                 <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                                   <span className="text-mono text-muted text-xs">LIVE P&amp;L</span>
-                                  <button
-                                    className="btn btn-secondary"
-                                    style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
-                                    onClick={async () => {
-                                      const sym = acc.marketSymbol!;
-                                      setSymbolRefreshing(sym, true);
-                                      const price = await fetchStockPrice(sym);
-                                      if (price !== null) setPrices(prev => ({ ...prev, [sym]: price }));
-                                      setSymbolRefreshing(sym, false);
-                                    }}
-                                  >
-                                    Fetch
-                                  </button>
+                                  {isFailed && !isRefreshing
+                                    ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Symbol not found · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const price = await fetchStockPrice(sym); if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
+                                    : <button
+                                        className="btn btn-secondary"
+                                        style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
+                                        onClick={async () => {
+                                          const sym = acc.marketSymbol!;
+                                          setSymbolRefreshing(sym, true);
+                                          const price = await fetchStockPrice(sym);
+                                          if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
+                                          setSymbolRefreshing(sym, false);
+                                        }}
+                                      >
+                                        Fetch
+                                      </button>
+                                  }
                                 </div>
                               )
                             )}
