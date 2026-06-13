@@ -296,6 +296,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveUp, 
                 : (() => {
                     const cats = counterparts!.map(c => c.tx.category.toLowerCase());
                     if (cats.includes('sip')) return 'Invested in SIP account';
+                    if (cats.includes('stocks')) return 'Stock purchase debited from bank';
                     if (cats.includes('transfer')) return 'Transfer entry on destination account';
                     if (cats.includes('cc payment')) return 'Payment reflected on card';
                     if (cats.includes('ncmc travel recharge')) return 'Travel wallet top-up entry';
@@ -429,7 +430,8 @@ export default function Transactions() {
     rewardEarned: '',
     rewardUsed: '',
     excludedAmount: '',
-    sipAllottedAmount: ''
+    sipAllottedAmount: '',
+    numberOfShares: ''
   });
 
   const syncInputStrings = (tx: Partial<Transaction>) => {
@@ -438,7 +440,8 @@ export default function Transactions() {
       rewardEarned: (tx.rewardEarned === 0 || tx.rewardEarned === undefined) ? '' : tx.rewardEarned.toString(),
       rewardUsed: (tx.rewardUsed === 0 || tx.rewardUsed === undefined) ? '' : tx.rewardUsed.toString(),
       excludedAmount: (tx.excludedAmount === 0 || tx.excludedAmount === undefined) ? '' : tx.excludedAmount.toString(),
-      sipAllottedAmount: (tx.sipAllottedAmount === 0 || tx.sipAllottedAmount === undefined) ? '' : tx.sipAllottedAmount.toString()
+      sipAllottedAmount: (tx.sipAllottedAmount === 0 || tx.sipAllottedAmount === undefined) ? '' : tx.sipAllottedAmount.toString(),
+      numberOfShares: (tx.numberOfShares === undefined) ? '' : tx.numberOfShares.toString()
     });
   };
   const [paymentSourceAccountId, setPaymentSourceAccountId] = useState('');
@@ -616,10 +619,27 @@ export default function Transactions() {
     const isTransfer = newTx.category?.toLowerCase() === 'transfer';
     const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
     const isSip = newTx.category?.toLowerCase() === 'sip';
+    const isStocks = newTx.category?.toLowerCase() === 'stocks';
     const allottedAmount = isSip ? (newTx.sipAllottedAmount !== undefined ? Number(newTx.sipAllottedAmount) : Number(newTx.amount)) : Number(newTx.amount);
     const sipCharges = isSip ? (newTx.sipCharges !== undefined ? Number(newTx.sipCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined;
 
-    if (isSip && paymentSourceAccountId && !editId) {
+    if (isStocks && paymentSourceAccountId && !editId) {
+      const bankCounterpartId = generateId();
+      currentLinkedIds.push(bankCounterpartId);
+      const counterpartType = newTx.type === 'credit' ? 'debit' : 'credit';
+      addTransaction({
+        id: bankCounterpartId,
+        date: newTx.date as string,
+        description: newTx.description as string,
+        accountId: paymentSourceAccountId,
+        type: counterpartType,
+        amount: Number(newTx.amount),
+        category: 'Stocks',
+        isRecurring: false,
+        linkedTransactionIds: [mainTxId],
+        numberOfShares: newTx.numberOfShares
+      });
+    } else if (isSip && paymentSourceAccountId && !editId) {
       const bankCounterpartId = generateId();
       currentLinkedIds.push(bankCounterpartId);
       const counterpartType = newTx.type === 'debit' ? 'credit' : 'debit';
@@ -795,6 +815,7 @@ export default function Transactions() {
       paymentSourceAccountId: paymentSourceAccountId,
       sipAllottedAmount: isSip ? allottedAmount : undefined,
       sipCharges: isSip ? sipCharges : undefined,
+      numberOfShares: isStocks ? newTx.numberOfShares : undefined,
       order: newTx.order
     };
 
@@ -1326,7 +1347,7 @@ export default function Transactions() {
                                     if (uncollapsedInGroup.length > 1) {
                                       const debitParent = uncollapsedInGroup.find(other => other.type === 'debit');
                                       const creditParent = uncollapsedInGroup.find(other => other.type === 'credit');
-                                      const creditCategories = ['sip', 'cc payment', 'transfer', 'ncmc travel recharge'];
+                                      const creditCategories = ['sip', 'stocks', 'cc payment', 'transfer', 'ncmc travel recharge'];
                                       const isCreditParentGroup = uncollapsedInGroup.some(other => creditCategories.includes(other.category?.toLowerCase() ?? ''));
                                       const parent = isCreditParentGroup ? (creditParent || uncollapsedInGroup[0]) : (debitParent || uncollapsedInGroup[0]);
                                       const counterpartsList = uncollapsedInGroup.filter(other => other.id !== parent.id);
@@ -1590,6 +1611,9 @@ export default function Transactions() {
                     if (newTx.category?.toLowerCase() === 'sip') {
                       return newTx.type === 'credit' ? acc.type === 'sips' : acc.type === 'bank_account';
                     }
+                    if (newTx.category?.toLowerCase() === 'stocks') {
+                      return newTx.type === 'credit' ? acc.type === 'stocks' : acc.type === 'bank_account';
+                    }
                     return true;
                   })
                   .map(acc => ({
@@ -1601,6 +1625,7 @@ export default function Transactions() {
                   const selectedAcc = data.accounts.find(a => a.id === val);
                   const isNcmcRecharge = newTx.category?.toLowerCase() === 'ncmc travel recharge';
                   const isSip = newTx.category?.toLowerCase() === 'sip';
+                  const isStocksCat = newTx.category?.toLowerCase() === 'stocks';
                   const shouldAutoTravel = newTx.type === 'credit' && selectedAcc?.type === 'debit_card' && selectedAcc?.isNcmcEnabled && isNcmcRecharge;
                   const shouldAutoDebitDesc = newTx.type === 'debit' && selectedAcc?.type === 'debit_card' && selectedAcc?.isNcmcEnabled && isNcmcRecharge;
                   let finalDesc = newTx.description;
@@ -1608,6 +1633,10 @@ export default function Transactions() {
                     const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
                     const sipAcc = selectedAcc?.type === 'sips' ? selectedAcc : (counterpartAcc?.type === 'sips' ? counterpartAcc : null);
                     finalDesc = sipAcc ? sipAcc.name : 'SIP';
+                  } else if (isStocksCat) {
+                    const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
+                    const stocksAcc = selectedAcc?.type === 'stocks' ? selectedAcc : (counterpartAcc?.type === 'stocks' ? counterpartAcc : null);
+                    finalDesc = stocksAcc ? stocksAcc.name : 'Stocks';
                   } else {
                     finalDesc = shouldAutoDebitDesc ? 'Transfer to Travel Wallet' : (shouldAutoTravel ? 'NCMC Travel Recharge' : newTx.description);
                   }
@@ -1668,6 +1697,14 @@ export default function Transactions() {
                   const sipAccForSip = mainAccForSip?.type === 'sips' ? mainAccForSip : (counterpartAccForSip?.type === 'sips' ? counterpartAccForSip : null);
                   const isSipAutoFilled = sipAccForSip && currentDesc === sipAccForSip.name;
 
+                  // Stocks auto-fill / clear
+                  const wasStocks = newTx.category?.toLowerCase() === 'stocks';
+                  const isNowStocks = val.toLowerCase() === 'stocks';
+                  const mainAccForStocks = data.accounts.find(a => a.id === newTx.accountId);
+                  const counterpartAccForStocks = data.accounts.find(a => a.id === paymentSourceAccountId);
+                  const stocksAccForStocks = mainAccForStocks?.type === 'stocks' ? mainAccForStocks : (counterpartAccForStocks?.type === 'stocks' ? counterpartAccForStocks : null);
+                  const isStocksAutoFilled = stocksAccForStocks && currentDesc === stocksAccForStocks.name;
+
                   let updatedDesc = currentDesc;
                   if (wasTransfer && !isNowTransfer && isTransferAutoFilled) {
                     updatedDesc = '';
@@ -1677,6 +1714,8 @@ export default function Transactions() {
                   } else if (wasNcmc && !isNowNcmc && (isNcmcAutoFilled || currentDesc === 'Transfer to Travel Wallet')) {
                     updatedDesc = '';
                   } else if (wasSip && !isNowSip && isSipAutoFilled) {
+                    updatedDesc = '';
+                  } else if (wasStocks && !isNowStocks && isStocksAutoFilled) {
                     updatedDesc = '';
                   } else if (isNowCC && paymentSourceAccountId) {
                     // Switching TO CC Payment with counterpart already selected — auto-fill
@@ -1691,6 +1730,10 @@ export default function Transactions() {
                   } else if (isNowSip) {
                     if (currentDesc === '' || isSipAutoFilled || isTransferAutoFilled || isCCAutoFilled || isNcmcAutoFilled) {
                       updatedDesc = sipAccForSip ? sipAccForSip.name : 'SIP';
+                    }
+                  } else if (isNowStocks) {
+                    if (currentDesc === '' || isStocksAutoFilled || isTransferAutoFilled || isCCAutoFilled || isNcmcAutoFilled || isSipAutoFilled) {
+                      updatedDesc = stocksAccForStocks ? stocksAccForStocks.name : 'Stocks';
                     }
                   }
                   const selectedAccForTravel = data.accounts.find(a => a.id === newTx.accountId);
@@ -1728,14 +1771,15 @@ export default function Transactions() {
                     }
                     setPaymentSourceAccountId('');
                   }
-                  setNewTx({ 
-                    ...newTx, 
-                    category: val, 
-                    description: updatedDesc, 
-                    accountId: updatedAccountId, 
+                  setNewTx({
+                    ...newTx,
+                    category: val,
+                    description: updatedDesc,
+                    accountId: updatedAccountId,
                     isTravelTransaction: updatedIsTravel,
                     sipAllottedAmount: isSip ? newTx.sipAllottedAmount || newTx.amount : undefined,
-                    sipCharges: isSip ? newTx.sipCharges || 0 : undefined
+                    sipCharges: isSip ? newTx.sipCharges || 0 : undefined,
+                    numberOfShares: isNowStocks ? newTx.numberOfShares : undefined
                   });
                   if (errors.category) {
                     const newErr = { ...errors };
@@ -1746,6 +1790,26 @@ export default function Transactions() {
                 iconGetter={c => getCategoryIcon(c)}
                 error={errors.category}
               />
+
+              {newTx.category?.toLowerCase() === 'stocks' && (
+                <div className="input-group" style={{ marginTop: '0.5rem', marginBottom: '1rem' }}>
+                  <label>No. of Shares (Optional)</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className="input-field"
+                    value={inputStrings.numberOfShares}
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                        setInputStrings(prev => ({ ...prev, numberOfShares: val }));
+                        setNewTx(prev => ({ ...prev, numberOfShares: val === '' ? undefined : parseFloat(val) }));
+                      }
+                    }}
+                    placeholder="e.g. 10"
+                  />
+                </div>
+              )}
 
               {(() => {
                 const isSip = newTx.category?.toLowerCase() === 'sip';
@@ -1794,11 +1858,14 @@ export default function Transactions() {
                     : data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card'
                 ))
                 || (newTx.category?.toLowerCase() === 'sip')
+                || (newTx.category?.toLowerCase() === 'stocks')
               ) && (
                   <CustomPicker
                     label={
                       newTx.category?.toLowerCase() === 'sip'
                         ? (newTx.type === 'debit' ? 'Credit To SIP Account' : 'Debit From Bank Account')
+                        : newTx.category?.toLowerCase() === 'stocks'
+                        ? (newTx.type === 'debit' ? 'Credit To Stocks Account' : 'Debit From Bank Account')
                         : (newTx.type === 'debit'
                           ? (isCCPayment ? 'Pay To Card (Auto-Credit)' : 'Credit To Account (Auto-Credit)')
                           : 'Debit From Account (Auto-Debit)')
@@ -1814,6 +1881,9 @@ export default function Transactions() {
                         }
                         if (newTx.category?.toLowerCase() === 'sip') {
                           return newTx.type === 'debit' ? a.type === 'sips' : a.type === 'bank_account';
+                        }
+                        if (newTx.category?.toLowerCase() === 'stocks') {
+                          return newTx.type === 'debit' ? a.type === 'stocks' : a.type === 'bank_account';
                         }
                         return true;
                       }).map(acc => ({
@@ -1845,6 +1915,10 @@ export default function Transactions() {
                         const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
                         const sipAcc = mainAcc?.type === 'sips' ? mainAcc : (selectedAcc?.type === 'sips' ? selectedAcc : null);
                         setNewTx(prev => ({ ...prev, description: sipAcc ? sipAcc.name : 'SIP' }));
+                      } else if (newTx.category?.toLowerCase() === 'stocks') {
+                        const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
+                        const stocksAcc = mainAcc?.type === 'stocks' ? mainAcc : (selectedAcc?.type === 'stocks' ? selectedAcc : null);
+                        setNewTx(prev => ({ ...prev, description: stocksAcc ? stocksAcc.name : 'Stocks' }));
                       }
                     }}
                     iconGetter={_id => _id ? getAccountIcon(_id) : '🚫'}

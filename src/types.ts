@@ -100,6 +100,7 @@ export interface Transaction {
   isCCPaymentRecord?: boolean;
   sipAllottedAmount?: number;
   sipCharges?: number;
+  numberOfShares?: number;
 }
 
 export interface CashbackStatement {
