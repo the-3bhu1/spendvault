@@ -191,7 +191,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     if (!newAccount.type) {
       newErrors.type = 'Account Type is required';
     }
-    if (!openingBalanceInput.trim()) {
+    if (newAccount.type !== 'sips' && !openingBalanceInput.trim()) {
       newErrors.openingBalance = 'Opening Balance is required';
     }
     if (newAccount.type === 'credit_card') {
@@ -239,7 +239,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     let updatedRewardOpeningBalances = hasInternalRewards ? { ...(newAccount.rewardOpeningBalances || {}) } : undefined;
     let updatedRewardBalanceAdjustments = hasInternalRewards ? { ...(newAccount.rewardBalanceAdjustments || {}) } : undefined;
 
-    if (editId) {
+    if (editId && newAccount.type !== 'sips') {
       const originalAcc = data.accounts.find(a => a.id === editId);
       if (originalAcc) {
         // 1. Standard Wallet Opening Balance setup/rollover folding
@@ -339,7 +339,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       }
     } else {
       // In add mode, set opening balance as input and reset adjustment for standard
-      updatedOpeningBalances[month] = parseFloat(openingBalanceInput) || 0;
+      updatedOpeningBalances[month] = newAccount.type === 'sips' ? 0 : (parseFloat(openingBalanceInput) || 0);
       updatedBalanceAdjustments[month] = 0;
 
       if (newAccount.isNcmcEnabled && updatedTravelOpeningBalances) {
@@ -380,6 +380,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       numberOfShares: (newAccount.type === 'stocks' || newAccount.type === 'sips') ? newAccount.numberOfShares : undefined,
       marketSymbol: (newAccount.type === 'stocks' || newAccount.type === 'sips') ? (newAccount.marketSymbol?.trim() || undefined) : undefined,
       investedValue: (newAccount.type === 'stocks' || newAccount.type === 'sips') ? newAccount.investedValue : undefined,
+      avgNav: newAccount.type === 'sips' ? newAccount.avgNav : undefined,
       rewardUnit: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.rewardUnit : undefined,
       pointsConversionRate: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.pointsConversionRate : undefined,
       rewardType: (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.isCashbackEnabled ? (newAccount.rewardType || 'rupee') : undefined,
@@ -681,13 +682,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         const hasShares = acc.numberOfShares !== undefined || txShares !== 0;
                         const isSip = acc.type === 'sips';
                         const currentPrice = acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
-                        const hasPnLSetup = !!acc.marketSymbol && acc.investedValue !== undefined && totalShares > 0;
+                        const effectiveInvested = acc.investedValue ?? (acc.avgNav && totalShares > 0 ? acc.avgNav * totalShares : undefined);
+                        const hasPnLSetup = !!acc.marketSymbol && effectiveInvested !== undefined && totalShares > 0;
 
                         if (!hasShares && !hasPnLSetup) return null;
 
                         const currentValue = hasPnLSetup && currentPrice !== null ? currentPrice * totalShares : null;
-                        const pnl = currentValue !== null ? currentValue - acc.investedValue! : null;
-                        const pnlPct = pnl !== null && acc.investedValue! > 0 ? (pnl / acc.investedValue!) * 100 : null;
+                        const pnl = currentValue !== null ? currentValue - effectiveInvested! : null;
+                        const pnlPct = pnl !== null && effectiveInvested! > 0 ? (pnl / effectiveInvested!) * 100 : null;
                         const pnlPos = pnl !== null && pnl >= 0;
 
                         const refreshBtn = (
@@ -735,9 +737,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                   </div>
                                   <div className="flex justify-between align-center" style={{ padding: '0.35rem 1rem 0.65rem', backgroundColor: 'var(--bg-hover)' }}>
                                     <div className="flex-col gap-0">
-                                      <span className="text-mono text-muted text-xs">INVESTED</span>
+                                      <span className="text-mono text-muted text-xs">
+                                        {isSip && acc.avgNav ? `AVG NAV · ₹${acc.avgNav.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'INVESTED'}
+                                      </span>
                                       <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', fontWeight: 600 }}>
-                                        ₹{acc.investedValue!.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                        ₹{effectiveInvested!.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                                       </span>
                                     </div>
                                     {pnl !== null && pnlPct !== null && (
@@ -827,20 +831,22 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   }
                 }}
               />
-              <div className="input-group">
-                <label>{editId ? 'Current Balance (Current Month)' : 'Opening Balance (Current Month)'}</label>
-                <input
-                  type="number"
-                  className={`input-field ${errors.openingBalance ? 'border-danger' : ''}`}
-                  value={openingBalanceInput}
-                  onChange={e => {
-                    setOpeningBalanceInput(e.target.value);
-                    if (errors.openingBalance) setErrors(prev => ({ ...prev, openingBalance: '' }));
-                  }}
-                  placeholder="0.00"
-                />
-                {errors.openingBalance && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.openingBalance}</span>}
-              </div>
+              {newAccount.type !== 'sips' && (
+                <div className="input-group">
+                  <label>{editId ? 'Current Balance (Current Month)' : 'Opening Balance (Current Month)'}</label>
+                  <input
+                    type="number"
+                    className={`input-field ${errors.openingBalance ? 'border-danger' : ''}`}
+                    value={openingBalanceInput}
+                    onChange={e => {
+                      setOpeningBalanceInput(e.target.value);
+                      if (errors.openingBalance) setErrors(prev => ({ ...prev, openingBalance: '' }));
+                    }}
+                    placeholder="0.00"
+                  />
+                  {errors.openingBalance && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.openingBalance}</span>}
+                </div>
+              )}
 
               {newAccount.type === 'debit_card' && (
                 <>
@@ -970,6 +976,21 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     />
                     <span className="text-xs text-muted" style={{ marginTop: '0.25rem', display: 'block' }}>Total amount you have put in — used to calculate P&amp;L</span>
                   </div>
+                  {newAccount.type === 'sips' && (
+                    <div className="input-group">
+                      <label>Average NAV — ₹/unit (Optional)</label>
+                      <input
+                        type="number"
+                        className="input-field"
+                        value={newAccount.avgNav ?? ''}
+                        onChange={e => setNewAccount({ ...newAccount, avgNav: e.target.value ? parseFloat(e.target.value) : undefined })}
+                        placeholder="e.g. 32.50"
+                        step="any"
+                        min="0"
+                      />
+                      <span className="text-xs text-muted" style={{ marginTop: '0.25rem', display: 'block' }}>Your average buy NAV — shown on the card for reference</span>
+                    </div>
+                  )}
                 </>
               )}
 

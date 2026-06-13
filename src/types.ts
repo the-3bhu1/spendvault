@@ -56,6 +56,7 @@ export interface Account {
   numberOfShares?: number;
   marketSymbol?: string;
   investedValue?: number;
+  avgNav?: number;
   statementRounding?: RoundingRule;
   cashbackDestinationAccountId?: string;
   rewardUnit?: string;
