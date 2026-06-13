@@ -689,7 +689,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
               </div>}
             </div>
           );
-          })}
+          });
         })()}
       </div>
 
