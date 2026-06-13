@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useFinance } from '../FinanceContext';
-import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X } from 'lucide-react';
+import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, ChevronDown } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardNetwork } from '../types';
@@ -76,6 +76,15 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
   const [editingCashbackRateId, setEditingCashbackRateId] = useState<string | null>(null);
   const [isEditingCardDetails, setIsEditingCardDetails] = useState(false);
+  const [collapsedTypes, setCollapsedTypes] = useState<Set<string>>(new Set());
+
+  const toggleCollapse = (type: string) => {
+    setCollapsedTypes(prev => {
+      const s = new Set(prev);
+      s.has(type) ? s.delete(type) : s.add(type);
+      return s;
+    });
+  };
 
   const addCashbackRate = () => {
     if (!newCbName || !newCbRate) return;
@@ -448,16 +457,28 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             );
           }
 
-          return sortedTypes.map((type, index) => (
+          return sortedTypes.map((type, index) => {
+            const isCollapsed = collapsedTypes.has(type);
+            return (
             <div key={type} className="flex-col gap-4" style={{ marginTop: index === 0 ? '0' : '2.5rem' }}>
-              <div className="flex align-center gap-3" style={{ padding: '0 0.5rem', marginBottom: '0.5rem' }}>
+              <div
+                className="flex align-center gap-3"
+                style={{ padding: '0 0.5rem', marginBottom: isCollapsed ? '0' : '0.5rem', cursor: 'pointer', userSelect: 'none' }}
+                onClick={() => toggleCollapse(type)}
+              >
                 <span className="text-mono" style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--accent)', opacity: 0.8 }}>
                   {TYPE_LABELS[type] || type.replace('_', ' ')}
                 </span>
+                {isCollapsed && (
+                  <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
+                    {grouped[type].length} {grouped[type].length === 1 ? 'account' : 'accounts'}
+                  </span>
+                )}
                 <div style={{ flex: 1, height: '1px', background: 'linear-gradient(to right, var(--accent), transparent)', opacity: 0.2 }}></div>
+                <ChevronDown size={14} style={{ color: 'var(--accent)', opacity: 0.6, flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
               </div>
 
-              <div className="flex-col gap-6">
+              {!isCollapsed && <div className="flex-col gap-6">
                 {grouped[type].map(acc => {
                   const rawBal = calculateBalance(acc, data.transactions, currentMonth);
                   let bal = rawBal;
@@ -665,9 +686,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     </div>
                   );
                 })}
-              </div>
+              </div>}
             </div>
-          ));
+          );
+          })}
         })()}
       </div>
 
