@@ -108,6 +108,12 @@ export default function Settings() {
   const touchStartY = useRef<number>(0);
   const savedScrollPos = useRef<number>(0);
 
+  const navigateTo = (view: 'categories' | 'accountTypes' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem') => {
+    const appRoot = document.querySelector('.app-root');
+    if (appRoot) savedScrollPos.current = (appRoot as HTMLElement).scrollTop;
+    setActiveView(view);
+  };
+
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     
@@ -157,9 +163,8 @@ export default function Settings() {
     if (appRoot) {
       if (activeView === 'main') {
         const saved = savedScrollPos.current;
-        requestAnimationFrame(() => { appRoot.scrollTop = saved; });
+        requestAnimationFrame(() => requestAnimationFrame(() => { appRoot.scrollTop = saved; }));
       } else {
-        savedScrollPos.current = appRoot.scrollTop;
         appRoot.scrollTop = 0;
       }
     }
@@ -1725,20 +1730,20 @@ export default function Settings() {
 
         <div className="flex justify-between align-center" style={{ background: 'var(--bg-card)', padding: '1rem', marginBottom: '2rem', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
           <div className="flex align-center gap-3">
-            <ProfileAvatar size={44} onClick={() => setActiveView('profile')} />
-            <div className="flex-col gap-0" onClick={() => setActiveView('profile')} style={{ cursor: 'pointer' }}>
+            <ProfileAvatar size={44} onClick={() => navigateTo('profile')} />
+            <div className="flex-col gap-0" onClick={() => navigateTo('profile')} style={{ cursor: 'pointer' }}>
               <span style={{ fontWeight: 600 }}>{data.user?.name}</span>
             </div>
           </div>
-          <button className="btn btn-secondary text-xs" style={{ borderRadius: '20px' }} onClick={() => setActiveView('profile')}>details</button>
+          <button className="btn btn-secondary text-xs" style={{ borderRadius: '20px' }} onClick={() => navigateTo('profile')}>details</button>
         </div>
 
         <div style={{ paddingBottom: '2rem' }} className="tour-profile-features">
           <SectionHeader title="preferences" first={true} />
           <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-            <GridButton icon={Tags} label="Categories" onClick={() => setActiveView('categories')} />
-            <GridButton icon={Briefcase} label="Account Types" onClick={() => setActiveView('accountTypes')} />
-            <GridButton icon={Moon} label="App Theme" onClick={() => setActiveView('theme')} />
+            <GridButton icon={Tags} label="Categories" onClick={() => navigateTo('categories')} />
+            <GridButton icon={Briefcase} label="Account Types" onClick={() => navigateTo('accountTypes')} />
+            <GridButton icon={Moon} label="App Theme" onClick={() => navigateTo('theme')} />
             {/* tour-passive-logs: spotlight target in the union rect */}
             <div className="tour-passive-logs">
               <GridToggleButton 
@@ -1828,7 +1833,7 @@ export default function Settings() {
                   }} 
                 />
                 {Capacitor.isNativePlatform() && (
-                  <GridButton icon={ShieldAlert} label="Background Guide" onClick={() => setActiveView('oem')} />
+                  <GridButton icon={ShieldAlert} label="Background Guide" onClick={() => navigateTo('oem')} />
                 )}
               </div>
             </>
@@ -1836,14 +1841,14 @@ export default function Settings() {
 
           <SectionHeader title="data management" />
           <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-            <GridButton icon={Download} label="Export Backup" onClick={() => setActiveView('export')} />
-            <GridButton icon={Upload} label="Import Data" onClick={() => setActiveView('import')} />
-            <GridButton icon={Database} label="Wipe Data" onClick={() => setActiveView('clear')} />
+            <GridButton icon={Download} label="Export Backup" onClick={() => navigateTo('export')} />
+            <GridButton icon={Upload} label="Import Data" onClick={() => navigateTo('import')} />
+            <GridButton icon={Database} label="Wipe Data" onClick={() => navigateTo('clear')} />
           </div>
           <SectionHeader title="support & info" />
           <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-            <GridButton icon={HelpCircle} label="Help Center" onClick={() => setActiveView('help')} />
-            <GridButton icon={Info} label="App About" onClick={() => setActiveView('about')} />
+            <GridButton icon={HelpCircle} label="Help Center" onClick={() => navigateTo('help')} />
+            <GridButton icon={Info} label="App About" onClick={() => navigateTo('about')} />
           </div>
         </div>
       </div>
