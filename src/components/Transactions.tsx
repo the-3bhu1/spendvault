@@ -566,6 +566,9 @@ export default function Transactions() {
     if (!newTx.amount) newErrors.amount = 'Amount is required';
     if (!newTx.accountId) newErrors.accountId = 'Account is required';
     if (!newTx.category) newErrors.category = 'Category is required';
+    if (newTx.category?.toLowerCase() === 'stocks' && !newTx.numberOfShares) {
+      newErrors.numberOfShares = 'No. of Shares is required';
+    }
     if (newTx.excludeFromStats && (newTx.excludedAmount || 0) > (newTx.amount || 0)) {
       newErrors.excludedAmount = 'Cannot exclude more than total amount';
     }
@@ -1793,21 +1796,23 @@ export default function Transactions() {
 
               {newTx.category?.toLowerCase() === 'stocks' && (
                 <div className="input-group" style={{ marginTop: '0.5rem', marginBottom: '1rem' }}>
-                  <label>No. of Shares (Optional)</label>
+                  <label>No. of Shares</label>
                   <input
                     type="text"
                     inputMode="decimal"
-                    className="input-field"
+                    className={`input-field ${errors.numberOfShares ? 'border-danger' : ''}`}
                     value={inputStrings.numberOfShares}
                     onChange={e => {
                       const val = e.target.value;
                       if (val === '' || /^\d*\.?\d*$/.test(val)) {
                         setInputStrings(prev => ({ ...prev, numberOfShares: val }));
                         setNewTx(prev => ({ ...prev, numberOfShares: val === '' ? undefined : parseFloat(val) }));
+                        if (errors.numberOfShares) setErrors(prev => ({ ...prev, numberOfShares: '' }));
                       }
                     }}
                     placeholder="e.g. 10"
                   />
+                  {errors.numberOfShares && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.numberOfShares}</span>}
                 </div>
               )}
 

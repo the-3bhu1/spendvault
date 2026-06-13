@@ -64,6 +64,12 @@ export function getCachedPrice(symbol: string): number | null {
   return mem[symbol]?.price ?? null;
 }
 
+export function isCacheFresh(symbol: string, kind: 'stock' | 'sip'): boolean {
+  const entry = mem[symbol];
+  if (!entry) return false;
+  return fresh(entry, kind === 'sip' ? SIP_TTL : STOCK_TTL);
+}
+
 export async function fetchPricesForSymbols(
   items: Array<{ symbol: string; kind: 'stock' | 'sip' }>
 ): Promise<Record<string, number>> {

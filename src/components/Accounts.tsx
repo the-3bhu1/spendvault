@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useFinance } from '../FinanceContext';
 import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw } from 'lucide-react';
-import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols } from '../services/MarketDataService';
+import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols, isCacheFresh } from '../services/MarketDataService';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardNetwork } from '../types';
@@ -205,8 +205,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     if (newAccount.type !== 'sips' && newAccount.type !== 'stocks' && !openingBalanceInput.trim()) {
       newErrors.openingBalance = 'Opening Balance is required';
     }
-    if (newAccount.type === 'sips' && (newAccount.numberOfShares === undefined || newAccount.numberOfShares <= 0)) {
-      newErrors.openingUnits = 'Opening Units is required';
+    if ((newAccount.type === 'sips' || newAccount.type === 'stocks') && (newAccount.numberOfShares === undefined || newAccount.numberOfShares <= 0)) {
+      newErrors.openingUnits = newAccount.type === 'sips' ? 'Opening Units is required' : 'Opening Shares is required';
+    }
+    if ((newAccount.type === 'sips' || newAccount.type === 'stocks') && (newAccount.investedValue === undefined || newAccount.investedValue <= 0)) {
+      newErrors.investedValue = 'Total Invested Value is required';
     }
     if (newAccount.type === 'credit_card') {
       if (!newAccount.statementDay || newAccount.statementDay < 1 || newAccount.statementDay > 31) {
@@ -762,6 +765,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         const sipPnlPos = sipPnl !== null && sipPnl >= 0;
                         const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
                         const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
+                        const isFresh = acc.marketSymbol ? isCacheFresh(acc.marketSymbol, 'sip') : false;
                         return (
                           <>
                             {sipTotalUnits > 0 && (
@@ -801,21 +805,23 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                       {isFailed && !isRefreshing && (
                                         <span style={{ fontSize: '0.65rem', color: 'var(--danger)', textAlign: 'right' }}>fetch<br/>failed</span>
                                       )}
-                                      <button
-                                        className="btn btn-secondary"
-                                        style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : undefined }}
-                                        title="Refresh NAV"
-                                        disabled={isRefreshing}
-                                        onClick={async () => {
-                                          const sym = acc.marketSymbol!;
-                                          setSymbolRefreshing(sym, true);
-                                          const price = await fetchMFNav(sym);
-                                          if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
-                                          setSymbolRefreshing(sym, false);
-                                        }}
-                                      >
-                                        <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
-                                      </button>
+                                      {(!isFresh || isRefreshing) && (
+                                        <button
+                                          className="btn btn-secondary"
+                                          style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : !isFresh ? 'var(--success)' : undefined, color: !isFresh && !isRefreshing ? 'var(--success)' : undefined }}
+                                          title="Refresh NAV"
+                                          disabled={isRefreshing}
+                                          onClick={async () => {
+                                            const sym = acc.marketSymbol!;
+                                            setSymbolRefreshing(sym, true);
+                                            const price = await fetchMFNav(sym);
+                                            if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
+                                            setSymbolRefreshing(sym, false);
+                                          }}
+                                        >
+                                          <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
+                                        </button>
+                                      )}
                                     </div>
                                   </>
                                 ) : (
@@ -853,6 +859,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         const hasPnLSetup = !!acc.marketSymbol && effectiveInvested !== undefined && totalShares > 0;
                         const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
                         const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
+                        const isFresh = acc.marketSymbol ? isCacheFresh(acc.marketSymbol, 'stock') : false;
 
                         if (!hasShares && !hasPnLSetup) return null;
 
@@ -896,9 +903,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                     {isFailed && !isRefreshing && (
                                       <span style={{ fontSize: '0.65rem', color: 'var(--danger)', textAlign: 'right' }}>fetch<br/>failed</span>
                                     )}
+                                    {(!isFresh || isRefreshing) && (
                                     <button
                                       className="btn btn-secondary"
-                                      style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : undefined }}
+                                      style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : !isFresh ? 'var(--success)' : undefined, color: !isFresh && !isRefreshing ? 'var(--success)' : undefined }}
                                       title="Refresh price"
                                       disabled={isRefreshing}
                                       onClick={async () => {
@@ -911,6 +919,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                     >
                                       <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
                                     </button>
+                                    )}
                                   </div>
                                 </div>
                               ) : (
@@ -1096,7 +1105,26 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
               {(newAccount.type === 'stocks' || newAccount.type === 'sips') && (
                 <>
                   <div className="input-group">
-                    <label>{newAccount.type === 'sips' ? 'Opening Units' : 'Opening Shares (Optional)'}</label>
+                    <label>Total Invested Value — ₹</label>
+                    <input
+                      type="number"
+                      className={`input-field ${errors.investedValue ? 'border-danger' : ''}`}
+                      value={newAccount.investedValue ?? ''}
+                      onChange={e => {
+                        setNewAccount({ ...newAccount, investedValue: e.target.value ? parseFloat(e.target.value) : undefined });
+                        if (errors.investedValue) setErrors(prev => ({ ...prev, investedValue: '' }));
+                      }}
+                      placeholder="e.g. 15000"
+                      step="any"
+                      min="0"
+                    />
+                    {errors.investedValue
+                      ? <span className="text-xs text-danger" style={{ marginTop: '0.25rem', display: 'block' }}>{errors.investedValue}</span>
+                      : <span className="text-xs text-muted" style={{ marginTop: '0.25rem', display: 'block' }}>Total amount you have put in — used to calculate P&amp;L</span>
+                    }
+                  </div>
+                  <div className="input-group">
+                    <label>{newAccount.type === 'sips' ? 'Opening Units' : 'Opening Shares'}</label>
                     <input
                       type="number"
                       className={`input-field ${errors.openingUnits ? 'border-danger' : ''}`}
@@ -1126,19 +1154,6 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         ? 'Find on mfapi.in — search your fund name to get the scheme code'
                         : 'NSE stocks use .NS suffix (e.g. RELIANCE.NS, TCS.NS)'}
                     </span>
-                  </div>
-                  <div className="input-group">
-                    <label>Total Invested Value — ₹ (Optional)</label>
-                    <input
-                      type="number"
-                      className="input-field"
-                      value={newAccount.investedValue ?? ''}
-                      onChange={e => setNewAccount({ ...newAccount, investedValue: e.target.value ? parseFloat(e.target.value) : undefined })}
-                      placeholder="e.g. 15000"
-                      step="any"
-                      min="0"
-                    />
-                    <span className="text-xs text-muted" style={{ marginTop: '0.25rem', display: 'block' }}>Total amount you have put in — used to calculate P&amp;L</span>
                   </div>
                   {newAccount.type === 'sips' && (
                     <div className="input-group">
