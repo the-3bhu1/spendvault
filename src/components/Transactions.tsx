@@ -1190,7 +1190,7 @@ export default function Transactions() {
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="flex-col gap-1">
+            <div className="flex-col gap-1" style={{ minWidth: 0 }}>
               <label className="text-xs text-muted" style={{ marginLeft: '0.5rem', marginBottom: '2px' }}>Type</label>
               <CustomPicker
                 label="Type"
@@ -1205,7 +1205,7 @@ export default function Transactions() {
                 iconGetter={(id) => id === 'all' ? <Activity size={16} /> : (id === 'debit' ? <ArrowRightLeft size={16} className="rotate-90 text-danger" /> : <ArrowRightLeft size={16} className="-rotate-90 text-success" />)}
               />
             </div>
-            <div className="flex-col gap-1">
+            <div className="flex-col gap-1" style={{ minWidth: 0 }}>
               <label className="text-xs text-muted" style={{ marginLeft: '0.5rem', marginBottom: '2px' }}>Account</label>
               <CustomPicker
                 label="Account"
@@ -1220,7 +1220,7 @@ export default function Transactions() {
                 iconGetter={getAccountIcon}
               />
             </div>
-            <div className="flex-col gap-1">
+            <div className="flex-col gap-1" style={{ minWidth: 0 }}>
               <label className="text-xs text-muted" style={{ marginLeft: '0.5rem', marginBottom: '2px' }}>Category</label>
               <CustomPicker
                 label="Category"
@@ -1235,7 +1235,7 @@ export default function Transactions() {
                 iconGetter={getCategoryIcon}
               />
             </div>
-            <div className="flex-col gap-1">
+            <div className="flex-col gap-1" style={{ minWidth: 0 }}>
               <label className="text-xs text-muted" style={{ marginLeft: '0.5rem', marginBottom: '2px' }}>Month</label>
               <CustomPicker
                 label="Month"
