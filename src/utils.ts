@@ -250,7 +250,7 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork) => {
   return themes[index];
 };
 
-export const APP_VERSION = 'v2.0.0';
+export const APP_VERSION = 'v2.1.0';
 
 // ─── Recurring Split Cycle Helpers ──────────────────────────────────────────
 
