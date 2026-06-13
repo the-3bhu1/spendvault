@@ -23,7 +23,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     symbols.forEach(s => { const p = getCachedPrice(s); if (p !== null) cached[s] = p; });
     return cached;
   });
-  const [pricesLoading, setPricesLoading] = useState(false);
+  const [refreshingSymbols, setRefreshingSymbols] = useState<Set<string>>(new Set());
+
+  const setSymbolRefreshing = (sym: string, on: boolean) => {
+    setRefreshingSymbols(prev => { const s = new Set(prev); on ? s.add(sym) : s.delete(sym); return s; });
+  };
 
   useEffect(() => {
     const handleGlobalBack = (e: Event) => {
@@ -47,10 +51,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       .filter(a => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
       .map(a => ({ symbol: a.marketSymbol!, kind: (a.type === 'stocks' ? 'stock' : 'sip') as 'stock' | 'sip' }));
     if (items.length === 0) return;
-    setPricesLoading(true);
+    const syms = items.map(i => i.symbol);
+    setRefreshingSymbols(new Set(syms));
     fetchPricesForSymbols(items).then(result => {
       setPrices(prev => ({ ...prev, ...result }));
-      setPricesLoading(false);
+      setRefreshingSymbols(new Set());
     });
   }, []);
 
@@ -712,6 +717,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         const sipPnl = sipCurrentValue !== null && sipEffectiveInvested !== undefined ? sipCurrentValue - sipEffectiveInvested : null;
                         const sipPnlPct = sipPnl !== null && sipEffectiveInvested! > 0 ? (sipPnl / sipEffectiveInvested!) * 100 : null;
                         const sipPnlPos = sipPnl !== null && sipPnl >= 0;
+                        const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
                         return (
                           <>
                             {sipTotalUnits > 0 && (
@@ -722,16 +728,19 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                             )}
                             {acc.marketSymbol && (
                               <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                {sipCurrentPrice !== null ? (
+                                {(sipCurrentPrice !== null || isRefreshing) ? (
                                   <>
                                     <div className="flex-col gap-0">
                                       <span className="text-mono text-muted text-xs">CURRENT NAV</span>
-                                      <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                        ₹{sipCurrentPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                      </span>
+                                      {isRefreshing
+                                        ? <span className="skeleton-bar" style={{ width: '4rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                        : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                            ₹{sipCurrentPrice!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                          </span>
+                                      }
                                     </div>
-                                    <div className="flex align-center gap-2">
-                                      {sipPnl !== null && sipPnlPct !== null && (
+                                    <div className="flex align-center" style={{ gap: '0.75rem' }}>
+                                      {(sipPnl !== null && sipPnlPct !== null && !isRefreshing) && (
                                         <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
                                           <span className="text-mono text-muted text-xs">P&amp;L ({sipPnlPos ? '+' : ''}{sipPnlPct.toFixed(2)}%)</span>
                                           <span style={{ color: sipPnlPos ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
@@ -739,36 +748,45 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                           </span>
                                         </div>
                                       )}
+                                      {isRefreshing && sipEffectiveInvested !== undefined && (
+                                        <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
+                                          <span className="text-mono text-muted text-xs">P&amp;L</span>
+                                          <span className="skeleton-bar" style={{ width: '5rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                        </div>
+                                      )}
                                       <button
                                         className="btn btn-secondary"
-                                        style={{ width: '28px', height: '28px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                                        style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
                                         title="Refresh NAV"
+                                        disabled={isRefreshing}
                                         onClick={async () => {
-                                          const price = await fetchMFNav(acc.marketSymbol!);
-                                          if (price !== null) setPrices(prev => ({ ...prev, [acc.marketSymbol!]: price }));
+                                          const sym = acc.marketSymbol!;
+                                          setSymbolRefreshing(sym, true);
+                                          const price = await fetchMFNav(sym);
+                                          if (price !== null) setPrices(prev => ({ ...prev, [sym]: price }));
+                                          setSymbolRefreshing(sym, false);
                                         }}
                                       >
-                                        <RefreshCw size={11} />
+                                        <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
                                       </button>
                                     </div>
                                   </>
                                 ) : (
                                   <>
                                     <span className="text-mono text-muted text-xs">CURRENT NAV</span>
-                                    {pricesLoading ? (
-                                      <span className="text-xs text-muted">Fetching...</span>
-                                    ) : (
-                                      <button
-                                        className="btn btn-secondary"
-                                        style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
-                                        onClick={async () => {
-                                          const price = await fetchMFNav(acc.marketSymbol!);
-                                          if (price !== null) setPrices(prev => ({ ...prev, [acc.marketSymbol!]: price }));
-                                        }}
-                                      >
-                                        Fetch NAV
-                                      </button>
-                                    )}
+                                    <button
+                                      className="btn btn-secondary"
+                                      style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
+                                      onClick={async () => {
+                                        const sym = acc.marketSymbol!;
+                                        setSymbolRefreshing(sym, true);
+                                        const price = await fetchMFNav(sym);
+                                        if (price !== null) setPrices(prev => ({ ...prev, [sym]: price }));
+                                        setSymbolRefreshing(sym, false);
+                                      }}
+                                    >
+                                      Fetch NAV
+                                    </button>
                                   </>
                                 )}
                               </div>
@@ -786,6 +804,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         const currentPrice = acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
                         const effectiveInvested = acc.investedValue;
                         const hasPnLSetup = !!acc.marketSymbol && effectiveInvested !== undefined && totalShares > 0;
+                        const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
 
                         if (!hasShares && !hasPnLSetup) return null;
 
@@ -803,33 +822,42 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               </div>
                             )}
                             {hasPnLSetup && (
-                              currentPrice !== null ? (
+                              (currentPrice !== null || isRefreshing) ? (
                                 <>
                                   <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem 0.35rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                                     <div className="flex-col gap-0">
                                       <span className="text-mono text-muted text-xs">LTP</span>
-                                      <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                        ₹{currentPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                      </span>
+                                      {isRefreshing
+                                        ? <span className="skeleton-bar" style={{ width: '4.5rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                        : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                            ₹{currentPrice!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                          </span>
+                                      }
                                     </div>
-                                    <div className="flex align-center gap-2">
+                                    <div className="flex align-center" style={{ gap: '0.75rem' }}>
                                       <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
                                         <span className="text-mono text-muted text-xs">CURRENT VALUE</span>
-                                        <span style={{ color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                          ₹{currentValue!.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                                        </span>
+                                        {isRefreshing
+                                          ? <span className="skeleton-bar" style={{ width: '5rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                          : <span style={{ color: 'var(--text-primary)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                              ₹{currentValue!.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                            </span>
+                                        }
                                       </div>
                                       <button
                                         className="btn btn-secondary"
-                                        style={{ width: '28px', height: '28px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                                        style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
                                         title="Refresh price"
+                                        disabled={isRefreshing}
                                         onClick={async () => {
                                           const sym = acc.marketSymbol!;
+                                          setSymbolRefreshing(sym, true);
                                           const price = await fetchStockPrice(sym);
                                           if (price !== null) setPrices(prev => ({ ...prev, [sym]: price }));
+                                          setSymbolRefreshing(sym, false);
                                         }}
                                       >
-                                        <RefreshCw size={11} />
+                                        <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
                                       </button>
                                     </div>
                                   </div>
@@ -840,7 +868,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                         ₹{effectiveInvested!.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                                       </span>
                                     </div>
-                                    {pnl !== null && pnlPct !== null && (
+                                    {(pnl !== null && pnlPct !== null && !isRefreshing) && (
                                       <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
                                         <span className="text-mono text-muted text-xs">P&amp;L ({pnlPos ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
                                         <span style={{ color: pnlPos ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
@@ -848,26 +876,27 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                         </span>
                                       </div>
                                     )}
+                                    {isRefreshing && (
+                                      <span className="skeleton-bar" style={{ width: '5.5rem', height: '1.1rem' }} />
+                                    )}
                                   </div>
                                 </>
                               ) : (
                                 <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                                   <span className="text-mono text-muted text-xs">LIVE P&amp;L</span>
-                                  {pricesLoading ? (
-                                    <span className="text-xs text-muted">Fetching...</span>
-                                  ) : (
-                                    <button
-                                      className="btn btn-secondary"
-                                      style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
-                                      onClick={async () => {
-                                        const sym = acc.marketSymbol!;
-                                        const price = await fetchStockPrice(sym);
-                                        if (price !== null) setPrices(prev => ({ ...prev, [sym]: price }));
-                                      }}
-                                    >
-                                      Fetch
-                                    </button>
-                                  )}
+                                  <button
+                                    className="btn btn-secondary"
+                                    style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
+                                    onClick={async () => {
+                                      const sym = acc.marketSymbol!;
+                                      setSymbolRefreshing(sym, true);
+                                      const price = await fetchStockPrice(sym);
+                                      if (price !== null) setPrices(prev => ({ ...prev, [sym]: price }));
+                                      setSymbolRefreshing(sym, false);
+                                    }}
+                                  >
+                                    Fetch
+                                  </button>
                                 </div>
                               )
                             )}
