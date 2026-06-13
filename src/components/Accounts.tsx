@@ -205,6 +205,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     if (newAccount.type !== 'sips' && newAccount.type !== 'stocks' && !openingBalanceInput.trim()) {
       newErrors.openingBalance = 'Opening Balance is required';
     }
+    if (newAccount.type === 'sips' && (newAccount.numberOfShares === undefined || newAccount.numberOfShares <= 0)) {
+      newErrors.openingUnits = 'Opening Units is required';
+    }
     if (newAccount.type === 'credit_card') {
       if (!newAccount.statementDay || newAccount.statementDay < 1 || newAccount.statementDay > 31) {
         newErrors.statementDay = 'Statement Generation Day is required';
@@ -1093,16 +1096,20 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
               {(newAccount.type === 'stocks' || newAccount.type === 'sips') && (
                 <>
                   <div className="input-group">
-                    <label>{newAccount.type === 'sips' ? 'Opening Units (Optional)' : 'Opening Shares (Optional)'}</label>
+                    <label>{newAccount.type === 'sips' ? 'Opening Units' : 'Opening Shares (Optional)'}</label>
                     <input
                       type="number"
-                      className="input-field"
+                      className={`input-field ${errors.openingUnits ? 'border-danger' : ''}`}
                       value={newAccount.numberOfShares ?? ''}
-                      onChange={e => setNewAccount({ ...newAccount, numberOfShares: e.target.value ? parseFloat(e.target.value) : undefined })}
-                      placeholder="e.g. 100"
+                      onChange={e => {
+                        setNewAccount({ ...newAccount, numberOfShares: e.target.value ? parseFloat(e.target.value) : undefined });
+                        if (errors.openingUnits) setErrors(prev => ({ ...prev, openingUnits: '' }));
+                      }}
+                      placeholder={newAccount.type === 'sips' ? 'e.g. 484.775' : 'e.g. 100'}
                       step="any"
                       min="0"
                     />
+                    {errors.openingUnits && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.openingUnits}</span>}
                   </div>
                   <div className="input-group">
                     <label>{newAccount.type === 'sips' ? 'MF Scheme Code (Optional)' : 'Market Symbol (Optional)'}</label>

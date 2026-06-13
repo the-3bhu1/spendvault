@@ -1814,36 +1814,55 @@ export default function Transactions() {
               {(() => {
                 const isSip = newTx.category?.toLowerCase() === 'sip';
                 return isSip && (
-                  <div className="grid grid-cols-2 gap-4" style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', marginBottom: '1rem' }}>
-                    <div className="input-group" style={{ marginBottom: 0 }}>
-                      <label>Allotted Amount</label>
-                      <input 
-                        type="text" 
+                  <div style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', marginBottom: '1rem' }}>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="input-group" style={{ marginBottom: 0 }}>
+                        <label>Allotted Amount</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="input-field"
+                          value={inputStrings.sipAllottedAmount}
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                              setInputStrings(prev => ({ ...prev, sipAllottedAmount: val }));
+                              const allotted = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
+                              const totalAmount = Number(newTx.amount || 0);
+                              const charges = Math.max(0, totalAmount - allotted);
+                              setNewTx(prev => ({
+                                ...prev,
+                                sipAllottedAmount: allotted,
+                                sipCharges: parseFloat(charges.toFixed(2))
+                              }));
+                            }
+                          }}
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div className="input-group" style={{ marginBottom: 0 }}>
+                        <label>Stamp Duty / Charges</label>
+                        <div className="input-field flex align-center text-muted text-mono" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', height: '42px', borderRadius: '12px', padding: '0.75rem 1rem' }}>
+                          {newTx.sipCharges !== undefined ? newTx.sipCharges : '0.00'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="input-group" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
+                      <label>Units Allotted</label>
+                      <input
+                        type="text"
                         inputMode="decimal"
-                        className="input-field" 
-                        value={inputStrings.sipAllottedAmount} 
-                        onChange={e => { 
+                        className="input-field"
+                        value={inputStrings.numberOfShares}
+                        onChange={e => {
                           const val = e.target.value;
                           if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                            setInputStrings(prev => ({ ...prev, sipAllottedAmount: val }));
-                            const allotted = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
-                            const totalAmount = Number(newTx.amount || 0);
-                            const charges = Math.max(0, totalAmount - allotted);
-                            setNewTx(prev => ({ 
-                              ...prev, 
-                              sipAllottedAmount: allotted,
-                              sipCharges: parseFloat(charges.toFixed(2))
-                            }));
+                            setInputStrings(prev => ({ ...prev, numberOfShares: val }));
+                            setNewTx(prev => ({ ...prev, numberOfShares: val === '' ? undefined : parseFloat(val) }));
                           }
-                        }} 
-                        placeholder="0.00" 
+                        }}
+                        placeholder="e.g. 78.234"
                       />
-                    </div>
-                    <div className="input-group" style={{ marginBottom: 0 }}>
-                      <label>Stamp Duty / Charges</label>
-                      <div className="input-field flex align-center text-muted text-mono" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', height: '42px', borderRadius: '12px', padding: '0.75rem 1rem' }}>
-                        {newTx.sipCharges !== undefined ? newTx.sipCharges : '0.00'}
-                      </div>
                     </div>
                   </div>
                 );
