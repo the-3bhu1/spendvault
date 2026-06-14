@@ -1418,6 +1418,14 @@ tr:hover td {
   pointer-events: none !important;
 }
 
+/* Portfolio chart: re-enable the cursor line + active dot (overrides global hide above) */
+.portfolio-chart .recharts-tooltip-cursor,
+.portfolio-chart .recharts-active-dot {
+  display: block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
 /* Remove browser focus outline on chart elements (the real blue rectangle culprit) */
 .recharts-wrapper,
 .recharts-wrapper *,

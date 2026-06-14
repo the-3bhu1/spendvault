@@ -541,21 +541,18 @@ export function Portfolio() {
             }}
           >
             {/* Header with back button */}
-            <div style={{ padding: '1.25rem 1.25rem 1rem', display: 'flex', alignItems: 'center', gap: '0.85rem', boxSizing: 'border-box' }}>
+            <div className="flex align-center gap-4" style={{ padding: '0 0 0.5rem', boxSizing: 'border-box' }}>
               <button
                 className="btn btn-secondary"
-                style={{ padding: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                style={{ padding: '0.5rem', flexShrink: 0 }}
                 onClick={() => setSelectedAsset(null)}
               >
                 <ChevronLeft size={20} />
               </button>
-              <span className="text-mono font-bold uppercase" style={{ opacity: 0.72, color: 'var(--text-primary)', fontSize: '0.9rem', letterSpacing: '1px' }}>
-                {selectedAsset.type === 'sips' ? 'Mutual Fund' : 'Stock'}
-              </span>
             </div>
 
             {/* Asset identity — centered, CRED style */}
-            <div style={{ padding: '0.5rem 1.5rem 1.5rem', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+            <div style={{ padding: '0 1.5rem 1.5rem', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
               <div
                 style={{
                   width: '60px',
@@ -622,8 +619,9 @@ export function Portfolio() {
               const lineColor = up ? '#22c55e' : '#ef4444';
               return (
               <div style={{ padding: '0.5rem 0 0.5rem', width: '100%', boxSizing: 'border-box' }}>
-                <div style={{ width: '100%', height: '280px' }}>
+                <div className="portfolio-chart" style={{ width: '100%', height: '280px' }}>
                   <ResponsiveContainer width="100%" height="100%">
+                    {/* plot bottom baseline: container 280 - x-axis height 30 */}
                     <AreaChart data={historyData} margin={{ top: 70, right: 0, left: 0, bottom: 0 }}>
                       <defs>
                         <linearGradient id="portfolioChartFill" x1="0" y1="0" x2="0" y2="1">
@@ -634,6 +632,7 @@ export function Portfolio() {
                       <YAxis domain={['dataMin', 'dataMax']} hide />
                       <XAxis
                         dataKey="date"
+                        height={30}
                         tick={{ fontSize: 11, fill: 'var(--text-secondary)' }}
                         tickFormatter={d => new Date(d).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}
                         minTickGap={50}
@@ -643,8 +642,9 @@ export function Portfolio() {
                       />
                       <Tooltip
                         position={{ y: 6 }}
+                        offset={0}
                         allowEscapeViewBox={{ x: true }}
-                        cursor={{ stroke: '#ffffff', strokeWidth: 2, strokeDasharray: '5 4', strokeOpacity: 0.9 }}
+                        cursor={false}
                         content={({ active, payload, label }: any) => {
                           if (!active || !payload || !payload.length) return null;
                           const val = payload[0].value as number;
@@ -688,7 +688,21 @@ export function Portfolio() {
                         strokeWidth={1.5}
                         fill="url(#portfolioChartFill)"
                         dot={false}
-                        activeDot={{ r: 6, fill: '#ffffff', stroke: lineColor, strokeWidth: 3 }}
+                        activeDot={(props: any) => {
+                          const { cx, cy } = props;
+                          if (cx == null || cy == null) return <g />;
+                          const topAnchor = 64; // meet the tooltip caret tip (tooltip top y=6 + height)
+                          return (
+                            <g>
+                              <line
+                                x1={cx} y1={cy} x2={cx} y2={topAnchor}
+                                stroke={lineColor} strokeWidth={1.25}
+                                strokeDasharray="5 4" strokeOpacity={0.4}
+                              />
+                              <circle cx={cx} cy={cy} r={3.5} fill={lineColor} />
+                            </g>
+                          );
+                        }}
                       />
                     </AreaChart>
                   </ResponsiveContainer>
