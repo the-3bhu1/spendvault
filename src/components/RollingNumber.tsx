@@ -40,7 +40,7 @@ const RollingNumber: React.FC<RollingNumberProps> = ({
       fontWeight: 700,
       fontSize,
       letterSpacing: '-0.02em',
-      fontVariantNumeric: 'lining-nums',
+      fontVariantNumeric: 'tabular-nums lining-nums',
       overflow: 'hidden',
     }}>
       {chars.map((char, i) => {
@@ -81,8 +81,9 @@ const RollingNumber: React.FC<RollingNumberProps> = ({
               style={{
                 display: 'flex',
                 flexDirection: 'column',
-                transform: animate 
-                  ? `translateY(-${totalRoll}em)` 
+                alignItems: 'center',
+                transform: animate
+                  ? `translateY(-${totalRoll}em)`
                   : 'translateY(0)',
                 transition: `transform ${0.8 + i * 0.06}s cubic-bezier(0.2, 0.8, 0.2, 1) ${i * 0.04}s`,
               }}
@@ -134,6 +135,7 @@ const RollingNumber: React.FC<RollingNumberProps> = ({
               style={{
                 display: 'flex',
                 flexDirection: 'column',
+                alignItems: 'center',
                 transform: animate
                   ? `translateY(-${totalRoll}em)`
                   : 'translateY(0)',
