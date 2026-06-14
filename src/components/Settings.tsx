@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, FileJson, ChevronDown, Sparkles, ShieldAlert } from 'lucide-react';
+import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, FileJson, ChevronDown, Sparkles, ShieldAlert, Hash } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
 import ConfirmDialog from './ConfirmDialog';
 import TransparentLogo from './TransparentLogo';
@@ -97,10 +97,11 @@ const backupActionIconStyle = {
 import { SubviewWrapper } from './SubviewWrapper.tsx';
 
 export default function Settings() {
-  const { data, updateCategories, updateCustomAccountTypes, clearAllData, updateUser, setAuthenticated, setTheme } = useFinance();
+  const { data, updateCategories, updateCustomAccountTypes, updateTags, updateTransaction, clearAllData, updateUser, setAuthenticated, setTheme } = useFinance();
   const [newCat, setNewCat] = useState('');
   const [newAccountType, setNewAccountType] = useState('');
-  const [activeView, setActiveView] = useState<'main' | 'categories' | 'accountTypes' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem'>('main');
+  const [newTagEntry, setNewTagEntry] = useState('');
+  const [activeView, setActiveView] = useState<'main' | 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem'>('main');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
@@ -108,7 +109,7 @@ export default function Settings() {
   const touchStartY = useRef<number>(0);
   const savedScrollPos = useRef<number>(0);
 
-  const navigateTo = (view: 'categories' | 'accountTypes' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem') => {
+  const navigateTo = (view: 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem') => {
     const appRoot = document.querySelector('.app-root');
     if (appRoot) savedScrollPos.current = (appRoot as HTMLElement).scrollTop;
     setActiveView(view);
@@ -492,6 +493,35 @@ export default function Settings() {
     });
   };
 
+  const handleAddTag = () => {
+    const raw = newTagEntry.trim().replace(/^#/, '');
+    if (raw && !(data.tags || []).includes(raw)) {
+      updateTags([...(data.tags || []), raw]);
+      setNewTagEntry('');
+    }
+  };
+
+  const handleRemoveTag = (tag: string) => {
+    const usedByTxCount = data.transactions.filter(t => (t.tags || []).includes(tag)).length;
+    setConfirmConfig({
+      title: "Delete Tag?",
+      message: usedByTxCount > 0
+        ? `"#${tag}" is used on ${usedByTxCount} transaction${usedByTxCount > 1 ? 's' : ''}. It will be removed from those transactions too. Delete anyway?`
+        : `Are you sure you want to delete the tag "#${tag}"?`,
+      confirmLabel: "Delete",
+      isDanger: usedByTxCount > 0,
+      onConfirm: () => {
+        updateTags((data.tags || []).filter(t => t !== tag));
+        if (usedByTxCount > 0) {
+          data.transactions
+            .filter(t => (t.tags || []).includes(tag))
+            .forEach(t => updateTransaction({ ...t, tags: (t.tags || []).filter(tg => tg !== tag) }));
+        }
+        setConfirmConfig(null);
+      }
+    });
+  };
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
   };
@@ -562,7 +592,7 @@ export default function Settings() {
   const KEY_MAP: Record<string, string> = {
     // Root keys
     version: 'v', exportedAt: 't', user: 'u', accounts: 'A', transactions: 'T',
-    categories: 'C', customAccountTypes: 'X', cashbackStatements: 'S',
+    categories: 'C', tags: 'tg', customAccountTypes: 'X', cashbackStatements: 'S',
     splitEvents: 'E', recurringBills: 'R', theme: 'm', debts: 'H',
     // User fields
     email: 'ue', profileImage: 'upi', pinHash: 'uph', recoveryKeyHash: 'urk',
@@ -641,6 +671,7 @@ export default function Settings() {
     accounts: data.accounts,
     transactions: data.transactions,
     categories: data.categories || [],
+    tags: data.tags || [],
     customAccountTypes: data.customAccountTypes || [],
     cashbackStatements: data.cashbackStatements || [],
     splitEvents: data.splitEvents || [],
@@ -1125,6 +1156,50 @@ export default function Settings() {
           <div className="flex gap-2" style={{ marginTop: '0.5rem' }}>
             <input className="input-field" style={{ flex: 1 }} value={newAccountType} onChange={e => setNewAccountType(e.target.value)} placeholder="New Account Type" onKeyDown={e => e.key === 'Enter' && handleAddAccountType()} />
             <button className="btn btn-primary" style={{ minWidth: '54px', padding: '0.75rem' }} onClick={handleAddAccountType} aria-label="Add Account Type"><Plus size={20} /></button>
+          </div>
+        </div>
+      </SubviewWrapper>
+    );
+  } else if (activeView === 'tags') {
+    viewContent = (
+      <SubviewWrapper title="Tags" onBack={() => setActiveView('main')}>
+        <div className="card flex-col gap-4">
+          <SettingsCardHeader icon={Hash} title="Bucket Tags" level="h3" size={20} marginBottom="0.5rem" />
+          <p className="text-muted text-sm">Tags let you group expenses across categories for buckets or events like #Vacation2024 or #WeddingDec.</p>
+          <div className="flex-col gap-2">
+            {(data.tags || []).length === 0 ? (
+              <div className="text-sm text-muted" style={{ padding: '0.75rem 0' }}>No tags yet. Create your first tag below.</div>
+            ) : (
+              (data.tags || []).map(tag => {
+                const useCount = data.transactions.filter(t => (t.tags || []).includes(tag)).length;
+                return (
+                  <div
+                    key={tag}
+                    className="flex justify-between align-center"
+                    style={{ padding: '0.75rem 1rem', background: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
+                  >
+                    <div className="flex align-center gap-3">
+                      <span className="tag-pill" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}>#{tag}</span>
+                      {useCount > 0 && <span className="text-xs text-muted">{useCount} transaction{useCount !== 1 ? 's' : ''}</span>}
+                    </div>
+                    <button className="text-danger" style={{ background: 'none', border: 'none', padding: 0 }} onClick={() => handleRemoveTag(tag)}>
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div className="flex gap-2" style={{ marginTop: '0.5rem' }}>
+            <input
+              className="input-field"
+              style={{ flex: 1 }}
+              value={newTagEntry}
+              onChange={e => setNewTagEntry(e.target.value)}
+              placeholder="New tag (e.g. Vacation2024)"
+              onKeyDown={e => e.key === 'Enter' && handleAddTag()}
+            />
+            <button className="btn btn-primary" style={{ minWidth: '54px', padding: '0.75rem' }} onClick={handleAddTag} aria-label="Add Tag"><Plus size={20} /></button>
           </div>
         </div>
       </SubviewWrapper>
@@ -1743,6 +1818,7 @@ export default function Settings() {
           <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
             <GridButton icon={Tags} label="Categories" onClick={() => navigateTo('categories')} />
             <GridButton icon={Briefcase} label="Account Types" onClick={() => navigateTo('accountTypes')} />
+            <GridButton icon={Hash} label="Tags" onClick={() => navigateTo('tags')} />
             <GridButton icon={Moon} label="App Theme" onClick={() => navigateTo('theme')} />
             {/* tour-passive-logs: spotlight target in the union rect */}
             <div className="tour-passive-logs">

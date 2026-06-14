@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account } from '../types';
 import { generateId, formatCurrency, formatAmount, formatDateString, getBillingCycleForDate, calculateBalance, getCurrentMonthStr } from '../utils';
-import { ShoppingBag, Utensils, Zap, Car, HeartPulse, Film, CreditCard, Wallet, ArrowRightLeft, MoreHorizontal, Coins, BadgeDollarSign, Calendar, Activity, X, Search, Home, Gift, Landmark, Smartphone, Sparkles, ChevronRight, TrendingUp, Train, BarChart, BarChart3 } from 'lucide-react';
+import { ShoppingBag, Utensils, Zap, Car, HeartPulse, Film, CreditCard, Wallet, ArrowRightLeft, MoreHorizontal, Coins, BadgeDollarSign, Calendar, Activity, X, Search, Home, Gift, Landmark, Smartphone, Sparkles, ChevronRight, TrendingUp, Train, BarChart, BarChart3, Hash } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
@@ -212,9 +212,15 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveUp, 
                 </div>
               )}
             </div>
-            <div className="flex align-center gap-2" style={{ marginTop: '2px' }}>
-              <span className="text-mono text-muted text-xs truncate" style={{ fontWeight: 600 }}>{acc?.name || 'Unknown'}</span>
+            <div className="flex align-center gap-2" style={{ marginTop: '2px', flexWrap: 'nowrap', overflow: 'hidden' }}>
+              <span className="text-mono text-muted text-xs truncate" style={{ fontWeight: 600, flexShrink: 1 }}>{acc?.name || 'Unknown'}</span>
               <span className="metric-pill truncate" style={{ flexShrink: 0 }}>{tx.category}</span>
+              {(tx.tags || []).slice(0, 2).map(tag => (
+                <span key={tag} className="tag-pill" style={{ flexShrink: 0 }}>#{tag}</span>
+              ))}
+              {(tx.tags || []).length > 2 && (
+                <span className="tag-pill tag-pill-overflow" style={{ flexShrink: 0 }}>+{(tx.tags || []).length - 2}</span>
+              )}
             </div>
           </div>
         </div>
@@ -333,7 +339,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveUp, 
 }
 
 export default function Transactions() {
-  const { data, pendingTransfer, setPendingTransfer, smsQueue, removeFromSmsQueue, removeSmsByMatch, addTransaction, updateTransaction, reorderTransactions, deleteTransaction } = useFinance();
+  const { data, pendingTransfer, setPendingTransfer, smsQueue, removeFromSmsQueue, removeSmsByMatch, addTransaction, updateTransaction, reorderTransactions, deleteTransaction, updateTags } = useFinance();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [processingSms, setProcessingSms] = useState(false);
@@ -448,6 +454,7 @@ export default function Transactions() {
   const [ccPaymentCycleTarget, setCcPaymentCycleTarget] = useState<'current_cycle' | 'previous_statement'>('previous_statement');
   const [selectedCashbackLevelId, setSelectedCashbackLevelId] = useState('');
   const [showRewardSplit, setShowRewardSplit] = useState(false);
+  const [newTagInput, setNewTagInput] = useState('');
   const rewardSplitRef = useRef<HTMLDivElement>(null);
   const passiveLogRef = useRef<HTMLDivElement>(null);
 
@@ -553,6 +560,7 @@ export default function Transactions() {
   const [filterAccountId, setFilterAccountId] = useState<string[]>(['all']);
   const [filterCategory, setFilterCategory] = useState<string[]>(['all']);
   const [filterMonth, setFilterMonth] = useState<string[]>(['all']);
+  const [filterTag, setFilterTag] = useState<string[]>(['all']);
   const [searchQuery, setSearchQuery] = useState('');
 
   const [showFilters, setShowFilters] = useState(false);
@@ -819,6 +827,7 @@ export default function Transactions() {
       sipAllottedAmount: isSip ? allottedAmount : undefined,
       sipCharges: isSip ? sipCharges : undefined,
       numberOfShares: isStocks ? newTx.numberOfShares : undefined,
+      tags: (newTx.tags || []).length > 0 ? newTx.tags : undefined,
       order: newTx.order
     };
 
@@ -859,6 +868,19 @@ export default function Transactions() {
     setIsModalOpen(false);
   };
 
+  const handleCreateTag = () => {
+    const raw = newTagInput.trim().replace(/^#/, '');
+    if (!raw) return;
+    const existing = data.tags || [];
+    if (!existing.includes(raw)) {
+      updateTags([...existing, raw]);
+    }
+    if (!(newTx.tags || []).includes(raw)) {
+      setNewTx(prev => ({ ...prev, tags: [...(prev.tags || []), raw] }));
+    }
+    setNewTagInput('');
+  };
+
   const openAddModal = () => {
     setEditId(null);
     const initialTx: Partial<Transaction> = {
@@ -873,6 +895,7 @@ export default function Transactions() {
     setPaymentSourceAccountId('');
     setCcPaymentCycleTarget('previous_statement');
     setShowRewardSplit(false);
+    setNewTagInput('');
     setIsModalOpen(true);
   };
 
@@ -931,13 +954,14 @@ export default function Transactions() {
       const matchesAccount = filterAccountId.includes('all') || filterAccountId.includes(tx.accountId);
       const matchesCategory = filterCategory.includes('all') || filterCategory.includes(tx.category);
       const matchesMonth = filterMonth.includes('all') || filterMonth.includes(tx.date.substring(0, 7));
+      const matchesTag = filterTag.includes('all') || (tx.tags || []).some(t => filterTag.includes(t));
       const matchesSearch = tx.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
         tx.category.toLowerCase().includes(searchQuery.toLowerCase());
 
       const today = format(new Date(), 'yyyy-MM-dd');
       const isFuture = tx.date > today;
 
-      return matchesType && matchesAccount && matchesCategory && matchesMonth && matchesSearch && !isFuture && tx.amount > 0;
+      return matchesType && matchesAccount && matchesCategory && matchesMonth && matchesTag && matchesSearch && !isFuture && tx.amount > 0;
     });
 
   useEffect(() => {
@@ -967,13 +991,14 @@ export default function Transactions() {
     };
   }, [filteredTransactions]);
 
-  const isFilterActive = filterType !== 'all' || !filterAccountId.includes('all') || !filterCategory.includes('all') || !filterMonth.includes('all') || searchQuery !== '';
+  const isFilterActive = filterType !== 'all' || !filterAccountId.includes('all') || !filterCategory.includes('all') || !filterMonth.includes('all') || !filterTag.includes('all') || searchQuery !== '';
 
   const clearFilters = () => {
     setFilterType('all');
     setFilterAccountId(['all']);
     setFilterCategory(['all']);
     setFilterMonth(['all']);
+    setFilterTag(['all']);
     setSearchQuery('');
   };
 
@@ -1140,6 +1165,21 @@ export default function Transactions() {
                     <X size={14} />
                   </div>
                 </div>
+              )}
+              {!filterTag.includes('all') && (
+                <div className="flex align-center gap-2" style={{ background: 'var(--bg-hover)', padding: '0.4rem 0.8rem', borderRadius: '20px', border: '1px solid var(--border-color)', whiteSpace: 'nowrap' }}>
+                  <Hash size={11} style={{ color: 'var(--accent)', opacity: 0.8 }} />
+                  <span className="text-xs uppercase font-extrabold" style={{ color: 'var(--accent)', letterSpacing: '0.5px' }}>
+                    {filterTag.length === 1
+                      ? filterTag[0]
+                      : (filterTag.length === 2
+                        ? `${filterTag[0]} + ${filterTag[1]}`
+                        : `${filterTag.length} Tags`)}
+                  </span>
+                  <div onClick={() => setFilterTag(['all'])} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', opacity: 0.6 }}>
+                    <X size={14} />
+                  </div>
+                </div>
               )}</div>
           </div>
 
@@ -1238,6 +1278,23 @@ export default function Transactions() {
                 iconGetter={getCategoryIcon}
               />
             </div>
+            {(data.tags || []).length > 0 && (
+              <div className="flex-col gap-1" style={{ minWidth: 0 }}>
+                <label className="text-xs text-muted" style={{ marginLeft: '0.5rem', marginBottom: '2px' }}>Tag</label>
+                <CustomPicker
+                  label="Tag"
+                  hideLabel={true}
+                  value={filterTag}
+                  isMulti={true}
+                  options={[
+                    { id: 'all', name: 'All Tags' },
+                    ...(data.tags || []).map(t => ({ id: t, name: `#${t}` }))
+                  ]}
+                  onChange={setFilterTag}
+                  iconGetter={() => <Hash size={16} />}
+                />
+              </div>
+            )}
             <div className="flex-col gap-1" style={{ minWidth: 0 }}>
               <label className="text-xs text-muted" style={{ marginLeft: '0.5rem', marginBottom: '2px' }}>Month</label>
               <CustomPicker
@@ -2001,6 +2058,40 @@ export default function Transactions() {
                 </div>
               )}
 
+              {data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled && (
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Hash size={13} style={{ opacity: 0.6 }} />Tags <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: 400 }}>(optional)</span>
+                  </label>
+                  {(data.tags || []).length > 0 && (
+                    <CustomPicker
+                      label="Tags"
+                      hideLabel={true}
+                      value={newTx.tags || []}
+                      isMulti={true}
+                      options={(data.tags || []).map(t => ({ id: t, name: `#${t}` }))}
+                      onChange={(val: string[]) => {
+                        const cleaned = (val || []).filter(v => v !== 'all' && v !== '');
+                        setNewTx(prev => ({ ...prev, tags: cleaned.length > 0 ? cleaned : [] }));
+                      }}
+                      placeholder="Select tags"
+                      noSelectionLabel="None"
+                    />
+                  )}
+                  <div className="flex gap-2" style={{ marginTop: (data.tags || []).length > 0 ? '0.5rem' : '0' }}>
+                    <input
+                      className="input-field"
+                      style={{ flex: 1, fontSize: '0.85rem' }}
+                      value={newTagInput}
+                      onChange={e => setNewTagInput(e.target.value)}
+                      placeholder="Create tag (e.g. Vacation2024)"
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateTag(); } }}
+                    />
+                    <button className="btn btn-secondary" style={{ minWidth: '42px', padding: '0 0.75rem' }} onClick={handleCreateTag} type="button">+</button>
+                  </div>
+                </div>
+              )}
+
               {(() => {
                 const activeAcc = data.accounts.find(a => a.id === newTx.accountId);
                 const isCard = activeAcc?.type === 'credit_card' || activeAcc?.type === 'debit_card';
@@ -2111,12 +2202,44 @@ export default function Transactions() {
                 );
               })()}
 
-
+              {!data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled && (
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Hash size={13} style={{ opacity: 0.6 }} />Tags <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: 400 }}>(optional)</span>
+                  </label>
+                  {(data.tags || []).length > 0 && (
+                    <CustomPicker
+                      label="Tags"
+                      hideLabel={true}
+                      value={newTx.tags || []}
+                      isMulti={true}
+                      options={(data.tags || []).map(t => ({ id: t, name: `#${t}` }))}
+                      onChange={(val: string[]) => {
+                        const cleaned = (val || []).filter(v => v !== 'all' && v !== '');
+                        setNewTx(prev => ({ ...prev, tags: cleaned.length > 0 ? cleaned : [] }));
+                      }}
+                      placeholder="Select tags"
+                      noSelectionLabel="None"
+                    />
+                  )}
+                  <div className="flex gap-2" style={{ marginTop: (data.tags || []).length > 0 ? '0.5rem' : '0' }}>
+                    <input
+                      className="input-field"
+                      style={{ flex: 1, fontSize: '0.85rem' }}
+                      value={newTagInput}
+                      onChange={e => setNewTagInput(e.target.value)}
+                      placeholder="Create tag (e.g. Vacation2024)"
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateTag(); } }}
+                    />
+                    <button className="btn btn-secondary" style={{ minWidth: '42px', padding: '0 0.75rem' }} onClick={handleCreateTag} type="button">+</button>
+                  </div>
+                </div>
+              )}
 
               {!showRewardSplit && isCCPayment && paymentSourceAccountId && hasRewardsOrWallet && (
                 <button
                   className="btn btn-secondary w-100 flex align-center justify-center gap-2"
-                  style={{ marginTop: '0.25rem', marginBottom: '1.25rem', padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}
+                  style={{ marginTop: '1rem', marginBottom: '1.25rem', padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}
                   onClick={() => {
                     setShowRewardSplit(true);
                     setTimeout(() => {
@@ -2133,7 +2256,7 @@ export default function Transactions() {
                 <div
                   ref={rewardSplitRef}
                   className="grid grid-cols-2 gap-4"
-                  style={{ marginTop: '0.25rem', marginBottom: '1.25rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}
+                  style={{ marginTop: '1rem', marginBottom: '1.25rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}
                 >
                   <div className="flex justify-between align-center col-span-2">
                     <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>Split Payment</span>

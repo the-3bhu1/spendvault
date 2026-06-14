@@ -556,6 +556,35 @@ h3 {
   letter-spacing: 0.5px;
 }
 
+/* Tag Pills — for hashtag labels on transaction rows */
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem 0.4rem;
+  border-radius: 2px;
+  background-color: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: none;
+  color: var(--accent);
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.tag-pill-overflow {
+  background-color: transparent;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+}
+
+[data-theme='light'] .tag-pill {
+  background-color: rgba(79, 70, 229, 0.07);
+  border-color: rgba(79, 70, 229, 0.25);
+}
+
 /* NeoPOP Scalloped Badge */
 .badge-scalloped {
   width: 44px;

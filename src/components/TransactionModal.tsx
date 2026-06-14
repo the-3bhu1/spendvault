@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import {
   ShoppingBag, Utensils, Zap, Car, HeartPulse, Film, CreditCard, Wallet,
   ArrowRightLeft, MoreHorizontal, Coins, BadgeDollarSign, Home, Gift,
-  Landmark, Sparkles, Calendar, TrendingUp, Train, BarChart
+  Landmark, Sparkles, Calendar, TrendingUp, Train, BarChart, Hash
 } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 import { useFinance } from '../FinanceContext';
@@ -65,7 +65,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   initialData,
   onSuccess
 }) => {
-  const { data, addTransaction, updateTransaction, updateRecurringBill } = useFinance();
+  const { data, addTransaction, updateTransaction, updateRecurringBill, updateTags } = useFinance();
   const [newTx, setNewTx] = useState<Partial<Transaction>>({
     date: format(new Date(), 'yyyy-MM-dd'),
     description: '',
@@ -74,6 +74,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     category: 'Bills',
     accountId: data.accounts[0]?.id || '',
     excludeFromStats: false,
+    tags: [],
     ...initialData
   });
 
@@ -84,6 +85,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [showRewardSplit, setShowRewardSplit] = useState(false);
   const [selectedCashbackLevelId] = useState('');
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [newTagInput, setNewTagInput] = useState('');
 
   const rewardSplitRef = useRef<HTMLDivElement>(null);
 
@@ -105,14 +107,29 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           category: 'Bills',
           accountId: data.accounts[0]?.id || '',
           excludeFromStats: false,
+          tags: [],
           ...initialData
         });
         // Reset local UI states for new entry
         setShowRewardSplit(false);
         setPaymentSourceAccountId(initialData.paymentSourceAccountId || '');
       }
+      setNewTagInput('');
     }
   }, [isOpen]); // Only run when modal opens
+
+  const handleCreateTag = () => {
+    const raw = newTagInput.trim().replace(/^#/, '');
+    if (!raw) return;
+    const existing = data.tags || [];
+    if (!existing.includes(raw)) {
+      updateTags([...existing, raw]);
+    }
+    if (!(newTx.tags || []).includes(raw)) {
+      setNewTx(prev => ({ ...prev, tags: [...(prev.tags || []), raw] }));
+    }
+    setNewTagInput('');
+  };
 
   if (!isOpen) return null;
 
@@ -522,6 +539,38 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               <CustomPicker label="From Rewards" value={newTx.rewardUsedAccountId || ''} placeholder="Select Reward Account" options={data.accounts.filter(a => a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points')).map(acc => ({ id: acc.id, name: acc.name }))} onChange={val => setNewTx({ ...newTx, rewardUsedAccountId: val })} iconGetter={id => getAccountIcon(id, data.accounts)} />
             </div>
           )}
+
+          <div className="input-group" style={{ marginTop: '1rem', marginBottom: 0 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              <Hash size={13} style={{ opacity: 0.6 }} />Tags <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: 400 }}>(optional)</span>
+            </label>
+            {(data.tags || []).length > 0 && (
+              <CustomPicker
+                label="Tags"
+                hideLabel={true}
+                value={newTx.tags || []}
+                isMulti={true}
+                options={(data.tags || []).map(t => ({ id: t, name: `#${t}` }))}
+                onChange={(val: string[]) => {
+                  const cleaned = (val || []).filter(v => v !== 'all' && v !== '');
+                  setNewTx(prev => ({ ...prev, tags: cleaned.length > 0 ? cleaned : [] }));
+                }}
+                placeholder="Select tags"
+                noSelectionLabel="None"
+              />
+            )}
+            <div className="flex gap-2" style={{ marginTop: (data.tags || []).length > 0 ? '0.5rem' : '0' }}>
+              <input
+                className="input-field"
+                style={{ flex: 1, fontSize: '0.85rem' }}
+                value={newTagInput}
+                onChange={e => setNewTagInput(e.target.value)}
+                placeholder={`Create tag (e.g. Vacation2024)`}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateTag(); } }}
+              />
+              <button className="btn btn-secondary" style={{ minWidth: '42px', padding: '0 0.75rem' }} onClick={handleCreateTag} type="button">+</button>
+            </div>
+          </div>
 
           {((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') ||
             (newTx.type === 'debit' && isCCPayment && paymentSourceAccountId && data.accounts.find(a => a.id === paymentSourceAccountId)?.type === 'credit_card')) && (

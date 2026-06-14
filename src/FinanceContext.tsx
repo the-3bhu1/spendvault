@@ -34,6 +34,7 @@ interface FinanceContextType {
   deleteTransaction: (id: string) => void;
   updateCashbackStatement: (statement: CashbackStatement) => void;
   updateCategories: (categories: string[]) => void;
+  updateTags: (tags: string[]) => void;
   updateCustomAccountTypes: (accountTypes: string[]) => void;
   updateUser: (user: User) => void;
   addSplitEvent: (event: SplitEvent) => void;
@@ -58,6 +59,7 @@ const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 const LOCAL_STORAGE_KEY = 'minimalist_finance_data_v1';
 const DEFAULT_CATEGORIES = ['Food', 'Shopping', 'Income', 'Salary', 'Rent', 'Travel', 'Bills', 'Entertainment', 'CC Payment', 'Loans', 'Lending & Borrowing', 'NCMC Travel Recharge', 'Cashback', 'SIP', 'Stocks', 'Other/Miscellaneous'];
 const DEFAULT_CUSTOM_ACCOUNT_TYPES: string[] = [];
+const DEFAULT_TAGS: string[] = [];
 
 export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isAuthenticated, setAuthenticated] = useState(false);
@@ -528,6 +530,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         });
 
         if (!parsed.debts) parsed.debts = [];
+        if (!parsed.tags) parsed.tags = [];
         return parsed;
       } catch (e) {
         console.error("Failed to parse local storage", e);
@@ -535,10 +538,11 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
     return { 
       user: { id: 'default', name: 'spendvault user', biometricsEnabled: false, enablePassiveTransactions: false },
-      accounts: [], 
-      transactions: [], 
-      cashbackStatements: [], 
+      accounts: [],
+      transactions: [],
+      cashbackStatements: [],
       categories: DEFAULT_CATEGORIES,
+      tags: DEFAULT_TAGS,
       customAccountTypes: DEFAULT_CUSTOM_ACCOUNT_TYPES,
       splitEvents: [],
       recurringBills: [],
@@ -862,6 +866,10 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const updateCategories = (categories: string[]) => {
     setData(prev => ({ ...prev, categories }));
+  };
+
+  const updateTags = (tags: string[]) => {
+    setData(prev => ({ ...prev, tags }));
   };
 
   const updateCustomAccountTypes = (accountTypes: string[]) => {
@@ -1221,7 +1229,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const clearAllData = () => {
     localStorage.removeItem(LOCAL_STORAGE_KEY);
-    setData({ user: { id: 'default', name: 'spendvault user', biometricsEnabled: false }, accounts: [], transactions: [], cashbackStatements: [], categories: DEFAULT_CATEGORIES, customAccountTypes: DEFAULT_CUSTOM_ACCOUNT_TYPES, theme: 'dark' });
+    setData({ user: { id: 'default', name: 'spendvault user', biometricsEnabled: false }, accounts: [], transactions: [], cashbackStatements: [], categories: DEFAULT_CATEGORIES, tags: DEFAULT_TAGS, customAccountTypes: DEFAULT_CUSTOM_ACCOUNT_TYPES, theme: 'dark' });
     window.location.reload();
   };
 
@@ -1243,6 +1251,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       deleteTransaction,
       updateCashbackStatement,
       updateCategories,
+      updateTags,
       updateCustomAccountTypes,
       addSplitEvent,
       updateSplitEvent,

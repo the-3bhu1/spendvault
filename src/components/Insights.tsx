@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useFinance } from '../FinanceContext';
 import { formatCurrency, formatDateString } from '../utils';
-import { TrendingUp, TrendingDown, Star, Trophy, Calendar, ArrowUpRight, ArrowDownRight, Zap, Activity } from 'lucide-react';
+import { TrendingUp, TrendingDown, Star, Trophy, Calendar, ArrowUpRight, ArrowDownRight, Zap, Activity, Hash } from 'lucide-react';
 
 
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine, Label } from 'recharts';
@@ -64,6 +64,7 @@ export default function Insights() {
     recurringSpend: number;
     daysInMonth: number;
     streakDays: { day: number; spend: number; state: string }[];
+    tagSpend: Record<string, number>;
   } | null>(() => {
 
     if (!selectedMonth) return null;
@@ -125,6 +126,18 @@ export default function Insights() {
     const [y, m] = selectedMonth.split('-').map(Number);
     const daysInMonth = new Date(y, m, 0).getDate();
 
+    const tagSpend: Record<string, number> = {};
+    monthTxs.forEach(t => {
+      if (t.type !== 'debit') return;
+      const isSystemType = ['transfer', 'cc payment', 'sip', 'ncmc travel recharge'].includes(t.category.toLowerCase());
+      if (isSystemType) return;
+      const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
+      if (effectiveAmount <= 0) return;
+      (t.tags || []).forEach(tag => {
+        tagSpend[tag] = (tagSpend[tag] || 0) + effectiveAmount;
+      });
+    });
+
     return {
       displayMonth,
       totalSpend: currentStats.spend,
@@ -141,6 +154,7 @@ export default function Insights() {
       weekendSpend,
       recurringSpend,
       daysInMonth,
+      tagSpend,
       streakDays: Array.from({ length: daysInMonth }, (_, i) => {
         const dStr = `${y}-${m.toString().padStart(2, '0')}-${(i + 1).toString().padStart(2, '0')}`;
         const dayTxs = monthTxs.filter(t => {
@@ -678,6 +692,53 @@ export default function Insights() {
               })}
             </div>
           </div>
+
+          {Object.keys(insights.tagSpend).length > 0 && (() => {
+            const tagEntries = Object.entries(insights.tagSpend).sort((a, b) => b[1] - a[1]);
+            const maxTagSpend = tagEntries[0]?.[1] || 1;
+            const totalTagged = insights.monthTxs.filter(t => t.type === 'debit' && (t.tags || []).length > 0 && !['transfer', 'cc payment', 'sip', 'ncmc travel recharge'].includes(t.category.toLowerCase())).reduce((s, t) => s + (t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0))), 0);
+
+            return (
+              <div className="card flex-col gap-8" style={{ padding: '2rem' }}>
+                <div className="flex-col gap-2">
+                  <span className="text-mono text-xs text-muted uppercase font-bold" style={{ letterSpacing: '2px', opacity: 0.8 }}>Spend by Tag</span>
+                  <h3 className="text-serif" style={{ fontSize: '2.2rem', fontWeight: 800 }}>
+                    {tagEntries.length} {tagEntries.length === 1 ? 'bucket' : 'buckets'} tracked
+                  </h3>
+                  <p className="text-sm text-secondary">
+                    {((totalTagged / (insights.totalSpend || 1)) * 100).toFixed(0)}% of total spend is grouped across {tagEntries.length} {tagEntries.length === 1 ? 'bucket' : 'buckets'} this month.
+                  </p>
+                </div>
+
+                <div className="flex-col gap-5">
+                  {tagEntries.map(([tag, amount]) => {
+                    const txCount = insights.monthTxs.filter(t => (t.tags || []).includes(tag) && t.type === 'debit').length;
+                    const pctOfTotal = ((amount / (insights.totalSpend || 1)) * 100).toFixed(1);
+                    const barWidth = ((amount / maxTagSpend) * 100).toFixed(1);
+
+                    return (
+                      <div key={tag} className="flex-col gap-2">
+                        <div className="flex justify-between align-center">
+                          <div className="flex align-center gap-3">
+                            <Hash size={13} style={{ color: 'var(--accent)', opacity: 0.8, flexShrink: 0 }} />
+                            <span style={{ fontWeight: 700, fontSize: '1rem' }}>{tag}</span>
+                            <span className="text-xs text-muted font-bold">{txCount} {txCount === 1 ? 'tx' : 'txs'}</span>
+                          </div>
+                          <div className="flex align-center gap-3">
+                            <span className="text-mono font-bold" style={{ fontSize: '1rem' }}>{formatCurrency(amount)}</span>
+                            <span className="text-xs text-muted font-bold" style={{ minWidth: '3ch', textAlign: 'right' }}>{pctOfTotal}%</span>
+                          </div>
+                        </div>
+                        <div style={{ height: '5px', background: 'var(--bg-hover)', borderRadius: '3px', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${barWidth}%`, background: 'rgba(99,102,241,0.65)', borderRadius: '3px', transition: 'width 0.4s cubic-bezier(0.175,0.885,0.32,1.275)' }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>

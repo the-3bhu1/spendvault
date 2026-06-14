@@ -20,6 +20,7 @@ interface CustomPickerProps {
   hideLabel?: boolean;
   allowTextWrap?: boolean;
   isMulti?: boolean;
+  noSelectionLabel?: string;
   style?: React.CSSProperties;
 }
 
@@ -34,6 +35,7 @@ export function CustomPicker({
   hideLabel,
   allowTextWrap = false,
   isMulti = false,
+  noSelectionLabel = 'All',
   style = {}
 }: CustomPickerProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -205,8 +207,8 @@ export function CustomPicker({
             minWidth: 0,
             lineHeight: allowTextWrap ? 1.2 : undefined
           }}>
-            {isMulti 
-              ? (valueArray.includes('all') || valueArray.length === 0 ? 'All' : (valueArray.length === 1 ? selectedOptions[0].name : `${valueArray.length} selected`))
+            {isMulti
+              ? (valueArray.includes('all') || valueArray.length === 0 ? noSelectionLabel : (valueArray.length === 1 ? selectedOptions[0].name : `${valueArray.length} selected`))
               : (selectedOption ? selectedOption.name : placeholder)}
           </span>
         </div>

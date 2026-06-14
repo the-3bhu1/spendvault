@@ -602,7 +602,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                             <span className="text-mono text-muted text-xs">
                               {sipCurrentValue !== null ? 'CURRENT VALUE' : sipEffectiveInvested !== undefined ? 'INVESTED' : 'CURRENT VALUE'}
                             </span>
-                            <span className="text-serif" style={{ fontSize: '1.8rem', color: 'var(--success)', lineHeight: '1.2' }}>
+                            <span className="text-serif" style={{ fontSize: '1.8rem', color: (sipCurrentValue !== null && sipEffectiveInvested !== undefined && sipCurrentValue < sipEffectiveInvested) ? 'var(--danger)' : 'var(--success)', lineHeight: '1.2' }}>
                               {sipCurrentValue !== null
                                 ? formatCurrency(sipCurrentValue)
                                 : sipEffectiveInvested !== undefined
@@ -625,7 +625,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                             <span className="text-mono text-muted text-xs">
                               {stockCurrentValue !== null ? 'CURRENT VALUE' : stockEffectiveInvested !== undefined ? 'INVESTED' : 'CURRENT VALUE'}
                             </span>
-                            <span className="text-serif" style={{ fontSize: '1.8rem', color: 'var(--success)', lineHeight: '1.2' }}>
+                            <span className="text-serif" style={{ fontSize: '1.8rem', color: (stockCurrentValue !== null && stockEffectiveInvested !== undefined && stockCurrentValue < stockEffectiveInvested) ? 'var(--danger)' : 'var(--success)', lineHeight: '1.2' }}>
                               {stockCurrentValue !== null
                                 ? formatCurrency(stockCurrentValue)
                                 : stockEffectiveInvested !== undefined

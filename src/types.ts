@@ -104,6 +104,7 @@ export interface Transaction {
   sipAllottedAmount?: number;
   sipCharges?: number;
   numberOfShares?: number;
+  tags?: string[];
 }
 
 export interface CashbackStatement {
@@ -214,6 +215,7 @@ export interface FinanceData {
   transactions: Transaction[];
   cashbackStatements: CashbackStatement[];
   categories: string[];
+  tags?: string[];
   customAccountTypes?: string[];
   splitEvents?: SplitEvent[];
   recurringBills?: RecurringBill[];

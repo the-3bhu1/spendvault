@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Home, Wallet, ReceiptText, Gift, Users, Sparkles, LayoutGrid, ChevronRight, Calendar, HandCoins, LogOut } from 'lucide-react';
+import { Home, Wallet, ReceiptText, Gift, Users, Sparkles, LayoutGrid, ChevronRight, Calendar, HandCoins, LogOut, TrendingUp } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import Accounts from './components/Accounts';
 import Transactions from './components/Transactions';
@@ -12,6 +12,7 @@ import TransparentLogo from './components/TransparentLogo';
 import ProfileAvatar from './components/ProfileAvatar';
 import UpcomingBills from './components/UpcomingBills';
 import Debts from './components/Debts';
+import { Portfolio } from './components/Portfolio';
 
 import { useFinance } from './FinanceContext';
 import AuthScreen from './components/AuthScreen';
@@ -23,7 +24,7 @@ import type { Account } from './types';
 import SmsReader, { startSmsListener } from './services/SmsService';
 import { Capacitor } from '@capacitor/core';
 
-export type Tab = 'dashboard' | 'accounts' | 'transactions' | 'cashback' | 'insights' | 'settings' | 'splits' | 'bills' | 'debts';
+export type Tab = 'dashboard' | 'accounts' | 'transactions' | 'cashback' | 'insights' | 'settings' | 'splits' | 'bills' | 'debts' | 'portfolio';
 
 import { App as CapApp } from '@capacitor/app';
 
@@ -37,14 +38,12 @@ function App() {
   const autoLogSmsRef = useRef(data.user?.autoLogSms);
   autoLogSmsRef.current = data.user?.autoLogSms;
 
-
-
   useEffect(() => {
     const appRoot = document.querySelector('.app-root');
     if (!appRoot) return;
 
     // Define which tabs should reset to top vs resume
-    const resettingTabs = ['dashboard', 'insights', 'cashback', 'splits', 'bills', 'debts'];
+    const resettingTabs = ['dashboard', 'insights', 'portfolio', 'cashback', 'splits', 'bills', 'debts'];
     
     // 1. Restore scroll position
     const savedPos = resettingTabs.includes(activeTab) ? 0 : (scrollPositions.current[activeTab] || 0);
@@ -397,6 +396,23 @@ function App() {
                 </div>
               )}
 
+              {data.accounts.some(acc => acc.type === 'sips' || acc.type === 'stocks') && (
+                <div
+                  className="card flex align-center gap-4 clickable"
+                  onClick={() => { setActiveTab('portfolio'); setIsHubOpen(false); }}
+                  style={{ padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}
+                >
+                  <div className="flex-center" style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'linear-gradient(135deg, #06b6d4, #10b981)', color: 'white', flexShrink: 0 }}>
+                    <TrendingUp size={22} />
+                  </div>
+                  <div className="flex-col flex-1">
+                    <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Portfolio</span>
+                    <span className="text-xs text-muted">Stocks & mutual funds</span>
+                  </div>
+                  <ChevronRight size={18} className="text-muted" />
+                </div>
+              )}
+
               <div
                 className="card flex align-center gap-4 clickable"
                 onClick={() => { setActiveTab('insights'); setIsHubOpen(false); }}
@@ -441,6 +457,7 @@ function App() {
 
         {/* Other Dynamic Tabs */}
         {activeTab === 'cashback' && <div className="fade-in"><Cashback /></div>}
+        {activeTab === 'portfolio' && <div className="fade-in"><Portfolio /></div>}
         {activeTab === 'insights' && <div className="fade-in"><Insights /></div>}
         {activeTab === 'splits' && <div className="fade-in"><Splits /></div>}
         {activeTab === 'bills' && <div className="fade-in"><UpcomingBills /></div>}
