@@ -2202,40 +2202,6 @@ export default function Transactions() {
                 );
               })()}
 
-              {!data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled && (
-                <div className="input-group" style={{ marginBottom: 0 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <Hash size={13} style={{ opacity: 0.6 }} />Tags <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: 400 }}>(optional)</span>
-                  </label>
-                  {(data.tags || []).length > 0 && (
-                    <CustomPicker
-                      label="Tags"
-                      hideLabel={true}
-                      value={newTx.tags || []}
-                      isMulti={true}
-                      options={(data.tags || []).map(t => ({ id: t, name: `#${t}` }))}
-                      onChange={(val: string[]) => {
-                        const cleaned = (val || []).filter(v => v !== 'all' && v !== '');
-                        setNewTx(prev => ({ ...prev, tags: cleaned.length > 0 ? cleaned : [] }));
-                      }}
-                      placeholder="Select tags"
-                      noSelectionLabel="None"
-                    />
-                  )}
-                  <div className="flex gap-2" style={{ marginTop: (data.tags || []).length > 0 ? '0.5rem' : '0' }}>
-                    <input
-                      className="input-field"
-                      style={{ flex: 1, fontSize: '0.85rem' }}
-                      value={newTagInput}
-                      onChange={e => setNewTagInput(e.target.value)}
-                      placeholder="Create tag (e.g. Vacation2024)"
-                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateTag(); } }}
-                    />
-                    <button className="btn btn-secondary" style={{ minWidth: '42px', padding: '0 0.75rem' }} onClick={handleCreateTag} type="button">+</button>
-                  </div>
-                </div>
-              )}
-
               {!showRewardSplit && isCCPayment && paymentSourceAccountId && hasRewardsOrWallet && (
                 <button
                   className="btn btn-secondary w-100 flex align-center justify-center gap-2"
@@ -2312,6 +2278,40 @@ export default function Transactions() {
                   />
                   <div className="col-span-2 text-xs text-muted" style={{ opacity: 0.7 }}>
                     Primary Account Debit: <strong>{formatCurrency(Math.max(0, Number(newTx.amount || 0) - Number(newTx.rewardUsed || 0)))}</strong>
+                  </div>
+                </div>
+              )}
+
+              {!data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled && (
+                <div className="input-group" style={{ marginTop: '1rem', marginBottom: 0 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Hash size={13} style={{ opacity: 0.6 }} />Tags <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: 400 }}>(optional)</span>
+                  </label>
+                  {(data.tags || []).length > 0 && (
+                    <CustomPicker
+                      label="Tags"
+                      hideLabel={true}
+                      value={newTx.tags || []}
+                      isMulti={true}
+                      options={(data.tags || []).map(t => ({ id: t, name: `#${t}` }))}
+                      onChange={(val: string[]) => {
+                        const cleaned = (val || []).filter(v => v !== 'all' && v !== '');
+                        setNewTx(prev => ({ ...prev, tags: cleaned.length > 0 ? cleaned : [] }));
+                      }}
+                      placeholder="Select tags"
+                      noSelectionLabel="None"
+                    />
+                  )}
+                  <div className="flex gap-2" style={{ marginTop: (data.tags || []).length > 0 ? '0.5rem' : '0' }}>
+                    <input
+                      className="input-field"
+                      style={{ flex: 1, fontSize: '0.85rem' }}
+                      value={newTagInput}
+                      onChange={e => setNewTagInput(e.target.value)}
+                      placeholder="Create tag (e.g. Vacation2024)"
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateTag(); } }}
+                    />
+                    <button className="btn btn-secondary" style={{ minWidth: '42px', padding: '0 0.75rem' }} onClick={handleCreateTag} type="button">+</button>
                   </div>
                 </div>
               )}
