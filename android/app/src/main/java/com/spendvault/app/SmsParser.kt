@@ -56,6 +56,35 @@ object SmsParser {
         )
         if (promoKeywords.any { lowerMessage.contains(it) }) return null
 
+        // Exclude bill/payment reminders and due notices — these are NOT actual
+        // transactions. Only skip when the message does not also confirm a
+        // completed transaction (so "Rs 189 paid via Bill Pay" still logs).
+        val completedKeywords = listOf("debited", "credited", "spent", "paid", "sent", "deducted", "received", "withdrawn")
+        val reminderKeywords = listOf(
+            "amount due",
+            "amt due",
+            "payment due",
+            "min due",
+            "minimum due",
+            "total due",
+            "due date",
+            "due by",
+            "due on",
+            "pay by",
+            "pay instantly",
+            "bill pay",
+            "is due",
+            "outstanding",
+            "statement generated",
+            "statement is generated",
+            "e-statement",
+            "kindly pay",
+            "please pay"
+        )
+        val isReminder = reminderKeywords.any { lowerMessage.contains(it) }
+        val isCompleted = completedKeywords.any { lowerMessage.contains(it) }
+        if (isReminder && !isCompleted) return null
+
         val transactionKeywords = listOf("upi", "debited", "credited", "spent", "paid", "received", "txn", "sent", "top up", "topped up", "deducted", "card", "vpa")
         if (!transactionKeywords.any { lowerMessage.contains(it) }) return null
 
