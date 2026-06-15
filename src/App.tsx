@@ -133,6 +133,19 @@ function App() {
     // Check launch intent on mount/auth success
     checkAndOpenPending();
 
+    // Drain any queued SMS transactions on initial mount (covers normal app opens where
+    // appStateChange never fires — notifications are cleared inside drainPendingTransactions on native side)
+    if (autoLogSmsRef.current && Capacitor.getPlatform() === 'android') {
+      SmsReader.drainPendingTransactions().then(({ transactions }) => {
+        transactions.forEach((tx) => {
+          console.log("SpendVaultSms: Drained transaction on cold start:", tx);
+          addToSmsQueueRef.current(tx);
+        });
+      }).catch((err) => {
+        console.error("SpendVaultSms: Failed to drain transactions on cold start:", err);
+      });
+    }
+
     // Register active state resume change listener (warm restarts)
     const listener = CapApp.addListener('appStateChange', async (state) => {
       if (state.isActive) {

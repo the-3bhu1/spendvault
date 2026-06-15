@@ -56,6 +56,21 @@ object SmsParser {
         )
         if (promoKeywords.any { lowerMessage.contains(it) }) return null
 
+        // Exclude card/account verification and action-required marketing messages
+        val verificationKeywords = listOf(
+            "pending verification",
+            "complete it now",
+            "complete verification",
+            "complete your kyc",
+            "kyc pending",
+            "verify your card",
+            "verify your account",
+            "account verification",
+            "limit of up to",
+            "credit limit of"
+        )
+        if (verificationKeywords.any { lowerMessage.contains(it) }) return null
+
         // Exclude bill/payment reminders and due notices — these are NOT actual
         // transactions. Only skip when the message does not also confirm a
         // completed transaction (so "Rs 189 paid via Bill Pay" still logs).

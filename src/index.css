@@ -1603,5 +1603,10 @@ tr:hover td {
 }
 
 .icon-spin {
-  animation: spin-cw 0.9s linear infinite;
+  animation: spin-ccw 0.9s linear infinite;
+}
+
+@keyframes spin-ccw {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(-360deg); }
 }

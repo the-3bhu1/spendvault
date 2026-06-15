@@ -1,4 +1,4 @@
-export type BuiltInAccountType = 'credit_card' | 'bank_account' | 'cash' | 'debit_card' | 'e_wallet' | 'stocks' | 'sips' | 'rewards';
+export type BuiltInAccountType = 'credit_card' | 'bank_account' | 'cash' | 'debit_card' | 'e_wallet' | 'stocks' | 'sips' | 'rewards' | 'commodity';
 export type AccountType = BuiltInAccountType | (string & {});
 export type RoundingRule = 'round' | 'floor' | 'ceil' | 'none';
 
@@ -51,6 +51,9 @@ export interface Account {
 
   // Optional saved card details (credit_card / debit_card only)
   cardDetails?: CardDetails;
+
+  // Specific to commodity (gold, silver)
+  commodityMetal?: 'gold' | 'silver';
 
   // Specific to stocks / sips
   numberOfShares?: number;

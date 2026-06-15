@@ -57,7 +57,7 @@ interface FinanceContextType {
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_KEY = 'minimalist_finance_data_v1';
-const DEFAULT_CATEGORIES = ['Food', 'Shopping', 'Income', 'Salary', 'Rent', 'Travel', 'Bills', 'Entertainment', 'CC Payment', 'Loans', 'Lending & Borrowing', 'NCMC Travel Recharge', 'Cashback', 'SIP', 'Stocks', 'Other/Miscellaneous'];
+const DEFAULT_CATEGORIES = ['Food', 'Shopping', 'Income', 'Salary', 'Rent', 'Travel', 'Bills', 'Entertainment', 'CC Payment', 'Loans', 'Lending & Borrowing', 'NCMC Travel Recharge', 'Cashback', 'SIP', 'Stocks', 'Commodity', 'Other/Miscellaneous'];
 const DEFAULT_CUSTOM_ACCOUNT_TYPES: string[] = [];
 const DEFAULT_TAGS: string[] = [];
 
@@ -172,7 +172,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         const parsed = JSON.parse(saved);
         
         // Data Migration: Convert old ncmc_card type to debit_card with NCMC enabled
-        const nativeTypes = ['credit_card', 'debit_card', 'bank_account', 'e_wallet', 'stocks', 'sips', 'rewards', 'cash'];
+        const nativeTypes = ['credit_card', 'debit_card', 'bank_account', 'e_wallet', 'stocks', 'sips', 'rewards', 'cash', 'commodity'];
         
         parsed.accounts = (parsed.accounts || []).map((acc: any) => {
           if (acc.type === 'ncmc_card') {
@@ -220,6 +220,9 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           }
           if (!parsed.categories.includes('Stocks')) {
             parsed.categories.push('Stocks');
+          }
+          if (!parsed.categories.includes('Commodity')) {
+            parsed.categories.push('Commodity');
           }
         }
 

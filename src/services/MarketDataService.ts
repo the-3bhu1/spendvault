@@ -224,6 +224,74 @@ export async function fetchMFNavHistory(
   }
 }
 
+export interface MFSearchResult {
+  schemeName: string;
+  schemeCode: string;
+}
+
+export interface StockSearchResult {
+  name: string;
+  symbol: string;
+  exchange: string;
+}
+
+export async function searchMFByName(query: string): Promise<MFSearchResult[]> {
+  try {
+    const res = await fetch(`https://api.mfapi.in/mf/search?q=${encodeURIComponent(query)}`);
+    const json = await res.json();
+    if (!Array.isArray(json)) return [];
+    return json.slice(0, 6).map((item: any) => ({
+      schemeName: String(item.schemeName || ''),
+      schemeCode: String(item.schemeCode || ''),
+    }));
+  } catch { return []; }
+}
+
+export async function searchStockByName(query: string): Promise<StockSearchResult[]> {
+  try {
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=8&newsCount=0`,
+      {
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+        },
+      }
+    );
+    const json = await res.json();
+    const quotes: any[] = json?.quotes || json?.finance?.result?.[0]?.quotes || [];
+    return quotes
+      .filter((q: any) => q.quoteType === 'EQUITY' && q.symbol)
+      .slice(0, 6)
+      .map((q: any) => ({
+        name: q.longname || q.shortname || q.symbol,
+        symbol: String(q.symbol),
+        exchange: String(q.exchange || ''),
+      }));
+  } catch { return []; }
+}
+
+const TROY_OZ_TO_GRAM = 31.1035;
+
+export async function fetchCommodityPriceINR(metalTicker: string): Promise<number | null> {
+  const cacheKey = `cINR_${metalTicker}`;
+  if (mem[cacheKey] && fresh(mem[cacheKey], STOCK_TTL)) return mem[cacheKey].price;
+  const [metalUsd, usdInr] = await Promise.all([
+    fetchStockPrice(metalTicker),
+    fetchStockPrice('USDINR=X')
+  ]);
+  if (metalUsd === null || usdInr === null) return null;
+  const price = (metalUsd * usdInr) / TROY_OZ_TO_GRAM;
+  mem[cacheKey] = { price, fetchedAt: Date.now() };
+  persist();
+  return price;
+}
+
+export function getCachedCommodityPriceINR(metalTicker: string): number | null {
+  const cacheKey = `cINR_${metalTicker}`;
+  return mem[cacheKey]?.price ?? null;
+}
+
 export function sliceHistoryByRange(
   data: HistoryDataPoint[],
   range: 'all' | '1y' | '6m' | '1m' | '1w' | '1d'

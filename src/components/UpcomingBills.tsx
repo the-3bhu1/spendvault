@@ -17,7 +17,8 @@ import {
   Calendar,
   AlertCircle,
   Check,
-  CheckCircle2
+  CheckCircle2,
+  ChevronDown
 } from 'lucide-react';
 import { useFinance } from '../FinanceContext';
 import type { RecurringBill, RecurringFrequency } from '../types';
@@ -54,6 +55,8 @@ export default function UpcomingBills() {
   const [selectedBill, setSelectedBill] = useState<RecurringBill | null>(null);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [editingBillId, setEditingBillId] = useState<string | null>(null);
+  const [billsOpen, setBillsOpen] = useState(true);
+  const [sipsOpen, setSipsOpen] = useState(true);
 
   const handleLinkTransaction = (transaction: any) => {
     if (!selectedBill) return;
@@ -242,8 +245,11 @@ export default function UpcomingBills() {
             </button>
           </div>
 
-          <div className="flex-col gap-4">
-            {allUpcoming.length === 0 ? (
+          {(() => {
+            const sipItems = allUpcoming.filter(b => !('isCC' in b) && (b as RecurringBill).category === 'SIP');
+            const billItems = allUpcoming.filter(b => ('isCC' in b) || (b as RecurringBill).category !== 'SIP');
+
+            if (allUpcoming.length === 0) return (
               <div className="card flex-col align-center justify-center gap-4 text-center" style={{ padding: '3rem 1rem', opacity: 0.6 }}>
                 <div className="flex-center" style={{ width: '60px', height: '60px', borderRadius: '50%', background: 'var(--bg-hover)' }}>
                   <Calendar size={32} />
@@ -253,8 +259,26 @@ export default function UpcomingBills() {
                   <p className="text-xs">No upcoming bills or SIPs tracked.</p>
                 </div>
               </div>
-            ) : (
-              allUpcoming.map(bill => {
+            );
+
+            const SectionHeader = ({ label, count, open, onToggle }: { label: string; count: number; open: boolean; onToggle: () => void }) => (
+              <button
+                onClick={onToggle}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginBottom: '0.25rem' }}
+              >
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{label}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem', fontWeight: 700, color: 'var(--text-muted)', opacity: 0.6 }}>{count}</span>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border-color)' }} />
+                <ChevronDown size={14} style={{ color: 'var(--text-muted)', flexShrink: 0, transition: 'transform 0.2s ease', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }} />
+              </button>
+            );
+
+            return (
+              <div className="flex-col gap-6">
+                {billItems.length > 0 && (
+                  <div className="flex-col gap-4">
+                    <SectionHeader label="Bills" count={billItems.length} open={billsOpen} onToggle={() => setBillsOpen(o => !o)} />
+                    {billsOpen && billItems.map(bill => {
                 const daysLeft = getDaysRemaining(bill.nextDueDate);
                 const isOverdue = daysLeft < 0;
                 const isUrgent = daysLeft <= 3;
@@ -403,9 +427,90 @@ export default function UpcomingBills() {
                     )}
                   </div>
                 );
-              })
-            )}
-          </div>
+                    })}
+                  </div>
+                )}
+                {sipItems.length > 0 && (
+                  <div className="flex-col gap-4">
+                    <SectionHeader label="SIPs" count={sipItems.length} open={sipsOpen} onToggle={() => setSipsOpen(o => !o)} />
+                    {sipsOpen && sipItems.map(bill => {
+                      const daysLeft = getDaysRemaining(bill.nextDueDate);
+                      const isOverdue = daysLeft < 0;
+                      const isUrgent = daysLeft <= 3;
+                      const isPaidCC = ('isPaid' in bill && bill.isPaid);
+                      return (
+                        <div key={bill.id} className="card flex-col gap-5" style={{
+                          opacity: isPaidCC ? 0.7 : 1,
+                          border: '2px solid var(--border-color)',
+                          boxShadow: '4px 4px 0 var(--border-color)',
+                          transition: 'transform 0.2s ease'
+                        }}>
+                          <div className="flex justify-between align-start gap-3">
+                            <div className="flex align-center gap-3" style={{ flex: 1, minWidth: 0 }}>
+                              <div className="flex-center" style={{
+                                width: '44px', height: '44px', flexShrink: 0, borderRadius: '12px',
+                                background: isPaidCC ? 'rgba(16, 185, 129, 0.1)' : isOverdue ? 'rgba(255, 59, 48, 0.1)' : 'var(--bg-hover)',
+                                color: isPaidCC ? 'var(--success-color, #10b981)' : isOverdue ? 'var(--negative-color)' : 'var(--text-color)',
+                                border: '1px solid var(--border-color)'
+                              }}>
+                                {isPaidCC ? <CheckCircle2 size={22} /> : (CATEGORY_ICONS[(bill as RecurringBill).category as string] || <Clock size={22} />)}
+                              </div>
+                              <div className="flex-col gap-1" style={{ minWidth: 0 }}>
+                                <span className="font-bold" style={{ fontSize: '1rem', lineHeight: 1.3 }}>{bill.name}</span>
+                                <span className="text-muted text-xs font-medium uppercase tracking-wider">
+                                  {(bill as RecurringBill).frequency === 'custom' ? `Every ${(bill as RecurringBill).customDays} Days` : FREQUENCY_LABELS[(bill as RecurringBill).frequency as RecurringFrequency]}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex gap-3" style={{ flexShrink: 0 }}>
+                              <button className="btn btn-secondary" style={{ width: '36px', height: '36px', minHeight: 'auto', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
+                                onClick={() => { setNewBill({ ...bill }); setEditingBillId(bill.id); setActiveView('add'); }}>
+                                <Pencil size={15} />
+                              </button>
+                              <button className="btn btn-secondary" style={{ width: '36px', height: '36px', minHeight: 'auto', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }}
+                                onClick={() => deleteRecurringBill(bill.id)}>
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex justify-end align-center gap-3">
+                            <span className={`text-xl font-bold ${isOverdue && !isPaidCC ? 'text-negative' : ''}`} style={{ fontFamily: 'var(--font-mono)' }}>
+                              {bill.amount > 0 ? `₹${bill.amount.toLocaleString()}` : '--'}
+                            </span>
+                            <div className="flex align-center gap-1 text-xs font-bold px-2 py-1" style={{
+                              borderRadius: '6px',
+                              background: isPaidCC ? 'rgba(16, 185, 129, 0.1)' : isOverdue ? 'var(--negative-color)' : isUrgent ? 'rgba(255, 159, 10, 0.1)' : 'var(--bg-hover)',
+                              color: isPaidCC ? 'var(--success-color, #10b981)' : isOverdue ? 'white' : isUrgent ? 'var(--warning-color, #ff9f0a)' : 'var(--text-muted)',
+                              textTransform: 'uppercase', whiteSpace: 'nowrap'
+                            }}>
+                              {isPaidCC ? <Check size={12} /> : isOverdue ? <AlertCircle size={12} /> : <Clock size={12} />}
+                              {isPaidCC ? 'No Dues' : formatDays(daysLeft)}
+                            </div>
+                          </div>
+                          {!isPaidCC && (
+                            <div className="flex gap-2" style={{ width: '100%', marginTop: '0.5rem' }}>
+                              <button className="btn flex-center gap-1" style={{ height: '40px', padding: '0 4px', fontSize: '0.75rem', fontWeight: 800, border: '2px solid var(--border-color)', boxShadow: '3px 3px 0 var(--border-color)', background: 'var(--bg-hover)', color: 'var(--text-primary)', boxSizing: 'border-box', flex: 1 }}
+                                onClick={() => { setSelectedBill(bill as RecurringBill); setIsLogModalOpen(true); }}>
+                                <ArrowUpRight size={14} strokeWidth={3} /> LOG
+                              </button>
+                              <button className="btn flex-center gap-1" style={{ height: '40px', padding: '0 4px', fontSize: '0.75rem', fontWeight: 800, border: '2px solid var(--border-color)', boxShadow: '3px 3px 0 var(--border-color)', background: 'var(--bg-hover)', color: 'var(--text-primary)', boxSizing: 'border-box', flex: 1 }}
+                                onClick={() => { setSelectedBill(bill as RecurringBill); setIsLinkModalOpen(true); }}>
+                                <Link size={14} strokeWidth={2.5} /> LINK
+                              </button>
+                              <button className="btn flex-center gap-1" style={{ height: '40px', padding: '0 4px', fontSize: '0.75rem', fontWeight: 800, border: '2px solid var(--border-color)', boxShadow: '3px 3px 0 var(--border-color)', background: 'var(--bg-hover)', color: 'var(--success-color, #10b981)', boxSizing: 'border-box', flex: 1 }}
+                                onClick={() => handleMarkAsPaid(bill as RecurringBill)}>
+                                <Check size={14} strokeWidth={3} /> PAID
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </>
       )}
 

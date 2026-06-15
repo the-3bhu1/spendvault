@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { useFinance } from '../FinanceContext';
 import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown } from 'lucide-react';
-import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols, isCacheFresh } from '../services/MarketDataService';
+import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols, isCacheFresh, searchMFByName, searchStockByName, fetchCommodityPriceINR, getCachedCommodityPriceINR } from '../services/MarketDataService';
+import type { MFSearchResult, StockSearchResult } from '../services/MarketDataService';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardNetwork } from '../types';
@@ -16,11 +17,13 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const [viewingCard, setViewingCard] = useState<Account | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [prices, setPrices] = useState<Record<string, number>>(() => {
-    const symbols = data.accounts
-      .filter(a => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
-      .map(a => a.marketSymbol!);
     const cached: Record<string, number> = {};
-    symbols.forEach(s => { const p = getCachedPrice(s); if (p !== null) cached[s] = p; });
+    data.accounts
+      .filter(a => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
+      .forEach(a => { const p = getCachedPrice(a.marketSymbol!); if (p !== null) cached[a.marketSymbol!] = p; });
+    data.accounts
+      .filter(a => a.type === 'commodity' && a.marketSymbol)
+      .forEach(a => { const p = getCachedCommodityPriceINR(a.marketSymbol!); if (p !== null) cached[a.marketSymbol!] = p; });
     return cached;
   });
   const [refreshingSymbols, setRefreshingSymbols] = useState<Set<string>>(new Set());
@@ -53,13 +56,21 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   }, [viewingCard, isModalOpen, deleteConfirmId]);
 
   useEffect(() => {
-    const items = data.accounts
+    const stockSipItems = data.accounts
       .filter(a => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
       .map(a => ({ symbol: a.marketSymbol!, kind: (a.type === 'stocks' ? 'stock' : 'sip') as 'stock' | 'sip' }));
-    if (items.length === 0) return;
-    const syms = items.map(i => i.symbol);
-    setRefreshingSymbols(new Set(syms));
-    fetchPricesForSymbols(items).then(result => {
+    const commodityAccs = data.accounts.filter(a => a.type === 'commodity' && a.marketSymbol);
+    if (stockSipItems.length === 0 && commodityAccs.length === 0) return;
+    const allSyms = [...stockSipItems.map(i => i.symbol), ...commodityAccs.map(a => a.marketSymbol!)];
+    setRefreshingSymbols(new Set(allSyms));
+    Promise.all([
+      fetchPricesForSymbols(stockSipItems),
+      Promise.all(commodityAccs.map(a =>
+        fetchCommodityPriceINR(a.marketSymbol!).then(p => [a.marketSymbol!, p] as [string, number | null])
+      ))
+    ]).then(([stockSipPrices, commodityPrices]) => {
+      const result = { ...stockSipPrices };
+      commodityPrices.forEach(([sym, p]) => { if (p !== null) result[sym] = p; });
       setPrices(prev => ({ ...prev, ...result }));
       setRefreshingSymbols(new Set());
     });
@@ -84,6 +95,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     { id: 'sips', name: 'SIPs', subtext: 'Systematic Investment Plan' },
     { id: 'rewards', name: 'Rewards', subtext: 'Cashback & Points' },
     { id: 'cash', name: 'Cash', subtext: 'Physical wallet' },
+    { id: 'commodity', name: 'Commodity', subtext: 'Physical gold & silver' },
     ...(data.customAccountTypes || []).map(type => ({
       id: type,
       name: type,
@@ -110,6 +122,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const [editingCashbackRateId, setEditingCashbackRateId] = useState<string | null>(null);
   const [isEditingCardDetails, setIsEditingCardDetails] = useState(false);
   const [collapsedTypes, setCollapsedTypes] = useState<Set<string>>(new Set());
+
+  const [symbolInput, setSymbolInput] = useState('');
+  const [symbolResults, setSymbolResults] = useState<(MFSearchResult | StockSearchResult)[]>([]);
+  const [symbolSearching, setSymbolSearching] = useState(false);
+  const [symbolDropdownOpen, setSymbolDropdownOpen] = useState(false);
+  const symbolTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const toggleCollapse = (type: string) => {
     setCollapsedTypes(prev => {
@@ -165,6 +183,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setExpiryInput('');
     setShowCvv(false);
     setErrors({});
+    setSymbolInput('');
+    setSymbolResults([]);
+    setSymbolDropdownOpen(false);
     setIsModalOpen(true);
   };
 
@@ -199,6 +220,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       setExpiryInput('');
     }
     setShowCvv(false);
+    setSymbolInput(acc.marketSymbol || '');
+    setSymbolResults([]);
+    setSymbolDropdownOpen(false);
 
     setIsModalOpen(true);
   };
@@ -211,14 +235,17 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     if (!newAccount.type) {
       newErrors.type = 'Account Type is required';
     }
-    if (newAccount.type !== 'sips' && newAccount.type !== 'stocks' && !openingBalanceInput.trim()) {
+    if (newAccount.type !== 'sips' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && !openingBalanceInput.trim()) {
       newErrors.openingBalance = 'Opening Balance is required';
     }
-    if ((newAccount.type === 'sips' || newAccount.type === 'stocks') && (newAccount.numberOfShares === undefined || newAccount.numberOfShares <= 0)) {
-      newErrors.openingUnits = newAccount.type === 'sips' ? 'Opening Units is required' : 'Opening Shares is required';
+    if ((newAccount.type === 'sips' || newAccount.type === 'stocks' || newAccount.type === 'commodity') && newAccount.numberOfShares === undefined) {
+      newErrors.openingUnits = newAccount.type === 'sips' ? 'Opening Units is required' : newAccount.type === 'commodity' ? 'Opening Grams is required' : 'Opening Shares is required';
     }
-    if ((newAccount.type === 'sips' || newAccount.type === 'stocks') && (newAccount.investedValue === undefined || newAccount.investedValue <= 0)) {
+    if ((newAccount.type === 'sips' || newAccount.type === 'stocks' || newAccount.type === 'commodity') && newAccount.investedValue === undefined) {
       newErrors.investedValue = 'Total Invested Value is required';
+    }
+    if (newAccount.type === 'commodity' && !newAccount.commodityMetal) {
+      newErrors.commodityMetal = 'Metal type is required';
     }
     if (newAccount.type === 'credit_card') {
       if (!newAccount.statementDay || newAccount.statementDay < 1 || newAccount.statementDay > 31) {
@@ -265,7 +292,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     let updatedRewardOpeningBalances = hasInternalRewards ? { ...(newAccount.rewardOpeningBalances || {}) } : undefined;
     let updatedRewardBalanceAdjustments = hasInternalRewards ? { ...(newAccount.rewardBalanceAdjustments || {}) } : undefined;
 
-    if (editId && newAccount.type !== 'sips' && newAccount.type !== 'stocks') {
+    if (editId && newAccount.type !== 'sips' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity') {
       const originalAcc = data.accounts.find(a => a.id === editId);
       if (originalAcc) {
         // 1. Standard Wallet Opening Balance setup/rollover folding
@@ -403,9 +430,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
         ? newAccount.cardDetails
         : undefined,
       statementRounding: newAccount.statementRounding || 'none',
-      numberOfShares: (newAccount.type === 'stocks' || newAccount.type === 'sips') ? newAccount.numberOfShares : undefined,
-      marketSymbol: (newAccount.type === 'stocks' || newAccount.type === 'sips') ? (newAccount.marketSymbol?.trim() || undefined) : undefined,
-      investedValue: (newAccount.type === 'stocks' || newAccount.type === 'sips') ? newAccount.investedValue : undefined,
+      numberOfShares: (newAccount.type === 'stocks' || newAccount.type === 'sips' || newAccount.type === 'commodity') ? newAccount.numberOfShares : undefined,
+      marketSymbol: (newAccount.type === 'stocks' || newAccount.type === 'sips' || newAccount.type === 'commodity') ? (newAccount.marketSymbol?.trim() || undefined) : undefined,
+      investedValue: (newAccount.type === 'stocks' || newAccount.type === 'sips' || newAccount.type === 'commodity') ? newAccount.investedValue : undefined,
+      commodityMetal: newAccount.type === 'commodity' ? newAccount.commodityMetal : undefined,
       avgNav: newAccount.type === 'sips' ? newAccount.avgNav : undefined,
       rewardUnit: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.rewardUnit : undefined,
       pointsConversionRate: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.pointsConversionRate : undefined,
@@ -436,6 +464,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       case 'sips': return '💹';
       case 'rewards': return '🎁';
       case 'cash': return '💵';
+      case 'commodity': return acc.commodityMetal === 'silver' ? '🥈' : '🥇';
       default: return '💼';
     }
   };
@@ -468,7 +497,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             stocks: 'Stocks & Investments',
             sips: 'SIPs',
             rewards: 'Rewards & Cashback',
-            cash: 'Physical Cash'
+            cash: 'Physical Cash',
+            commodity: 'Commodities'
           };
 
           const TYPE_ORDER = [
@@ -479,7 +509,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             'e_wallet',
             'rewards',
             'stocks',
-            'sips'
+            'sips',
+            'commodity'
           ];
 
           const grouped = data.accounts.reduce((acc, account) => {
@@ -553,7 +584,22 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   const sipCurrentPrice = acc.type === 'sips' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
                   const sipCurrentValue = sipCurrentPrice !== null && sipTotalUnits > 0 ? sipCurrentPrice * sipTotalUnits : null;
                   const sipEffectiveInvested = acc.type === 'sips'
-                    ? (acc.investedValue ?? (acc.avgNav && sipTotalUnits > 0 ? acc.avgNav * sipTotalUnits : undefined))
+                    ? acc.investedValue !== undefined
+                      ? acc.investedValue + rawBal
+                      : (acc.avgNav && sipTotalUnits > 0 ? acc.avgNav * sipTotalUnits : undefined)
+                    : undefined;
+
+                  // Commodity market data — pre-computed once for middle + bottom sections
+                  const commodityTxGrams = acc.type === 'commodity'
+                    ? data.transactions
+                        .filter(t => t.accountId === acc.id && t.numberOfShares !== undefined)
+                        .reduce((sum, t) => t.type === 'credit' ? sum + (t.numberOfShares ?? 0) : sum - (t.numberOfShares ?? 0), 0)
+                    : 0;
+                  const commodityTotalGrams = acc.type === 'commodity' ? (acc.numberOfShares ?? 0) + commodityTxGrams : 0;
+                  const commodityPricePerGram = acc.type === 'commodity' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
+                  const commodityCurrentValue = commodityPricePerGram !== null && commodityTotalGrams > 0 ? commodityPricePerGram * commodityTotalGrams : null;
+                  const commodityEffectiveInvested = acc.type === 'commodity'
+                    ? (acc.investedValue !== undefined ? acc.investedValue + rawBal : undefined)
                     : undefined;
 
                   // Stocks market data — pre-computed once for middle + bottom sections
@@ -565,7 +611,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   const stockTotalShares = acc.type === 'stocks' ? (acc.numberOfShares ?? 0) + stockTxShares : 0;
                   const stockCurrentPrice = acc.type === 'stocks' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
                   const stockCurrentValue = stockCurrentPrice !== null && stockTotalShares > 0 ? stockCurrentPrice * stockTotalShares : null;
-                  const stockEffectiveInvested = acc.type === 'stocks' ? acc.investedValue : undefined;
+                  const stockEffectiveInvested = acc.type === 'stocks'
+                    ? (acc.investedValue !== undefined ? acc.investedValue + rawBal : undefined)
+                    : undefined;
 
                   return (
                     <div key={acc.id} className={`card flex-col ${isFirstAccount ? 'tour-first-account' : ''}`} style={{ padding: '0' }}>
@@ -615,6 +663,29 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               <span className="text-mono text-muted text-xs">INVESTED</span>
                               <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
                                 {formatCurrency(sipEffectiveInvested)}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ) : acc.type === 'commodity' ? (
+                        <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
+                          <div className="flex-col gap-1">
+                            <span className="text-mono text-muted text-xs">
+                              {commodityCurrentValue !== null ? 'CURRENT VALUE' : commodityEffectiveInvested !== undefined ? 'INVESTED' : 'CURRENT VALUE'}
+                            </span>
+                            <span className="text-serif" style={{ fontSize: '1.8rem', color: (commodityCurrentValue !== null && commodityEffectiveInvested !== undefined && commodityCurrentValue < commodityEffectiveInvested) ? 'var(--danger)' : 'var(--success)', lineHeight: '1.2' }}>
+                              {commodityCurrentValue !== null
+                                ? formatCurrency(commodityCurrentValue)
+                                : commodityEffectiveInvested !== undefined
+                                  ? formatCurrency(commodityEffectiveInvested)
+                                  : '—'}
+                            </span>
+                          </div>
+                          {commodityCurrentValue !== null && commodityEffectiveInvested !== undefined && (
+                            <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
+                              <span className="text-mono text-muted text-xs">INVESTED</span>
+                              <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
+                                {formatCurrency(commodityEffectiveInvested)}
                               </span>
                             </div>
                           )}
@@ -968,6 +1039,58 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           </>
                         );
                       })()}
+
+                      {acc.type === 'commodity' && (() => {
+                        const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
+                        const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
+                        return (
+                          <>
+                            {commodityTotalGrams > 0 && (
+                              <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                                <span className="text-mono text-muted text-xs">TOTAL GRAMS</span>
+                                <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{commodityTotalGrams.toLocaleString('en-IN', { maximumFractionDigits: 3 })} g</span>
+                              </div>
+                            )}
+                            {acc.marketSymbol && (
+                              <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                                {(commodityPricePerGram !== null || isRefreshing) ? (
+                                  <>
+                                    <div className="flex-col gap-0">
+                                      <span className="text-mono text-muted text-xs">₹ / GRAM</span>
+                                      {isRefreshing
+                                        ? <span className="skeleton-bar" style={{ width: '4rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                        : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                            ₹{commodityPricePerGram!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                          </span>
+                                      }
+                                    </div>
+                                    {(commodityCurrentValue !== null && commodityEffectiveInvested !== undefined && !isRefreshing) && (() => {
+                                      const pnl = commodityCurrentValue - commodityEffectiveInvested;
+                                      const pnlPct = commodityEffectiveInvested > 0 ? (pnl / commodityEffectiveInvested) * 100 : 0;
+                                      return (
+                                        <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
+                                          <span className="text-mono text-muted text-xs">P&amp;L ({pnl >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
+                                          <span style={{ color: pnl >= 0 ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                            {pnl >= 0 ? '+' : '-'}₹{Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                          </span>
+                                        </div>
+                                      );
+                                    })()}
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="text-mono text-muted text-xs">₹ / GRAM</span>
+                                    {isFailed && !isRefreshing
+                                      ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Fetch failed · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
+                                      : <button className="btn btn-secondary" style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Fetch</button>
+                                    }
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   );
                 })}
@@ -1006,6 +1129,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                 onChange={val => {
                   setNewAccount({ ...newAccount, type: val as AccountType });
                   if (errors.type) setErrors(prev => ({ ...prev, type: '' }));
+                  setSymbolInput('');
+                  setSymbolResults([]);
+                  setSymbolDropdownOpen(false);
                 }}
                 error={errors.type}
                 iconGetter={id => {
@@ -1018,11 +1144,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     case 'sips': return '💹';
                     case 'rewards': return '🎁';
                     case 'cash': return '💵';
+                    case 'commodity': return '💎';
                     default: return '💼';
                   }
                 }}
               />
-              {newAccount.type !== 'sips' && newAccount.type !== 'stocks' && (
+              {newAccount.type !== 'sips' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && (
                 <div className="input-group">
                   <label>{editId ? 'Current Balance (Current Month)' : 'Opening Balance (Current Month)'}</label>
                   <input
@@ -1133,7 +1260,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       className={`input-field ${errors.investedValue ? 'border-danger' : ''}`}
                       value={newAccount.investedValue ?? ''}
                       onChange={e => {
-                        setNewAccount({ ...newAccount, investedValue: e.target.value ? parseFloat(e.target.value) : undefined });
+                        setNewAccount({ ...newAccount, investedValue: e.target.value !== '' ? parseFloat(e.target.value) : undefined });
                         if (errors.investedValue) setErrors(prev => ({ ...prev, investedValue: '' }));
                       }}
                       placeholder="e.g. 15000"
@@ -1152,7 +1279,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       className={`input-field ${errors.openingUnits ? 'border-danger' : ''}`}
                       value={newAccount.numberOfShares ?? ''}
                       onChange={e => {
-                        setNewAccount({ ...newAccount, numberOfShares: e.target.value ? parseFloat(e.target.value) : undefined });
+                        setNewAccount({ ...newAccount, numberOfShares: e.target.value !== '' ? parseFloat(e.target.value) : undefined });
                         if (errors.openingUnits) setErrors(prev => ({ ...prev, openingUnits: '' }));
                       }}
                       placeholder={newAccount.type === 'sips' ? 'e.g. 484.775' : 'e.g. 100'}
@@ -1162,19 +1289,86 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     {errors.openingUnits && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.openingUnits}</span>}
                   </div>
                   <div className="input-group">
-                    <label>{newAccount.type === 'sips' ? 'MF Scheme Code (Optional)' : 'Market Symbol (Optional)'}</label>
-                    <input
-                      type="text"
-                      className="input-field"
-                      value={newAccount.marketSymbol || ''}
-                      onChange={e => setNewAccount({ ...newAccount, marketSymbol: e.target.value.toUpperCase() || undefined })}
-                      placeholder={newAccount.type === 'sips' ? 'e.g. 120503' : 'e.g. TCS.NS'}
-                      style={{ textTransform: newAccount.type === 'stocks' ? 'uppercase' : 'none' }}
-                    />
+                    <label>{newAccount.type === 'sips' ? 'MF Scheme Code — Search by Name' : 'Market Symbol — Search by Name'}</label>
+                    <div style={{ position: 'relative', width: '100%' }}>
+                      <input
+                        type="text"
+                        className="input-field"
+                        value={symbolInput}
+                        style={{ width: '100%', boxSizing: 'border-box' }}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setSymbolInput(val);
+                          setNewAccount({ ...newAccount, marketSymbol: val.trim() || undefined });
+                          if (symbolTimerRef.current) clearTimeout(symbolTimerRef.current);
+                          if (val.trim().length >= 2) {
+                            setSymbolSearching(true);
+                            setSymbolDropdownOpen(false);
+                            symbolTimerRef.current = setTimeout(async () => {
+                              const results = newAccount.type === 'sips'
+                                ? await searchMFByName(val.trim())
+                                : await searchStockByName(val.trim());
+                              setSymbolResults(results);
+                              setSymbolSearching(false);
+                              if (results.length > 0) setSymbolDropdownOpen(true);
+                            }, 420);
+                          } else {
+                            setSymbolResults([]);
+                            setSymbolSearching(false);
+                            setSymbolDropdownOpen(false);
+                          }
+                        }}
+                        placeholder={newAccount.type === 'sips' ? 'Type fund name or scheme code…' : 'Type company name or symbol…'}
+                        autoComplete="off"
+                      />
+                      {symbolSearching && (
+                        <span style={{
+                          position: 'absolute', right: '0.875rem', top: '50%', transform: 'translateY(-50%)',
+                          fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)', pointerEvents: 'none',
+                        }}>
+                          Searching…
+                        </span>
+                      )}
+                      {symbolDropdownOpen && symbolResults.length > 0 && (
+                        <div style={{
+                          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+                          background: '#1c1f26', border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '0.625rem', zIndex: 200,
+                          maxHeight: '13rem', overflowY: 'auto',
+                          boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                        }}>
+                          {symbolResults.map((r, idx) => {
+                            const isMF = newAccount.type === 'sips';
+                            const label = isMF ? (r as MFSearchResult).schemeName : (r as StockSearchResult).name;
+                            const code = isMF ? (r as MFSearchResult).schemeCode : (r as StockSearchResult).symbol;
+                            const sub = isMF ? `Code: ${code}` : `${code}${(r as StockSearchResult).exchange ? ' · ' + (r as StockSearchResult).exchange : ''}`;
+                            return (
+                              <div
+                                key={idx}
+                                onClick={() => {
+                                  setSymbolInput(code);
+                                  setNewAccount({ ...newAccount, marketSymbol: code });
+                                  setSymbolDropdownOpen(false);
+                                  setSymbolResults([]);
+                                }}
+                                style={{
+                                  padding: '0.65rem 1rem',
+                                  borderBottom: idx < symbolResults.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <div style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.9)', lineHeight: 1.3 }}>{label}</div>
+                                <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.4)', marginTop: '0.15rem', fontFamily: 'monospace' }}>{sub}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                     <span className="text-xs text-muted" style={{ marginTop: '0.25rem', display: 'block' }}>
                       {newAccount.type === 'sips'
-                        ? 'Find on mfapi.in — search your fund name to get the scheme code'
-                        : 'NSE stocks use .NS suffix (e.g. RELIANCE.NS, TCS.NS)'}
+                        ? 'Search by fund name — tap a result to auto-fill the scheme code'
+                        : 'Search by company name — tap a result to auto-fill the NSE/BSE symbol'}
                     </span>
                   </div>
                   {newAccount.type === 'sips' && (
@@ -1192,6 +1386,63 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       <span className="text-xs text-muted" style={{ marginTop: '0.25rem', display: 'block' }}>Your average buy NAV — shown on the card for reference</span>
                     </div>
                   )}
+                </>
+              )}
+
+              {newAccount.type === 'commodity' && (
+                <>
+                  <CustomPicker
+                    label="Metal"
+                    value={newAccount.commodityMetal || ''}
+                    options={[
+                      { id: 'gold', name: 'Gold', subtext: 'International spot · GC=F' },
+                      { id: 'silver', name: 'Silver', subtext: 'International spot · SI=F' },
+                    ]}
+                    onChange={val => {
+                      const ticker = val === 'gold' ? 'GC=F' : 'SI=F';
+                      setNewAccount({ ...newAccount, commodityMetal: val as 'gold' | 'silver', marketSymbol: ticker });
+                    }}
+                    error={errors.commodityMetal}
+                    iconGetter={id => id === 'gold' ? '🥇' : '🥈'}
+                  />
+                  <div className="input-group">
+                    <label>Total Invested Value — ₹</label>
+                    <input
+                      type="number"
+                      className={`input-field ${errors.investedValue ? 'border-danger' : ''}`}
+                      value={newAccount.investedValue ?? ''}
+                      onChange={e => {
+                        setNewAccount({ ...newAccount, investedValue: e.target.value !== '' ? parseFloat(e.target.value) : undefined });
+                        if (errors.investedValue) setErrors(prev => ({ ...prev, investedValue: '' }));
+                      }}
+                      placeholder="e.g. 50000"
+                      step="any"
+                      min="0"
+                    />
+                    {errors.investedValue
+                      ? <span className="text-xs text-danger" style={{ marginTop: '0.25rem', display: 'block' }}>{errors.investedValue}</span>
+                      : <span className="text-xs text-muted" style={{ marginTop: '0.25rem', display: 'block' }}>Total amount you have put in — used to calculate P&amp;L</span>
+                    }
+                  </div>
+                  <div className="input-group">
+                    <label>Opening Weight — grams</label>
+                    <input
+                      type="number"
+                      className={`input-field ${errors.openingUnits ? 'border-danger' : ''}`}
+                      value={newAccount.numberOfShares ?? ''}
+                      onChange={e => {
+                        setNewAccount({ ...newAccount, numberOfShares: e.target.value !== '' ? parseFloat(e.target.value) : undefined });
+                        if (errors.openingUnits) setErrors(prev => ({ ...prev, openingUnits: '' }));
+                      }}
+                      placeholder="e.g. 10.5"
+                      step="any"
+                      min="0"
+                    />
+                    {errors.openingUnits && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.openingUnits}</span>}
+                  </div>
+                  <p className="text-xs text-muted" style={{ marginTop: '-0.5rem', marginBottom: '0.5rem' }}>
+                    Price fetched live from international spot (USD/oz × USDINR ÷ 31.1035 g/oz). Reflects market rate — physical premiums excluded.
+                  </p>
                 </>
               )}
 

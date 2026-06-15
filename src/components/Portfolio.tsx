@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useFinance } from '../FinanceContext';
 import type { Account } from '../types';
-import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHistoryByRange, getLatestFetchedAt } from '../services/MarketDataService';
+import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHistoryByRange, getLatestFetchedAt, fetchCommodityPriceINR, getCachedCommodityPriceINR } from '../services/MarketDataService';
 import { xirr } from '../utils/xirr';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, RotateCcw, ChevronLeft, ChevronDown } from 'lucide-react';
@@ -45,7 +45,13 @@ function StatRow({ label, value, color }: { label: string; value: string; color?
 export function Portfolio() {
   const { data } = useFinance();
 
-  const [prices, setPrices] = useState<Record<string, number>>({});
+  const [prices, setPrices] = useState<Record<string, number>>(() => {
+    const cached: Record<string, number> = {};
+    (data?.accounts || [])
+      .filter((a: Account) => a.type === 'commodity' && a.marketSymbol)
+      .forEach((a: Account) => { const p = getCachedCommodityPriceINR(a.marketSymbol!); if (p !== null) cached[a.marketSymbol!] = p; });
+    return cached;
+  });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +62,7 @@ export function Portfolio() {
   const [stockRange, setStockRange] = useState<StockHistoryRange>('1mo');
   const [mfRange, setMFRange] = useState<MFHistoryRange>('1y');
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const [portfolioView, setPortfolioView] = useState<'all' | 'mf' | 'stocks' | 'commodity'>('all');
 
   const toggleSection = (key: string) =>
     setCollapsedSections(prev => {
@@ -80,6 +87,14 @@ export function Portfolio() {
     }
   }, [data?.accounts]);
 
+  const commodityAccounts = useMemo(() => {
+    try {
+      return (data?.accounts || []).filter((a: Account) => a.type === 'commodity');
+    } catch {
+      return [];
+    }
+  }, [data?.accounts]);
+
   const handleRefresh = async () => {
     try {
       setIsRefreshing(true);
@@ -90,12 +105,20 @@ export function Portfolio() {
         ...stockAccounts.map((a: Account) => ({ symbol: a.marketSymbol || '', kind: 'stock' as const }))
       ].filter(i => i.symbol);
 
-      if (items.length === 0) {
+      const commodityItems = commodityAccounts.filter((a: Account) => a.marketSymbol);
+
+      if (items.length === 0 && commodityItems.length === 0) {
         setIsRefreshing(false);
         return;
       }
 
-      const newPrices = await fetchPricesForSymbols(items);
+      const [newPrices, commodityPriceResults] = await Promise.all([
+        fetchPricesForSymbols(items),
+        Promise.all(commodityItems.map((a: Account) =>
+          fetchCommodityPriceINR(a.marketSymbol!).then(p => [a.marketSymbol!, p] as [string, number | null])
+        ))
+      ]);
+      commodityPriceResults.forEach(([sym, p]) => { if (p !== null) newPrices[sym] = p; });
       setPrices(newPrices);
 
       // Show the time of the latest actual API fetch (from cache metadata),
@@ -112,7 +135,7 @@ export function Portfolio() {
 
   useEffect(() => {
     handleRefresh();
-  }, [sipAccounts, stockAccounts]);
+  }, [sipAccounts, stockAccounts, commodityAccounts]);
 
   useEffect(() => {
     if (!selectedAsset) {
@@ -152,11 +175,13 @@ export function Portfolio() {
 
     const totalUnits = getTotalUnits(account);
 
-    // Invested value comes directly from the account record (matches Accounts screen),
-    // falling back to avgNav * units when not explicitly set.
-    const totalInvested =
-      account.investedValue ??
-      (account.avgNav && totalUnits > 0 ? account.avgNav * totalUnits : 0);
+    const txInvested = data.transactions
+      .filter((t: any) => t.accountId === account.id && !t.isTravelTransaction && !t.isRewardTransaction)
+      .reduce((sum: number, t: any) => t.type === 'credit' ? sum + t.amount : sum - t.amount, 0);
+
+    const totalInvested = account.investedValue !== undefined
+      ? account.investedValue + txInvested
+      : (account.avgNav && totalUnits > 0 ? account.avgNav * totalUnits : 0);
 
     const currentValue = currentPrice * totalUnits;
     const totalReturn = currentValue - totalInvested;
@@ -213,19 +238,15 @@ export function Portfolio() {
   const formatFullCurrency = (value: number) =>
     `₹${value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const portfolioStats = useMemo(() => {
-    const allInvestmentAccounts = [...sipAccounts, ...stockAccounts];
-    const invested = allInvestmentAccounts.reduce((sum, acc) => sum + getAccountStats(acc).totalInvested, 0);
-    const current = allInvestmentAccounts.reduce((sum, acc) => sum + getAccountStats(acc).currentValue, 0);
+  const buildStats = (accounts: Account[], includeXirr: boolean) => {
+    const invested = accounts.reduce((sum, acc) => sum + getAccountStats(acc).totalInvested, 0);
+    const current = accounts.reduce((sum, acc) => sum + getAccountStats(acc).currentValue, 0);
     const pnl = current - invested;
     const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
-
-    // Aggregate XIRR: every SIP installment across all funds as a dated outflow,
-    // plus the whole portfolio's current value as the terminal inflow today.
-    let portfolioXirr: number | null = null;
-    if (current > 0) {
+    let statsXirr: number | null = null;
+    if (includeXirr && current > 0) {
       const cashflows = data.transactions
-        .filter((t: any) => sipAccounts.some((a: Account) => a.id === t.accountId) && t.category === 'SIP' && (t.sipAllottedAmount ?? t.amount))
+        .filter((t: any) => accounts.some((a: Account) => a.id === t.accountId) && t.category === 'SIP' && (t.sipAllottedAmount ?? t.amount))
         .map((t: any) => ({
           date: new Date(t.date),
           amount: -Math.abs((t.sipAllottedAmount ?? t.amount ?? 0) - (t.sipCharges ?? 0))
@@ -233,12 +254,18 @@ export function Portfolio() {
         .filter((cf: any) => cf.amount !== 0 && !isNaN(cf.date.getTime()));
       if (cashflows.length >= 1) {
         cashflows.push({ date: new Date(), amount: current });
-        portfolioXirr = xirr(cashflows);
+        statsXirr = xirr(cashflows);
       }
     }
+    return { invested, current, pnl, pnlPct, xirr: statsXirr };
+  };
 
-    return { invested, current, pnl, pnlPct, xirr: portfolioXirr };
-  }, [sipAccounts, stockAccounts, prices, data.transactions]);
+  const portfolioStats = useMemo(() => ({
+    all: buildStats([...sipAccounts, ...stockAccounts, ...commodityAccounts], true),
+    mf: buildStats(sipAccounts, true),
+    stocks: buildStats(stockAccounts, false),
+    commodity: buildStats(commodityAccounts, false),
+  }), [sipAccounts, stockAccounts, commodityAccounts, prices, data.transactions]);
 
   const getAvatarColor = (name: string) => {
     const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#f9ca24', '#6c5ce7', '#a29bfe'];
@@ -274,7 +301,7 @@ export function Portfolio() {
     return `${hours}:${minutes}`;
   };
 
-  const hasInvestments = sipAccounts.length > 0 || stockAccounts.length > 0;
+  const hasInvestments = sipAccounts.length > 0 || stockAccounts.length > 0 || commodityAccounts.length > 0;
 
   const userName = data.user?.name?.split(' ')[0] || 'Your';
 
@@ -374,16 +401,16 @@ export function Portfolio() {
         </div>
 
         <div className="text-serif" style={{ fontSize: '2.75rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
-          ₹{Math.round(portfolioStats.current).toLocaleString('en-IN')}
+          ₹{Math.round(portfolioStats[portfolioView].current).toLocaleString('en-IN')}
         </div>
 
         <div style={{
           fontSize: '0.95rem',
           fontWeight: 600,
           marginTop: '0.75rem',
-          color: portfolioStats.pnl >= 0 ? '#22c55e' : '#ef4444'
+          color: portfolioStats[portfolioView].pnl >= 0 ? '#22c55e' : '#ef4444'
         }}>
-          {portfolioStats.pnl >= 0 ? '↑' : '↓'} ₹{Math.abs(portfolioStats.pnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({portfolioStats.pnlPct >= 0 ? '+' : ''}{portfolioStats.pnlPct.toFixed(2)}%)
+          {portfolioStats[portfolioView].pnl >= 0 ? '↑' : '↓'} ₹{Math.abs(portfolioStats[portfolioView].pnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({portfolioStats[portfolioView].pnlPct >= 0 ? '+' : ''}{portfolioStats[portfolioView].pnlPct.toFixed(2)}%)
         </div>
 
         <button
@@ -414,6 +441,74 @@ export function Portfolio() {
             Last refresh at {formatTime(lastRefreshed)}
           </div>
         )}
+
+        {/* View toggle — All / MF / Stocks / Commodity */}
+        {(sipAccounts.length > 0 || stockAccounts.length > 0 || commodityAccounts.length > 0) && (() => {
+          const tabs = [
+            { v: 'all', label: 'All' },
+            { v: 'mf', label: 'MF' },
+            { v: 'stocks', label: 'Stocks' },
+            { v: 'commodity', label: 'Metals' },
+          ] as const;
+          const activeIdx = tabs.findIndex(t => t.v === portfolioView);
+          const PAD = 4; // track padding px
+          return (
+            <div style={{
+              position: 'relative',
+              display: 'flex',
+              marginTop: '1.5rem',
+              padding: `${PAD}px`,
+              background: 'rgba(255,255,255,0.05)',
+              borderRadius: '999px',
+              border: '1px solid rgba(255,255,255,0.08)',
+              width: '272px',
+            }}>
+              {/* sliding pill — width and left derived from inner track minus 2×padding split across 4 tabs */}
+              <div style={{
+                position: 'absolute',
+                top: `${PAD}px`,
+                bottom: `${PAD}px`,
+                width: `calc((100% - ${PAD * 2}px) / 4)`,
+                left: `calc(${PAD}px + ${activeIdx} * (100% - ${PAD * 2}px) / 4)`,
+                borderRadius: '999px',
+                background: 'rgba(255,255,255,0.11)',
+                backdropFilter: 'blur(8px)',
+                boxShadow: '0 2px 10px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.14)',
+                transition: 'left 0.38s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                pointerEvents: 'none'
+              }} />
+              {tabs.map(({ v, label }) => {
+                const active = portfolioView === v;
+                return (
+                  <button
+                    key={v}
+                    onClick={() => setPortfolioView(v)}
+                    style={{
+                      flex: 1,
+                      position: 'relative',
+                      zIndex: 1,
+                      padding: '0.5rem 0',
+                      border: 'none',
+                      background: 'transparent',
+                      color: active ? 'var(--text-primary)' : 'rgba(255,255,255,0.32)',
+                      borderRadius: '999px',
+                      cursor: 'pointer',
+                      fontSize: '0.72rem',
+                      fontWeight: active ? 700 : 500,
+                      fontFamily: 'var(--font-mono)',
+                      letterSpacing: '1px',
+                      textTransform: 'uppercase',
+                      transition: 'color 0.28s ease',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Portfolio stat row */}
@@ -426,24 +521,29 @@ export function Portfolio() {
         justifyContent: 'space-between',
         gap: '0.5rem'
       }}>
-        <div style={{ flex: 1, textAlign: 'center' }}>
-          <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Invested</div>
-          <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>{formatCurrency(portfolioStats.invested)}</div>
-        </div>
-        <div style={{ width: '1px', background: 'var(--border-color)' }} />
-        <div style={{ flex: 1, textAlign: 'center' }}>
-          <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Returns</div>
-          <div style={{ fontSize: '0.92rem', fontWeight: 700, color: portfolioStats.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
-            {portfolioStats.pnl >= 0 ? '+' : ''}{portfolioStats.pnlPct.toFixed(2)}%
-          </div>
-        </div>
-        <div style={{ width: '1px', background: 'var(--border-color)' }} />
-        <div style={{ flex: 1, textAlign: 'center' }}>
-          <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>XIRR</div>
-          <div style={{ fontSize: '0.92rem', fontWeight: 700, color: portfolioStats.xirr !== null ? (portfolioStats.xirr >= 0 ? '#22c55e' : '#ef4444') : 'var(--text-primary)' }}>
-            {portfolioStats.xirr !== null ? `${(portfolioStats.xirr * 100).toFixed(2)}%` : '—'}
-          </div>
-        </div>
+        {(() => {
+          const s = portfolioStats[portfolioView];
+          return (<>
+            <div style={{ flex: 1, textAlign: 'center' }}>
+              <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Invested</div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>{formatCurrency(s.invested)}</div>
+            </div>
+            <div style={{ width: '1px', background: 'var(--border-color)' }} />
+            <div style={{ flex: 1, textAlign: 'center' }}>
+              <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Returns</div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: s.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
+                {s.pnl >= 0 ? '+' : ''}{s.pnlPct.toFixed(2)}%
+              </div>
+            </div>
+            <div style={{ width: '1px', background: 'var(--border-color)' }} />
+            <div style={{ flex: 1, textAlign: 'center' }}>
+              <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>XIRR</div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: s.xirr !== null ? (s.xirr >= 0 ? '#22c55e' : '#ef4444') : 'var(--text-primary)' }}>
+                {s.xirr !== null ? `${(s.xirr * 100).toFixed(2)}%` : '—'}
+              </div>
+            </div>
+          </>);
+        })()}
       </div>
 
       {error && (
@@ -524,6 +624,33 @@ export function Portfolio() {
             </div>
             );
           })()}
+
+          {commodityAccounts.length > 0 && (() => {
+            const isCollapsed = collapsedSections.has('commodity');
+            return (
+            <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+              <div
+                className="flex align-center gap-3"
+                style={{ cursor: 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
+                onClick={() => toggleSection('commodity')}
+              >
+                <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
+                  Commodities
+                </span>
+                <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
+                  {commodityAccounts.length}
+                </span>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
+                <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
+              </div>
+              {!isCollapsed && (
+                <div>
+                  {commodityAccounts.map((account: Account) => renderAssetRow(account))}
+                </div>
+              )}
+            </div>
+            );
+          })()}
         </>
       )}
       </>
@@ -575,7 +702,7 @@ export function Portfolio() {
                 {selectedAsset.name}
               </div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
-                {selectedAsset.type === 'sips' ? 'Mutual Fund' : 'Stock'}
+                {selectedAsset.type === 'sips' ? 'Mutual Fund' : selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'Silver' : 'Gold') : 'Stock'}
               </div>
 
               <div className="text-serif" style={{
@@ -585,7 +712,10 @@ export function Portfolio() {
                 marginTop: '1.25rem',
                 lineHeight: 1
               }}>
-                ₹{stats.currentPrice.toFixed(2)}
+                {selectedAsset.type === 'commodity'
+                  ? `₹${stats.currentPrice.toFixed(2)}/g`
+                  : `₹${stats.currentPrice.toFixed(2)}`
+                }
               </div>
 
               {oneDay ? (
@@ -610,7 +740,7 @@ export function Portfolio() {
             </div>
 
             {/* Chart — CRED style: auto-scaled, no axes/grid clutter, thin trend line */}
-            {historyLoading ? (
+            {selectedAsset.type === 'commodity' ? null : historyLoading ? (
               <div style={{ padding: '3rem 2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
                 Loading chart...
               </div>
@@ -716,45 +846,47 @@ export function Portfolio() {
             )}
 
             {/* Range Selector — below chart, CRED style */}
-            <div style={{ padding: '0.75rem 1rem 0.5rem', boxSizing: 'border-box', borderBottom: '1px solid var(--border-color)' }}>
-              <div className="no-scrollbar" style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', gap: '0.25rem' }}>
-                {(selectedAsset.type === 'stocks'
-                  ? ['1d', '5d', '1mo', '3mo', '1y', '5y']
-                  : ['1m', '6m', '1y', 'all']
-                ).map(r => {
-                  const isActive = selectedAsset.type === 'stocks' ? stockRange === r : mfRange === r;
-                  return (
-                    <button
-                      key={r}
-                      onClick={() => selectedAsset.type === 'stocks'
-                        ? setStockRange(r as StockHistoryRange)
-                        : setMFRange(r as MFHistoryRange)}
-                      style={{
-                        padding: '0.4rem 0.9rem',
-                        border: `1px solid ${isActive ? 'var(--border-color)' : 'transparent'}`,
-                        background: isActive ? 'var(--bg-hover)' : 'transparent',
-                        color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                        borderRadius: '999px',
-                        cursor: 'pointer',
-                        fontSize: '0.82rem',
-                        fontWeight: isActive ? 700 : 500,
-                        whiteSpace: 'nowrap',
-                        flexShrink: 0,
-                        transition: 'all 0.15s ease'
-                      }}
-                    >
-                      {r.toUpperCase()}
-                    </button>
-                  );
-                })}
+            {selectedAsset.type !== 'commodity' && (
+              <div style={{ padding: '0.75rem 1rem 0.5rem', boxSizing: 'border-box', borderBottom: '1px solid var(--border-color)' }}>
+                <div className="no-scrollbar" style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', gap: '0.25rem' }}>
+                  {(selectedAsset.type === 'stocks'
+                    ? ['1d', '5d', '1mo', '3mo', '1y', '5y']
+                    : ['1m', '6m', '1y', 'all']
+                  ).map(r => {
+                    const isActive = selectedAsset.type === 'stocks' ? stockRange === r : mfRange === r;
+                    return (
+                      <button
+                        key={r}
+                        onClick={() => selectedAsset.type === 'stocks'
+                          ? setStockRange(r as StockHistoryRange)
+                          : setMFRange(r as MFHistoryRange)}
+                        style={{
+                          padding: '0.4rem 0.9rem',
+                          border: `1px solid ${isActive ? 'var(--border-color)' : 'transparent'}`,
+                          background: isActive ? 'var(--bg-hover)' : 'transparent',
+                          color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          borderRadius: '999px',
+                          cursor: 'pointer',
+                          fontSize: '0.82rem',
+                          fontWeight: isActive ? 700 : 500,
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        {r.toUpperCase()}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Stats List */}
             <div style={{ padding: '0.5rem 1.25rem 1.5rem', boxSizing: 'border-box' }}>
               <StatRow
-                label={selectedAsset.type === 'stocks' ? 'Shares' : 'Units'}
-                value={stats.totalUnits.toLocaleString('en-IN', { maximumFractionDigits: 3 })}
+                label={selectedAsset.type === 'stocks' ? 'Shares' : selectedAsset.type === 'commodity' ? 'Grams' : 'Units'}
+                value={`${stats.totalUnits.toLocaleString('en-IN', { maximumFractionDigits: 3 })}${selectedAsset.type === 'commodity' ? ' g' : ''}`}
               />
               <StatRow
                 label="Total Returns"

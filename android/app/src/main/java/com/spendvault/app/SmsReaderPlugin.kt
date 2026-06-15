@@ -376,6 +376,15 @@ class SmsReaderPlugin : Plugin() {
     fun drainPendingTransactions(call: PluginCall) {
         val queue = drainQueueAtomic(context)
         android.util.Log.d("SpendVaultSms", "Draining ${queue.length()} pending transaction(s) to JS")
+        if (queue.length() > 0) {
+            try {
+                val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                notificationManager.cancelAll()
+                android.util.Log.d("SpendVaultSms", "Cleared notification tray after draining queue.")
+            } catch (e: Exception) {
+                android.util.Log.e("SpendVaultSms", "Failed to cancel notifications on drain", e)
+            }
+        }
         val ret = JSObject()
         ret.put("transactions", queue)
         call.resolve(ret)

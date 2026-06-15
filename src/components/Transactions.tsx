@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account } from '../types';
 import { generateId, formatCurrency, formatAmount, formatDateString, getBillingCycleForDate, calculateBalance, getCurrentMonthStr } from '../utils';
-import { ShoppingBag, Utensils, Zap, Car, HeartPulse, Film, CreditCard, Wallet, ArrowRightLeft, MoreHorizontal, Coins, BadgeDollarSign, Calendar, Activity, X, Search, Home, Gift, Landmark, Smartphone, Sparkles, ChevronRight, TrendingUp, Train, BarChart, BarChart3, Hash } from 'lucide-react';
+import { ShoppingBag, Utensils, Zap, Car, HeartPulse, Film, CreditCard, Wallet, ArrowRightLeft, MoreHorizontal, Coins, BadgeDollarSign, Calendar, Activity, X, Search, Home, Gift, Landmark, Smartphone, Sparkles, ChevronRight, TrendingUp, Train, BarChart, BarChart3, Hash, Gem, Medal } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
@@ -27,6 +27,7 @@ const getCategoryIcon = (category: string) => {
   if (cat.includes('cashback')) return <Gift size={17} />;
   if (cat.includes('sip')) return <BarChart size={17} />;
   if (cat.includes('stocks')) return <TrendingUp size={17} />;
+  if (cat.includes('commodity')) return <Gem size={17} />;
   if (cat.includes('miscellaneous') || cat.includes('other')) return <MoreHorizontal size={17} />;
   return <Coins size={17} />;
 };
@@ -301,8 +302,9 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveUp, 
                 ? 'Hide linked entry'
                 : (() => {
                     const cats = counterparts!.map(c => c.tx.category.toLowerCase());
-                    if (cats.includes('sip')) return 'Invested in SIP account';
-                    if (cats.includes('stocks')) return 'Stock purchase debited from bank';
+                    if (cats.includes('sip')) return 'SIP auto-debited from bank';
+                    if (cats.includes('stocks')) return 'Stock purchase debited from wallet';
+                    if (cats.includes('commodity')) return 'Commodity purchase debited from bank';
                     if (cats.includes('transfer')) return 'Transfer entry on destination account';
                     if (cats.includes('cc payment')) return 'Payment reflected on card';
                     if (cats.includes('ncmc travel recharge')) return 'Travel wallet top-up entry';
@@ -544,6 +546,8 @@ export default function Transactions() {
       case 'stocks':
       case 'investment':
         return <TrendingUp size={18} />;
+      case 'commodity':
+        return <Medal size={18} />;
       default:
         return <Wallet size={18} />;
     }
@@ -631,6 +635,7 @@ export default function Transactions() {
     const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
     const isSip = newTx.category?.toLowerCase() === 'sip';
     const isStocks = newTx.category?.toLowerCase() === 'stocks';
+    const isCommodity = newTx.category?.toLowerCase() === 'commodity';
     const allottedAmount = isSip ? (newTx.sipAllottedAmount !== undefined ? Number(newTx.sipAllottedAmount) : Number(newTx.amount)) : Number(newTx.amount);
     const sipCharges = isSip ? (newTx.sipCharges !== undefined ? Number(newTx.sipCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined;
 
@@ -646,6 +651,22 @@ export default function Transactions() {
         type: counterpartType,
         amount: Number(newTx.amount),
         category: 'Stocks',
+        isRecurring: false,
+        linkedTransactionIds: [mainTxId],
+        numberOfShares: newTx.numberOfShares
+      });
+    } else if (isCommodity && paymentSourceAccountId && !editId) {
+      const bankCounterpartId = generateId();
+      currentLinkedIds.push(bankCounterpartId);
+      const counterpartType = newTx.type === 'credit' ? 'debit' : 'credit';
+      addTransaction({
+        id: bankCounterpartId,
+        date: newTx.date as string,
+        description: newTx.description as string,
+        accountId: paymentSourceAccountId,
+        type: counterpartType,
+        amount: Number(newTx.amount),
+        category: 'Commodity',
         isRecurring: false,
         linkedTransactionIds: [mainTxId],
         numberOfShares: newTx.numberOfShares
@@ -826,7 +847,7 @@ export default function Transactions() {
       paymentSourceAccountId: paymentSourceAccountId,
       sipAllottedAmount: isSip ? allottedAmount : undefined,
       sipCharges: isSip ? sipCharges : undefined,
-      numberOfShares: isStocks ? newTx.numberOfShares : undefined,
+      numberOfShares: (isStocks || isSip || isCommodity) ? newTx.numberOfShares : undefined,
       tags: (newTx.tags || []).length > 0 ? newTx.tags : undefined,
       order: newTx.order
     };
@@ -1674,6 +1695,9 @@ export default function Transactions() {
                     if (newTx.category?.toLowerCase() === 'stocks') {
                       return newTx.type === 'credit' ? acc.type === 'stocks' : acc.type === 'bank_account';
                     }
+                    if (newTx.category?.toLowerCase() === 'commodity') {
+                      return newTx.type === 'credit' ? acc.type === 'commodity' : acc.type === 'bank_account';
+                    }
                     return true;
                   })
                   .map(acc => ({
@@ -1697,6 +1721,10 @@ export default function Transactions() {
                     const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
                     const stocksAcc = selectedAcc?.type === 'stocks' ? selectedAcc : (counterpartAcc?.type === 'stocks' ? counterpartAcc : null);
                     finalDesc = stocksAcc ? stocksAcc.name : 'Stocks';
+                  } else if (newTx.category?.toLowerCase() === 'commodity') {
+                    const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
+                    const commodityAcc = selectedAcc?.type === 'commodity' ? selectedAcc : (counterpartAcc?.type === 'commodity' ? counterpartAcc : null);
+                    finalDesc = commodityAcc ? commodityAcc.name : 'Commodity';
                   } else {
                     finalDesc = shouldAutoDebitDesc ? 'Transfer to Travel Wallet' : (shouldAutoTravel ? 'NCMC Travel Recharge' : newTx.description);
                   }
@@ -1765,6 +1793,14 @@ export default function Transactions() {
                   const stocksAccForStocks = mainAccForStocks?.type === 'stocks' ? mainAccForStocks : (counterpartAccForStocks?.type === 'stocks' ? counterpartAccForStocks : null);
                   const isStocksAutoFilled = stocksAccForStocks && currentDesc === stocksAccForStocks.name;
 
+                  // Commodity auto-fill / clear
+                  const wasCommodity = newTx.category?.toLowerCase() === 'commodity';
+                  const isNowCommodity = val.toLowerCase() === 'commodity';
+                  const mainAccForCommodity = data.accounts.find(a => a.id === newTx.accountId);
+                  const counterpartAccForCommodity = data.accounts.find(a => a.id === paymentSourceAccountId);
+                  const commodityAccForCommodity = mainAccForCommodity?.type === 'commodity' ? mainAccForCommodity : (counterpartAccForCommodity?.type === 'commodity' ? counterpartAccForCommodity : null);
+                  const isCommodityAutoFilled = commodityAccForCommodity && currentDesc === commodityAccForCommodity.name;
+
                   let updatedDesc = currentDesc;
                   if (wasTransfer && !isNowTransfer && isTransferAutoFilled) {
                     updatedDesc = '';
@@ -1776,6 +1812,8 @@ export default function Transactions() {
                   } else if (wasSip && !isNowSip && isSipAutoFilled) {
                     updatedDesc = '';
                   } else if (wasStocks && !isNowStocks && isStocksAutoFilled) {
+                    updatedDesc = '';
+                  } else if (wasCommodity && !isNowCommodity && isCommodityAutoFilled) {
                     updatedDesc = '';
                   } else if (isNowCC && paymentSourceAccountId) {
                     // Switching TO CC Payment with counterpart already selected — auto-fill
@@ -1794,6 +1832,10 @@ export default function Transactions() {
                   } else if (isNowStocks) {
                     if (currentDesc === '' || isStocksAutoFilled || isTransferAutoFilled || isCCAutoFilled || isNcmcAutoFilled || isSipAutoFilled) {
                       updatedDesc = stocksAccForStocks ? stocksAccForStocks.name : 'Stocks';
+                    }
+                  } else if (isNowCommodity) {
+                    if (currentDesc === '' || isCommodityAutoFilled || isTransferAutoFilled || isCCAutoFilled || isNcmcAutoFilled || isSipAutoFilled || isStocksAutoFilled) {
+                      updatedDesc = commodityAccForCommodity ? commodityAccForCommodity.name : 'Commodity';
                     }
                   }
                   const selectedAccForTravel = data.accounts.find(a => a.id === newTx.accountId);
@@ -1851,9 +1893,9 @@ export default function Transactions() {
                 error={errors.category}
               />
 
-              {newTx.category?.toLowerCase() === 'stocks' && (
+              {(newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity') && (
                 <div className="input-group" style={{ marginTop: '0.5rem', marginBottom: '1rem' }}>
-                  <label>No. of Shares</label>
+                  <label>{newTx.category?.toLowerCase() === 'commodity' ? 'Grams' : 'No. of Shares'}</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -1867,7 +1909,7 @@ export default function Transactions() {
                         if (errors.numberOfShares) setErrors(prev => ({ ...prev, numberOfShares: '' }));
                       }
                     }}
-                    placeholder="e.g. 10"
+                    placeholder={newTx.category?.toLowerCase() === 'commodity' ? 'e.g. 5.5' : 'e.g. 10'}
                   />
                   {errors.numberOfShares && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.numberOfShares}</span>}
                 </div>
@@ -1940,6 +1982,7 @@ export default function Transactions() {
                 ))
                 || (newTx.category?.toLowerCase() === 'sip')
                 || (newTx.category?.toLowerCase() === 'stocks')
+                || (newTx.category?.toLowerCase() === 'commodity')
               ) && (
                   <CustomPicker
                     label={
@@ -1947,6 +1990,8 @@ export default function Transactions() {
                         ? (newTx.type === 'debit' ? 'Credit To SIP Account' : 'Debit From Bank Account')
                         : newTx.category?.toLowerCase() === 'stocks'
                         ? (newTx.type === 'debit' ? 'Credit To Stocks Account' : 'Debit From Bank Account')
+                        : newTx.category?.toLowerCase() === 'commodity'
+                        ? (newTx.type === 'debit' ? 'Credit To Commodity Account' : 'Debit From Bank Account')
                         : (newTx.type === 'debit'
                           ? (isCCPayment ? 'Pay To Card (Auto-Credit)' : 'Credit To Account (Auto-Credit)')
                           : 'Debit From Account (Auto-Debit)')
@@ -1965,6 +2010,9 @@ export default function Transactions() {
                         }
                         if (newTx.category?.toLowerCase() === 'stocks') {
                           return newTx.type === 'debit' ? a.type === 'stocks' : a.type === 'bank_account';
+                        }
+                        if (newTx.category?.toLowerCase() === 'commodity') {
+                          return newTx.type === 'debit' ? a.type === 'commodity' : a.type === 'bank_account';
                         }
                         return true;
                       }).map(acc => ({
@@ -2000,6 +2048,10 @@ export default function Transactions() {
                         const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
                         const stocksAcc = mainAcc?.type === 'stocks' ? mainAcc : (selectedAcc?.type === 'stocks' ? selectedAcc : null);
                         setNewTx(prev => ({ ...prev, description: stocksAcc ? stocksAcc.name : 'Stocks' }));
+                      } else if (newTx.category?.toLowerCase() === 'commodity') {
+                        const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
+                        const commodityAcc = mainAcc?.type === 'commodity' ? mainAcc : (selectedAcc?.type === 'commodity' ? selectedAcc : null);
+                        setNewTx(prev => ({ ...prev, description: commodityAcc ? commodityAcc.name : 'Commodity' }));
                       }
                     }}
                     iconGetter={_id => _id ? getAccountIcon(_id) : '🚫'}
@@ -2112,7 +2164,7 @@ export default function Transactions() {
                 if (showInstantUI && !hasRewardsOrWallet) return null;
 
                 return (
-                  <div className="flex-col gap-3" style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}>
+                  <div className="flex-col gap-3" style={{ marginTop: '0.5rem', marginBottom: '1rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}>
                     <div className="flex justify-between align-center">
                       <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>Cashback Earned</span>
                       {showInstantUI && (
@@ -2205,7 +2257,7 @@ export default function Transactions() {
               {!showRewardSplit && isCCPayment && paymentSourceAccountId && hasRewardsOrWallet && (
                 <button
                   className="btn btn-secondary w-100 flex align-center justify-center gap-2"
-                  style={{ marginTop: '1rem', marginBottom: '1.25rem', padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}
+                  style={{ marginBottom: '1rem', padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}
                   onClick={() => {
                     setShowRewardSplit(true);
                     setTimeout(() => {
@@ -2222,7 +2274,7 @@ export default function Transactions() {
                 <div
                   ref={rewardSplitRef}
                   className="grid grid-cols-2 gap-4"
-                  style={{ marginTop: '1rem', marginBottom: '1.25rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}
+                  style={{ marginBottom: '1rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}
                 >
                   <div className="flex justify-between align-center col-span-2">
                     <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>Split Payment</span>
@@ -2283,7 +2335,7 @@ export default function Transactions() {
               )}
 
               {!data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled && (
-                <div className="input-group" style={{ marginTop: '1rem', marginBottom: 0 }}>
+                <div className="input-group" style={{ marginBottom: 0 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                     <Hash size={13} style={{ opacity: 0.6 }} />Tags <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: 400 }}>(optional)</span>
                   </label>
@@ -2318,7 +2370,7 @@ export default function Transactions() {
 
               {((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') ||
                 (newTx.type === 'debit' && isCCPayment && paymentSourceAccountId && data.accounts.find(a => a.id === paymentSourceAccountId)?.type === 'credit_card')) && (
-                  <div style={{ marginTop: '0.5rem' }}>
+                  <div style={{ marginTop: '1rem' }}>
                     <CustomPicker
                       label="Apply Payment To"
                       value={ccPaymentCycleTarget}

@@ -635,6 +635,8 @@ export default function Settings() {
     cycles: 'cy', currentCycleId: 'cci', cycleStartDate: 'csd',
     cycleNumber: 'cnm', startDate: 'sdt', endDate: 'edt', carriedOverPeople: 'cop',
     markedDone: 'md', linkedSipAccountId: 'lsa',
+    // Stocks / SIPs / Commodity investment fields
+    numberOfShares: 'ns', marketSymbol: 'ms', investedValue: 'iv', commodityMetal: 'cm',
   };
 
   const minifyPayload = (obj: any): any => {
