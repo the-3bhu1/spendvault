@@ -2167,39 +2167,6 @@ export default function Transactions() {
                 </div>
               )}
 
-              {!data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled && (
-                <div className="input-group" style={{ marginTop: '1rem', marginBottom: 0 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <Hash size={13} style={{ opacity: 0.6 }} />Tags <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: 400 }}>(optional)</span>
-                  </label>
-                  {(data.tags || []).length > 0 && (
-                    <CustomPicker
-                      label="Tags"
-                      hideLabel={true}
-                      value={newTx.tags || []}
-                      isMulti={true}
-                      options={(data.tags || []).map(t => ({ id: t, name: `#${t}` }))}
-                      onChange={(val: string[]) => {
-                        const cleaned = (val || []).filter(v => v !== 'all' && v !== '');
-                        setNewTx(prev => ({ ...prev, tags: cleaned.length > 0 ? cleaned : [] }));
-                      }}
-                      placeholder="Select tags"
-                      noSelectionLabel="None"
-                    />
-                  )}
-                  <div className="flex gap-2" style={{ marginTop: (data.tags || []).length > 0 ? '0.5rem' : '0' }}>
-                    <input
-                      className="input-field"
-                      style={{ flex: 1, fontSize: '0.85rem' }}
-                      value={newTagInput}
-                      onChange={e => setNewTagInput(e.target.value)}
-                      placeholder="Create tag (e.g. Vacation2024)"
-                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateTag(); } }}
-                    />
-                    <button className="btn btn-secondary" style={{ minWidth: '42px', padding: '0 0.75rem' }} onClick={handleCreateTag} type="button">+</button>
-                  </div>
-                </div>
-              )}
 
               {((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') ||
                 (newTx.type === 'debit' && isCCPayment && paymentSourceAccountId && data.accounts.find(a => a.id === paymentSourceAccountId)?.type === 'credit_card')) && (
