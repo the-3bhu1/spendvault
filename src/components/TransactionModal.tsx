@@ -412,7 +412,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             onChange={val => {
               const isSip = newTx.category?.toLowerCase() === 'sip';
               const isStock = newTx.category?.toLowerCase() === 'stocks';
-              const isInvestment = isSip || isStock;
               const selectedAcc = data.accounts.find(a => a.id === val);
               let updatedDesc = newTx.description;
               if (isSip) {
