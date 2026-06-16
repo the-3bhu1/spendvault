@@ -165,8 +165,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       : undefined;
 
     const isSip = newTx.category?.toLowerCase() === 'sip';
-    const allottedAmount = isSip ? (newTx.sipAllottedAmount !== undefined ? Number(newTx.sipAllottedAmount) : Number(newTx.amount)) : Number(newTx.amount);
-    const sipCharges = isSip ? (newTx.sipCharges !== undefined ? Number(newTx.sipCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined;
+    const isStock = newTx.category?.toLowerCase() === 'stocks';
+    const isInvestment = isSip || isStock;
+    const allottedAmount = isInvestment ? (newTx.sipAllottedAmount !== undefined ? Number(newTx.sipAllottedAmount) : Number(newTx.amount)) : Number(newTx.amount);
+    const sipCharges = isInvestment ? (newTx.sipCharges !== undefined ? Number(newTx.sipCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined;
 
     const secondaryTxId = paymentSourceAccountId ? crypto.randomUUID() : undefined;
     const currentLinkedIds: string[] = [];
@@ -178,14 +180,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     const txData: Transaction = {
       ...newTx,
       id: txId,
-      amount: isSip ? (newTx.type === 'debit' ? (allottedAmount + (sipCharges || 0)) : allottedAmount) : Number(newTx.amount),
+      amount: isInvestment ? (newTx.type === 'debit' ? (allottedAmount + (sipCharges || 0)) : allottedAmount) : Number(newTx.amount),
       date: newTx.date!,
       description: newTx.description!,
       type: newTx.type!,
       accountId: newTx.accountId!,
       category: newTx.category!,
-      sipAllottedAmount: isSip ? allottedAmount : undefined,
-      sipCharges: isSip ? sipCharges : undefined,
+      sipAllottedAmount: isInvestment ? allottedAmount : undefined,
+      sipCharges: isInvestment ? sipCharges : undefined,
       rewardEarnedType: newTx.rewardEarnedType || (selectedCashbackLevelId ? 'delayed' : 'none'),
       cashbackLevelId: selectedCashbackLevelId || undefined,
       paymentSourceAccountId: paymentSourceAccountId || undefined,
@@ -233,15 +235,15 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           date: txData.date,
           description: isCCPayment
             ? (counterpartType === 'credit' ? 'CC Bill Payment' : `CC Payment: ${data.accounts.find(a => a.id === txData.accountId)?.name}`)
-            : (isSip ? txData.description : `Transfer to ${data.accounts.find(a => a.id === txData.accountId)?.name}`),
-          amount: isSip ? (counterpartType === 'credit' ? allottedAmount : (allottedAmount + (sipCharges || 0))) : txData.amount,
+            : (isInvestment ? txData.description : `Transfer to ${data.accounts.find(a => a.id === txData.accountId)?.name}`),
+          amount: isInvestment ? (counterpartType === 'credit' ? allottedAmount : (allottedAmount + (sipCharges || 0))) : txData.amount,
           type: counterpartType,
           accountId: paymentSourceAccountId,
           category: txData.category,
           isCCPaymentRecord: isCCPayment,
           isRecurring: false,
-          sipAllottedAmount: isSip ? allottedAmount : undefined,
-          sipCharges: isSip ? sipCharges : undefined,
+          sipAllottedAmount: isInvestment ? allottedAmount : undefined,
+          sipCharges: isInvestment ? sipCharges : undefined,
           appliedBillingCycleYearMonth: isCCPayment && counterpartType === 'credit' && destAccount?.type === 'credit_card'
             ? (() => {
                 const safeStatementDay = destAccount.statementDay || 1;
@@ -354,9 +356,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   const val = e.target.value;
                   if (val === '' || /^\d*\.?\d*$/.test(val)) {
                     const totalAmount = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
-                    const isSip = newTx.category?.toLowerCase() === 'sip';
+                    const isInvestment = newTx.category?.toLowerCase() === 'sip' || newTx.category?.toLowerCase() === 'stocks';
                     const allotted = newTx.sipAllottedAmount || 0;
-                    const charges = isSip ? Math.max(0, totalAmount - allotted) : undefined;
+                    const charges = isInvestment ? Math.max(0, totalAmount - allotted) : undefined;
                     setNewTx(prev => ({ 
                       ...prev, 
                       amount: totalAmount,
@@ -370,11 +372,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               {errors.amount && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.amount}</span>}
             </div>
             <CustomPicker label="Type" value={newTx.type!} options={[{ id: 'debit', name: 'Debit (Spend)', subtext: 'Money going out' }, { id: 'credit', name: 'Credit (Receive)', subtext: 'Money coming in' }]} onChange={val => {
-              const isSip = newTx.category?.toLowerCase() === 'sip';
+              const isInvestment = newTx.category?.toLowerCase() === 'sip' || newTx.category?.toLowerCase() === 'stocks';
               setNewTx(prev => {
                 const nextType = val as TransactionType;
                 let nextAccountId = prev.accountId;
-                if (isSip) {
+                if (isInvestment) {
                   // Type changed: clear selections to avoid invalid combination
                   nextAccountId = '';
                   setPaymentSourceAccountId('');
@@ -395,7 +397,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             options={data.accounts
               .filter(acc => {
                 if (newTx.category?.toLowerCase() === 'sip') {
-                  return newTx.type === 'credit' ? acc.type === 'sips' : acc.type === 'bank_account';
+                  return newTx.type === 'credit' ? acc.type === 'sips' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
+                }
+                if (newTx.category?.toLowerCase() === 'stocks') {
+                  return newTx.type === 'credit' ? acc.type === 'stocks' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
+                }
+                if (newTx.category?.toLowerCase() === 'commodity') {
+                  return newTx.type === 'credit' ? acc.type === 'commodity' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
                 }
                 return true;
               })
@@ -403,12 +411,18 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             } 
             onChange={val => {
               const isSip = newTx.category?.toLowerCase() === 'sip';
+              const isStock = newTx.category?.toLowerCase() === 'stocks';
+              const isInvestment = isSip || isStock;
               const selectedAcc = data.accounts.find(a => a.id === val);
               let updatedDesc = newTx.description;
               if (isSip) {
                 const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
                 const sipAcc = selectedAcc?.type === 'sips' ? selectedAcc : (counterpartAcc?.type === 'sips' ? counterpartAcc : null);
                 updatedDesc = sipAcc ? sipAcc.name : 'SIP';
+              } else if (isStock) {
+                const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
+                const stockAcc = selectedAcc?.type === 'stocks' ? selectedAcc : (counterpartAcc?.type === 'stocks' ? counterpartAcc : null);
+                updatedDesc = stockAcc ? stockAcc.name : 'Stock Trade';
               }
               setNewTx(prev => ({ ...prev, accountId: val, description: updatedDesc }));
               if (errors.accountId) { const newErr = { ...errors }; delete newErr.accountId; setErrors(newErr); }
@@ -425,25 +439,45 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             return 0;
           }).map(c => ({ id: c, name: c })), ...(newTx.category && !(data.categories || []).includes(newTx.category) ? [{ id: newTx.category, name: newTx.category }] : [])]} onChange={val => {
             const isSip = val.toLowerCase() === 'sip';
+            const isStock = val.toLowerCase() === 'stocks';
+            const isCommodity = val.toLowerCase() === 'commodity';
+            const isInvestment = isSip || isStock;
             setNewTx(prev => {
               let nextAccountId = prev.accountId;
-              if (isSip) {
+              if (isInvestment || isCommodity) {
                 const currentAcc = data.accounts.find(a => a.id === prev.accountId);
-                const isValid = currentAcc && (prev.type === 'credit' ? currentAcc.type === 'sips' : currentAcc.type === 'bank_account');
+                let isValid = false;
+                if (currentAcc) {
+                  if (prev.type === 'credit') {
+                    if (isSip) isValid = currentAcc.type === 'sips';
+                    else if (isStock) isValid = currentAcc.type === 'stocks';
+                    else if (isCommodity) isValid = currentAcc.type === 'commodity';
+                  } else {
+                    isValid = currentAcc.type === 'bank_account' || currentAcc.type === 'e_wallet';
+                  }
+                }
                 if (!isValid) {
                   nextAccountId = '';
                 }
                 setPaymentSourceAccountId('');
               }
               const mainAcc = data.accounts.find(a => a.id === nextAccountId);
-              const sipAcc = mainAcc?.type === 'sips' ? mainAcc : null;
+              
+              let newDesc = prev.description;
+              if (isSip) {
+                 const sipAcc = mainAcc?.type === 'sips' ? mainAcc : null;
+                 newDesc = sipAcc ? sipAcc.name : 'SIP';
+              } else if (isStock) {
+                 const stockAcc = mainAcc?.type === 'stocks' ? mainAcc : null;
+                 newDesc = stockAcc ? stockAcc.name : 'Stock Trade';
+              }
               return { 
                 ...prev, 
                 category: val, 
                 accountId: nextAccountId,
-                description: isSip ? (sipAcc ? sipAcc.name : 'SIP') : prev.description,
-                sipAllottedAmount: isSip ? prev.sipAllottedAmount || prev.amount : undefined,
-                sipCharges: isSip ? prev.sipCharges || 0 : undefined
+                description: newDesc,
+                sipAllottedAmount: isInvestment ? prev.sipAllottedAmount || prev.amount : undefined,
+                sipCharges: isInvestment ? prev.sipCharges || 0 : undefined
               };
             }); 
             if (errors.category) { const newErr = { ...errors }; delete newErr.category; setErrors(newErr); } 
@@ -451,10 +485,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
           {(() => {
             const isSip = newTx.category?.toLowerCase() === 'sip';
-            return isSip && (
+            const isStock = newTx.category?.toLowerCase() === 'stocks';
+            const isInvestment = isSip || isStock;
+            return isInvestment && (
               <div className="grid grid-cols-2 gap-4" style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', marginBottom: '1rem' }}>
                 <div className="input-group" style={{ marginBottom: 0 }}>
-                  <label>Allotted Amount</label>
+                  <label>{isStock ? 'Invested Amount' : 'Allotted Amount'}</label>
                   <input 
                     type="text" 
                     inputMode="decimal"
@@ -477,7 +513,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   />
                 </div>
                 <div className="input-group" style={{ marginBottom: 0 }}>
-                  <label>Stamp Duty / Charges</label>
+                  <label>{isStock ? 'Brokerage / Taxes' : 'Stamp Duty / Charges'}</label>
                   <div className="input-field flex align-center text-muted text-mono" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', height: '42px', borderRadius: '12px', padding: '0.75rem 1rem' }}>
                     {newTx.sipCharges !== undefined ? newTx.sipCharges : '0.00'}
                   </div>
@@ -486,21 +522,33 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             );
           })()}
 
-          {!editId && ((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') || isCCPayment || (newTx.category?.toLowerCase() === 'sip')) && (
-            <CustomPicker label={newTx.category?.toLowerCase() === 'sip' ? (newTx.type === 'debit' ? 'Credit To SIP Account' : 'Debit From Bank Account') : (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' ? 'Debit From Account (Auto-Debit)' : 'Pay To Card (Auto-Credit)')} value={paymentSourceAccountId} placeholder="None (Manual Log)" options={[{ id: '', name: 'None (Manual Log)' }, ...data.accounts.filter(a => {
+          {!editId && ((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') || isCCPayment || (newTx.category?.toLowerCase() === 'sip' || newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity')) && (
+            <CustomPicker label={(newTx.category?.toLowerCase() === 'sip' || newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity') ? (newTx.type === 'debit' ? 'Credit To Investment Account' : 'Debit From Account') : (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' ? 'Debit From Account (Auto-Debit)' : 'Pay To Card (Auto-Credit)')} value={paymentSourceAccountId} placeholder="None (Manual Log)" options={[{ id: '', name: 'None (Manual Log)' }, ...data.accounts.filter(a => {
               if (a.id === newTx.accountId) return false;
               if (newTx.category?.toLowerCase() === 'sip') {
-                return newTx.type === 'debit' ? a.type === 'sips' : a.type === 'bank_account';
+                return newTx.type === 'debit' ? a.type === 'sips' : (a.type === 'bank_account' || a.type === 'e_wallet');
+              }
+              if (newTx.category?.toLowerCase() === 'stocks') {
+                return newTx.type === 'debit' ? a.type === 'stocks' : (a.type === 'bank_account' || a.type === 'e_wallet');
+              }
+              if (newTx.category?.toLowerCase() === 'commodity') {
+                return newTx.type === 'debit' ? a.type === 'commodity' : (a.type === 'bank_account' || a.type === 'e_wallet');
               }
               return true;
             }).map(acc => ({ id: acc.id, name: acc.name, subtext: acc.type.replace('_', ' ') }))]} onChange={val => {
               setPaymentSourceAccountId(val);
               const isSip = newTx.category?.toLowerCase() === 'sip';
+              const isStock = newTx.category?.toLowerCase() === 'stocks';
               if (isSip) {
                 const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
                 const counterpartAcc = data.accounts.find(a => a.id === val);
                 const sipAcc = mainAcc?.type === 'sips' ? mainAcc : (counterpartAcc?.type === 'sips' ? counterpartAcc : null);
                 setNewTx(prev => ({ ...prev, description: sipAcc ? sipAcc.name : 'SIP' }));
+              } else if (isStock) {
+                const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
+                const counterpartAcc = data.accounts.find(a => a.id === val);
+                const stockAcc = mainAcc?.type === 'stocks' ? mainAcc : (counterpartAcc?.type === 'stocks' ? counterpartAcc : null);
+                setNewTx(prev => ({ ...prev, description: stockAcc ? stockAcc.name : 'Stock Trade' }));
               }
             }} iconGetter={_id => _id ? getAccountIcon(_id, data.accounts) : '🚫'} />
           )}

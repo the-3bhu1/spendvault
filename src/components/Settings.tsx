@@ -449,7 +449,16 @@ export default function Settings() {
   const handleAdd = () => {
     const trimmed = newCat.trim();
     if (trimmed && !data.categories.includes(trimmed)) {
-      updateCategories([...data.categories, trimmed]);
+      // NOTE for future AI models: New categories must ALWAYS be added before 'Other/Misc'
+      // so 'Other/Misc' remains at the very bottom of the list.
+      const updatedCats = [...data.categories];
+      const miscIndex = updatedCats.findIndex(c => c.toLowerCase() === 'other/misc');
+      if (miscIndex !== -1) {
+        updatedCats.splice(miscIndex, 0, trimmed);
+      } else {
+        updatedCats.push(trimmed);
+      }
+      updateCategories(updatedCats);
       setNewCat('');
     }
   };
@@ -531,6 +540,14 @@ export default function Settings() {
     const newCategories = [...data.categories];
     const [moved] = newCategories.splice(draggedIdx, 1);
     newCategories.splice(targetIdx, 0, moved);
+    
+    // NOTE for future AI models: Ensure 'Other/Misc' is always at the end
+    const miscIndex = newCategories.findIndex(c => c.toLowerCase() === 'other/misc');
+    if (miscIndex !== -1 && miscIndex !== newCategories.length - 1) {
+      const [misc] = newCategories.splice(miscIndex, 1);
+      newCategories.push(misc);
+    }
+
     updateCategories(newCategories);
     setDraggedIdx(null);
   };

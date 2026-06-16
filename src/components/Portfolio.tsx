@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { useFinance } from '../FinanceContext';
 import type { Account } from '../types';
 import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHistoryByRange, getLatestFetchedAt, fetchCommodityPriceINR, getCachedCommodityPriceINR } from '../services/MarketDataService';
-import { xirr } from '../utils/xirr';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, RotateCcw, ChevronLeft, ChevronDown } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
@@ -121,8 +120,6 @@ export function Portfolio() {
       commodityPriceResults.forEach(([sym, p]) => { if (p !== null) newPrices[sym] = p; });
       setPrices(newPrices);
 
-      // Show the time of the latest actual API fetch (from cache metadata),
-      // not "now" — a cache hit shouldn't bump the timestamp.
       const latest = getLatestFetchedAt(items.map(i => i.symbol));
       if (latest !== null) setLastRefreshed(new Date(latest));
     } catch (e: any) {
@@ -164,10 +161,10 @@ export function Portfolio() {
   }, [selectedAsset, stockRange, mfRange]);
 
   const getTotalUnits = (account: Account) =>
-    (account.numberOfShares ?? 0) +
+    Number(account.numberOfShares ?? 0) +
     data.transactions
       .filter((t: any) => t.accountId === account.id && t.numberOfShares !== undefined)
-      .reduce((sum: number, t: any) => t.type === 'credit' ? sum + (t.numberOfShares ?? 0) : sum - (t.numberOfShares ?? 0), 0);
+      .reduce((sum: number, t: any) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0);
 
   const getAccountStats = (account: Account) => {
     const symbol = account.marketSymbol || '';
@@ -197,7 +194,6 @@ export function Portfolio() {
     };
   };
 
-  // 1-day return derived from the two most recent history points (per-unit NAV/price change × units)
   const getOneDayReturn = (account: Account) => {
     if (historyData.length < 2) return null;
     const totalUnits = getTotalUnits(account);
@@ -209,62 +205,22 @@ export function Portfolio() {
     return { amount, pct, perUnitChange };
   };
 
-  const calculateXIRR = (account: Account): number | null => {
-    const currentPrice = prices[account.marketSymbol || ''] ?? 0;
-    const totalUnits = getTotalUnits(account);
-    const currentValue = currentPrice * totalUnits;
-    if (currentValue <= 0) return null;
-
-    // Each SIP installment is a cash outflow on its date (allotted amount net of charges).
-    // Don't restrict by transaction type — SIP installments can be logged as debit or credit
-    // depending on how the linked bank transfer was recorded.
-    const cashflows = data.transactions
-      .filter((t: any) => t.accountId === account.id && t.category === 'SIP' && (t.sipAllottedAmount ?? t.amount))
-      .map((t: any) => ({
-        date: new Date(t.date),
-        amount: -Math.abs((t.sipAllottedAmount ?? t.amount ?? 0) - (t.sipCharges ?? 0))
-      }))
-      .filter((cf: any) => cf.amount !== 0 && !isNaN(cf.date.getTime()));
-
-    if (cashflows.length < 1) return null;
-
-    cashflows.push({ date: new Date(), amount: currentValue });
-
-    if (cashflows.length < 2) return null;
-
-    return xirr(cashflows);
-  };
-
   const formatFullCurrency = (value: number) =>
     `₹${value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const buildStats = (accounts: Account[], includeXirr: boolean) => {
+  const buildStats = (accounts: Account[]) => {
     const invested = accounts.reduce((sum, acc) => sum + getAccountStats(acc).totalInvested, 0);
     const current = accounts.reduce((sum, acc) => sum + getAccountStats(acc).currentValue, 0);
     const pnl = current - invested;
     const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
-    let statsXirr: number | null = null;
-    if (includeXirr && current > 0) {
-      const cashflows = data.transactions
-        .filter((t: any) => accounts.some((a: Account) => a.id === t.accountId) && t.category === 'SIP' && (t.sipAllottedAmount ?? t.amount))
-        .map((t: any) => ({
-          date: new Date(t.date),
-          amount: -Math.abs((t.sipAllottedAmount ?? t.amount ?? 0) - (t.sipCharges ?? 0))
-        }))
-        .filter((cf: any) => cf.amount !== 0 && !isNaN(cf.date.getTime()));
-      if (cashflows.length >= 1) {
-        cashflows.push({ date: new Date(), amount: current });
-        statsXirr = xirr(cashflows);
-      }
-    }
-    return { invested, current, pnl, pnlPct, xirr: statsXirr };
+    return { invested, current, pnl, pnlPct };
   };
 
   const portfolioStats = useMemo(() => ({
-    all: buildStats([...sipAccounts, ...stockAccounts, ...commodityAccounts], true),
-    mf: buildStats(sipAccounts, true),
-    stocks: buildStats(stockAccounts, false),
-    commodity: buildStats(commodityAccounts, false),
+    all: buildStats([...sipAccounts, ...stockAccounts, ...commodityAccounts]),
+    mf: buildStats(sipAccounts),
+    stocks: buildStats(stockAccounts),
+    commodity: buildStats(commodityAccounts),
   }), [sipAccounts, stockAccounts, commodityAccounts, prices, data.transactions]);
 
   const getAvatarColor = (name: string) => {
@@ -355,14 +311,14 @@ export function Portfolio() {
             fontWeight: 700,
             color: positive ? '#22c55e' : '#ef4444'
           }}>
-            {formatFullCurrency(stats.currentValue).replace('.00', '')}
+            {formatCurrency(stats.currentValue)}
           </div>
           <div style={{
             fontSize: '0.8rem',
             color: 'var(--text-secondary)',
             marginTop: '0.15rem'
           }}>
-            {formatFullCurrency(stats.totalInvested).replace('.00', '')}
+            {formatCurrency(stats.totalInvested)}
           </div>
         </div>
       </div>
@@ -380,7 +336,6 @@ export function Portfolio() {
     return () => window.removeEventListener('appBackButton', handleBack);
   }, [selectedAsset]);
 
-  // Reset scroll to top when entering/leaving an asset detail view
   useEffect(() => {
     const appRoot = document.querySelector('.app-root');
     if (appRoot) appRoot.scrollTo({ top: 0, behavior: 'auto' });
@@ -390,7 +345,6 @@ export function Portfolio() {
     <div style={{ background: 'var(--bg-primary)', paddingBottom: '100px' }}>
       {!selectedAsset && (
       <>
-      {/* Header — minimal, centered, CRED style */}
       <div style={{ padding: '1.75rem 1.5rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
         <div style={{ marginBottom: '1rem' }}>
           <ProfileAvatar size={64} />
@@ -442,7 +396,6 @@ export function Portfolio() {
           </div>
         )}
 
-        {/* View toggle — All / MF / Stocks / Commodity */}
         {(sipAccounts.length > 0 || stockAccounts.length > 0 || commodityAccounts.length > 0) && (() => {
           const tabs = [
             { v: 'all', label: 'All' },
@@ -451,7 +404,7 @@ export function Portfolio() {
             { v: 'commodity', label: 'Metals' },
           ] as const;
           const activeIdx = tabs.findIndex(t => t.v === portfolioView);
-          const PAD = 4; // track padding px
+          const PAD = 4;
           return (
             <div style={{
               position: 'relative',
@@ -463,7 +416,6 @@ export function Portfolio() {
               border: '1px solid rgba(255,255,255,0.08)',
               width: '272px',
             }}>
-              {/* sliding pill — width and left derived from inner track minus 2×padding split across 4 tabs */}
               <div style={{
                 position: 'absolute',
                 top: `${PAD}px`,
@@ -511,7 +463,6 @@ export function Portfolio() {
         })()}
       </div>
 
-      {/* Portfolio stat row */}
       <div style={{
         margin: '0 1.5rem',
         padding: '1.25rem 0',
@@ -533,13 +484,6 @@ export function Portfolio() {
               <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Returns</div>
               <div style={{ fontSize: '0.92rem', fontWeight: 700, color: s.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
                 {s.pnl >= 0 ? '+' : ''}{s.pnlPct.toFixed(2)}%
-              </div>
-            </div>
-            <div style={{ width: '1px', background: 'var(--border-color)' }} />
-            <div style={{ flex: 1, textAlign: 'center' }}>
-              <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>XIRR</div>
-              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: s.xirr !== null ? (s.xirr >= 0 ? '#22c55e' : '#ef4444') : 'var(--text-primary)' }}>
-                {s.xirr !== null ? `${(s.xirr * 100).toFixed(2)}%` : '—'}
               </div>
             </div>
           </>);
@@ -658,7 +602,6 @@ export function Portfolio() {
 
       {selectedAsset && (() => {
         const stats = getAccountStats(selectedAsset);
-        const xirrVal = selectedAsset.type === 'sips' ? calculateXIRR(selectedAsset) : null;
         const oneDay = getOneDayReturn(selectedAsset);
         return (
         <div className="fade-in" style={{ boxSizing: 'border-box' }}>
@@ -898,13 +841,6 @@ export function Portfolio() {
                   label="1 Day Returns"
                   value={`${oneDay.amount >= 0 ? '↑' : '↓'} ₹${Math.abs(oneDay.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${oneDay.pct >= 0 ? '+' : ''}${oneDay.pct.toFixed(2)}%)`}
                   color={oneDay.amount >= 0 ? '#4ade80' : '#f87171'}
-                />
-              )}
-              {selectedAsset.type === 'sips' && (
-                <StatRow
-                  label="XIRR"
-                  value={xirrVal !== null ? `${(xirrVal * 100).toFixed(2)}%` : '—'}
-                  color={xirrVal !== null ? (xirrVal >= 0 ? '#4ade80' : '#f87171') : undefined}
                 />
               )}
 

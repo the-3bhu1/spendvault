@@ -342,6 +342,14 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveUp, 
 
 export default function Transactions() {
   const { data, pendingTransfer, setPendingTransfer, smsQueue, removeFromSmsQueue, removeSmsByMatch, addTransaction, updateTransaction, reorderTransactions, deleteTransaction, updateTags } = useFinance();
+
+  const ACCOUNT_TYPE_ORDER = ['bank_account', 'credit_card', 'debit_card', 'cash', 'e_wallet', 'rewards', 'stocks', 'sips', 'commodity'];
+  const sortByAccountType = (a: { type: string }, b: { type: string }) => {
+    const ai = ACCOUNT_TYPE_ORDER.indexOf(a.type);
+    const bi = ACCOUNT_TYPE_ORDER.indexOf(b.type);
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+  };
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [processingSms, setProcessingSms] = useState(false);
@@ -636,8 +644,9 @@ export default function Transactions() {
     const isSip = newTx.category?.toLowerCase() === 'sip';
     const isStocks = newTx.category?.toLowerCase() === 'stocks';
     const isCommodity = newTx.category?.toLowerCase() === 'commodity';
-    const allottedAmount = isSip ? (newTx.sipAllottedAmount !== undefined ? Number(newTx.sipAllottedAmount) : Number(newTx.amount)) : Number(newTx.amount);
-    const sipCharges = isSip ? (newTx.sipCharges !== undefined ? Number(newTx.sipCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined;
+    const isInvestment = isSip || isStocks;
+    const allottedAmount = isInvestment ? (newTx.sipAllottedAmount !== undefined ? Number(newTx.sipAllottedAmount) : Number(newTx.amount)) : Number(newTx.amount);
+    const sipCharges = isInvestment ? (newTx.sipCharges !== undefined ? Number(newTx.sipCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined;
 
     if (isStocks && paymentSourceAccountId && !editId) {
       const bankCounterpartId = generateId();
@@ -649,11 +658,13 @@ export default function Transactions() {
         description: newTx.description as string,
         accountId: paymentSourceAccountId,
         type: counterpartType,
-        amount: Number(newTx.amount),
+        amount: counterpartType === 'credit' ? allottedAmount : (allottedAmount + (sipCharges || 0)),
         category: 'Stocks',
         isRecurring: false,
         linkedTransactionIds: [mainTxId],
-        numberOfShares: newTx.numberOfShares
+        numberOfShares: newTx.numberOfShares,
+        sipAllottedAmount: allottedAmount,
+        sipCharges: sipCharges
       });
     } else if (isCommodity && paymentSourceAccountId && !editId) {
       const bankCounterpartId = generateId();
@@ -748,7 +759,7 @@ export default function Transactions() {
       });
     }
 
-    const mainAccountAmount = isSip 
+    const mainAccountAmount = isInvestment 
       ? (newTx.type === 'debit' ? (allottedAmount + (sipCharges || 0)) : allottedAmount) 
       : ((newTx.type === 'debit')
         ? Math.max(0, Number(newTx.amount) - rewardUsed)
@@ -845,8 +856,8 @@ export default function Transactions() {
       excludeFromStats: newTx.excludeFromStats,
       excludedAmount: newTx.excludeFromStats ? newTx.excludedAmount : undefined,
       paymentSourceAccountId: paymentSourceAccountId,
-      sipAllottedAmount: isSip ? allottedAmount : undefined,
-      sipCharges: isSip ? sipCharges : undefined,
+      sipAllottedAmount: isInvestment ? allottedAmount : undefined,
+      sipCharges: isInvestment ? sipCharges : undefined,
       numberOfShares: (isStocks || isSip || isCommodity) ? newTx.numberOfShares : undefined,
       tags: (newTx.tags || []).length > 0 ? newTx.tags : undefined,
       order: newTx.order
@@ -1024,13 +1035,15 @@ export default function Transactions() {
   };
 
   const filteredIncome = filteredTransactions.reduce((sum, tx) => {
-    const isExcludedCategory = tx.category.toLowerCase() === 'transfer' || tx.category.toLowerCase() === 'cc payment' || tx.category.toLowerCase() === 'ncmc travel recharge';
+    const cat = tx.category.toLowerCase();
+    const isExcludedCategory = cat === 'transfer' || cat === 'cc payment' || cat === 'ncmc travel recharge' || cat === 'stocks' || cat === 'sip' || cat === 'commodity';
     if (isExcludedCategory) return sum;
     const effectiveAmount = tx.amount - (tx.excludedAmount || (tx.excludeFromStats ? tx.amount : 0));
     return sum + (tx.type === 'credit' ? effectiveAmount : 0);
   }, 0);
   const filteredSpend = filteredTransactions.reduce((sum, tx) => {
-    const isExcludedCategory = tx.category.toLowerCase() === 'transfer' || tx.category.toLowerCase() === 'cc payment' || tx.category.toLowerCase() === 'ncmc travel recharge';
+    const cat = tx.category.toLowerCase();
+    const isExcludedCategory = cat === 'transfer' || cat === 'cc payment' || cat === 'ncmc travel recharge' || cat === 'stocks' || cat === 'sip' || cat === 'commodity';
     if (isExcludedCategory) return sum;
     const effectiveAmount = tx.amount - (tx.excludedAmount || (tx.excludeFromStats ? tx.amount : 0));
     return sum + (tx.type === 'debit' ? effectiveAmount : 0);
@@ -1278,7 +1291,7 @@ export default function Transactions() {
                 isMulti={true}
                 options={[
                   { id: 'all', name: 'All Accounts' },
-                  ...data.accounts.map(a => ({ id: a.id, name: a.name }))
+                  ...[...data.accounts].sort(sortByAccountType).map(a => ({ id: a.id, name: a.name }))
                 ]}
                 onChange={setFilterAccountId}
                 iconGetter={getAccountIcon}
@@ -1382,13 +1395,15 @@ export default function Transactions() {
                           return orderA - orderB;
                         });
                         const dailyIncome = txs.reduce((sum, t) => {
-                          const isExcludedCategory = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge' || t.category.toLowerCase() === 'sip';
+                          const cat = t.category.toLowerCase();
+                          const isExcludedCategory = cat === 'transfer' || cat === 'cc payment' || cat === 'ncmc travel recharge' || cat === 'sip' || cat === 'stocks' || cat === 'commodity';
                           if (isExcludedCategory) return sum;
                           const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
                           return sum + (t.type === 'credit' ? effectiveAmount : 0);
                         }, 0);
                         const dailySpend = txs.reduce((sum, t) => {
-                          const isExcludedCategory = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge' || t.category.toLowerCase() === 'sip';
+                          const cat = t.category.toLowerCase();
+                          const isExcludedCategory = cat === 'transfer' || cat === 'cc payment' || cat === 'ncmc travel recharge' || cat === 'sip' || cat === 'stocks' || cat === 'commodity';
                           if (isExcludedCategory) return sum;
                           const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
                           return sum + (t.type === 'debit' ? effectiveAmount : 0);
@@ -1684,19 +1699,20 @@ export default function Transactions() {
                 label="Account"
                 value={newTx.accountId || ''}
                 placeholder="Select an account"
-                options={data.accounts
+                options={[...data.accounts]
+                  .sort(sortByAccountType)
                   .filter(acc => {
                     if (isCCPayment) {
                       return newTx.type === 'debit' ? acc.type !== 'credit_card' : acc.type === 'credit_card';
                     }
                     if (newTx.category?.toLowerCase() === 'sip') {
-                      return newTx.type === 'credit' ? acc.type === 'sips' : acc.type === 'bank_account';
+                      return newTx.type === 'credit' ? acc.type === 'sips' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
                     }
                     if (newTx.category?.toLowerCase() === 'stocks') {
-                      return newTx.type === 'credit' ? acc.type === 'stocks' : acc.type === 'bank_account';
+                      return newTx.type === 'credit' ? acc.type === 'stocks' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
                     }
                     if (newTx.category?.toLowerCase() === 'commodity') {
-                      return newTx.type === 'credit' ? acc.type === 'commodity' : acc.type === 'bank_account';
+                      return newTx.type === 'credit' ? acc.type === 'commodity' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
                     }
                     return true;
                   })
@@ -1865,9 +1881,21 @@ export default function Transactions() {
                   }
 
                   const isSip = val.toLowerCase() === 'sip';
-                  if (isSip) {
+                  const isStock = val.toLowerCase() === 'stocks';
+                  const isCommodity = val.toLowerCase() === 'commodity';
+                  const isInvestment = isSip || isStock;
+                  if (isInvestment || isCommodity) {
                     const currentAcc = data.accounts.find(a => a.id === updatedAccountId);
-                    const isValid = currentAcc && (newTx.type === 'credit' ? currentAcc.type === 'sips' : currentAcc.type === 'bank_account');
+                    let isValid = false;
+                    if (currentAcc) {
+                      if (newTx.type === 'credit') {
+                        if (isSip) isValid = currentAcc.type === 'sips';
+                        else if (isStock) isValid = currentAcc.type === 'stocks';
+                        else if (isCommodity) isValid = currentAcc.type === 'commodity';
+                      } else {
+                        isValid = currentAcc.type === 'bank_account' || currentAcc.type === 'e_wallet';
+                      }
+                    }
                     if (!isValid) {
                       updatedAccountId = '';
                     }
@@ -1879,8 +1907,8 @@ export default function Transactions() {
                     description: updatedDesc,
                     accountId: updatedAccountId,
                     isTravelTransaction: updatedIsTravel,
-                    sipAllottedAmount: isSip ? newTx.sipAllottedAmount || newTx.amount : undefined,
-                    sipCharges: isSip ? newTx.sipCharges || 0 : undefined,
+                    sipAllottedAmount: isInvestment ? newTx.sipAllottedAmount || newTx.amount : undefined,
+                    sipCharges: isInvestment ? newTx.sipCharges || 0 : undefined,
                     numberOfShares: isNowStocks ? newTx.numberOfShares : undefined
                   });
                   if (errors.category) {
@@ -1917,11 +1945,13 @@ export default function Transactions() {
 
               {(() => {
                 const isSip = newTx.category?.toLowerCase() === 'sip';
-                return isSip && (
+                const isStock = newTx.category?.toLowerCase() === 'stocks';
+                const isInvestment = isSip || isStock;
+                return isInvestment && (
                   <div style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', marginBottom: '1rem' }}>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="input-group" style={{ marginBottom: 0 }}>
-                        <label>Allotted Amount</label>
+                        <label>{isStock ? 'Invested Amount' : 'Allotted Amount'}</label>
                         <input
                           type="text"
                           inputMode="decimal"
@@ -1945,29 +1975,31 @@ export default function Transactions() {
                         />
                       </div>
                       <div className="input-group" style={{ marginBottom: 0 }}>
-                        <label>Stamp Duty / Charges</label>
+                        <label>{isStock ? 'Brokerage / Taxes' : 'Stamp Duty / Charges'}</label>
                         <div className="input-field flex align-center text-muted text-mono" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', height: '42px', borderRadius: '12px', padding: '0.75rem 1rem' }}>
                           {newTx.sipCharges !== undefined ? newTx.sipCharges : '0.00'}
                         </div>
                       </div>
                     </div>
-                    <div className="input-group" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
-                      <label>Units Allotted</label>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        className="input-field"
-                        value={inputStrings.numberOfShares}
-                        onChange={e => {
-                          const val = e.target.value;
-                          if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                            setInputStrings(prev => ({ ...prev, numberOfShares: val }));
-                            setNewTx(prev => ({ ...prev, numberOfShares: val === '' ? undefined : parseFloat(val) }));
-                          }
-                        }}
-                        placeholder="e.g. 78.234"
-                      />
-                    </div>
+                    {isSip && (
+                      <div className="input-group" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
+                        <label>Units Allotted</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="input-field"
+                          value={inputStrings.numberOfShares}
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                              setInputStrings(prev => ({ ...prev, numberOfShares: val }));
+                              setNewTx(prev => ({ ...prev, numberOfShares: val === '' ? undefined : parseFloat(val) }));
+                            }
+                          }}
+                          placeholder="e.g. 78.234"
+                        />
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -1987,11 +2019,11 @@ export default function Transactions() {
                   <CustomPicker
                     label={
                       newTx.category?.toLowerCase() === 'sip'
-                        ? (newTx.type === 'debit' ? 'Credit To SIP Account' : 'Debit From Bank Account')
+                        ? (newTx.type === 'debit' ? 'Credit To SIP Account' : 'Debit From Account')
                         : newTx.category?.toLowerCase() === 'stocks'
-                        ? (newTx.type === 'debit' ? 'Credit To Stocks Account' : 'Debit From Bank Account')
+                        ? (newTx.type === 'debit' ? 'Credit To Stocks Account' : 'Debit From Account')
                         : newTx.category?.toLowerCase() === 'commodity'
-                        ? (newTx.type === 'debit' ? 'Credit To Commodity Account' : 'Debit From Bank Account')
+                        ? (newTx.type === 'debit' ? 'Credit To Commodity Account' : 'Debit From Account')
                         : (newTx.type === 'debit'
                           ? (isCCPayment ? 'Pay To Card (Auto-Credit)' : 'Credit To Account (Auto-Credit)')
                           : 'Debit From Account (Auto-Debit)')
@@ -2000,19 +2032,19 @@ export default function Transactions() {
                     placeholder="None (Manual Log)"
                     options={[
                       { id: '', name: 'None (Manual Log)' },
-                      ...data.accounts.filter(a => {
+                      ...[...data.accounts].sort(sortByAccountType).filter(a => {
                         if (a.id === newTx.accountId) return false;
                         if (isCCPayment) {
                           return newTx.type === 'debit' ? a.type === 'credit_card' : a.type !== 'credit_card';
                         }
                         if (newTx.category?.toLowerCase() === 'sip') {
-                          return newTx.type === 'debit' ? a.type === 'sips' : a.type === 'bank_account';
+                          return newTx.type === 'debit' ? a.type === 'sips' : (a.type === 'bank_account' || a.type === 'e_wallet');
                         }
                         if (newTx.category?.toLowerCase() === 'stocks') {
-                          return newTx.type === 'debit' ? a.type === 'stocks' : a.type === 'bank_account';
+                          return newTx.type === 'debit' ? a.type === 'stocks' : (a.type === 'bank_account' || a.type === 'e_wallet');
                         }
                         if (newTx.category?.toLowerCase() === 'commodity') {
-                          return newTx.type === 'debit' ? a.type === 'commodity' : a.type === 'bank_account';
+                          return newTx.type === 'debit' ? a.type === 'commodity' : (a.type === 'bank_account' || a.type === 'e_wallet');
                         }
                         return true;
                       }).map(acc => ({
@@ -2235,7 +2267,7 @@ export default function Transactions() {
                           label="Deposit To"
                           value={newTx.rewardEarnedAccountId || ''}
                           placeholder="Select Account"
-                          options={data.accounts.filter(a => a.type === 'rewards' || a.type === 'e_wallet').map(acc => ({
+                          options={[...data.accounts].sort(sortByAccountType).filter(a => a.type === 'rewards' || a.type === 'e_wallet').map(acc => ({
                             id: acc.id,
                             name: acc.name,
                             subtext: acc.type.replace('_', ' ')
@@ -2318,7 +2350,7 @@ export default function Transactions() {
                     label="From Rewards"
                     value={newTx.rewardUsedAccountId || ''}
                     placeholder="Select Reward Account"
-                    options={data.accounts.filter(a => a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points')).map(acc => ({
+                    options={[...data.accounts].sort(sortByAccountType).filter(a => a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points')).map(acc => ({
                       id: acc.id,
                       name: acc.name,
                       subtext: acc.rewardType === 'points'

@@ -224,6 +224,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           if (!parsed.categories.includes('Commodity')) {
             parsed.categories.push('Commodity');
           }
+
+          // NOTE for future AI models: Ensure 'Other/Misc' is always at the end
+          const miscIndex = parsed.categories.findIndex((c: string) => c.toLowerCase() === 'other/misc' || c.toLowerCase() === 'other/miscellaneous');
+          if (miscIndex !== -1 && miscIndex !== parsed.categories.length - 1) {
+            const [misc] = parsed.categories.splice(miscIndex, 1);
+            parsed.categories.push(misc);
+          }
         }
 
         if (!parsed.user) {
@@ -531,6 +538,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           }
           return t;
         });
+
 
         if (!parsed.debts) parsed.debts = [];
         if (!parsed.tags) parsed.tags = [];

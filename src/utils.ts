@@ -84,6 +84,33 @@ export const getBillingCycleDates = (cycle: string, statementDay: number) => {
   return { startDate, endDate };
 };
 
+export const calculateCycleBalanceForCycle = (
+  account: Account,
+  transactions: Transaction[],
+  cycle: string
+): number => {
+  const statementDay = account.statementDay || 1;
+  return transactions
+    .filter(t => {
+      if (t.accountId !== account.id) return false;
+      if (t.type === 'credit' && t.appliedBillingCycleYearMonth) {
+        return t.appliedBillingCycleYearMonth === cycle;
+      }
+      return getBillingCycleForDate(t.date, statementDay) === cycle;
+    })
+    .reduce((sum, t) => sum + (t.type === 'debit' ? t.amount : -t.amount), 0);
+};
+
+export const calculateCycleBalance = (
+  account: Account,
+  transactions: Transaction[],
+  todayStr: string
+): number => {
+  const statementDay = account.statementDay || 1;
+  const currentCycle = getBillingCycleForDate(todayStr, statementDay);
+  return calculateCycleBalanceForCycle(account, transactions, currentCycle);
+};
+
 export const getLatestBilledCycle = (statementDay: number): string => {
   const today = new Date();
   const currentCycle = getBillingCycleForDate(format(today, 'yyyy-MM-dd'), statementDay);

@@ -22,6 +22,21 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
 
   const transactionsViewportRef = useRef<HTMLDivElement>(null);
   const transactionsContentRef = useRef<HTMLDivElement>(null);
+
+  const smoothScrollToTop = (el: HTMLDivElement, duration: number, onDone: () => void) => {
+    const start = el.scrollTop;
+    if (start === 0) { onDone(); return; }
+    const startTime = performance.now();
+    const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+    const step = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      el.scrollTop = start * (1 - easeOutCubic(progress));
+      if (progress < 1) requestAnimationFrame(step);
+      else onDone();
+    };
+    requestAnimationFrame(step);
+  };
   const getCategoryIcon = (category: string) => {
     const cat = category.toLowerCase();
     if (cat.includes('shop')) return <ShoppingBag size={20} />;
@@ -263,18 +278,18 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
 
                   {/* Account Name + Cardholder name row */}
                   <div style={{ position: 'absolute', bottom: '24px', left: '24px', right: '24px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <span style={{ 
-                      fontFamily: 'var(--font-family)', 
-                      fontSize: '10px', 
+                    <span style={{
+                      fontFamily: 'var(--font-family)',
+                      fontSize: '10px',
                       color: 'rgba(255,255,255,0.5)',
                       textTransform: 'uppercase',
                       letterSpacing: '0.5px'
                     }}>
                       {acc.name}
                     </span>
-                    <span style={{ 
-                      fontFamily: '"Courier New", Courier, monospace', 
-                      fontSize: '14px', 
+                    <span style={{
+                      fontFamily: '"Courier New", Courier, monospace',
+                      fontSize: '14px',
                       color: 'rgba(255,255,255,0.9)',
                       textTransform: 'uppercase',
                       letterSpacing: '1.5px',
@@ -402,7 +417,11 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
             <div className="flex justify-center" style={{ flexShrink: 0, padding: '0.75rem 0 1.5rem' }}>
               <button
                 onClick={() => {
-                  setShowAllTransactions(!showAllTransactions);
+                  if (showAllTransactions && transactionsViewportRef.current) {
+                    smoothScrollToTop(transactionsViewportRef.current, 900, () => setShowAllTransactions(false));
+                  } else {
+                    setShowAllTransactions(true);
+                  }
                 }}
                 style={{ color: 'var(--accent)', fontSize: '0.85rem', fontWeight: 600, textDecoration: 'underline', opacity: 0.9, cursor: 'pointer', padding: '0.5rem 1rem' }}
               >

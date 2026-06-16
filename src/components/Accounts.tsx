@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { format, addMonths, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown } from 'lucide-react';
 import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols, isCacheFresh, searchMFByName, searchStockByName, fetchCommodityPriceINR, getCachedCommodityPriceINR } from '../services/MarketDataService';
@@ -6,7 +7,7 @@ import type { MFSearchResult, StockSearchResult } from '../services/MarketDataSe
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardNetwork } from '../types';
-import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, getOrdinalSuffix } from '../utils';
+import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, calculateCycleBalanceForCycle, getBillingCycleForDate, getOrdinalSuffix } from '../utils';
 import { CardNetworkLogo } from './CardNetworkLogo';
 import { ViewCardOverlay } from './ViewCardOverlay';
 
@@ -553,7 +554,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
               {!isCollapsed && <div className="flex-col gap-6">
                 {grouped[type].map(acc => {
-                  const rawBal = calculateBalance(acc, data.transactions, currentMonth);
+                  const todayStr = format(new Date(), 'yyyy-MM-dd');
+                  const rawBal = acc.type === 'credit_card'
+                    ? calculateCycleBalance(acc, data.transactions, todayStr)
+                    : calculateBalance(acc, data.transactions, currentMonth);
                   let bal = rawBal;
                   if (acc.type === 'credit_card') {
                     const rounding = acc.statementRounding || 'none';
@@ -572,15 +576,28 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     openingBal = calculateBalance(acc, data.transactions, prevMonthStr);
                   }
 
+                  const prevCycleDue = (() => {
+                    if (acc.type !== 'credit_card') return null;
+                    const statementDay = acc.statementDay || 1;
+                    const currentCycle = getBillingCycleForDate(todayStr, statementDay);
+                    const prevCycle = format(addMonths(parseISO(`${currentCycle}-01`), -1), 'yyyy-MM');
+                    const due = calculateCycleBalanceForCycle(acc, data.transactions, prevCycle);
+                    const rounding = acc.statementRounding || 'none';
+                    if (rounding === 'round') return Math.round(due);
+                    if (rounding === 'floor') return Math.floor(due);
+                    if (rounding === 'ceil') return Math.ceil(due);
+                    return due;
+                  })();
+
                   const isFirstAccount = index === 0 && acc.id === grouped[type][0].id;
 
                   // SIP market data — pre-computed once for middle + bottom sections
                   const sipTxUnits = acc.type === 'sips'
                     ? data.transactions
                         .filter(t => t.accountId === acc.id && t.numberOfShares !== undefined)
-                        .reduce((sum, t) => t.type === 'credit' ? sum + (t.numberOfShares ?? 0) : sum - (t.numberOfShares ?? 0), 0)
+                        .reduce((sum, t) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0)
                     : 0;
-                  const sipTotalUnits = acc.type === 'sips' ? (acc.numberOfShares ?? 0) + sipTxUnits : 0;
+                  const sipTotalUnits = acc.type === 'sips' ? Number(acc.numberOfShares ?? 0) + sipTxUnits : 0;
                   const sipCurrentPrice = acc.type === 'sips' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
                   const sipCurrentValue = sipCurrentPrice !== null && sipTotalUnits > 0 ? sipCurrentPrice * sipTotalUnits : null;
                   const sipEffectiveInvested = acc.type === 'sips'
@@ -593,9 +610,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   const commodityTxGrams = acc.type === 'commodity'
                     ? data.transactions
                         .filter(t => t.accountId === acc.id && t.numberOfShares !== undefined)
-                        .reduce((sum, t) => t.type === 'credit' ? sum + (t.numberOfShares ?? 0) : sum - (t.numberOfShares ?? 0), 0)
+                        .reduce((sum, t) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0)
                     : 0;
-                  const commodityTotalGrams = acc.type === 'commodity' ? (acc.numberOfShares ?? 0) + commodityTxGrams : 0;
+                  const commodityTotalGrams = acc.type === 'commodity' ? Number(acc.numberOfShares ?? 0) + commodityTxGrams : 0;
                   const commodityPricePerGram = acc.type === 'commodity' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
                   const commodityCurrentValue = commodityPricePerGram !== null && commodityTotalGrams > 0 ? commodityPricePerGram * commodityTotalGrams : null;
                   const commodityEffectiveInvested = acc.type === 'commodity'
@@ -606,9 +623,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   const stockTxShares = acc.type === 'stocks'
                     ? data.transactions
                         .filter(t => t.accountId === acc.id && t.numberOfShares !== undefined)
-                        .reduce((sum, t) => t.type === 'credit' ? sum + (t.numberOfShares ?? 0) : sum - (t.numberOfShares ?? 0), 0)
+                        .reduce((sum, t) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0)
                     : 0;
-                  const stockTotalShares = acc.type === 'stocks' ? (acc.numberOfShares ?? 0) + stockTxShares : 0;
+                  const stockTotalShares = acc.type === 'stocks' ? Number(acc.numberOfShares ?? 0) + stockTxShares : 0;
                   const stockCurrentPrice = acc.type === 'stocks' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
                   const stockCurrentValue = stockCurrentPrice !== null && stockTotalShares > 0 ? stockCurrentPrice * stockTotalShares : null;
                   const stockEffectiveInvested = acc.type === 'stocks'
@@ -750,19 +767,28 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                 <span>Send to Bank</span>
                               </button>
                             )}
-                            <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
-                              <span className="text-mono text-muted text-xs">OPENING BAL</span>
-                              <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
-                                {acc.type === 'rewards' && acc.rewardUnit ? (
-                                  <span className="flex-col" style={{ alignItems: 'flex-end', gap: '6px', lineHeight: '1' }}>
-                                    <span>{openingBal}</span>
-                                    <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 800, opacity: 0.7 }}>{acc.rewardUnit}</span>
-                                  </span>
-                                ) : (
-                                  formatCurrency(openingBal)
-                                )}
-                              </span>
-                            </div>
+                            {prevCycleDue !== null ? (
+                              <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
+                                <span className="text-mono text-muted text-xs">PREV DUE</span>
+                                <span className="text-serif" style={{ fontSize: '1.4rem', color: prevCycleDue > 0 ? 'var(--danger)' : 'var(--success)', marginTop: '0.1rem' }}>
+                                  {formatCurrency(Math.abs(prevCycleDue))}
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
+                                <span className="text-mono text-muted text-xs">OPENING BAL</span>
+                                <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
+                                  {acc.type === 'rewards' && acc.rewardUnit ? (
+                                    <span className="flex-col" style={{ alignItems: 'flex-end', gap: '6px', lineHeight: '1' }}>
+                                      <span>{openingBal}</span>
+                                      <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 800, opacity: 0.7 }}>{acc.rewardUnit}</span>
+                                    </span>
+                                  ) : (
+                                    formatCurrency(openingBal)
+                                  )}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
@@ -863,7 +889,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                             {sipTotalUnits > 0 && (
                               <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                                 <span className="text-mono text-muted text-xs">TOTAL UNITS</span>
-                                <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{sipTotalUnits}</span>
+                                <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{sipTotalUnits.toLocaleString('en-IN', { maximumFractionDigits: 3 })}</span>
                               </div>
                             )}
                             {acc.marketSymbol && (
@@ -965,7 +991,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                             {hasShares && (
                               <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                                 <span className="text-mono text-muted text-xs">TOTAL SHARES</span>
-                                <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{totalShares}</span>
+                                <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{totalShares.toLocaleString('en-IN', { maximumFractionDigits: 3 })}</span>
                               </div>
                             )}
                             {hasPnLSetup && (
