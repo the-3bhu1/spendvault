@@ -23,8 +23,9 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
     currentMonthTxs.forEach(t => {
       if (t.type === 'debit') {
         const account = data.accounts.find(a => a.id === t.accountId);
-        if (account?.type !== 'credit_card' || account?.type === 'credit_card') {
-          if (t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge') return;
+        {
+          const cat = t.category.toLowerCase();
+          if (cat === 'transfer' || cat === 'cc payment' || cat === 'ncmc travel recharge' || cat === 'sip' || cat === 'stocks') return;
           const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
           spend += effectiveAmount;
           catSpend[t.category] = (catSpend[t.category] || 0) + effectiveAmount;
