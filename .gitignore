@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Local env files (secrets like RapidAPI keys) — keep the committed template only
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

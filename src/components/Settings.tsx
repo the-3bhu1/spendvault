@@ -10,6 +10,11 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import SmsReader from '../services/SmsService';
+import {
+  getCommodityVendor, setCommodityVendor,
+  setGeminiKey, clearGeminiKey, hasGeminiKey,
+} from '../services/GeminiConfig';
+import { getGeminiUsageToday } from '../services/GeminiService';
 import { APP_VERSION } from '../utils';
 
 const GridButton = ({ icon: Icon, label, onClick }: { icon: React.ElementType, label: string, onClick?: () => void }) => (
@@ -602,6 +607,41 @@ export default function Settings() {
   const [importError, setImportError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const advancedSectionRef = useRef<HTMLDivElement>(null);
+
+  // Commodity prices (Gemini, BYOK) — each user supplies their own key; stored in the OS keystore.
+  const [geminiKeyInput, setGeminiKeyInput] = useState('');
+  const [geminiVendorInput, setGeminiVendorInput] = useState('');
+  const [geminiKeySaved, setGeminiKeySaved] = useState(false);
+  const [geminiUsage, setGeminiUsage] = useState<{ count: number; cap: number }>({ count: 0, cap: 30 });
+
+  useEffect(() => {
+    (async () => {
+      setGeminiVendorInput(getCommodityVendor());
+      setGeminiKeySaved(await hasGeminiKey());
+      setGeminiUsage(getGeminiUsageToday());
+    })();
+  }, []);
+
+  const handleSaveGemini = async () => {
+    try {
+      setCommodityVendor(geminiVendorInput);
+      if (geminiKeyInput.trim()) {
+        await setGeminiKey(geminiKeyInput.trim());
+        setGeminiKeyInput('');
+      }
+      setGeminiKeySaved(await hasGeminiKey());
+      showAlert('Saved. Your Gemini key is stored in the device keystore, not in the app.', 'Commodity Prices');
+    } catch {
+      showAlert('Could not save the key to secure storage. Make sure your device has a screen lock (PIN/biometric) enabled.', 'Secure Storage Error');
+    }
+  };
+
+  const handleClearGemini = async () => {
+    await clearGeminiKey();
+    setGeminiKeyInput('');
+    setGeminiKeySaved(false);
+    showAlert('Gemini key removed. Set a manual ₹/g on each commodity account, or re-add a key.', 'Commodity Prices');
+  };
 
   const BACKUP_VERSION = 1;
 
@@ -1933,6 +1973,51 @@ export default function Settings() {
               </div>
             </>
           )}
+
+          <SectionHeader title="Commodity Prices (AI)" />
+          <div className="card flex-col gap-3" style={{ padding: '1rem' }}>
+            <span className="text-xs text-muted">
+              Optional. Auto-fetches an approximate gold/silver ₹/g for your holdings using your own Google Gemini key (BYOK) — get a free one at aistudio.google.com. Your key is stored in the device keystore, never bundled or shared. Without a key, set a manual ₹/g per commodity account.
+            </span>
+            <div className="input-group" style={{ marginBottom: 0 }}>
+              <label>Gemini API Key {geminiKeySaved && <span style={{ color: 'var(--success)' }}>· saved</span>}</label>
+              <input
+                type="password"
+                className="input-field"
+                value={geminiKeyInput}
+                onChange={e => setGeminiKeyInput(e.target.value)}
+                placeholder={geminiKeySaved ? '•••••••• (saved — type to replace)' : 'Paste your Gemini API key'}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </div>
+            <div className="input-group" style={{ marginBottom: 0 }}>
+              <label>Vendor (price reference)</label>
+              <input
+                className="input-field"
+                value={geminiVendorInput}
+                onChange={e => setGeminiVendorInput(e.target.value)}
+                placeholder="MMTC-PAMP"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </div>
+            <span className="text-xs text-muted">
+              Prices are approximate AI estimates (may lag the live rate). Set a manual ₹/g on any commodity account for exact valuation.
+            </span>
+            {geminiKeySaved && (
+              <span className="text-xs" style={{ color: geminiUsage.count >= geminiUsage.cap ? 'var(--danger)' : 'var(--text-muted)' }}>
+                AI fetches today: {geminiUsage.count} / {geminiUsage.cap}
+                {geminiUsage.count >= geminiUsage.cap ? ' — daily cap reached, using cached/manual until tomorrow' : ' (safety cap; prices refresh at most every 6h)'}
+              </span>
+            )}
+            <div className="flex gap-3">
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSaveGemini}>Save</button>
+              {geminiKeySaved && <button className="btn btn-secondary" onClick={handleClearGemini}>Remove Key</button>}
+            </div>
+          </div>
 
           <SectionHeader title="data management" />
           <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>

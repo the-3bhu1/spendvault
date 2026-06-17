@@ -1,8 +1,15 @@
+import { fetchVendorCommodityPrices } from './GeminiService';
+
 const CACHE_KEY = 'market_prices_cache';
 const HISTORY_CACHE_KEY = 'market_history_cache';
+const PREV_CACHE_KEY = 'market_prev_prices_cache';
 const STOCK_TTL = 5 * 60 * 1000;
 const SIP_TTL = 8 * 60 * 60 * 1000;
 const HISTORY_TTL = 24 * 60 * 60 * 1000;
+// Commodity prices come from Gemini grounding (an approximate, lagging source). Cache for
+// 6h: refetching more often doesn't help freshness (Google's index is the bottleneck) and
+// it keeps us well within Gemini's free grounding quota.
+const COMMODITY_TTL = 6 * 60 * 60 * 1000;
 
 interface CacheEntry {
   price: number;
@@ -31,12 +38,23 @@ let historyMem: HistoryCache = (() => {
   } catch { return {}; }
 })();
 
+let prevMem: Record<string, number> = (() => {
+  try {
+    const raw = localStorage.getItem(PREV_CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+})();
+
 function persist() {
   localStorage.setItem(CACHE_KEY, JSON.stringify(mem));
 }
 
 function persistHistory() {
   localStorage.setItem(HISTORY_CACHE_KEY, JSON.stringify(historyMem));
+}
+
+function persistPrev() {
+  localStorage.setItem(PREV_CACHE_KEY, JSON.stringify(prevMem));
 }
 
 function fresh(entry: CacheEntry, ttl: number) {
@@ -60,6 +78,8 @@ export async function fetchStockPrice(symbol: string): Promise<number | null> {
     if (typeof price === 'number') {
       mem[symbol] = { price, fetchedAt: Date.now() };
       persist();
+      const prevClose: unknown = json?.chart?.result?.[0]?.meta?.chartPreviousClose;
+      if (typeof prevClose === 'number') { prevMem[symbol] = prevClose; persistPrev(); }
       return price;
     }
     return null;
@@ -271,25 +291,93 @@ export async function searchStockByName(query: string): Promise<StockSearchResul
   } catch { return []; }
 }
 
-const TROY_OZ_TO_GRAM = 31.1035;
+// ---- Commodity prices: Gemini grounding (approximate, BYOK) ----
+// The exact vendor price (MMTC-PAMP) is behind Akamai/JS and has no usable free feed, so we
+// use Gemini + Google Search grounding as an APPROXIMATE auto-fill (see GeminiService). It's
+// labelled as an estimate in the UI, with a manual override for exactness. If Gemini yields
+// nothing, we serve the last cached value (even if stale) rather than a wrong/zero price.
 
-export async function fetchCommodityPriceINR(metalTicker: string): Promise<number | null> {
+function metalFromTicker(metalTicker: string): 'gold' | 'silver' | null {
+  const t = metalTicker.toUpperCase();
+  if (t.startsWith('GC') || t.includes('GOLD')) return 'gold';
+  if (t.startsWith('SI') || t.includes('SILVER')) return 'silver';
+  return null;
+}
+
+// One in-flight Gemini request shared across callers, so fetching gold + silver together
+// (as the Accounts/Portfolio views do) costs a SINGLE grounded call, not two.
+let commodityInFlight: Promise<{ gold: number | null; silver: number | null }> | null = null;
+
+function fetchBothMetals(): Promise<{ gold: number | null; silver: number | null }> {
+  if (!commodityInFlight) {
+    commodityInFlight = fetchVendorCommodityPrices()
+      .catch(() => ({ gold: null, silver: null }))
+      .finally(() => { commodityInFlight = null; });
+  }
+  return commodityInFlight;
+}
+
+// `force` skips the 6h cache for a user-initiated refresh. It still goes through the daily
+// safety cap (in GeminiService) and the shared in-flight call, so it can't run away.
+export async function fetchCommodityPriceINR(metalTicker: string, force = false): Promise<number | null> {
   const cacheKey = `cINR_${metalTicker}`;
-  if (mem[cacheKey] && fresh(mem[cacheKey], STOCK_TTL)) return mem[cacheKey].price;
-  const [metalUsd, usdInr] = await Promise.all([
-    fetchStockPrice(metalTicker),
-    fetchStockPrice('USDINR=X')
-  ]);
-  if (metalUsd === null || usdInr === null) return null;
-  const price = (metalUsd * usdInr) / TROY_OZ_TO_GRAM;
-  mem[cacheKey] = { price, fetchedAt: Date.now() };
-  persist();
-  return price;
+  if (!force && mem[cacheKey] && fresh(mem[cacheKey], COMMODITY_TTL)) return mem[cacheKey].price;
+
+  const metal = metalFromTicker(metalTicker);
+  if (!metal) return mem[cacheKey]?.price ?? null;
+
+  // One grounded call returns both metals; cache both so the sibling commodity account is
+  // served from the same request.
+  const all = await fetchBothMetals();
+  const now = Date.now();
+  if (all.gold !== null) mem['cINR_GC=F'] = { price: all.gold, fetchedAt: now };
+  if (all.silver !== null) mem['cINR_SI=F'] = { price: all.silver, fetchedAt: now };
+  if (all.gold !== null || all.silver !== null) persist();
+
+  // Fresh value if we got one, else fall back to the last cached value (even if stale).
+  return all[metal] ?? mem[cacheKey]?.price ?? null;
 }
 
 export function getCachedCommodityPriceINR(metalTicker: string): number | null {
   const cacheKey = `cINR_${metalTicker}`;
   return mem[cacheKey]?.price ?? null;
+}
+
+export function getCachedPrevPrice(symbol: string): number | null {
+  return prevMem[symbol] ?? null;
+}
+
+export function getCachedPrevCommodityPriceINR(_metalTicker: string): number | null {
+  // No previous-day data for the Gemini commodity source.
+  return null;
+}
+
+export async function fetchMFPrevNav(schemeCode: string): Promise<number | null> {
+  const history = await fetchMFNavHistory(schemeCode);
+  if (history.length < 2) return null;
+  const prev = history[history.length - 2].close;
+  prevMem[schemeCode] = prev;
+  persistPrev();
+  return prev;
+}
+
+export async function fetchPrevClosesForSymbols(
+  items: Array<{ symbol: string; kind: 'stock' | 'sip' }>
+): Promise<Record<string, number>> {
+  const results: Record<string, number> = {};
+  await Promise.all(
+    items.map(async ({ symbol, kind }) => {
+      if (kind === 'stock') {
+        if (prevMem[symbol] !== undefined) { results[symbol] = prevMem[symbol]; return; }
+        await fetchStockPrice(symbol);
+        if (prevMem[symbol] !== undefined) results[symbol] = prevMem[symbol];
+      } else {
+        const prev = await fetchMFPrevNav(symbol);
+        if (prev !== null) results[symbol] = prev;
+      }
+    })
+  );
+  return results;
 }
 
 export function sliceHistoryByRange(

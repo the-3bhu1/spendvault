@@ -60,7 +60,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     const stockSipItems = data.accounts
       .filter(a => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
       .map(a => ({ symbol: a.marketSymbol!, kind: (a.type === 'stocks' ? 'stock' : 'sip') as 'stock' | 'sip' }));
-    const commodityAccs = data.accounts.filter(a => a.type === 'commodity' && a.marketSymbol);
+    // Skip accounts with a manual price override — no need to spend a Gemini call for them.
+    const commodityAccs = data.accounts.filter(a => a.type === 'commodity' && a.marketSymbol && a.manualPricePerGram === undefined);
     if (stockSipItems.length === 0 && commodityAccs.length === 0) return;
     const allSyms = [...stockSipItems.map(i => i.symbol), ...commodityAccs.map(a => a.marketSymbol!)];
     setRefreshingSymbols(new Set(allSyms));
@@ -435,6 +436,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       marketSymbol: (newAccount.type === 'stocks' || newAccount.type === 'sips' || newAccount.type === 'commodity') ? (newAccount.marketSymbol?.trim() || undefined) : undefined,
       investedValue: (newAccount.type === 'stocks' || newAccount.type === 'sips' || newAccount.type === 'commodity') ? newAccount.investedValue : undefined,
       commodityMetal: newAccount.type === 'commodity' ? newAccount.commodityMetal : undefined,
+      manualPricePerGram: newAccount.type === 'commodity' ? newAccount.manualPricePerGram : undefined,
       avgNav: newAccount.type === 'sips' ? newAccount.avgNav : undefined,
       rewardUnit: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.rewardUnit : undefined,
       pointsConversionRate: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.pointsConversionRate : undefined,
@@ -613,7 +615,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         .reduce((sum, t) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0)
                     : 0;
                   const commodityTotalGrams = acc.type === 'commodity' ? Number(acc.numberOfShares ?? 0) + commodityTxGrams : 0;
-                  const commodityPricePerGram = acc.type === 'commodity' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
+                  // Manual override wins over the AI estimate; track which source we're showing.
+                  const commodityFetchedPrice = acc.type === 'commodity' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
+                  const commodityPricePerGram = acc.type === 'commodity'
+                    ? (acc.manualPricePerGram ?? commodityFetchedPrice)
+                    : null;
+                  const commodityPriceSource: 'manual' | 'estimate' | null =
+                    acc.type !== 'commodity' || commodityPricePerGram === null ? null
+                    : acc.manualPricePerGram !== undefined ? 'manual' : 'estimate';
                   const commodityCurrentValue = commodityPricePerGram !== null && commodityTotalGrams > 0 ? commodityPricePerGram * commodityTotalGrams : null;
                   const commodityEffectiveInvested = acc.type === 'commodity'
                     ? (acc.investedValue !== undefined ? acc.investedValue + rawBal : undefined)
@@ -1086,9 +1095,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                       {isRefreshing
                                         ? <span className="skeleton-bar" style={{ width: '4rem', height: '1.1rem', marginTop: '0.2rem' }} />
                                         : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                            ₹{commodityPricePerGram!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            {commodityPriceSource === 'estimate' ? '≈ ' : ''}₹{commodityPricePerGram!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                           </span>
                                       }
+                                      {!isRefreshing && commodityPriceSource && (
+                                        <span className="text-mono text-muted" style={{ fontSize: '0.6rem', marginTop: '0.1rem', fontStyle: 'italic' }}>
+                                          {commodityPriceSource === 'manual' ? 'manual price' : 'approx · AI estimate'}
+                                        </span>
+                                      )}
                                     </div>
                                     {(commodityCurrentValue !== null && commodityEffectiveInvested !== undefined && !isRefreshing) && (() => {
                                       const pnl = commodityCurrentValue - commodityEffectiveInvested;
@@ -1107,8 +1121,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                   <>
                                     <span className="text-mono text-muted text-xs">₹ / GRAM</span>
                                     {isFailed && !isRefreshing
-                                      ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Fetch failed · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
-                                      : <button className="btn btn-secondary" style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Fetch</button>
+                                      ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Fetch failed · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym, true); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
+                                      : <button className="btn btn-secondary" style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym, true); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Fetch</button>
                                     }
                                   </>
                                 )}
@@ -1421,8 +1435,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     label="Metal"
                     value={newAccount.commodityMetal || ''}
                     options={[
-                      { id: 'gold', name: 'Gold', subtext: 'International spot · GC=F' },
-                      { id: 'silver', name: 'Silver', subtext: 'International spot · SI=F' },
+                      { id: 'gold', name: 'Gold', subtext: 'Digital gold · ₹/g' },
+                      { id: 'silver', name: 'Silver', subtext: 'Digital silver · ₹/g' },
                     ]}
                     onChange={val => {
                       const ticker = val === 'gold' ? 'GC=F' : 'SI=F';
@@ -1466,8 +1480,23 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     />
                     {errors.openingUnits && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.openingUnits}</span>}
                   </div>
+                  <div className="input-group">
+                    <label>Manual Price Override — ₹/gram (optional)</label>
+                    <input
+                      type="number"
+                      className="input-field"
+                      value={newAccount.manualPricePerGram ?? ''}
+                      onChange={e => setNewAccount({ ...newAccount, manualPricePerGram: e.target.value !== '' ? parseFloat(e.target.value) : undefined })}
+                      placeholder="Leave blank to use the AI estimate"
+                      step="any"
+                      min="0"
+                    />
+                    <span className="text-xs text-muted" style={{ marginTop: '0.25rem', display: 'block' }}>
+                      Set this to the exact ₹/g from your vendor for precise valuation. Blank = use the auto AI estimate.
+                    </span>
+                  </div>
                   <p className="text-xs text-muted" style={{ marginTop: '-0.5rem', marginBottom: '0.5rem' }}>
-                    Price fetched live from international spot (USD/oz × USDINR ÷ 31.1035 g/oz). Reflects market rate — physical premiums excluded.
+                    Live price is an approximate AI estimate of your vendor's per-gram buy price (incl. GST). For exactness, set the manual override above.
                   </p>
                 </>
               )}

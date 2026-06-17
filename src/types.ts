@@ -54,6 +54,8 @@ export interface Account {
 
   // Specific to commodity (gold, silver)
   commodityMetal?: 'gold' | 'silver';
+  // Optional manual price override (₹/gram). Takes precedence over the AI estimate when set.
+  manualPricePerGram?: number;
 
   // Specific to stocks / sips
   numberOfShares?: number;

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useFinance } from '../FinanceContext';
 import type { Account } from '../types';
-import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHistoryByRange, getLatestFetchedAt, fetchCommodityPriceINR, getCachedCommodityPriceINR } from '../services/MarketDataService';
+import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHistoryByRange, getLatestFetchedAt, fetchCommodityPriceINR, getCachedCommodityPriceINR, fetchPrevClosesForSymbols, getCachedPrevPrice, getCachedPrevCommodityPriceINR } from '../services/MarketDataService';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, RotateCcw, ChevronLeft, ChevronDown } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
@@ -51,6 +51,17 @@ export function Portfolio() {
       .forEach((a: Account) => { const p = getCachedCommodityPriceINR(a.marketSymbol!); if (p !== null) cached[a.marketSymbol!] = p; });
     return cached;
   });
+
+  const [prevPrices, setPrevPrices] = useState<Record<string, number>>(() => {
+    const cached: Record<string, number> = {};
+    (data?.accounts || [])
+      .filter((a: Account) => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
+      .forEach((a: Account) => { const p = getCachedPrevPrice(a.marketSymbol!); if (p !== null) cached[a.marketSymbol!] = p; });
+    (data?.accounts || [])
+      .filter((a: Account) => a.type === 'commodity' && a.marketSymbol)
+      .forEach((a: Account) => { const p = getCachedPrevCommodityPriceINR(a.marketSymbol!); if (p !== null) cached[a.marketSymbol!] = p; });
+    return cached;
+  });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +105,7 @@ export function Portfolio() {
     }
   }, [data?.accounts]);
 
-  const handleRefresh = async () => {
+  const handleRefresh = async (force = false) => {
     try {
       setIsRefreshing(true);
       setError(null);
@@ -104,7 +115,8 @@ export function Portfolio() {
         ...stockAccounts.map((a: Account) => ({ symbol: a.marketSymbol || '', kind: 'stock' as const }))
       ].filter(i => i.symbol);
 
-      const commodityItems = commodityAccounts.filter((a: Account) => a.marketSymbol);
+      // Skip accounts with a manual price override — no need to spend a Gemini call for them.
+      const commodityItems = commodityAccounts.filter((a: Account) => a.marketSymbol && a.manualPricePerGram === undefined);
 
       if (items.length === 0 && commodityItems.length === 0) {
         setIsRefreshing(false);
@@ -114,7 +126,7 @@ export function Portfolio() {
       const [newPrices, commodityPriceResults] = await Promise.all([
         fetchPricesForSymbols(items),
         Promise.all(commodityItems.map((a: Account) =>
-          fetchCommodityPriceINR(a.marketSymbol!).then(p => [a.marketSymbol!, p] as [string, number | null])
+          fetchCommodityPriceINR(a.marketSymbol!, force).then(p => [a.marketSymbol!, p] as [string, number | null])
         ))
       ]);
       commodityPriceResults.forEach(([sym, p]) => { if (p !== null) newPrices[sym] = p; });
@@ -122,6 +134,13 @@ export function Portfolio() {
 
       const latest = getLatestFetchedAt(items.map(i => i.symbol));
       if (latest !== null) setLastRefreshed(new Date(latest));
+
+      const newPrevPrices = await fetchPrevClosesForSymbols(items);
+      commodityItems.forEach((a: Account) => {
+        const p = getCachedPrevCommodityPriceINR(a.marketSymbol!);
+        if (p !== null) newPrevPrices[a.marketSymbol!] = p;
+      });
+      setPrevPrices(newPrevPrices);
     } catch (e: any) {
       console.error('Failed to refresh prices:', e);
       setError(`Price refresh failed: ${e?.message || 'Unknown error'}`);
@@ -168,7 +187,8 @@ export function Portfolio() {
 
   const getAccountStats = (account: Account) => {
     const symbol = account.marketSymbol || '';
-    const currentPrice = prices[symbol] ?? 0;
+    // Commodity manual override (₹/g) wins over the fetched estimate; harmless for others.
+    const currentPrice = account.manualPricePerGram ?? prices[symbol] ?? 0;
 
     const totalUnits = getTotalUnits(account);
 
@@ -223,6 +243,26 @@ export function Portfolio() {
     commodity: buildStats(commodityAccounts),
   }), [sipAccounts, stockAccounts, commodityAccounts, prices, data.transactions]);
 
+  const portfolioOneDayReturn = useMemo(() => {
+    const accounts = portfolioView === 'all' ? [...sipAccounts, ...stockAccounts, ...commodityAccounts]
+      : portfolioView === 'mf' ? sipAccounts
+      : portfolioView === 'stocks' ? stockAccounts
+      : commodityAccounts;
+    let amount = 0;
+    let prevTotal = 0;
+    for (const acc of accounts) {
+      const symbol = acc.marketSymbol || '';
+      const currentPrice = acc.manualPricePerGram ?? prices[symbol] ?? 0;
+      const prevPrice = prevPrices[symbol];
+      if (!prevPrice || currentPrice === 0) continue;
+      const units = getTotalUnits(acc);
+      amount += (currentPrice - prevPrice) * units;
+      prevTotal += prevPrice * units;
+    }
+    if (prevTotal === 0) return null;
+    return { amount, pct: (amount / prevTotal) * 100 };
+  }, [portfolioView, sipAccounts, stockAccounts, commodityAccounts, prices, prevPrices, data.transactions]);
+
   const getAvatarColor = (name: string) => {
     const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#f9ca24', '#6c5ce7', '#a29bfe'];
     let hash = 0;
@@ -242,14 +282,8 @@ export function Portfolio() {
       .slice(0, 2);
   };
 
-  const formatCurrency = (value: number) => {
-    if (value >= 1_00_000) {
-      return `₹${(value / 1_00_000).toFixed(1)}L`;
-    } else if (value >= 1_000) {
-      return `₹${(value / 1_000).toFixed(1)}K`;
-    }
-    return `₹${value.toFixed(0)}`;
-  };
+  const formatCurrency = (value: number) =>
+    `₹${Math.round(value).toLocaleString('en-IN')}`;
 
   const formatTime = (date: Date) => {
     const hours = String(date.getHours()).padStart(2, '0');
@@ -358,17 +392,19 @@ export function Portfolio() {
           ₹{Math.round(portfolioStats[portfolioView].current).toLocaleString('en-IN')}
         </div>
 
-        <div style={{
-          fontSize: '0.95rem',
-          fontWeight: 600,
-          marginTop: '0.75rem',
-          color: portfolioStats[portfolioView].pnl >= 0 ? '#22c55e' : '#ef4444'
-        }}>
-          {portfolioStats[portfolioView].pnl >= 0 ? '↑' : '↓'} ₹{Math.abs(portfolioStats[portfolioView].pnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({portfolioStats[portfolioView].pnlPct >= 0 ? '+' : ''}{portfolioStats[portfolioView].pnlPct.toFixed(2)}%)
-        </div>
+        {portfolioOneDayReturn !== null ? (
+          <div style={{ marginTop: '0.75rem', textAlign: 'center' }}>
+            <div style={{ fontSize: '0.95rem', fontWeight: 600, color: portfolioOneDayReturn.amount >= 0 ? '#22c55e' : '#ef4444' }}>
+              {portfolioOneDayReturn.amount >= 0 ? '↑' : '↓'} ₹{Math.abs(portfolioOneDayReturn.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(portfolioOneDayReturn.pct).toFixed(2)}%)
+            </div>
+            <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.2rem', letterSpacing: '0.5px' }}>Today</div>
+          </div>
+        ) : (
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.75rem' }}>— today</div>
+        )}
 
         <button
-          onClick={handleRefresh}
+          onClick={() => handleRefresh(true)}
           disabled={isRefreshing}
           style={{
             marginTop: '1.25rem',
@@ -482,8 +518,8 @@ export function Portfolio() {
             <div style={{ width: '1px', background: 'var(--border-color)' }} />
             <div style={{ flex: 1, textAlign: 'center' }}>
               <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Returns</div>
-              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: s.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
-                {s.pnl >= 0 ? '+' : ''}{s.pnlPct.toFixed(2)}%
+              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: s.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
+                ₹{Math.abs(s.pnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(s.pnlPct).toFixed(2)}%)
               </div>
             </div>
           </>);
