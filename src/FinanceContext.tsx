@@ -15,7 +15,40 @@ export interface PendingSmsTransaction {
   sourceIdentifier?: string;
   timestamp: number;
   raw: string;
+  // Set when this SMS is one leg of a multi-leg real-world event (e.g. a bank debit and
+  // the matching credit-card payment confirmation). Legs that share an eventGroupId
+  // describe the same money movement and must not be double-counted.
+  eventGroupId?: string;
+  relationKind?: SmsRelationKind;
 }
+
+export type SmsRelationKind = 'cc_payment' | 'investment' | 'transfer';
+type SmsSemantic = SmsRelationKind | 'generic';
+
+// Window within which two same-amount SMS from *different* accounts are treated as two
+// legs of one event rather than independent transactions.
+const RELATED_SMS_WINDOW = 5 * 60 * 1000;
+
+// Best-effort classification of what an SMS describes, from its raw text. Used to decide
+// whether a same-amount counterpart is a complementary leg (CC bill payment, investment,
+// transfer) rather than a coincidental second transaction.
+const classifySmsSemantic = (tx: { raw?: string; merchant?: string | null; source?: string }): SmsSemantic => {
+  const text = `${tx.raw || ''} ${tx.merchant || ''} ${tx.source || ''}`.toLowerCase();
+  // Credit-card bill payment confirmation, e.g. "payment of Rs 310 for your ... Credit Card was successful".
+  if (/credit\s*card/.test(text) && /(payment|paid|received|successful|towards)/.test(text)) return 'cc_payment';
+  if (/\bcard\b/.test(text) && /(payment|paid).*(success|received|done|processed)/.test(text)) return 'cc_payment';
+  // Investment legs (SIP / mutual fund / stock purchase).
+  if (/(sip|mutual fund|folio|\bnav\b|units?\s*allot)/.test(text)) return 'investment';
+  if (/(equity|demat|broker|shares?\s*(bought|allot))/.test(text)) return 'investment';
+  // Explicit transfers.
+  if (/(self\s*transfer|own account|imps|neft|rtgs|fund transfer)/.test(text)) return 'transfer';
+  return 'generic';
+};
+
+const sameSmsSource = (a: { sourceIdentifier?: string; source?: string }, b: { sourceIdentifier?: string; source?: string }): boolean => {
+  if (a.sourceIdentifier && b.sourceIdentifier) return a.sourceIdentifier === b.sourceIdentifier;
+  return (a.source || '').toLowerCase() === (b.source || '').toLowerCase();
+};
 
 interface FinanceContextType {
   data: FinanceData;
@@ -65,7 +98,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [isAuthenticated, setAuthenticated] = useState(false);
   const [pendingTransfer, setPendingTransfer] = useState<PendingTransfer | null>(null);
   const [smsQueue, setSmsQueue] = useState<PendingSmsTransaction[]>([]);
-  const [recentlyProcessedSms, setRecentlyProcessedSms] = useState<{ amount: number; type: string; sourceIdentifier?: string; timestamp: number }[]>([]);
+  const [recentlyProcessedSms, setRecentlyProcessedSms] = useState<{ amount: number; type: string; sourceIdentifier?: string; source?: string; raw?: string; timestamp: number }[]>([]);
 
   const addToSmsQueue = (tx: PendingSmsTransaction) => {
     setSmsQueue(prev => {
@@ -98,9 +131,9 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           // Also update the recently processed log
           setRecentlyProcessedSms(recent => [
             ...recent.filter(r => !(r.amount === tx.amount && r.type === tx.type && r.sourceIdentifier === tx.sourceIdentifier)),
-            { amount: tx.amount, type: tx.type, sourceIdentifier: tx.sourceIdentifier, timestamp: now }
+            { amount: tx.amount, type: tx.type, sourceIdentifier: tx.sourceIdentifier, source: tx.source, raw: tx.raw, timestamp: now }
           ]);
-          
+
           return updated;
         }
         
@@ -121,10 +154,54 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         return prev;
       }
 
+      // 3. Related-transaction check. Not an exact duplicate — but it may be a complementary
+      // leg of the same real-world event (e.g. a bank debit and the credit-card payment it
+      // settled). Same amount, within a few minutes, from a *different* account, where one
+      // leg is clearly a CC payment / investment / transfer. Link rather than double-count.
+      const newSemantic = classifySmsSemantic(tx);
+      const isRelated = (item: { amount: number; type: string; sourceIdentifier?: string; source?: string; raw?: string; timestamp: number }) => {
+        if (item.amount !== tx.amount) return false;
+        if (Math.abs(item.timestamp - tx.timestamp) > RELATED_SMS_WINDOW) return false;
+        if (sameSmsSource(item, tx)) return false; // same account => duplicate, handled above
+        // Require at least one clearly complementary leg (CC payment / investment / transfer).
+        // A bare same-amount coincidence in two accounts is not enough to link — note the CC
+        // case often has BOTH legs parsed as debit, so we key on semantics, not direction.
+        return newSemantic !== 'generic' || classifySmsSemantic(item) !== 'generic';
+      };
+
+      const relatedIdx = prev.findIndex(isRelated);
+      const relatedRecent = relatedIdx === -1 ? recentlyProcessedSms.find(isRelated) : undefined;
+
+      if (relatedIdx !== -1 || relatedRecent) {
+        const counterpart = relatedIdx !== -1 ? prev[relatedIdx] : relatedRecent!;
+        const counterpartSemantic = classifySmsSemantic(counterpart);
+        const relationKind: SmsRelationKind =
+          newSemantic !== 'generic' ? newSemantic
+          : counterpartSemantic !== 'generic' ? counterpartSemantic
+          : 'transfer';
+        const groupId = (relatedIdx !== -1 ? prev[relatedIdx].eventGroupId : undefined) || crypto.randomUUID();
+
+        console.log("SpendVaultSms: Linking related transaction leg under common event:", relationKind, counterpart, "<->", tx);
+
+        const taggedTx: PendingSmsTransaction = { ...tx, eventGroupId: groupId, relationKind };
+
+        setRecentlyProcessedSms(recent => [
+          ...recent,
+          { amount: tx.amount, type: tx.type, sourceIdentifier: tx.sourceIdentifier, source: tx.source, raw: tx.raw, timestamp: now }
+        ]);
+
+        if (relatedIdx !== -1) {
+          const updated = [...prev];
+          updated[relatedIdx] = { ...updated[relatedIdx], eventGroupId: groupId, relationKind };
+          return [...updated, taggedTx];
+        }
+        return [...prev, taggedTx];
+      }
+
       // Record this transaction as processed
       setRecentlyProcessedSms(recent => [
         ...recent,
-        { amount: tx.amount, type: tx.type, sourceIdentifier: tx.sourceIdentifier, timestamp: now }
+        { amount: tx.amount, type: tx.type, sourceIdentifier: tx.sourceIdentifier, source: tx.source, raw: tx.raw, timestamp: now }
       ]);
 
       return [...prev, tx];

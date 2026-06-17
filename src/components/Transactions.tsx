@@ -358,7 +358,7 @@ export default function Transactions() {
   const processNextSms = () => {
     if (smsQueue.length > 0 && !isModalOpen) {
       const tx = smsQueue[0];
-      const { amount, type, merchant, source, sourceIdentifier, timestamp } = tx;
+      const { amount, type, merchant, source, sourceIdentifier, timestamp, relationKind } = tx;
 
       const cardMatch = sourceIdentifier
         ? data.accounts.find(a => a.cardDetails?.cardNumber?.endsWith(sourceIdentifier))
@@ -369,14 +369,26 @@ export default function Transactions() {
         return normalizedAccountName.includes(normalizedSourceName) || normalizedSourceName.includes(normalizedAccountName);
       });
 
+      // If this SMS was detected as a leg of a linked event (e.g. the credit-card payment
+      // that settles a bank debit), prefill it as that event instead of a raw expense — a
+      // CC-payment confirmation on a card is a payment INTO the card, not a debit spend.
+      let initialType: TransactionType = type === 'unknown' ? 'debit' : type;
+      let initialCategory = '';
+      if (relationKind === 'cc_payment') {
+        initialCategory = 'CC Payment';
+        if (matchedAccount?.type === 'credit_card') initialType = 'credit';
+      } else if (relationKind === 'transfer') {
+        initialCategory = 'Transfer';
+      }
+
       setEditId(null);
       const initialTx: Partial<Transaction> = {
         date: format(new Date(timestamp), 'yyyy-MM-dd'),
         description: merchant || `Transaction via ${source}`,
         accountId: matchedAccount?.id || '',
-        type: type === 'unknown' ? 'debit' : type,
+        type: initialType,
         amount: amount,
-        category: '',
+        category: initialCategory,
         isRecurring: false,
         rewardEarned: 0,
         rewardEarnedType: 'delayed',
@@ -588,6 +600,9 @@ export default function Transactions() {
     if (!newTx.category) newErrors.category = 'Category is required';
     if (newTx.category?.toLowerCase() === 'stocks' && !newTx.numberOfShares) {
       newErrors.numberOfShares = 'No. of Shares is required';
+    }
+    if (newTx.category?.toLowerCase() === 'commodity' && !newTx.numberOfShares) {
+      newErrors.numberOfShares = 'Grams is required';
     }
     if (newTx.excludeFromStats && (newTx.excludedAmount || 0) > (newTx.amount || 0)) {
       newErrors.excludedAmount = 'Cannot exclude more than total amount';
@@ -1087,7 +1102,12 @@ export default function Transactions() {
               <span className="font-bold text-mono" style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>
                 {smsQueue.length} Pending {smsQueue.length === 1 ? 'Transaction' : 'Transactions'}
               </span>
-              <span className="text-xs text-muted">Tap to review and log</span>
+              <span className="text-xs text-muted">
+                {smsQueue[0]?.relationKind === 'cc_payment' ? 'Next: linked card payment — pre-filled as CC Payment'
+                  : smsQueue[0]?.relationKind === 'transfer' ? 'Next: linked transfer leg'
+                  : smsQueue[0]?.relationKind === 'investment' ? 'Next: linked investment leg'
+                  : 'Tap to review and log'}
+              </span>
             </div>
           </div>
           <ChevronRight size={20} className="text-muted" />
