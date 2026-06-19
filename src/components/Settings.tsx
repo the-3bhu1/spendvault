@@ -711,6 +711,7 @@ export default function Settings() {
     markedDone: 'md', linkedSipAccountId: 'lsa',
     // Stocks / SIPs / Commodity investment fields
     numberOfShares: 'ns', marketSymbol: 'ms', investedValue: 'iv', commodityMetal: 'cm',
+    manualPricePerGram: 'mpg', avgNav: 'an',
   };
 
   const minifyPayload = (obj: any): any => {
