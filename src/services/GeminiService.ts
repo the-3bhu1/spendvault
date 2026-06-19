@@ -21,7 +21,7 @@ function sane(v: unknown, metal: 'gold' | 'silver'): number | null {
 // ---- Daily safety cap ----
 // Hard ceiling on grounded calls/day so a failure loop or retry-spam can never burn the
 // user's free quota (Gemini 2.5 Flash grounding is ~1500/day free; this sits far below).
-// The 6h price cache (COMMODITY_TTL) is the normal throttle; this is the backstop. Tunable.
+// The 1h price cache (COMMODITY_TTL) is the normal throttle; this is the backstop. Tunable.
 const GEMINI_DAILY_CAP = 30;
 const GEMINI_USAGE_KEY = 'gemini_usage'; // { day: 'YYYY-MM-DD', count: number }
 

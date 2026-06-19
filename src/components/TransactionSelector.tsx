@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { format } from 'date-fns';
-import { Search, Calendar, ChevronDown, Receipt, X } from 'lucide-react';
+import { Search, Calendar, ChevronDown, ReceiptIndianRupee, X } from 'lucide-react';
 import { useFinance } from '../FinanceContext';
 import type { Transaction } from '../types';
 import { formatCurrency, formatDateString } from '../utils';
@@ -133,7 +133,7 @@ export const TransactionSelector: React.FC<TransactionSelectorProps> = ({
                                   >
                                     <div className="flex align-center gap-3 flex-1" style={{ minWidth: 0 }}>
                                       <div className="flex-center" style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', flexShrink: 0 }}>
-                                        <Receipt size={18} className="text-primary" />
+                                        <ReceiptIndianRupee size={18} className="text-primary" />
                                       </div>
                                       <div className="flex-col" style={{ minWidth: 0, flex: 1 }}>
                                         <span className="font-bold truncate" style={{ fontSize: '0.9rem', display: 'block' }}>{t.description}</span>

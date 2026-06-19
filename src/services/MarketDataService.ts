@@ -6,10 +6,12 @@ const PREV_CACHE_KEY = 'market_prev_prices_cache';
 const STOCK_TTL = 5 * 60 * 1000;
 const SIP_TTL = 8 * 60 * 60 * 1000;
 const HISTORY_TTL = 24 * 60 * 60 * 1000;
-// Commodity prices come from Gemini grounding (an approximate, lagging source). Cache for
-// 6h: refetching more often doesn't help freshness (Google's index is the bottleneck) and
-// it keeps us well within Gemini's free grounding quota.
-const COMMODITY_TTL = 6 * 60 * 60 * 1000;
+// Commodity prices come from Gemini grounding (an approximate, lagging source). Cache for 1h
+// and ALWAYS respect it (no force path) — both auto and manual refreshes serve cache when it's
+// fresh, exactly like stocks/MFs. So Gemini is hit at most once per hour across all screens
+// (gold + silver share one grounded call) → max ~24 calls/day, regardless of how many times the
+// user taps refresh. The daily safety cap (30) is just a backstop against failure loops.
+const COMMODITY_TTL = 1 * 60 * 60 * 1000;
 
 interface CacheEntry {
   price: number;
@@ -45,8 +47,15 @@ let prevMem: Record<string, number> = (() => {
   } catch { return {}; }
 })();
 
+// Broadcast so any already-mounted screen (e.g. the persistent Accounts tab) can re-read the
+// shared cache when prices change — keeps every view in sync with the latest fetch.
+function notifyPricesUpdated() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('marketPricesUpdated'));
+}
+
 function persist() {
   localStorage.setItem(CACHE_KEY, JSON.stringify(mem));
+  notifyPricesUpdated();
 }
 
 function persistHistory() {
@@ -317,11 +326,11 @@ function fetchBothMetals(): Promise<{ gold: number | null; silver: number | null
   return commodityInFlight;
 }
 
-// `force` skips the 6h cache for a user-initiated refresh. It still goes through the daily
-// safety cap (in GeminiService) and the shared in-flight call, so it can't run away.
-export async function fetchCommodityPriceINR(metalTicker: string, force = false): Promise<number | null> {
+// Always respects the 1h cache (no force flag) so repeated manual refreshes can't burn the
+// Gemini quota — a fetch only happens when the cached value is older than COMMODITY_TTL.
+export async function fetchCommodityPriceINR(metalTicker: string): Promise<number | null> {
   const cacheKey = `cINR_${metalTicker}`;
-  if (!force && mem[cacheKey] && fresh(mem[cacheKey], COMMODITY_TTL)) return mem[cacheKey].price;
+  if (mem[cacheKey] && fresh(mem[cacheKey], COMMODITY_TTL)) return mem[cacheKey].price;
 
   const metal = metalFromTicker(metalTicker);
   if (!metal) return mem[cacheKey]?.price ?? null;
@@ -341,6 +350,25 @@ export async function fetchCommodityPriceINR(metalTicker: string, force = false)
 export function getCachedCommodityPriceINR(metalTicker: string): number | null {
   const cacheKey = `cINR_${metalTicker}`;
   return mem[cacheKey]?.price ?? null;
+}
+
+// Whether the cached commodity estimate is still within the 1h window. Used to gate the manual
+// refresh button (same freshness-gated pattern as stocks/MFs) so we don't spend Gemini calls
+// that can't return anything newer.
+export function isCommodityCacheFresh(metalTicker: string): boolean {
+  const entry = mem[`cINR_${metalTicker}`];
+  if (!entry) return false;
+  return fresh(entry, COMMODITY_TTL);
+}
+
+// The most recent real Gemini fetch time across the given commodity tickers (epoch ms), or null.
+// Commodity prices live under a `cINR_` cache key, so they need their own lookup — used so
+// "Last refresh at" reflects a commodity-only refresh too, not just stock/MF fetches.
+export function getLatestCommodityFetchedAt(metalTickers: string[]): number | null {
+  const times = metalTickers
+    .map(t => mem[`cINR_${t}`]?.fetchedAt)
+    .filter((t): t is number => typeof t === 'number');
+  return times.length ? Math.max(...times) : null;
 }
 
 export function getCachedPrevPrice(symbol: string): number | null {

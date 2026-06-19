@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { Plus, Users, ChevronRight, Share2, Trash2, Receipt, Check, Search, ChevronDown, Calendar, Edit2, Repeat, ChevronLeft, AlertTriangle, Copy } from 'lucide-react';
+import { Plus, Users, ChevronRight, Share2, Trash2, ReceiptIndianRupee, Check, Search, ChevronDown, Calendar, Edit2, Repeat, ChevronLeft, AlertTriangle, Copy } from 'lucide-react';
 import ConfirmDialog from './ConfirmDialog';
 import { useFinance } from '../FinanceContext';
 import type { SplitEvent, SplitItem, SplitCycle, RecurringFrequency } from '../types';
@@ -1093,7 +1093,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                                           >
                                             <div className="flex align-center gap-3 flex-1" style={{ minWidth: 0 }}>
                                               <div className="flex-center" style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', flexShrink: 0 }}>
-                                                <Receipt size={18} className="text-primary" />
+                                                <ReceiptIndianRupee size={18} className="text-primary" />
                                               </div>
                                               <div className="flex-col" style={{ minWidth: 0, flex: 1 }}>
                                                 <span className="font-bold truncate" style={{ fontSize: '0.9rem', display: 'block' }}>{t.description}</span>
@@ -1156,7 +1156,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                       ) : (
                         <>
                           <div className="flex align-center gap-2">
-                            <Receipt size={16} className="text-primary" />
+                            <ReceiptIndianRupee size={16} className="text-primary" />
                             <span className="font-medium">{selectedTx?.description}</span>
                           </div>
                           <span className="text-2xl font-bold text-primary">

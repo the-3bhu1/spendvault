@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Home, Wallet, ReceiptText, Gift, Users, Sparkles, LayoutGrid, ChevronRight, Calendar, HandCoins, LogOut, TrendingUp } from 'lucide-react';
+import { Home, Wallet, ReceiptText, Gift, Users, Sparkles, LayoutGrid, ChevronRight, Calendar, HandCoins, LogOut, TrendingUpDown } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import Accounts from './components/Accounts';
 import Transactions from './components/Transactions';
@@ -416,7 +416,7 @@ function App() {
                   style={{ padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}
                 >
                   <div className="flex-center" style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'linear-gradient(135deg, #06b6d4, #10b981)', color: 'white', flexShrink: 0 }}>
-                    <TrendingUp size={22} />
+                    <TrendingUpDown size={22} />
                   </div>
                   <div className="flex-col flex-1">
                     <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Portfolio</span>

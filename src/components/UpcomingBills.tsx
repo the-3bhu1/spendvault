@@ -1,14 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { format, parseISO, addDays, addMonths } from 'date-fns';
 import {
   Repeat,
   Link,
   ArrowUpRight,
-  Home,
-  Smartphone,
-  Tv,
   PieChart,
-  Wallet,
   CreditCard,
   Clock,
   Trash2,
@@ -26,6 +22,7 @@ import { SubviewWrapper } from './SubviewWrapper';
 import { CustomPicker } from './CustomPicker';
 import { TransactionSelector } from './TransactionSelector';
 import { TransactionModal } from './TransactionModal';
+import { getCategoryIcon } from './transactionIcons';
 import CustomDatePicker from './CustomDatePicker';
 import { calculateTotalSpendPerCycle, getLatestBilledCycle } from '../utils';
 
@@ -38,14 +35,6 @@ const FREQUENCY_LABELS: Record<RecurringFrequency, string> = {
   custom: 'Custom Days'
 };
 
-const CATEGORY_ICONS: Record<string, React.ReactNode> = {
-  'Rent': <Home size={20} />,
-  'Bills': <Smartphone size={20} />,
-  'Entertainment': <Tv size={20} />,
-  'Travel': <Repeat size={20} />,
-  'SIP': <PieChart size={20} />,
-  'Other': <Wallet size={20} />
-};
 
 export default function UpcomingBills() {
   const { data, addRecurringBill, updateRecurringBill, deleteRecurringBill, updateTransaction } = useFinance();
@@ -303,7 +292,7 @@ export default function UpcomingBills() {
                           color: isPaidCC ? 'var(--success-color, #10b981)' : isOverdue ? 'var(--negative-color)' : 'var(--text-color)',
                           border: '1px solid var(--border-color)'
                         }}>
-                          {isPaidCC ? <CheckCircle2 size={22} /> : (('isCC' in bill) ? <CreditCard size={22} /> : (CATEGORY_ICONS[bill.category as string] || <Clock size={22} />))}
+                          {isPaidCC ? <CheckCircle2 size={22} /> : (('isCC' in bill) ? <CreditCard size={22} /> : getCategoryIcon(bill.category as string, 22))}
                         </div>
                         <div className="flex-col gap-1" style={{ minWidth: 0 }}>
                           <span className="font-bold" style={{ fontSize: '1rem', lineHeight: 1.3 }}>{bill.name}</span>
@@ -453,7 +442,7 @@ export default function UpcomingBills() {
                                 color: isPaidCC ? 'var(--success-color, #10b981)' : isOverdue ? 'var(--negative-color)' : 'var(--text-color)',
                                 border: '1px solid var(--border-color)'
                               }}>
-                                {isPaidCC ? <CheckCircle2 size={22} /> : (CATEGORY_ICONS[(bill as RecurringBill).category as string] || <Clock size={22} />)}
+                                {isPaidCC ? <CheckCircle2 size={22} /> : getCategoryIcon((bill as RecurringBill).category as string, 22)}
                               </div>
                               <div className="flex-col gap-1" style={{ minWidth: 0 }}>
                                 <span className="font-bold" style={{ fontSize: '1rem', lineHeight: 1.3 }}>{bill.name}</span>
@@ -611,7 +600,7 @@ export default function UpcomingBills() {
                 value={newBill.category || 'Bills'}
                 options={data.categories.map(cat => ({ id: cat, name: cat }))}
                 onChange={val => setNewBill({ ...newBill, category: val, linkedSipAccountId: val !== 'SIP' ? undefined : newBill.linkedSipAccountId })}
-                iconGetter={(id) => CATEGORY_ICONS[id] || <Wallet size={18} />}
+                iconGetter={(id) => getCategoryIcon(id)}
               />
             </div>
 

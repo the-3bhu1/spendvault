@@ -711,13 +711,15 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         oldTx.category?.toLowerCase() === 'cc payment' ||
         oldTx.category?.toLowerCase() === 'ncmc travel recharge' ||
         oldTx.category?.toLowerCase() === 'sip' ||
-        oldTx.category?.toLowerCase() === 'stocks'
+        oldTx.category?.toLowerCase() === 'stocks' ||
+        oldTx.category?.toLowerCase() === 'commodity'
       );
       const isNowTransferOrCC = transaction.category?.toLowerCase() === 'transfer' ||
                                  transaction.category?.toLowerCase() === 'cc payment' ||
                                  transaction.category?.toLowerCase() === 'ncmc travel recharge' ||
                                  transaction.category?.toLowerCase() === 'sip' ||
-                                 transaction.category?.toLowerCase() === 'stocks';
+                                 transaction.category?.toLowerCase() === 'stocks' ||
+                                 transaction.category?.toLowerCase() === 'commodity';
       
       let txsToDelete: string[] = [];
       let updatedTransaction = { ...transaction };
@@ -727,7 +729,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         const counterpartTxs = prev.transactions.filter(t => 
           allLinkedIds.includes(t.id) && 
           t.id !== transaction.id &&
-          (t.category?.toLowerCase() === 'transfer' || t.category?.toLowerCase() === 'cc payment' || t.category?.toLowerCase() === 'ncmc travel recharge' || t.category?.toLowerCase() === 'sip' || t.category?.toLowerCase() === 'stocks')
+          (t.category?.toLowerCase() === 'transfer' || t.category?.toLowerCase() === 'cc payment' || t.category?.toLowerCase() === 'ncmc travel recharge' || t.category?.toLowerCase() === 'sip' || t.category?.toLowerCase() === 'stocks' || t.category?.toLowerCase() === 'commodity')
         );
         txsToDelete = counterpartTxs.map(t => t.id);
         
@@ -775,6 +777,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
               const isNcmcRecharge = updatedTransaction.category?.toLowerCase() === 'ncmc travel recharge';
               const isSip = updatedTransaction.category?.toLowerCase() === 'sip';
               const isStocks = updatedTransaction.category?.toLowerCase() === 'stocks';
+              const isCommodity = updatedTransaction.category?.toLowerCase() === 'commodity';
               if (isCCPayment) {
                 if (updatedTransaction.rewardUsed && updatedTransaction.rewardUsedAccountId) {
                   // It's the bank portion
@@ -794,11 +797,14 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
               } else if (isStocks) {
                 updated.amount = updatedTransaction.amount;
                 updated.numberOfShares = updatedTransaction.numberOfShares;
+              } else if (isCommodity) {
+                updated.amount = updatedTransaction.amount;
+                updated.numberOfShares = updatedTransaction.numberOfShares;
               } else {
                 // Non-split transfer/payment: 1:1
                 updated.amount = updatedTransaction.amount;
               }
-              
+
               if (isNcmcRecharge) {
                 updated.category = 'NCMC Travel Recharge';
               } else if (updatedTransaction.category === 'Transfer') {
@@ -807,6 +813,9 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
                 updated.category = 'SIP';
               } else if (isStocks) {
                 updated.category = 'Stocks';
+                updated.description = updatedTransaction.description;
+              } else if (isCommodity) {
+                updated.category = 'Commodity';
                 updated.description = updatedTransaction.description;
               }
 
@@ -824,7 +833,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
                     const targetCardName = updatedTransaction.type === 'credit' ? parentAcc?.name : counterpartAcc?.name;
                     updated.description = `CC Payment: ${targetCardName || 'Unknown'}`;
                   }
-                } else if (isSip) {
+                } else if (isSip || isStocks || isCommodity) {
                   updated.description = updatedTransaction.description;
                 } else {
                   updated.description = updatedTransaction.type === 'credit' ? `Transfer to ${parentAcc?.name || 'Unknown'}` : `Transfer from ${parentAcc?.name || 'Unknown'}`;
@@ -886,8 +895,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       const linkedTxsToDelete = prev.transactions.filter(t => {
         if (!linkedIds.includes(t.id)) return false;
         
-        // 1. Always delete Transfer, CC Payment, NCMC Travel Recharge, or SIP counterpart legs
-        if (tx.category === 'Transfer' || tx.category === 'CC Payment' || tx.category === 'NCMC Travel Recharge' || tx.category === 'SIP' || tx.category === 'Stocks') return true;
+        // 1. Always delete Transfer, CC Payment, NCMC Travel Recharge, SIP, Stocks, or Commodity counterpart legs
+        if (tx.category === 'Transfer' || tx.category === 'CC Payment' || tx.category === 'NCMC Travel Recharge' || tx.category === 'SIP' || tx.category === 'Stocks' || tx.category === 'Commodity') return true;
         
         // 2. If parent is deleted, delete linked instant cashback
         if (t.category === 'Cashback' && tx.type === 'debit') return true;

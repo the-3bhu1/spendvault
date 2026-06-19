@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useFinance } from '../FinanceContext';
 import type { Account } from '../types';
-import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHistoryByRange, getLatestFetchedAt, fetchCommodityPriceINR, getCachedCommodityPriceINR, fetchPrevClosesForSymbols, getCachedPrevPrice, getCachedPrevCommodityPriceINR } from '../services/MarketDataService';
+import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHistoryByRange, getLatestFetchedAt, getLatestCommodityFetchedAt, fetchCommodityPriceINR, getCachedPrice, getCachedCommodityPriceINR, fetchPrevClosesForSymbols, getCachedPrevPrice, getCachedPrevCommodityPriceINR } from '../services/MarketDataService';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, RotateCcw, ChevronLeft, ChevronDown } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
@@ -41,11 +41,23 @@ function StatRow({ label, value, color }: { label: string; value: string; color?
   );
 }
 
+// We hide the 1-day return only on the day's FIRST Portfolio load (when the cached figure is
+// either yesterday's — stale — or not yet fully fetched). We track that by persisting the day
+// of the last successful refresh; same-day reopens skip the hide and show the cached value.
+const PORTFOLIO_REFRESH_DAY_KEY = 'portfolio_last_refresh_day';
+const currentDayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+};
+
 export function Portfolio() {
   const { data } = useFinance();
 
   const [prices, setPrices] = useState<Record<string, number>>(() => {
     const cached: Record<string, number> = {};
+    (data?.accounts || [])
+      .filter((a: Account) => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
+      .forEach((a: Account) => { const p = getCachedPrice(a.marketSymbol!); if (p !== null) cached[a.marketSymbol!] = p; });
     (data?.accounts || [])
       .filter((a: Account) => a.type === 'commodity' && a.marketSymbol)
       .forEach((a: Account) => { const p = getCachedCommodityPriceINR(a.marketSymbol!); if (p !== null) cached[a.marketSymbol!] = p; });
@@ -62,11 +74,40 @@ export function Portfolio() {
       .forEach((a: Account) => { const p = getCachedPrevCommodityPriceINR(a.marketSymbol!); if (p !== null) cached[a.marketSymbol!] = p; });
     return cached;
   });
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  // Start true: a refresh always runs on mount, and we don't want to flash a partial 1-day
+  // return (e.g. stocks-only, before MF prev-NAV loads) for a frame before the spinner shows.
+  const [isRefreshing, setIsRefreshing] = useState(true);
+  // Hide the 1-day return only on the day's first load. If we already refreshed today (per the
+  // persisted day), the cached value is current + complete, so seed this true and show it
+  // immediately on remount/reopen — and keep it on screen through later manual refreshes.
+  const [hasRefreshed, setHasRefreshed] = useState(() => {
+    try { return localStorage.getItem(PORTFOLIO_REFRESH_DAY_KEY) === currentDayStr(); } catch { return false; }
+  });
+  // Seed from the cached fetch time so "Last refresh at" shows immediately (no blink) — but only
+  // when we've already refreshed today. On the day's first load the cached fetchedAt is
+  // yesterday's, which would show a misleading HH:MM, so stay hidden until the fresh refresh.
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(() => {
+    try {
+      if (localStorage.getItem(PORTFOLIO_REFRESH_DAY_KEY) !== currentDayStr()) return null;
+      const syms = (data?.accounts || [])
+        .filter((a: Account) => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
+        .map((a: Account) => a.marketSymbol!);
+      const metalTickers = (data?.accounts || [])
+        .filter((a: Account) => a.type === 'commodity' && a.marketSymbol && a.manualPricePerGram === undefined)
+        .map((a: Account) => a.marketSymbol!);
+      const latest = Math.max(
+        getLatestFetchedAt(syms) ?? 0,
+        getLatestCommodityFetchedAt(metalTickers) ?? 0
+      );
+      return latest > 0 ? new Date(latest) : null;
+    } catch { return null; }
+  });
   const [error, setError] = useState<string | null>(null);
 
   const [selectedAsset, setSelectedAsset] = useState<Account | null>(null);
+  // Remembers the list's scroll position while a detail view is open, so returning lands back
+  // where the user was instead of at the top.
+  const listScrollRef = useRef(0);
   const [historyData, setHistoryData] = useState<HistoryDataPoint[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [stockRange, setStockRange] = useState<StockHistoryRange>('1mo');
@@ -105,7 +146,7 @@ export function Portfolio() {
     }
   }, [data?.accounts]);
 
-  const handleRefresh = async (force = false) => {
+  const handleRefresh = async () => {
     try {
       setIsRefreshing(true);
       setError(null);
@@ -125,27 +166,40 @@ export function Portfolio() {
 
       const [newPrices, commodityPriceResults] = await Promise.all([
         fetchPricesForSymbols(items),
+        // Non-forced: respects the 1h commodity cache, so repeated manual refreshes don't keep
+        // calling Gemini — a call happens only when the estimate is older than its TTL.
         Promise.all(commodityItems.map((a: Account) =>
-          fetchCommodityPriceINR(a.marketSymbol!, force).then(p => [a.marketSymbol!, p] as [string, number | null])
+          fetchCommodityPriceINR(a.marketSymbol!).then(p => [a.marketSymbol!, p] as [string, number | null])
         ))
       ]);
       commodityPriceResults.forEach(([sym, p]) => { if (p !== null) newPrices[sym] = p; });
-      setPrices(newPrices);
+      // Merge over previous values so a symbol whose fetch failed keeps its last-known price
+      // instead of dropping back to 0.
+      setPrices(prev => ({ ...prev, ...newPrices }));
 
-      const latest = getLatestFetchedAt(items.map(i => i.symbol));
-      if (latest !== null) setLastRefreshed(new Date(latest));
+      // "Last refresh at" = the most recent real fetch across stocks/MFs AND commodities, so a
+      // commodity-only refresh (its Gemini call) moves the timestamp too.
+      const latest = Math.max(
+        getLatestFetchedAt(items.map(i => i.symbol)) ?? 0,
+        getLatestCommodityFetchedAt(commodityItems.map((a: Account) => a.marketSymbol!)) ?? 0
+      );
+      if (latest > 0) setLastRefreshed(new Date(latest));
 
       const newPrevPrices = await fetchPrevClosesForSymbols(items);
       commodityItems.forEach((a: Account) => {
         const p = getCachedPrevCommodityPriceINR(a.marketSymbol!);
         if (p !== null) newPrevPrices[a.marketSymbol!] = p;
       });
-      setPrevPrices(newPrevPrices);
+      setPrevPrices(prev => ({ ...prev, ...newPrevPrices }));
+      // Mark that we've done a full refresh today, so the next same-day load shows the cached
+      // 1-day return immediately instead of hiding it.
+      try { localStorage.setItem(PORTFOLIO_REFRESH_DAY_KEY, currentDayStr()); } catch {}
     } catch (e: any) {
       console.error('Failed to refresh prices:', e);
       setError(`Price refresh failed: ${e?.message || 'Unknown error'}`);
     } finally {
       setIsRefreshing(false);
+      setHasRefreshed(true);
     }
   };
 
@@ -293,6 +347,14 @@ export function Portfolio() {
 
   const hasInvestments = sipAccounts.length > 0 || stockAccounts.length > 0 || commodityAccounts.length > 0;
 
+  // The 1-day return excludes commodities (no previous-day price). When commodities are part of
+  // the "All" view, spell out which classes the figure actually covers so it's not mistaken for
+  // the whole portfolio. Empty when there's nothing to clarify.
+  const todayScope = [
+    sipAccounts.length > 0 ? 'MF' : null,
+    stockAccounts.length > 0 ? 'Stocks' : null,
+  ].filter(Boolean).join(' + ');
+
   const userName = data.user?.name?.split(' ')[0] || 'Your';
 
   const renderAssetRow = (account: Account) => {
@@ -301,7 +363,11 @@ export function Portfolio() {
     return (
       <div
         key={account.id}
-        onClick={() => setSelectedAsset(account)}
+        onClick={() => {
+          const appRoot = document.querySelector('.app-root');
+          listScrollRef.current = appRoot?.scrollTop ?? 0;
+          setSelectedAsset(account);
+        }}
         className="clickable"
         style={{
           padding: '1rem 0',
@@ -372,7 +438,9 @@ export function Portfolio() {
 
   useEffect(() => {
     const appRoot = document.querySelector('.app-root');
-    if (appRoot) appRoot.scrollTo({ top: 0, behavior: 'auto' });
+    if (!appRoot) return;
+    // Opening a detail starts it at the top; returning restores the list's prior scroll position.
+    appRoot.scrollTo({ top: selectedAsset ? 0 : listScrollRef.current, behavior: 'auto' });
   }, [selectedAsset]);
 
   return (
@@ -392,19 +460,21 @@ export function Portfolio() {
           ₹{Math.round(portfolioStats[portfolioView].current).toLocaleString('en-IN')}
         </div>
 
-        {portfolioOneDayReturn !== null ? (
+        {isRefreshing && !hasRefreshed ? null : portfolioOneDayReturn !== null ? (
           <div style={{ marginTop: '0.75rem', textAlign: 'center' }}>
             <div style={{ fontSize: '0.95rem', fontWeight: 600, color: portfolioOneDayReturn.amount >= 0 ? '#22c55e' : '#ef4444' }}>
               {portfolioOneDayReturn.amount >= 0 ? '↑' : '↓'} ₹{Math.abs(portfolioOneDayReturn.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(portfolioOneDayReturn.pct).toFixed(2)}%)
             </div>
-            <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.2rem', letterSpacing: '0.5px' }}>Today</div>
+            <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.2rem', letterSpacing: '0.5px' }}>
+              Today{portfolioView === 'all' && commodityAccounts.length > 0 && todayScope ? ` (${todayScope})` : ''}
+            </div>
           </div>
-        ) : (
+        ) : portfolioView !== 'commodity' && (sipAccounts.length > 0 || stockAccounts.length > 0) ? (
           <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.75rem' }}>— today</div>
-        )}
+        ) : null}
 
         <button
-          onClick={() => handleRefresh(true)}
+          onClick={() => handleRefresh()}
           disabled={isRefreshing}
           style={{
             marginTop: '1.25rem',
@@ -432,13 +502,18 @@ export function Portfolio() {
           </div>
         )}
 
-        {(sipAccounts.length > 0 || stockAccounts.length > 0 || commodityAccounts.length > 0) && (() => {
-          const tabs = [
-            { v: 'all', label: 'All' },
-            { v: 'mf', label: 'MF' },
-            { v: 'stocks', label: 'Stocks' },
-            { v: 'commodity', label: 'Metals' },
-          ] as const;
+        {(() => {
+          // One tab per asset class that's actually present, plus "All". The bar only appears
+          // when more than one class exists — with a single class "All" is identical to it, so
+          // the bar would be noise (and with only MFs, there's nothing to filter at all).
+          const presentTabs = [
+            sipAccounts.length > 0 ? { v: 'mf' as const, label: 'MF' } : null,
+            stockAccounts.length > 0 ? { v: 'stocks' as const, label: 'Stocks' } : null,
+            commodityAccounts.length > 0 ? { v: 'commodity' as const, label: 'Metals' } : null,
+          ].filter((t): t is { v: 'mf' | 'stocks' | 'commodity'; label: string } => t !== null);
+          if (presentTabs.length < 2) return null;
+          const tabs = [{ v: 'all' as const, label: 'All' }, ...presentTabs];
+          const N = tabs.length;
           const activeIdx = tabs.findIndex(t => t.v === portfolioView);
           const PAD = 4;
           return (
@@ -450,14 +525,14 @@ export function Portfolio() {
               background: 'rgba(255,255,255,0.05)',
               borderRadius: '999px',
               border: '1px solid rgba(255,255,255,0.08)',
-              width: '272px',
+              width: `${N * 68}px`,
             }}>
               <div style={{
                 position: 'absolute',
                 top: `${PAD}px`,
                 bottom: `${PAD}px`,
-                width: `calc((100% - ${PAD * 2}px) / 4)`,
-                left: `calc(${PAD}px + ${activeIdx} * (100% - ${PAD * 2}px) / 4)`,
+                width: `calc((100% - ${PAD * 2}px) / ${N})`,
+                left: `calc(${PAD}px + ${activeIdx} * (100% - ${PAD * 2}px) / ${N})`,
                 borderRadius: '999px',
                 background: 'rgba(255,255,255,0.11)',
                 backdropFilter: 'blur(8px)',

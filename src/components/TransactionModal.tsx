@@ -1,14 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { format, parseISO } from 'date-fns';
-import {
-  ShoppingBag, Utensils, Zap, Car, HeartPulse, Film, CreditCard, Wallet,
-  ArrowRightLeft, MoreHorizontal, Coins, BadgeDollarSign, Home, Gift,
-  Landmark, Sparkles, Calendar, TrendingUp, Train, BarChart, Hash
-} from 'lucide-react';
+import { Sparkles, Calendar, Hash, BanknoteArrowUp, BanknoteArrowDown } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account } from '../types';
 import { CustomPicker } from './CustomPicker';
+import { getCategoryIcon } from './transactionIcons';
 import { getBillingCycleForDate } from '../utils';
 
 interface TransactionModalProps {
@@ -18,28 +15,6 @@ interface TransactionModalProps {
   initialData?: Partial<Transaction>;
   onSuccess?: () => void;
 }
-
-export const getCategoryIcon = (category: string) => {
-  const cat = category.toLowerCase();
-  if (cat.includes('ncmc')) return <Train size={17} />;
-  if (cat.includes('shop')) return <ShoppingBag size={17} />;
-  if (cat.includes('food') || cat.includes('eat') || cat.includes('dine')) return <Utensils size={17} />;
-  if (cat.includes('travel') || cat.includes('transport') || cat.includes('fuel')) return <Car size={17} />;
-  if (cat.includes('bill') || cat.includes('recharge') || cat.includes('utility')) return <Zap size={17} />;
-  if (cat.includes('health') || cat.includes('med')) return <HeartPulse size={17} />;
-  if (cat.includes('entertain') || cat.includes('movie') || cat.includes('ott')) return <Film size={17} />;
-  if (cat.includes('salary')) return <BadgeDollarSign size={17} />;
-  if (cat.includes('income')) return <Wallet size={17} />;
-  if (cat.includes('cc payment')) return <CreditCard size={17} />;
-  if (cat.includes('transfer')) return <ArrowRightLeft size={17} />;
-  if (cat.includes('rent')) return <Home size={17} />;
-  if (cat.includes('loan')) return <Landmark size={17} />;
-  if (cat.includes('cashback')) return <Gift size={17} />;
-  if (cat.includes('sip')) return <BarChart size={17} />;
-  if (cat.includes('stocks')) return <TrendingUp size={17} />;
-  if (cat.includes('miscellaneous') || cat.includes('other')) return <MoreHorizontal size={17} />;
-  return <Coins size={17} />;
-};
 
 export const getAccountIcon = (accountId: string, accounts: Account[]) => {
   const acc = accounts.find(a => a.id === accountId);
@@ -387,7 +362,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   accountId: nextAccountId
                 };
               });
-            }} iconGetter={_id => _id === 'debit' ? '📉' : '📈'} style={{ marginBottom: 0 }} />
+            }} iconGetter={_id => _id === 'debit' ? <BanknoteArrowDown size={18} /> : <BanknoteArrowUp size={18} />} style={{ marginBottom: 0 }} />
           </div>
 
           <CustomPicker 

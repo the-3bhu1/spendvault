@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, FileJson, ChevronDown, Sparkles, ShieldAlert, Hash } from 'lucide-react';
+import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, FileJson, ChevronDown, Sparkles, ShieldAlert, Hash, Bot, BotOff } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
 import ConfirmDialog from './ConfirmDialog';
 import TransparentLogo from './TransparentLogo';
@@ -106,7 +106,7 @@ export default function Settings() {
   const [newCat, setNewCat] = useState('');
   const [newAccountType, setNewAccountType] = useState('');
   const [newTagEntry, setNewTagEntry] = useState('');
-  const [activeView, setActiveView] = useState<'main' | 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem'>('main');
+  const [activeView, setActiveView] = useState<'main' | 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem' | 'commodity'>('main');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
@@ -114,7 +114,7 @@ export default function Settings() {
   const touchStartY = useRef<number>(0);
   const savedScrollPos = useRef<number>(0);
 
-  const navigateTo = (view: 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem') => {
+  const navigateTo = (view: 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem' | 'commodity') => {
     const appRoot = document.querySelector('.app-root');
     if (appRoot) savedScrollPos.current = (appRoot as HTMLElement).scrollTop;
     setActiveView(view);
@@ -622,15 +622,32 @@ export default function Settings() {
     })();
   }, []);
 
+  // Re-read key + today's usage each time the commodity screen is opened, so the green status
+  // and the fetch progress bar are current.
+  useEffect(() => {
+    if (activeView !== 'commodity') return;
+    (async () => {
+      setGeminiKeySaved(await hasGeminiKey());
+      setGeminiUsage(getGeminiUsageToday());
+    })();
+  }, [activeView]);
+
+  // The commodity AI square only matters when the user actually holds commodities.
+  const hasCommodity = (data.accounts || []).some(a => a.type === 'commodity');
+
   const handleSaveGemini = async () => {
     try {
+      const keyEntered = geminiKeyInput.trim() !== '';
       setCommodityVendor(geminiVendorInput);
-      if (geminiKeyInput.trim()) {
+      if (keyEntered) {
         await setGeminiKey(geminiKeyInput.trim());
         setGeminiKeyInput('');
+        // The key-storage note is only relevant when a key was actually entered.
+        showAlert('Saved. Your Gemini key is stored in the device keystore, not in the app.', 'Commodity Prices');
+      } else {
+        showAlert('Vendor updated.', 'Commodity Prices');
       }
       setGeminiKeySaved(await hasGeminiKey());
-      showAlert('Saved. Your Gemini key is stored in the device keystore, not in the app.', 'Commodity Prices');
     } catch {
       showAlert('Could not save the key to secure storage. Make sure your device has a screen lock (PIN/biometric) enabled.', 'Secure Storage Error');
     }
@@ -1855,6 +1872,77 @@ export default function Settings() {
         </div>
       </SubviewWrapper>
     );
+  } else if (activeView === 'commodity') {
+    const FETCH_LIMIT = 24; // user-facing daily limit; the internal hard cap (GeminiService) is higher
+    const used = Math.min(geminiUsage.count, FETCH_LIMIT);
+    const pct = Math.min(geminiUsage.count / FETCH_LIMIT, 1) * 100;
+    const atLimit = geminiUsage.count >= FETCH_LIMIT;
+    // Enable Save only when something actually changed: a new key was typed, or the vendor edited.
+    const commodityDirty = geminiKeyInput.trim() !== '' || geminiVendorInput.trim() !== getCommodityVendor();
+    viewContent = (
+      <SubviewWrapper title="Commodity Prices" onBack={() => setActiveView('main')}>
+        <div className="flex-col gap-4">
+          <div className="card flex-col gap-3" style={{ padding: '1rem' }}>
+            <SettingsCardHeader icon={geminiKeySaved ? Bot : BotOff} title="Commodity Prices (AI)" level="h3" size={20} marginBottom="0.5rem" />
+            <span className="text-xs text-muted">
+              Optional. Auto-fetches an approximate gold/silver ₹/g for your holdings using your own Google Gemini key (BYOK) — get a free one at{' '}
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'underline' }}>aistudio.google.com</a>. Your key is stored in the device keystore, never bundled or shared. Without a key, set a manual ₹/g per commodity account.
+            </span>
+            <div className="input-group" style={{ marginBottom: 0 }}>
+              <label>Gemini API Key {geminiKeySaved && <span style={{ color: 'var(--success)' }}>· saved</span>}</label>
+              <input
+                type="password"
+                className="input-field"
+                value={geminiKeyInput}
+                onChange={e => setGeminiKeyInput(e.target.value)}
+                placeholder={geminiKeySaved ? '•••••••• (saved — type to replace)' : 'Paste your Gemini API key'}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </div>
+            <div className="input-group" style={{ marginBottom: 0 }}>
+              <label>Vendor (price reference)</label>
+              <input
+                className="input-field"
+                value={geminiVendorInput}
+                onChange={e => setGeminiVendorInput(e.target.value)}
+                placeholder="MMTC-PAMP"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </div>
+            <span className="text-xs text-muted">
+              Prices are approximate AI estimates (may lag the live rate). Set a manual ₹/g on any commodity account for exact valuation.
+            </span>
+            {geminiKeySaved && (
+              <div className="flex-col gap-2">
+                <div className="flex justify-between align-center" style={{ fontSize: '0.7rem' }}>
+                  <span className="text-mono text-muted" style={{ textTransform: 'uppercase', letterSpacing: '1px' }}>AI fetches today</span>
+                  <span className="text-mono font-bold" style={{ color: atLimit ? 'var(--danger)' : 'var(--accent)' }}>{used} / {FETCH_LIMIT}</span>
+                </div>
+                <div style={{ height: '7px', background: 'var(--bg-hover)', borderRadius: '999px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: atLimit ? 'var(--danger)' : 'var(--accent)', borderRadius: '999px', transition: 'width 0.35s ease' }} />
+                </div>
+                <span className="text-xs text-muted">
+                  {atLimit ? 'Daily limit reached — using cached/manual prices until tomorrow.' : 'Prices refresh at most once an hour to stay within the limit.'}
+                </span>
+              </div>
+            )}
+            <div className="flex gap-3">
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1, opacity: commodityDirty ? 1 : 0.5, cursor: commodityDirty ? 'pointer' : 'not-allowed' }}
+                disabled={!commodityDirty}
+                onClick={handleSaveGemini}
+              >Save</button>
+              {geminiKeySaved && <button className="btn btn-secondary" onClick={handleClearGemini}>Remove Key</button>}
+            </div>
+          </div>
+        </div>
+      </SubviewWrapper>
+    );
   } else {
     viewContent = (
       <div className="flex-col">
@@ -1904,13 +1992,15 @@ export default function Settings() {
             </div>
           </div>
 
-          {/* Android-only: Auto-Log SMS + Background Guide (tour-smart-features-android for union rect) */}
-          {Capacitor.getPlatform() === 'android' && (
+          {/* Smart Features: Android auto-log + background guide, plus the BYOK commodity AI
+              square when the user holds commodities (tour-smart-features-android union rect) */}
+          {(Capacitor.getPlatform() === 'android' || hasCommodity) && (
             <>
               <SectionHeader title="Smart Features" />
               <div className="grid tour-smart-features-android" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-                <GridToggleButton 
-                  icon={Sparkles} 
+                {Capacitor.getPlatform() === 'android' && (<>
+                <GridToggleButton
+                  icon={Sparkles}
                   label="Auto-Log SMS" 
                   active={!!data.user?.autoLogSms} 
                   onClick={async () => {
@@ -1970,54 +2060,18 @@ export default function Settings() {
                 {Capacitor.isNativePlatform() && (
                   <GridButton icon={ShieldAlert} label="Background Guide" onClick={() => navigateTo('oem')} />
                 )}
+                </>)}
+                {hasCommodity && (
+                  <GridToggleButton
+                    icon={geminiKeySaved ? Bot : BotOff}
+                    label="Commodity AI"
+                    active={geminiKeySaved}
+                    onClick={() => navigateTo('commodity')}
+                  />
+                )}
               </div>
             </>
           )}
-
-          <SectionHeader title="Commodity Prices (AI)" />
-          <div className="card flex-col gap-3" style={{ padding: '1rem' }}>
-            <span className="text-xs text-muted">
-              Optional. Auto-fetches an approximate gold/silver ₹/g for your holdings using your own Google Gemini key (BYOK) — get a free one at aistudio.google.com. Your key is stored in the device keystore, never bundled or shared. Without a key, set a manual ₹/g per commodity account.
-            </span>
-            <div className="input-group" style={{ marginBottom: 0 }}>
-              <label>Gemini API Key {geminiKeySaved && <span style={{ color: 'var(--success)' }}>· saved</span>}</label>
-              <input
-                type="password"
-                className="input-field"
-                value={geminiKeyInput}
-                onChange={e => setGeminiKeyInput(e.target.value)}
-                placeholder={geminiKeySaved ? '•••••••• (saved — type to replace)' : 'Paste your Gemini API key'}
-                autoComplete="off"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-            </div>
-            <div className="input-group" style={{ marginBottom: 0 }}>
-              <label>Vendor (price reference)</label>
-              <input
-                className="input-field"
-                value={geminiVendorInput}
-                onChange={e => setGeminiVendorInput(e.target.value)}
-                placeholder="MMTC-PAMP"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-            </div>
-            <span className="text-xs text-muted">
-              Prices are approximate AI estimates (may lag the live rate). Set a manual ₹/g on any commodity account for exact valuation.
-            </span>
-            {geminiKeySaved && (
-              <span className="text-xs" style={{ color: geminiUsage.count >= geminiUsage.cap ? 'var(--danger)' : 'var(--text-muted)' }}>
-                AI fetches today: {geminiUsage.count} / {geminiUsage.cap}
-                {geminiUsage.count >= geminiUsage.cap ? ' — daily cap reached, using cached/manual until tomorrow' : ' (safety cap; prices refresh at most every 6h)'}
-              </span>
-            )}
-            <div className="flex gap-3">
-              <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSaveGemini}>Save</button>
-              {geminiKeySaved && <button className="btn btn-secondary" onClick={handleClearGemini}>Remove Key</button>}
-            </div>
-          </div>
 
           <SectionHeader title="data management" />
           <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>

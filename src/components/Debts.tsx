@@ -16,17 +16,12 @@ import {
   Search,
   UserPlus,
   Wallet,
-  CreditCard,
-  Landmark,
-  Coins,
-  Smartphone,
-  Gift,
   Edit2,
-  Calendar,
-  BarChart3
+  Calendar
 } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
+import { getAccountTypeIcon } from './transactionIcons';
 import { generateId, formatCurrency, calculateBalance, getCurrentMonthStr } from '../utils';
 import type { Debt, DebtTransaction, Account } from '../types';
 import { CustomPicker } from './CustomPicker';
@@ -824,31 +819,20 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
   const getAccountIcon = (accountId: string) => {
     const acc = accounts.find(a => a.id === accountId);
     if (!acc) return <Wallet size={18} />;
-
-    switch (acc.type) {
-      case 'credit_card':
-      case 'debit_card':
-        return <CreditCard size={18} />;
-      case 'bank_account':
-        return <Landmark size={18} />;
-      case 'e_wallet':
-        return <Smartphone size={18} />;
-      case 'rewards':
-        return <Gift size={18} />;
-      case 'cash':
-        return <Coins size={18} />;
-      case 'sips':
-        return <BarChart3 size={18} />;
-      default:
-        return <Wallet size={18} />;
-    }
+    return getAccountTypeIcon(acc.type);
   };
 
   const { data } = useFinance();
   const accountOptions = useMemo(() => {
     const currentMonth = getCurrentMonthStr();
+    const TYPE_ORDER = ['bank_account', 'credit_card', 'debit_card', 'cash', 'e_wallet'];
     return accounts
-      .filter(acc => !['stocks', 'sips', 'rewards'].includes(acc.type))
+      .filter(acc => !['stocks', 'sips', 'rewards', 'commodity'].includes(acc.type))
+      .sort((a, b) => {
+        const ai = TYPE_ORDER.indexOf(a.type);
+        const bi = TYPE_ORDER.indexOf(b.type);
+        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+      })
       .map(acc => ({
         id: acc.id,
         name: acc.name,
@@ -1129,30 +1113,19 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
   const getAccountIcon = (accountId: string) => {
     const acc = accounts.find(a => a.id === accountId);
     if (!acc) return <Wallet size={18} />;
-
-    switch (acc.type) {
-      case 'credit_card':
-      case 'debit_card':
-        return <CreditCard size={18} />;
-      case 'bank_account':
-        return <Landmark size={18} />;
-      case 'e_wallet':
-        return <Smartphone size={18} />;
-      case 'rewards':
-        return <Gift size={18} />;
-      case 'cash':
-        return <Coins size={18} />;
-      case 'sips':
-        return <BarChart3 size={18} />;
-      default:
-        return <Wallet size={18} />;
-    }
+    return getAccountTypeIcon(acc.type);
   };
 
   const accountOptions = useMemo(() => {
     const currentMonth = getCurrentMonthStr();
+    const TYPE_ORDER = ['bank_account', 'credit_card', 'debit_card', 'cash', 'e_wallet'];
     return accounts
-      .filter(acc => !['stocks', 'sips', 'rewards'].includes(acc.type))
+      .filter(acc => !['stocks', 'sips', 'rewards', 'commodity'].includes(acc.type))
+      .sort((a, b) => {
+        const ai = TYPE_ORDER.indexOf(a.type);
+        const bi = TYPE_ORDER.indexOf(b.type);
+        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+      })
       .map(acc => ({
         id: acc.id,
         name: acc.name,

@@ -3,34 +3,11 @@ import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account } from '../types';
 import { generateId, formatCurrency, formatAmount, formatDateString, getBillingCycleForDate, calculateBalance, getCurrentMonthStr } from '../utils';
-import { ShoppingBag, Utensils, Zap, Car, HeartPulse, Film, CreditCard, Wallet, ArrowRightLeft, MoreHorizontal, Coins, BadgeDollarSign, Calendar, Activity, X, Search, Home, Gift, Landmark, Smartphone, Sparkles, ChevronRight, TrendingUp, Train, BarChart, BarChart3, Hash, Gem, Medal } from 'lucide-react';
+import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, Sparkles, ChevronRight, Hash, BanknoteArrowUp, BanknoteArrowDown } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
-
-
-const getCategoryIcon = (category: string) => {
-  const cat = category.toLowerCase();
-  if (cat.includes('ncmc')) return <Train size={17} />;
-  if (cat.includes('shop')) return <ShoppingBag size={17} />;
-  if (cat.includes('food') || cat.includes('eat') || cat.includes('dine')) return <Utensils size={17} />;
-  if (cat.includes('travel') || cat.includes('transport') || cat.includes('fuel')) return <Car size={17} />;
-  if (cat.includes('bill') || cat.includes('recharge') || cat.includes('utility')) return <Zap size={17} />;
-  if (cat.includes('health') || cat.includes('med')) return <HeartPulse size={17} />;
-  if (cat.includes('entertain') || cat.includes('movie') || cat.includes('ott')) return <Film size={17} />;
-  if (cat.includes('salary')) return <BadgeDollarSign size={17} />;
-  if (cat.includes('income')) return <Wallet size={17} />;
-  if (cat.includes('cc payment')) return <CreditCard size={17} />;
-  if (cat.includes('transfer')) return <ArrowRightLeft size={17} />;
-  if (cat.includes('rent')) return <Home size={17} />;
-  if (cat.includes('loan')) return <Landmark size={17} />;
-  if (cat.includes('cashback')) return <Gift size={17} />;
-  if (cat.includes('sip')) return <BarChart size={17} />;
-  if (cat.includes('stocks')) return <TrendingUp size={17} />;
-  if (cat.includes('commodity')) return <Gem size={17} />;
-  if (cat.includes('miscellaneous') || cat.includes('other')) return <MoreHorizontal size={17} />;
-  return <Coins size={17} />;
-};
+import { getCategoryIcon, getAccountTypeIcon } from './transactionIcons';
 
 const isCountableTransaction = (tx: Transaction) => {
   const catLower = (tx.category || '').toLowerCase();
@@ -548,29 +525,7 @@ export default function Transactions() {
     if (accId === 'all') return <Activity size={18} />;
     const acc = data.accounts.find(a => a.id === accId);
     if (!acc) return <Wallet size={18} />;
-
-    switch (acc.type) {
-      case 'credit_card':
-      case 'debit_card':
-        return <CreditCard size={18} />;
-      case 'bank_account':
-        return <Landmark size={18} />;
-      case 'e_wallet':
-        return <Smartphone size={18} />;
-      case 'rewards':
-        return <Gift size={18} />;
-      case 'cash':
-        return <Coins size={18} />;
-      case 'sips':
-        return <BarChart3 size={18} />;
-      case 'stocks':
-      case 'investment':
-        return <TrendingUp size={18} />;
-      case 'commodity':
-        return <Medal size={18} />;
-      default:
-        return <Wallet size={18} />;
-    }
+    return getAccountTypeIcon(acc.type);
   };
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -663,7 +618,20 @@ export default function Transactions() {
     const allottedAmount = isInvestment ? (newTx.sipAllottedAmount !== undefined ? Number(newTx.sipAllottedAmount) : Number(newTx.amount)) : Number(newTx.amount);
     const sipCharges = isInvestment ? (newTx.sipCharges !== undefined ? Number(newTx.sipCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined;
 
-    if (isStocks && paymentSourceAccountId && !editId) {
+    // Does an investment counterpart leg already exist (i.e. we're editing, not creating)? If so,
+    // we skip re-creating it here — updateTransaction() in FinanceContext keeps it in sync, and
+    // clears it when the pairing/category is removed. We only create a leg when there isn't one
+    // yet, which also covers converting a plain log into an investment via edit.
+    const hasLinkedCategoryLeg = (catLower: string) => currentLinkedIds.some(id => {
+      const lt = data.transactions.find(t => t.id === id);
+      return !!lt && lt.id !== mainTxId && lt.category?.toLowerCase() === catLower;
+    });
+    const hasStocksLeg = hasLinkedCategoryLeg('stocks');
+    const hasSipLeg = hasLinkedCategoryLeg('sip');
+    const hasCommodityLeg = hasLinkedCategoryLeg('commodity');
+    const hasTransferOrCCLeg = hasLinkedCategoryLeg('transfer') || hasLinkedCategoryLeg('cc payment');
+
+    if (isStocks && paymentSourceAccountId && !hasStocksLeg) {
       const bankCounterpartId = generateId();
       currentLinkedIds.push(bankCounterpartId);
       const counterpartType = newTx.type === 'credit' ? 'debit' : 'credit';
@@ -681,7 +649,7 @@ export default function Transactions() {
         sipAllottedAmount: allottedAmount,
         sipCharges: sipCharges
       });
-    } else if (isCommodity && paymentSourceAccountId && !editId) {
+    } else if (isCommodity && paymentSourceAccountId && !hasCommodityLeg) {
       const bankCounterpartId = generateId();
       currentLinkedIds.push(bankCounterpartId);
       const counterpartType = newTx.type === 'credit' ? 'debit' : 'credit';
@@ -697,7 +665,7 @@ export default function Transactions() {
         linkedTransactionIds: [mainTxId],
         numberOfShares: newTx.numberOfShares
       });
-    } else if (isSip && paymentSourceAccountId && !editId) {
+    } else if (isSip && paymentSourceAccountId && !hasSipLeg) {
       const bankCounterpartId = generateId();
       currentLinkedIds.push(bankCounterpartId);
       const counterpartType = newTx.type === 'debit' ? 'credit' : 'debit';
@@ -715,7 +683,7 @@ export default function Transactions() {
         sipAllottedAmount: allottedAmount,
         sipCharges: sipCharges
       });
-    } else if ((isTransfer || isCCPayment) && paymentSourceAccountId && !editId) {
+    } else if ((isTransfer || isCCPayment) && paymentSourceAccountId && !hasTransferOrCCLeg) {
       const bankCounterpartId = generateId();
       currentLinkedIds.push(bankCounterpartId);
       const destAccount = data.accounts.find(a => a.id === paymentSourceAccountId);
@@ -1710,7 +1678,7 @@ export default function Transactions() {
                     }
                     setNewTx({ ...newTx, type: newType, description: updatedDesc, accountId: updatedAccountId, isTravelTransaction: updatedIsTravel });
                   }}
-                  iconGetter={_id => _id === 'debit' ? '📉' : '📈'}
+                  iconGetter={_id => _id === 'debit' ? <BanknoteArrowDown size={18} /> : <BanknoteArrowUp size={18} />}
                   style={{ marginBottom: 0 }}
                 />
               </div>

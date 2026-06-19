@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { format, addMonths, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown } from 'lucide-react';
-import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols, isCacheFresh, searchMFByName, searchStockByName, fetchCommodityPriceINR, getCachedCommodityPriceINR } from '../services/MarketDataService';
+import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols, isCacheFresh, searchMFByName, searchStockByName, fetchCommodityPriceINR, getCachedCommodityPriceINR, isCommodityCacheFresh } from '../services/MarketDataService';
 import type { MFSearchResult, StockSearchResult } from '../services/MarketDataService';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
@@ -65,18 +65,51 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     if (stockSipItems.length === 0 && commodityAccs.length === 0) return;
     const allSyms = [...stockSipItems.map(i => i.symbol), ...commodityAccs.map(a => a.marketSymbol!)];
     setRefreshingSymbols(new Set(allSyms));
-    Promise.all([
-      fetchPricesForSymbols(stockSipItems),
+    const clearRefreshing = (syms: string[]) =>
+      setRefreshingSymbols(prev => { const s = new Set(prev); syms.forEach(sym => s.delete(sym)); return s; });
+
+    // Stocks + MFs (Yahoo / mfapi.in) un-skeleton as soon as their batch lands — independent
+    // of the slower Gemini commodity call, so quick price sources don't wait on the estimate.
+    if (stockSipItems.length) {
+      fetchPricesForSymbols(stockSipItems).then(stockSipPrices => {
+        setPrices(prev => ({ ...prev, ...stockSipPrices }));
+        clearRefreshing(stockSipItems.map(i => i.symbol));
+      });
+    }
+
+    // Commodities (Gemini grounding) resolve on their own timeline.
+    if (commodityAccs.length) {
       Promise.all(commodityAccs.map(a =>
         fetchCommodityPriceINR(a.marketSymbol!).then(p => [a.marketSymbol!, p] as [string, number | null])
-      ))
-    ]).then(([stockSipPrices, commodityPrices]) => {
-      const result = { ...stockSipPrices };
-      commodityPrices.forEach(([sym, p]) => { if (p !== null) result[sym] = p; });
-      setPrices(prev => ({ ...prev, ...result }));
-      setRefreshingSymbols(new Set());
-    });
+      )).then(commodityPrices => {
+        const result: Record<string, number> = {};
+        commodityPrices.forEach(([sym, p]) => { if (p !== null) result[sym] = p; });
+        setPrices(prev => ({ ...prev, ...result }));
+        clearRefreshing(commodityAccs.map(a => a.marketSymbol!));
+      });
+    }
   }, []);
+
+  // This tab stays mounted for the whole session (App renders it with display:none), so its
+  // mount-time fetch above runs only once. Re-sync from the shared price cache whenever any
+  // screen refreshes prices (e.g. the Portfolio "Refresh prices" button) so we don't show a
+  // stale estimate relative to other views.
+  useEffect(() => {
+    const resync = () => {
+      setPrices(prev => {
+        const next = { ...prev };
+        data.accounts
+          .filter(a => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
+          .forEach(a => { const p = getCachedPrice(a.marketSymbol!); if (p !== null) next[a.marketSymbol!] = p; });
+        data.accounts
+          .filter(a => a.type === 'commodity' && a.marketSymbol)
+          .forEach(a => { const p = getCachedCommodityPriceINR(a.marketSymbol!); if (p !== null) next[a.marketSymbol!] = p; });
+        return next;
+      });
+    };
+    window.addEventListener('marketPricesUpdated', resync);
+    return () => window.removeEventListener('marketPricesUpdated', resync);
+  }, [data.accounts]);
 
   const handleLiquidate = (acc: Account) => {
     const currentMonth = getCurrentMonthStr();
@@ -1078,6 +1111,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       {acc.type === 'commodity' && (() => {
                         const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
                         const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
+                        const isFresh = acc.marketSymbol ? isCommodityCacheFresh(acc.marketSymbol) : false;
                         return (
                           <>
                             {commodityTotalGrams > 0 && (
@@ -1104,25 +1138,44 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                         </span>
                                       )}
                                     </div>
-                                    {(commodityCurrentValue !== null && commodityEffectiveInvested !== undefined && !isRefreshing) && (() => {
-                                      const pnl = commodityCurrentValue - commodityEffectiveInvested;
-                                      const pnlPct = commodityEffectiveInvested > 0 ? (pnl / commodityEffectiveInvested) * 100 : 0;
-                                      return (
-                                        <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
-                                          <span className="text-mono text-muted text-xs">P&amp;L ({pnl >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
-                                          <span style={{ color: pnl >= 0 ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                            {pnl >= 0 ? '+' : '-'}₹{Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                                          </span>
-                                        </div>
-                                      );
-                                    })()}
+                                    <div className="flex align-center" style={{ gap: '0.75rem' }}>
+                                      {(commodityCurrentValue !== null && commodityEffectiveInvested !== undefined && !isRefreshing) && (() => {
+                                        const pnl = commodityCurrentValue - commodityEffectiveInvested;
+                                        const pnlPct = commodityEffectiveInvested > 0 ? (pnl / commodityEffectiveInvested) * 100 : 0;
+                                        return (
+                                          <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
+                                            <span className="text-mono text-muted text-xs">P&amp;L ({pnl >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
+                                            <span style={{ color: pnl >= 0 ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                              {pnl >= 0 ? '+' : '-'}₹{Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                            </span>
+                                          </div>
+                                        );
+                                      })()}
+                                      {commodityPriceSource === 'estimate' && (!isFresh || isRefreshing) && (
+                                        <button
+                                          className="btn btn-secondary"
+                                          style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : !isFresh ? 'var(--success)' : undefined, color: !isFresh && !isRefreshing ? 'var(--success)' : undefined }}
+                                          title="Refresh estimate"
+                                          disabled={isRefreshing}
+                                          onClick={async () => {
+                                            const sym = acc.marketSymbol!;
+                                            setSymbolRefreshing(sym, true);
+                                            const p = await fetchCommodityPriceINR(sym);
+                                            if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym);
+                                            setSymbolRefreshing(sym, false);
+                                          }}
+                                        >
+                                          <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
+                                        </button>
+                                      )}
+                                    </div>
                                   </>
                                 ) : (
                                   <>
                                     <span className="text-mono text-muted text-xs">₹ / GRAM</span>
                                     {isFailed && !isRefreshing
-                                      ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Fetch failed · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym, true); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
-                                      : <button className="btn btn-secondary" style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym, true); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Fetch</button>
+                                      ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Fetch failed · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
+                                      : <button className="btn btn-secondary" style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Fetch</button>
                                     }
                                   </>
                                 )}
