@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account } from '../types';
 import { generateId, formatCurrency, formatAmount, formatDateString, getBillingCycleForDate, calculateBalance, getCurrentMonthStr } from '../utils';
-import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, Sparkles, ChevronRight, Hash, BanknoteArrowUp, BanknoteArrowDown } from 'lucide-react';
+import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, Sparkles, ChevronRight, Hash, BanknoteArrowUp, BanknoteArrowDown, Shapes } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
@@ -609,6 +609,8 @@ export default function Transactions() {
       currentLinkedIds = existingTx?.linkedTransactionIds || (existingTx?.linkedTransactionId ? [existingTx.linkedTransactionId] : []);
     }
 
+    // Linked counterpart (child leg) creation. Edit/delete sync behavior is documented in
+    // docs/LINKED_TRANSACTIONS.md — keep that matrix accurate when changing this block.
     const isTransfer = newTx.category?.toLowerCase() === 'transfer';
     const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
     const isSip = newTx.category?.toLowerCase() === 'sip';
@@ -923,11 +925,14 @@ export default function Transactions() {
     };
     setNewTx(sanitizedTx);
 
-    // Find linked counterpart account (Transfer/CC payment)
+    // Find linked counterpart account (Transfer/CC payment). Reward-split and cashback child
+    // legs are excluded — they reciprocate via dedicated reverse-propagation in
+    // updateTransaction, not the transfer/payment leg path. See docs/LINKED_TRANSACTIONS.md.
     const linkedIds = tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []);
-    const counterpartTx = data.transactions.find(t =>
-      linkedIds.includes(t.id) &&
-      t.id !== tx.id &&
+    const linkedTxs = data.transactions.filter(t => linkedIds.includes(t.id) && t.id !== tx.id);
+    const isRewardChild = linkedTxs.some(p => p.rewardUsedAccountId && p.rewardUsedAccountId === tx.accountId);
+    const isCashbackChild = tx.category === 'Cashback';
+    const counterpartTx = (isRewardChild || isCashbackChild) ? undefined : linkedTxs.find(t =>
       t.category !== 'Cashback' &&
       t.accountId !== tx.rewardUsedAccountId
     );
@@ -1282,7 +1287,7 @@ export default function Transactions() {
                   ...[...data.accounts].sort(sortByAccountType).map(a => ({ id: a.id, name: a.name }))
                 ]}
                 onChange={setFilterAccountId}
-                iconGetter={getAccountIcon}
+                iconGetter={(id) => id === 'all' ? <Wallet size={18} /> : getAccountIcon(id)}
               />
             </div>
             <div className="flex-col gap-1" style={{ minWidth: 0 }}>
@@ -1297,7 +1302,7 @@ export default function Transactions() {
                   ...(data.categories || []).map(c => ({ id: c, name: c }))
                 ]}
                 onChange={setFilterCategory}
-                iconGetter={getCategoryIcon}
+                iconGetter={(c) => c === 'all' ? <Shapes size={17} /> : getCategoryIcon(c)}
               />
             </div>
             {(data.tags || []).length > 0 && (

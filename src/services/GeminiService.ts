@@ -49,6 +49,63 @@ export function getGeminiUsageToday(): { count: number; cap: number } {
   return { count: readUsage().count, cap: GEMINI_DAILY_CAP };
 }
 
+// Resolves the official primary website domain for a company / mutual-fund house, for logo
+// lookup. Uses Google Search grounding. Returns a bare hostname (e.g. "olaelectric.com") or null
+// on no-key / cap-reached / not-found / any failure. Counts against the shared daily cap.
+function sanitizeDomain(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  let d = v.trim().toLowerCase();
+  if (!d) return null;
+  d = d.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].split('?')[0].trim();
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d) ? d : null;
+}
+
+export async function resolveBrandDomain(query: string): Promise<string | null> {
+  const key = await getGeminiKey();
+  if (!key) return null;
+  if (readUsage().count >= GEMINI_DAILY_CAP) {
+    console.warn('Gemini: daily safety cap reached; skipping logo domain lookup until tomorrow.');
+    return null;
+  }
+  bumpUsage();
+
+  const model = getGeminiModel();
+  const prompt =
+`Using Google Search, find the official primary website domain of this Indian-listed company or mutual fund house: "${query}".
+Respond with ONLY this strict minified JSON and NOTHING else — no prose, no markdown:
+{"domain":"<bare hostname>"}
+Rules: bare registrable hostname only (e.g. "olaelectric.com", "tcs.com") — no "https://", no "www.", no path. Use the company's main corporate site, not a stock-exchange or aggregator page. If you cannot confidently identify it, use an empty string.`;
+
+  const body = { contents: [{ parts: [{ text: prompt }] }], tools: [{ google_search: {} }] };
+  let j: any = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+      );
+      j = await res.json();
+    } catch {
+      return null;
+    }
+    if (j?.error && (j.error.code === 503 || j.error.status === 'UNAVAILABLE')) {
+      await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+      continue;
+    }
+    break;
+  }
+
+  const txt: string = (j?.candidates?.[0]?.content?.parts || [])
+    .map((p: any) => p?.text || '').join('');
+  const match = txt.match(/\{[\s\S]*\}/);
+  try {
+    const parsed = JSON.parse(match ? match[0] : txt);
+    return sanitizeDomain(parsed.domain);
+  } catch {
+    return null;
+  }
+}
+
 export interface VendorPrices { gold: number | null; silver: number | null }
 
 export async function fetchVendorCommodityPrices(): Promise<VendorPrices> {

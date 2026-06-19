@@ -392,6 +392,13 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
   };
   const [showActionModal, setShowActionModal] = useState<'lent' | 'borrowed' | 'repayment' | null>(null);
   const [editingTx, setEditingTx] = useState<DebtTransaction | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
+  const hintTimer = useRef<number | null>(null);
+  const showHint = (msg: string) => {
+    setHint(msg);
+    if (hintTimer.current) clearTimeout(hintTimer.current);
+    hintTimer.current = window.setTimeout(() => setHint(null), 2200);
+  };
   const netBalance = debt.transactions.reduce((sum, t) => {
     if (t.type === 'lent' || t.type === 'repayment_sent') return sum + t.amount;
     if (t.type === 'borrowed' || t.type === 'repayment_received') return sum - t.amount;
@@ -645,7 +652,10 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
                     <button
                       className="btn btn-secondary flex-center"
                       style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      onClick={() => setEditingTx(tx)}
+                      onClick={() => {
+                        if (tx.markedDone) { showHint('Untick to edit'); return; }
+                        setEditingTx(tx);
+                      }}
                     >
                       <Edit2 size={14} className="text-muted" />
                     </button>
@@ -653,6 +663,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
                       className="btn btn-secondary flex-center"
                       style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       onClick={() => {
+                        if (tx.markedDone) { showHint('Untick to delete'); return; }
                         const ledgerTx = data.transactions.find(t => t.linkedTransactionIds?.includes(tx.id));
                         const isLendingCategory = ledgerTx?.category === 'Lending & Borrowing';
                         setConfirmConfig({
@@ -783,6 +794,34 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {hint && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '100px',
+            left: 0,
+            right: 0,
+            width: 'max-content',
+            maxWidth: '90%',
+            margin: '0 auto',
+            background: 'var(--bg-card-elevated)',
+            padding: '0.75rem 1.25rem',
+            borderRadius: '12px',
+            border: '1px solid var(--border-color)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+            zIndex: 9999,
+            pointerEvents: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            animation: 'slideUp 0.3s ease'
+          }}
+        >
+          <Check size={16} className="text-accent" />
+          <span className="text-mono text-sm">{hint}</span>
         </div>
       )}
     </>

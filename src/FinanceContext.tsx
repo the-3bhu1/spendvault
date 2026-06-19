@@ -703,6 +703,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     });
   };
 
+  // Linked (parent ↔ child) transaction edit/delete sync — full behavior matrix, discriminators,
+  // and the "parent is source of truth" design rationale: docs/LINKED_TRANSACTIONS.md
   const updateTransaction = (transaction: Transaction) => {
     setData(prev => {
       const oldTx = prev.transactions.find(t => t.id === transaction.id);
@@ -723,8 +725,29 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       
       let txsToDelete: string[] = [];
       let updatedTransaction = { ...transaction };
-      
-      if (wasTransferOrCC && (!isNowTransferOrCC || !transaction.paymentSourceAccountId)) {
+
+      // Reward-split (3-leg CC Payment) edit detection — Option B keeps the card credit as the
+      // fixed anchor; the non-edited funding leg absorbs the change. See docs/LINKED_TRANSACTIONS.md.
+      // (a) editing the REWARD leg: a linked parent uses this tx's account as rewardUsedAccountId.
+      const rewardSplitParent = prev.transactions.find(p =>
+        p.id !== transaction.id &&
+        (p.linkedTransactionIds || []).includes(transaction.id) &&
+        !!p.rewardUsedAccountId &&
+        p.rewardUsedAccountId === transaction.accountId
+      );
+      const isRewardSplitChildEdit = !!rewardSplitParent;
+      // (b) editing the BANK leg of a parent that has an active reward split.
+      const bankLegParent = !rewardSplitParent ? prev.transactions.find(p =>
+        p.id !== transaction.id &&
+        (p.linkedTransactionIds || []).includes(transaction.id) &&
+        !!p.rewardUsedAccountId && (p.rewardUsed || 0) > 0 &&
+        p.rewardUsedAccountId !== transaction.accountId
+      ) : undefined;
+      const isRewardSplitBankEdit = !!bankLegParent;
+
+      // Guard: a reward/bank leg edit must NOT be mistaken for "payment source removed" (which would
+      // delete the card parent). Those edits rebalance via the reverse blocks below instead.
+      if (wasTransferOrCC && (!isNowTransferOrCC || !transaction.paymentSourceAccountId) && !isRewardSplitChildEdit && !isRewardSplitBankEdit) {
         const allLinkedIds = transaction.linkedTransactionIds || (transaction.linkedTransactionId ? [transaction.linkedTransactionId] : []);
         const counterpartTxs = prev.transactions.filter(t => 
           allLinkedIds.includes(t.id) && 
@@ -748,8 +771,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       const allLinkedIds = updatedTransaction.linkedTransactionIds || (updatedTransaction.linkedTransactionId ? [updatedTransaction.linkedTransactionId] : []);
       
       const isCashback = updatedTransaction.category === 'Cashback';
-      
-      if (allLinkedIds.length > 0 && !isCashback) {
+
+      if (allLinkedIds.length > 0 && !isCashback && !isRewardSplitChildEdit && !isRewardSplitBankEdit) {
         updatedTxs = updatedTxs.map(t => {
           if (allLinkedIds.includes(t.id)) {
             // Propagate date ALWAYS
@@ -794,8 +817,15 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
                 }
                 updated.sipAllottedAmount = updatedTransaction.sipAllottedAmount;
                 updated.sipCharges = updatedTransaction.sipCharges;
+                updated.numberOfShares = updatedTransaction.numberOfShares;
               } else if (isStocks) {
-                updated.amount = updatedTransaction.amount;
+                if (updated.type === 'credit') {
+                  updated.amount = Number(updatedTransaction.sipAllottedAmount) || updatedTransaction.amount;
+                } else {
+                  updated.amount = (Number(updatedTransaction.sipAllottedAmount) || updatedTransaction.amount) + (Number(updatedTransaction.sipCharges) || 0);
+                }
+                updated.sipAllottedAmount = updatedTransaction.sipAllottedAmount;
+                updated.sipCharges = updatedTransaction.sipCharges;
                 updated.numberOfShares = updatedTransaction.numberOfShares;
               } else if (isCommodity) {
                 updated.amount = updatedTransaction.amount;
@@ -846,6 +876,64 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         });
       }
       
+      // Reverse propagation: a child-leg edit reciprocates to its parent. Without this, editing a
+      // collapsed child (cashback credit / reward-split debit) would silently desync — or worse,
+      // the forward path above would corrupt the parent. See docs/LINKED_TRANSACTIONS.md.
+      if (isCashback) {
+        // Instant-cashback child → parent.rewardEarned / rewardEarnedAccountId
+        updatedTxs = updatedTxs.map(t => {
+          const tLinkedIds = t.linkedTransactionIds || (t.linkedTransactionId ? [t.linkedTransactionId] : []);
+          if (t.id !== updatedTransaction.id && tLinkedIds.includes(updatedTransaction.id)) {
+            return {
+              ...t,
+              rewardEarned: updatedTransaction.amount,
+              rewardEarnedAccountId: updatedTransaction.accountId || t.rewardEarnedAccountId,
+            };
+          }
+          return t;
+        });
+      } else if (isRewardSplitChildEdit && rewardSplitParent) {
+        // Option B — edited the REWARD leg. Card credit (parent.amount) is the fixed anchor;
+        // the bank leg absorbs: bank = total − reward. Parent.rewardUsed follows the reward leg.
+        const total = rewardSplitParent.amount;
+        const newReward = updatedTransaction.amount;
+        const bankAmount = Math.max(0, total - newReward);
+        const rewardAcct = updatedTransaction.accountId;
+        const bankLegId = (rewardSplitParent.linkedTransactionIds || []).find(id => {
+          const lt = prev.transactions.find(t => t.id === id);
+          return !!lt && lt.id !== updatedTransaction.id && lt.accountId !== rewardAcct && lt.accountId !== rewardSplitParent.accountId;
+        });
+        updatedTxs = updatedTxs.map(t => {
+          if (t.id === rewardSplitParent.id) {
+            return { ...t, rewardUsed: newReward, rewardUsedAccountId: rewardAcct, date: updatedTransaction.date };
+          }
+          if (bankLegId && t.id === bankLegId) {
+            return { ...t, amount: bankAmount, date: updatedTransaction.date };
+          }
+          return t;
+        });
+      } else if (isRewardSplitBankEdit && bankLegParent) {
+        // Option B (symmetric) — edited the BANK leg. Card credit stays fixed; the reward leg
+        // absorbs: reward = total − bank. Parent.rewardUsed follows the new reward amount.
+        const total = bankLegParent.amount;
+        const newBank = updatedTransaction.amount;
+        const newReward = Math.max(0, total - newBank);
+        const rewardAcct = bankLegParent.rewardUsedAccountId;
+        const rewardLegId = (bankLegParent.linkedTransactionIds || []).find(id => {
+          const lt = prev.transactions.find(t => t.id === id);
+          return !!lt && lt.accountId === rewardAcct;
+        });
+        updatedTxs = updatedTxs.map(t => {
+          if (t.id === bankLegParent.id) {
+            return { ...t, rewardUsed: newReward, date: updatedTransaction.date };
+          }
+          if (rewardLegId && t.id === rewardLegId) {
+            return { ...t, amount: newReward, date: updatedTransaction.date };
+          }
+          return t;
+        });
+      }
+
       let updatedDebts = prev.debts || [];
       if (allLinkedIds.length > 0 || txsToDelete.length > 0) {
         updatedDebts = updatedDebts.map(debt => ({
@@ -876,10 +964,56 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     }));
   };
 
+  // Linked-transaction delete cascade (both directions). See docs/LINKED_TRANSACTIONS.md
   const deleteTransaction = (id: string) => {
     setData(prev => {
       const tx = prev.transactions.find(t => t.id === id);
       if (!tx) return prev;
+
+      // Special case: deleting ONLY the reward leg of a 3-leg reward-split payment does NOT remove
+      // the payment. It un-splits it — the card credit stays, the bank leg absorbs the reward amount
+      // (bank = card total), and the parent's reward split is cleared. See docs/LINKED_TRANSACTIONS.md.
+      const rewardSplitParentOnDelete = prev.transactions.find(p =>
+        p.id !== tx.id &&
+        (p.linkedTransactionIds || []).includes(tx.id) &&
+        !!p.rewardUsedAccountId && (p.rewardUsed || 0) > 0 &&
+        p.rewardUsedAccountId === tx.accountId
+      );
+      if (rewardSplitParentOnDelete) {
+        const total = rewardSplitParentOnDelete.amount; // card credit = fixed total
+        const rewardAcct = tx.accountId;
+        const bankLegId = (rewardSplitParentOnDelete.linkedTransactionIds || []).find(lid => {
+          const lt = prev.transactions.find(t => t.id === lid);
+          return !!lt && lt.id !== tx.id && lt.accountId !== rewardAcct && lt.accountId !== rewardSplitParentOnDelete.accountId;
+        });
+        const remaining = prev.transactions
+          .filter(t => t.id !== tx.id)
+          .map(t => {
+            if (t.id === rewardSplitParentOnDelete.id) {
+              return {
+                ...t,
+                rewardUsed: 0,
+                rewardUsedAccountId: '',
+                linkedTransactionIds: (t.linkedTransactionIds || []).filter(l => l !== tx.id),
+              };
+            }
+            if (bankLegId && t.id === bankLegId) {
+              return {
+                ...t,
+                amount: total,
+                linkedTransactionIds: (t.linkedTransactionIds || []).filter(l => l !== tx.id),
+              };
+            }
+            if ((t.linkedTransactionIds || []).includes(tx.id)) {
+              return { ...t, linkedTransactionIds: (t.linkedTransactionIds || []).filter(l => l !== tx.id) };
+            }
+            return t;
+          });
+        const debtsAfter = (prev.debts || [])
+          .map(debt => ({ ...debt, transactions: debt.transactions.filter(dt => dt.id !== tx.id) }))
+          .filter(debt => debt.transactions.length > 0);
+        return { ...prev, transactions: remaining, debts: debtsAfter };
+      }
 
       const linkedIds = (tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []));
       
@@ -891,19 +1025,44 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         })).filter(debt => debt.transactions.length > 0);
       }
 
+      // Leg-type links (Transfer/CC/NCMC/SIP/Stocks/Commodity) form a STAR around the parent:
+      // children link to the parent, not to each other. Deleting one child must take the whole
+      // group — otherwise a 3-leg reward-split CC payment orphans its sibling leg. So we expand
+      // to the full transitively-linked leg group. See docs/LINKED_TRANSACTIONS.md.
+      const LEG_CATS = ['transfer', 'cc payment', 'ncmc travel recharge', 'sip', 'stocks', 'commodity'];
+      const isLegCat = (c?: string) => LEG_CATS.includes((c || '').toLowerCase());
+      const legGroup = new Set<string>([id]);
+      if (isLegCat(tx.category)) {
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const t of prev.transactions) {
+            if (legGroup.has(t.id) || !isLegCat(t.category)) continue;
+            const tLinks = t.linkedTransactionIds || [];
+            const connected = [...legGroup].some(gid =>
+              tLinks.includes(gid) ||
+              (prev.transactions.find(x => x.id === gid)?.linkedTransactionIds || []).includes(t.id)
+            );
+            if (connected) { legGroup.add(t.id); changed = true; }
+          }
+        }
+      }
+
       // Determine which linked transactions should also be deleted
       const linkedTxsToDelete = prev.transactions.filter(t => {
+        if (t.id === id) return false;
+
+        // 1. Whole leg group (transitive) is deleted together
+        if (legGroup.has(t.id)) return true;
+
         if (!linkedIds.includes(t.id)) return false;
-        
-        // 1. Always delete Transfer, CC Payment, NCMC Travel Recharge, SIP, Stocks, or Commodity counterpart legs
-        if (tx.category === 'Transfer' || tx.category === 'CC Payment' || tx.category === 'NCMC Travel Recharge' || tx.category === 'SIP' || tx.category === 'Stocks' || tx.category === 'Commodity') return true;
-        
+
         // 2. If parent is deleted, delete linked instant cashback
         if (t.category === 'Cashback' && tx.type === 'debit') return true;
-        
+
         // 3. If parent is deleted, delete linked reward split counterpart
         if (tx.rewardUsedAccountId && t.accountId === tx.rewardUsedAccountId && tx.type === 'debit') return true;
-        
+
         return false;
       }).map(t => t.id);
 

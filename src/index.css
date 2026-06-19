@@ -1,3 +1,14 @@
+/* FOUT guard: keep app content hidden until main.tsx confirms every custom font has loaded,
+   then fade it in. Prevents the first-launch flash where text/numbers render in the fallback
+   font and then swap. The dark body background shows during this brief gate (no white flash). */
+#root {
+  opacity: 0;
+  transition: opacity 0.18s ease-in;
+}
+html.fonts-loaded #root {
+  opacity: 1;
+}
+
 @font-face {
   font-family: 'Inter';
   src: url('/fonts/inter-400.woff2') format('woff2');

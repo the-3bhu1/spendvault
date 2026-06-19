@@ -5,6 +5,15 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0, viewport-fit=cover" />
     <meta name="description" content="A minimalist, dark-mode personal finance tracking application to manage accounts, transactions, and cashback." />
+    <!-- Preload the fonts visible at first paint so they fetch in parallel with the JS bundle.
+         Combined with the font-load gate in main.tsx, this prevents the first-session FOUT
+         (flash of fallback font, most visible on numbers rendered in Overpass Mono). -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/inter-400.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/inter-600.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/inter-700.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/overpass-mono-400.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/overpass-mono-600.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/overpass-mono-700.woff2" />
     <title>spendvault - Premium Expense Management</title>
   </head>
   <body>

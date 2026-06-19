@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Home, Wallet, ReceiptText, Gift, Users, Sparkles, LayoutGrid, ChevronRight, Calendar, HandCoins, LogOut, TrendingUpDown } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import Accounts from './components/Accounts';
@@ -38,33 +38,31 @@ function App() {
   const autoLogSmsRef = useRef(data.user?.autoLogSms);
   autoLogSmsRef.current = data.user?.autoLogSms;
 
+  // Define which tabs should reset to top vs resume
+  const resettingTabs = ['dashboard', 'insights', 'portfolio', 'cashback', 'splits', 'bills', 'debts'];
+
+  // Restore scroll position synchronously, before the browser paints the new
+  // tab. useLayoutEffect runs after the DOM updates (display toggled to block)
+  // but before paint, so the scroll lands in the same frame the tab renders —
+  // no visible "jerk" of painting at the top first.
+  useLayoutEffect(() => {
+    const appRoot = document.querySelector('.app-root');
+    if (!appRoot) return;
+    const savedPos = resettingTabs.includes(activeTab) ? 0 : (scrollPositions.current[activeTab] || 0);
+    (appRoot as HTMLElement).scrollTop = savedPos;
+  }, [activeTab]);
+
+  // Continuous listener to save scroll for persistent (resumable) tabs.
   useEffect(() => {
     const appRoot = document.querySelector('.app-root');
     if (!appRoot) return;
-
-    // Define which tabs should reset to top vs resume
-    const resettingTabs = ['dashboard', 'insights', 'portfolio', 'cashback', 'splits', 'bills', 'debts'];
-    
-    // 1. Restore scroll position
-    const savedPos = resettingTabs.includes(activeTab) ? 0 : (scrollPositions.current[activeTab] || 0);
-    
-    // Small delay to ensure DOM is updated before scrolling
-    const timer = setTimeout(() => {
-      appRoot.scrollTo({ top: savedPos, behavior: 'auto' });
-    }, 10);
-
-    // 2. Continuous listener to save scroll for persistent tabs
     const handleScroll = () => {
       if (!resettingTabs.includes(activeTab)) {
         scrollPositions.current[activeTab] = appRoot.scrollTop;
       }
     };
-
     appRoot.addEventListener('scroll', handleScroll, { passive: true });
-    return () => {
-      appRoot.removeEventListener('scroll', handleScroll);
-      clearTimeout(timer);
-    };
+    return () => appRoot.removeEventListener('scroll', handleScroll);
   }, [activeTab]);
 
   useEffect(() => {

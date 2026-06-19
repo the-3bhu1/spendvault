@@ -5,6 +5,8 @@ import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHisto
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, RotateCcw, ChevronLeft, ChevronDown } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
+import { LogoAvatar } from './LogoAvatar';
+import { getAssetLogoUrl, ensureAssetLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
 
 type HistoryDataPoint = { date: number; close: number };
 type StockHistoryRange = '1d' | '5d' | '1mo' | '3mo' | '1y' | '5y';
@@ -114,6 +116,8 @@ export function Portfolio() {
   const [mfRange, setMFRange] = useState<MFHistoryRange>('1y');
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [portfolioView, setPortfolioView] = useState<'all' | 'mf' | 'stocks' | 'commodity'>('all');
+  // Bumped when a background AI logo lookup resolves, so resolved logos appear without a reload.
+  const [, setLogoTick] = useState(0);
 
   const toggleSection = (key: string) =>
     setCollapsedSections(prev => {
@@ -206,6 +210,15 @@ export function Portfolio() {
   useEffect(() => {
     handleRefresh();
   }, [sipAccounts, stockAccounts, commodityAccounts]);
+
+  // Resolve real logos for any stock/MF the static registry misses (one cached Gemini lookup
+  // each), and re-render when one lands.
+  useEffect(() => {
+    const onLogosUpdated = () => setLogoTick(t => t + 1);
+    window.addEventListener(LOGOS_UPDATED_EVENT, onLogosUpdated);
+    [...sipAccounts, ...stockAccounts].forEach(acc => { ensureAssetLogo(acc); });
+    return () => window.removeEventListener(LOGOS_UPDATED_EVENT, onLogosUpdated);
+  }, [sipAccounts, stockAccounts]);
 
   useEffect(() => {
     if (!selectedAsset) {
@@ -317,25 +330,6 @@ export function Portfolio() {
     return { amount, pct: (amount / prevTotal) * 100 };
   }, [portfolioView, sipAccounts, stockAccounts, commodityAccounts, prices, prevPrices, data.transactions]);
 
-  const getAvatarColor = (name: string) => {
-    const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#f9ca24', '#6c5ce7', '#a29bfe'];
-    let hash = 0;
-    for (let i = 0; i < name.length; i++) {
-      hash = ((hash << 5) - hash) + name.charCodeAt(i);
-      hash = hash & hash;
-    }
-    return colors[Math.abs(hash) % colors.length];
-  };
-
-  const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map(word => word[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
-  };
-
   const formatCurrency = (value: number) =>
     `₹${Math.round(value).toLocaleString('en-IN')}`;
 
@@ -378,23 +372,7 @@ export function Portfolio() {
           gap: '0.9rem'
         }}
       >
-        <div
-          style={{
-            width: '42px',
-            height: '42px',
-            borderRadius: '50%',
-            background: getAvatarColor(account.name),
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'white',
-            fontWeight: 700,
-            fontSize: '0.8rem',
-            flexShrink: 0
-          }}
-        >
-          {getInitials(account.name)}
-        </div>
+        <LogoAvatar name={account.name} logoUrl={getAssetLogoUrl(account)} size={42} metal={account.type === 'commodity' ? (account.commodityMetal === 'silver' ? 'silver' : 'gold') : undefined} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
             fontSize: '0.92rem',
@@ -594,7 +572,7 @@ export function Portfolio() {
             <div style={{ flex: 1, textAlign: 'center' }}>
               <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Returns</div>
               <div style={{ fontSize: '0.88rem', fontWeight: 700, color: s.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
-                ₹{Math.abs(s.pnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(s.pnlPct).toFixed(2)}%)
+                {s.pnl >= 0 ? '↑' : '↓'} ₹{Math.abs(s.pnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(s.pnlPct).toFixed(2)}%)
               </div>
             </div>
           </>);
@@ -626,14 +604,15 @@ export function Portfolio() {
         </div>
       ) : (
         <>
-          {sipAccounts.length > 0 && (() => {
-            const isCollapsed = collapsedSections.has('mf');
+          {sipAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'mf') && (() => {
+            const single = portfolioView !== 'all';
+            const isCollapsed = single ? false : collapsedSections.has('mf');
             return (
             <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
               <div
                 className="flex align-center gap-3"
-                style={{ cursor: 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
-                onClick={() => toggleSection('mf')}
+                style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
+                onClick={single ? undefined : () => toggleSection('mf')}
               >
                 <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
                   Mutual Funds
@@ -642,7 +621,7 @@ export function Portfolio() {
                   {sipAccounts.length}
                 </span>
                 <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
-                <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
+                {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
               </div>
               {!isCollapsed && (
                 <div>
@@ -653,14 +632,15 @@ export function Portfolio() {
             );
           })()}
 
-          {stockAccounts.length > 0 && (() => {
-            const isCollapsed = collapsedSections.has('stocks');
+          {stockAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'stocks') && (() => {
+            const single = portfolioView !== 'all';
+            const isCollapsed = single ? false : collapsedSections.has('stocks');
             return (
             <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
               <div
                 className="flex align-center gap-3"
-                style={{ cursor: 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
-                onClick={() => toggleSection('stocks')}
+                style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
+                onClick={single ? undefined : () => toggleSection('stocks')}
               >
                 <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
                   Stocks
@@ -669,7 +649,7 @@ export function Portfolio() {
                   {stockAccounts.length}
                 </span>
                 <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
-                <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
+                {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
               </div>
               {!isCollapsed && (
                 <div>
@@ -680,14 +660,15 @@ export function Portfolio() {
             );
           })()}
 
-          {commodityAccounts.length > 0 && (() => {
-            const isCollapsed = collapsedSections.has('commodity');
+          {commodityAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'commodity') && (() => {
+            const single = portfolioView !== 'all';
+            const isCollapsed = single ? false : collapsedSections.has('commodity');
             return (
             <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
               <div
                 className="flex align-center gap-3"
-                style={{ cursor: 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
-                onClick={() => toggleSection('commodity')}
+                style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
+                onClick={single ? undefined : () => toggleSection('commodity')}
               >
                 <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
                   Commodities
@@ -696,7 +677,7 @@ export function Portfolio() {
                   {commodityAccounts.length}
                 </span>
                 <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
-                <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
+                {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
               </div>
               {!isCollapsed && (
                 <div>
@@ -734,22 +715,8 @@ export function Portfolio() {
 
             {/* Asset identity — centered, CRED style */}
             <div style={{ padding: '0 1.5rem 1.5rem', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-              <div
-                style={{
-                  width: '60px',
-                  height: '60px',
-                  borderRadius: '50%',
-                  background: getAvatarColor(selectedAsset.name),
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'white',
-                  fontWeight: 700,
-                  fontSize: '1.2rem',
-                  marginBottom: '1rem'
-                }}
-              >
-                {getInitials(selectedAsset.name)}
+              <div style={{ marginBottom: '1rem' }}>
+                <LogoAvatar name={selectedAsset.name} logoUrl={getAssetLogoUrl(selectedAsset)} size={60} metal={selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'silver' : 'gold') : undefined} />
               </div>
 
               <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.35, maxWidth: '90%' }}>
@@ -795,8 +762,24 @@ export function Portfolio() {
 
             {/* Chart — CRED style: auto-scaled, no axes/grid clutter, thin trend line */}
             {selectedAsset.type === 'commodity' ? null : historyLoading ? (
-              <div style={{ padding: '3rem 2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                Loading chart...
+              <div style={{ padding: '0.5rem 0 0.5rem', width: '100%', boxSizing: 'border-box' }}>
+                {/* Skeleton mirrors the real chart's box: 280px tall, 70px top / 30px axis padding */}
+                <div style={{ width: '100%', height: '280px', padding: '70px 0 30px', boxSizing: 'border-box' }}>
+                  <div
+                    className="skeleton-bar"
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      borderRadius: 0,
+                      clipPath: 'polygon(0% 72%, 5% 58%, 10% 64%, 15% 48%, 20% 56%, 25% 40%, 30% 50%, 35% 36%, 40% 52%, 45% 62%, 50% 74%, 55% 80%, 60% 66%, 65% 74%, 70% 56%, 75% 44%, 80% 34%, 85% 44%, 90% 26%, 95% 34%, 100% 18%, 100% 100%, 0% 100%)'
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0 16px' }}>
+                  {[0, 1, 2, 3, 4].map(i => (
+                    <div key={i} className="skeleton-bar" style={{ width: '38px', height: '10px' }} />
+                  ))}
+                </div>
               </div>
             ) : historyData.length > 0 ? (() => {
               const up = historyData[historyData.length - 1].close >= historyData[0].close;

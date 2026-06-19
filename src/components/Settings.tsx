@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, FileJson, ChevronDown, Sparkles, ShieldAlert, Hash, Bot, BotOff } from 'lucide-react';
+import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, FileJson, ChevronDown, Sparkles, ShieldAlert, Hash, Bot, BotOff, Image as ImageIcon } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
 import ConfirmDialog from './ConfirmDialog';
 import TransparentLogo from './TransparentLogo';
@@ -100,13 +100,14 @@ const backupActionIconStyle = {
 };
 
 import { SubviewWrapper } from './SubviewWrapper.tsx';
+import { hasLogoDevToken, setLogoDevToken } from '../services/LogoService';
 
 export default function Settings() {
   const { data, updateCategories, updateCustomAccountTypes, updateTags, updateTransaction, clearAllData, updateUser, setAuthenticated, setTheme } = useFinance();
   const [newCat, setNewCat] = useState('');
   const [newAccountType, setNewAccountType] = useState('');
   const [newTagEntry, setNewTagEntry] = useState('');
-  const [activeView, setActiveView] = useState<'main' | 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem' | 'commodity'>('main');
+  const [activeView, setActiveView] = useState<'main' | 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem' | 'commodity' | 'logos'>('main');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
@@ -114,7 +115,7 @@ export default function Settings() {
   const touchStartY = useRef<number>(0);
   const savedScrollPos = useRef<number>(0);
 
-  const navigateTo = (view: 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem' | 'commodity') => {
+  const navigateTo = (view: 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem' | 'commodity' | 'logos') => {
     const appRoot = document.querySelector('.app-root');
     if (appRoot) savedScrollPos.current = (appRoot as HTMLElement).scrollTop;
     setActiveView(view);
@@ -163,19 +164,21 @@ export default function Settings() {
       }
     };
     window.addEventListener('appBackButton', handleGlobalBack);
-    
-    // Save/restore scroll position when navigating between main and sub-views
-    const appRoot = document.querySelector('.app-root');
-    if (appRoot) {
-      if (activeView === 'main') {
-        const saved = savedScrollPos.current;
-        requestAnimationFrame(() => requestAnimationFrame(() => { appRoot.scrollTop = saved; }));
-      } else {
-        appRoot.scrollTop = 0;
-      }
-    }
-    
     return () => window.removeEventListener('appBackButton', handleGlobalBack);
+  }, [activeView]);
+
+  // Save/restore scroll position when navigating between main and sub-views.
+  // useLayoutEffect runs after the DOM updates but before the browser paints,
+  // so the scroll position is set in the same frame the new view renders —
+  // preventing the visible "jerk" of painting at the top first.
+  useLayoutEffect(() => {
+    const appRoot = document.querySelector('.app-root');
+    if (!appRoot) return;
+    if (activeView === 'main') {
+      (appRoot as HTMLElement).scrollTop = savedScrollPos.current;
+    } else {
+      (appRoot as HTMLElement).scrollTop = 0;
+    }
   }, [activeView]);
 
   // States for Image Handling
@@ -634,6 +637,21 @@ export default function Settings() {
 
   // The commodity AI square only matters when the user actually holds commodities.
   const hasCommodity = (data.accounts || []).some(a => a.type === 'commodity');
+  // The asset-logos square only matters when the user holds stocks or mutual funds.
+  const hasInvestments = (data.accounts || []).some(a => a.type === 'stocks' || a.type === 'sips');
+
+  const [logoTokenInput, setLogoTokenInput] = useState('');
+  const [logoTokenSaved, setLogoTokenSaved] = useState(() => hasLogoDevToken());
+  const handleSaveLogoToken = () => {
+    setLogoDevToken(logoTokenInput.trim());
+    setLogoTokenSaved(hasLogoDevToken());
+    setLogoTokenInput('');
+  };
+  const handleClearLogoToken = () => {
+    setLogoDevToken('');
+    setLogoTokenSaved(false);
+    setLogoTokenInput('');
+  };
 
   const handleSaveGemini = async () => {
     try {
@@ -1944,6 +1962,44 @@ export default function Settings() {
         </div>
       </SubviewWrapper>
     );
+  } else if (activeView === 'logos') {
+    const logoDirty = logoTokenInput.trim() !== '';
+    viewContent = (
+      <SubviewWrapper title="Asset Logos" onBack={() => setActiveView('main')}>
+        <div className="flex-col gap-4">
+          <div className="card flex-col gap-3" style={{ padding: '1rem' }}>
+            <SettingsCardHeader icon={ImageIcon} title="Investment Logos" level="h3" size={20} marginBottom="0.5rem" />
+            <span className="text-xs text-muted">
+              Shows real brand logos for your mutual funds and stocks. Works out of the box using public favicons — no setup needed. For sharper, higher-resolution logos (and better coverage for individual stocks), add a free logo.dev publishable token — get one at{' '}
+              <a href="https://www.logo.dev" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'underline' }}>logo.dev</a>. Stocks the registry doesn't recognise are resolved once via your Gemini key (if set, see Commodity AI) and cached. Holdings with no match keep the colored-initials avatar.
+            </span>
+            <div className="input-group" style={{ marginBottom: 0 }}>
+              <label>logo.dev Token {logoTokenSaved && <span style={{ color: 'var(--success)' }}>· saved</span>}</label>
+              <input
+                type="password"
+                className="input-field"
+                value={logoTokenInput}
+                onChange={e => setLogoTokenInput(e.target.value)}
+                placeholder={logoTokenSaved ? '•••••••• (saved — type to replace)' : 'pk_… (optional)'}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1, opacity: logoDirty ? 1 : 0.5, cursor: logoDirty ? 'pointer' : 'not-allowed' }}
+                disabled={!logoDirty}
+                onClick={handleSaveLogoToken}
+              >Save</button>
+              {logoTokenSaved && <button className="btn btn-secondary" onClick={handleClearLogoToken}>Remove</button>}
+            </div>
+          </div>
+        </div>
+      </SubviewWrapper>
+    );
   } else {
     viewContent = (
       <div className="flex-col">
@@ -1995,7 +2051,7 @@ export default function Settings() {
 
           {/* Smart Features: Android auto-log + background guide, plus the BYOK commodity AI
               square when the user holds commodities (tour-smart-features-android union rect) */}
-          {(Capacitor.getPlatform() === 'android' || hasCommodity) && (
+          {(Capacitor.getPlatform() === 'android' || hasCommodity || hasInvestments) && (
             <>
               <SectionHeader title="Smart Features" />
               <div className="grid tour-smart-features-android" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
@@ -2068,6 +2124,14 @@ export default function Settings() {
                     label="Commodity AI"
                     active={geminiKeySaved}
                     onClick={() => navigateTo('commodity')}
+                  />
+                )}
+                {hasInvestments && (
+                  <GridToggleButton
+                    icon={ImageIcon}
+                    label="Asset Logos"
+                    active={logoTokenSaved}
+                    onClick={() => navigateTo('logos')}
                   />
                 )}
               </div>
