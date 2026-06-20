@@ -1010,17 +1010,50 @@ tr:hover td {
   transition: background-color 0.3s ease;
 }
 
-.nav-links {
+/* Frosted gradient scrim filling the strip below + behind the floating nav, so content scrolling
+   past the bottom fades and blurs out instead of peeking distractingly around the bar (à la Uber).
+   Sits below the nav (z 1000) and above content; never intercepts taps. The mask fades the blur
+   out toward the top while the gradient fades the colour, blending into the page. */
+.nav-scrim {
   position: fixed;
-  bottom: 0;
   left: 0;
   right: 0;
+  bottom: 0;
+  height: calc(7rem + env(safe-area-inset-bottom, 0px));
+  z-index: 999;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--bg-color) 30%, transparent);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  -webkit-mask-image: linear-gradient(to top, #000 55%, transparent);
+  mask-image: linear-gradient(to top, #000 55%, transparent);
+}
+
+.nav-links {
+  position: fixed;
+  bottom: calc(0.6rem + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  /* Narrower, content-hugging bar (centered) — keeps the four icons in a tight cluster like
+     Uber's, rather than stretched edge-to-edge. The sliding pill stays correct since its width
+     and offset are percentages of this bar's width. */
+  width: min(17rem, calc(100% - 2.5rem));
   display: flex;
   align-items: center;
   justify-content: space-around;
-  padding: 0.5rem 0.5rem calc(0.5rem + env(safe-area-inset-bottom, 0px));
-  background: var(--bg-color);
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 0.5rem;
+  /* Floating glass bar — frosted, lifted off the edges, with layered depth and a faint top
+     sheen for a premium, high-end feel (à la Uber's pill nav). Falls back to the opaque
+     --nav-bg tint where backdrop-filter is unsupported. */
+  background: var(--nav-bg);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.45),
+    0 2px 8px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
   z-index: 1000;
 }
 
@@ -1031,11 +1064,10 @@ tr:hover td {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  height: 60px;
+  height: 52px;
   color: var(--text-secondary);
   transition: all 0.3s ease;
   z-index: 2;
-  gap: 0.25rem;
   background: transparent !important;
   border: none !important;
 }
@@ -1045,34 +1077,60 @@ tr:hover td {
   transform: none !important;
 }
 
-.nav-link::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%) scaleX(0);
-  width: 24px;
-  height: 2px;
-  background: var(--text-primary);
-  border-radius: 0 0 2px 2px;
-  opacity: 0;
-  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s ease;
-  z-index: 1;
-  pointer-events: none;
+/* The sliding pill is now the active indicator, so the old top underline is retired. */
+.nav-link::before { display: none; }
+
+/* Icons pop when their tab becomes active: the animation (re)plays whenever .active moves to a
+   tab, because its icon then starts matching this selector. ProfileAvatar renders a <div>, the
+   other tabs render <svg> — cover both. */
+@keyframes navIconPop {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.28); }
+  65%  { transform: scale(0.9); }
+  100% { transform: scale(1); }
 }
 
-.nav-link.active::before {
-  opacity: 1;
-  transform: translateX(-50%) scaleX(1);
+.nav-link.active > svg,
+.nav-link.active > div {
+  animation: navIconPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  transform-origin: center;
+}
+
+/* Respect reduced-motion: keep the indicator, drop the glide and the pop. */
+@media (prefers-reduced-motion: reduce) {
+  .nav-active-pill { transition: none; }
+  .nav-link.active > svg,
+  .nav-link.active > div { animation: none; }
 }
 
 .nav-link:active {
   transform: scale(0.95) !important;
 }
 
-/* Active indicator highlight - Hide generic pill */
+/* Fluid sliding pill that glides behind the active tab. One cell wide (4 tabs), inset
+   horizontally via transparent borders so translateX(activeIndex * 100%) lands exactly on
+   each cell. The springy cubic-bezier gives a subtle settle/overshoot as it arrives. */
 .nav-active-pill {
-  display: none !important;
+  position: absolute;
+  top: 50%;
+  left: 0.5rem; /* matches .nav-links left padding */
+  width: calc((100% - 1rem) / 4);
+  height: 34px;
+  margin-top: -17px;
+  box-sizing: border-box;
+  border-left: 0.2rem solid transparent;
+  border-right: 0.2rem solid transparent;
+  /* Identical frosted highlight to the portfolio asset selector: translucent white, soft blur,
+     layered shadow + top sheen, fully-rounded stadium ends. */
+  background: rgba(255, 255, 255, 0.11);
+  background-clip: padding-box;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border-radius: 999px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  z-index: 1;
+  pointer-events: none;
+  transition: transform 0.45s cubic-bezier(0.34, 1.55, 0.5, 1);
 }
 
 .nav-avatar-active {

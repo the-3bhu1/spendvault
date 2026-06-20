@@ -19,10 +19,12 @@ function sane(v: unknown, metal: 'gold' | 'silver'): number | null {
 }
 
 // ---- Daily safety cap ----
-// Hard ceiling on grounded calls/day so a failure loop or retry-spam can never burn the
-// user's free quota (Gemini 2.5 Flash grounding is ~1500/day free; this sits far below).
+// Hard ceiling on grounded calls/day so we never burn the user's free quota (Gemini 2.5 Flash
+// grounding is ~1500/day free; this sits far below). Only SUCCESSFUL calls count — transport
+// failures, exhausted 503 retries, and the cap-reached path cost nothing, so a transient mobile
+// failure can neither drain the budget nor get permanently cached as a "not found".
 // The 1h price cache (COMMODITY_TTL) is the normal throttle; this is the backstop. Tunable.
-const GEMINI_DAILY_CAP = 30;
+const GEMINI_DAILY_CAP = 50;
 const GEMINI_USAGE_KEY = 'gemini_usage'; // { day: 'YYYY-MM-DD', count: number }
 
 function todayKey(): string {
@@ -50,8 +52,10 @@ export function getGeminiUsageToday(): { count: number; cap: number } {
 }
 
 // Resolves the official primary website domain for a company / mutual-fund house, for logo
-// lookup. Uses Google Search grounding. Returns a bare hostname (e.g. "olaelectric.com") or null
-// on no-key / cap-reached / not-found / any failure. Counts against the shared daily cap.
+// lookup. Uses Google Search grounding. Returns a bare hostname (e.g. "olaelectric.com"), or null
+// ONLY when the model genuinely finds nothing (a result worth caching). THROWS on any transient
+// failure (no key / cap reached / transport error / no usable API response) so the caller can
+// leave it uncached and retry on a later cold start. Only a successful call counts against the cap.
 function sanitizeDomain(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   let d = v.trim().toLowerCase();
@@ -62,12 +66,11 @@ function sanitizeDomain(v: unknown): string | null {
 
 export async function resolveBrandDomain(query: string): Promise<string | null> {
   const key = await getGeminiKey();
-  if (!key) return null;
+  if (!key) throw new Error('gemini: no key'); // transient (caller already guards on hasGeminiKey) — never cache a no-key state
   if (readUsage().count >= GEMINI_DAILY_CAP) {
     console.warn('Gemini: daily safety cap reached; skipping logo domain lookup until tomorrow.');
-    return null;
+    throw new Error('gemini: daily cap reached'); // cap resets next day → retry then, don't cache as "not found"
   }
-  bumpUsage();
 
   const model = getGeminiModel();
   const prompt =
@@ -79,15 +82,16 @@ Rules: bare registrable hostname only (e.g. "olaelectric.com", "tcs.com") — no
   const body = { contents: [{ parts: [{ text: prompt }] }], tools: [{ google_search: {} }] };
   let j: any = null;
   for (let attempt = 0; attempt < 3; attempt++) {
+    let res: Response;
     try {
-      const res = await fetch(
+      res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
       );
-      j = await res.json();
     } catch {
-      return null;
+      throw new Error('gemini: domain fetch failed'); // transport failure (incl. native HTTP) — don't cache, retry next session
     }
+    j = await res.json().catch(() => null);
     if (j?.error && (j.error.code === 503 || j.error.status === 'UNAVAILABLE')) {
       await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
       continue;
@@ -95,30 +99,40 @@ Rules: bare registrable hostname only (e.g. "olaelectric.com", "tcs.com") — no
     break;
   }
 
+  // No usable response (transport hiccup, exhausted 503 retries, or an API error like 400/403):
+  // transient — throw so the caller leaves it uncached and the next cold start retries.
+  if (!j || j.error) throw new Error('gemini: no usable domain response');
+
+  // A real response came back → count it against the daily budget (failed attempts above cost nothing).
+  bumpUsage();
+
   const txt: string = (j?.candidates?.[0]?.content?.parts || [])
     .map((p: any) => p?.text || '').join('');
   const match = txt.match(/\{[\s\S]*\}/);
   try {
     const parsed = JSON.parse(match ? match[0] : txt);
-    return sanitizeDomain(parsed.domain);
+    return sanitizeDomain(parsed.domain); // hostname, or null when the model genuinely found nothing → cached so we don't re-ask
   } catch {
-    return null;
+    return null; // got a response but no parseable domain → treat as a genuine "not found"
   }
 }
 
-export interface VendorPrices { gold: number | null; silver: number | null }
+// vendorFound: whether the model found the NAMED vendor's own published prices (true) or fell back
+// to a generic market estimate because it couldn't identify the vendor (false). Lets the UI warn
+// when a typo/fake vendor silently degrades to a generic price. It's false on every no-result path
+// (no key / cap / transport failure) too, but those don't overwrite a cached price so it's moot.
+export interface VendorPrices { gold: number | null; silver: number | null; vendorFound: boolean }
 
 export async function fetchVendorCommodityPrices(): Promise<VendorPrices> {
   const key = await getGeminiKey();
-  if (!key) return { gold: null, silver: null };
+  if (!key) return { gold: null, silver: null, vendorFound: false };
 
   // Safety net: never exceed the daily cap, even in a failure/retry loop. Caller falls
   // back to the last cached value or the manual override.
   if (readUsage().count >= GEMINI_DAILY_CAP) {
     console.warn('Gemini: daily safety cap reached; using cached/manual price until tomorrow.');
-    return { gold: null, silver: null };
+    return { gold: null, silver: null, vendorFound: false };
   }
-  bumpUsage(); // count this fetch operation up-front (conservative)
 
   const vendor = getCommodityVendor();
   const model = getGeminiModel();
@@ -126,8 +140,9 @@ export async function fetchVendorCommodityPrices(): Promise<VendorPrices> {
 `Using Google Search, get ${vendor}'s CURRENT live BUY prices per GRAM in INR (INCLUDING ~3% GST), as shown for Digital Gold and Digital Silver on https://www.mmtcpamp.com/digital-gold.
 Prefer ${vendor}'s own published "Live Buy Price" figures. If a metal's exact GST-inclusive figure isn't found, return your best grounded estimate of that metal's current Indian digital-${''}metal per-gram price including ~3% GST.
 Respond with ONLY this strict minified JSON and NOTHING else — no prose, no markdown:
-{"gold_inr_per_gram":<number>,"silver_inr_per_gram":<number>}
-Numbers only (no commas or symbols), per GRAM (if a source quotes per 10g, divide by 10). Both values MUST be > 0.`;
+{"gold_inr_per_gram":<number>,"silver_inr_per_gram":<number>,"vendor_found":<true|false>}
+Numbers only (no commas or symbols), per GRAM (if a source quotes per 10g, divide by 10). Both values MUST be > 0.
+Set "vendor_found" to true ONLY if you actually found ${vendor}'s own published prices; set it to false if you could not identify that vendor and returned a generic Indian market estimate instead.`;
 
   const body = { contents: [{ parts: [{ text: prompt }] }], tools: [{ google_search: {} }] };
   let j: any = null;
@@ -139,7 +154,7 @@ Numbers only (no commas or symbols), per GRAM (if a source quotes per 10g, divid
       );
       j = await res.json();
     } catch {
-      return { gold: null, silver: null };
+      return { gold: null, silver: null, vendorFound: false };
     }
     // Retry transient overload (503/UNAVAILABLE) with backoff.
     if (j?.error && (j.error.code === 503 || j.error.status === 'UNAVAILABLE')) {
@@ -148,6 +163,11 @@ Numbers only (no commas or symbols), per GRAM (if a source quotes per 10g, divid
     }
     break;
   }
+
+  // No usable response (transport hiccup, exhausted 503 retries, or an API error): fall back to the
+  // cached/manual price without counting it — only a real response costs a daily-cap slot.
+  if (!j || j.error) return { gold: null, silver: null, vendorFound: false };
+  bumpUsage();
 
   const txt: string = (j?.candidates?.[0]?.content?.parts || [])
     .map((p: any) => p?.text || '').join('');
@@ -158,5 +178,6 @@ Numbers only (no commas or symbols), per GRAM (if a source quotes per 10g, divid
   return {
     gold: sane(parsed.gold_inr_per_gram, 'gold'),
     silver: sane(parsed.silver_inr_per_gram, 'silver'),
+    vendorFound: parsed.vendor_found === true,
   };
 }

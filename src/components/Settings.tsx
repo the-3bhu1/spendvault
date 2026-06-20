@@ -15,6 +15,7 @@ import {
   setGeminiKey, clearGeminiKey, hasGeminiKey,
 } from '../services/GeminiConfig';
 import { getGeminiUsageToday } from '../services/GeminiService';
+import { clearCommodityCache } from '../services/MarketDataService';
 import { APP_VERSION } from '../utils';
 
 const GridButton = ({ icon: Icon, label, onClick }: { icon: React.ElementType, label: string, onClick?: () => void }) => (
@@ -656,7 +657,11 @@ export default function Settings() {
   const handleSaveGemini = async () => {
     try {
       const keyEntered = geminiKeyInput.trim() !== '';
+      const vendorChanged = geminiVendorInput.trim() !== getCommodityVendor();
       setCommodityVendor(geminiVendorInput);
+      // A vendor switch should fetch from the new source now, not serve the old vendor's price for
+      // up to an hour — drop the metal cache so the next read does a fresh grounded call.
+      if (vendorChanged) clearCommodityCache();
       if (keyEntered) {
         await setGeminiKey(geminiKeyInput.trim());
         setGeminiKeyInput('');

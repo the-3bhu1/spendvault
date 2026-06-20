@@ -151,8 +151,22 @@ type AccountLike = { type: string; name: string; marketSymbol?: string };
 // re-ask. Negatives are only stored when a Gemini key was present, so adding a key later still
 // triggers a fresh lookup.
 const DOMAIN_CACHE_KEY = 'logo_domain_cache';
+const DOMAIN_CACHE_MIGRATION_KEY = 'logo_domain_cache_v2';
 let domainCache: Record<string, string> = (() => {
-  try { const raw = localStorage.getItem(DOMAIN_CACHE_KEY); return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+  try {
+    const raw = localStorage.getItem(DOMAIN_CACHE_KEY);
+    const parsed: Record<string, string> = raw ? JSON.parse(raw) : {};
+    // One-time cleanup: the old resolver couldn't tell a transient failure (network/cap) from a
+    // genuine "not found" and cached '' for both — so any holding that failed once (common on
+    // mobile) was stuck on initials forever. Drop those empties once so they re-resolve under the
+    // new logic; a true not-found simply gets re-cached as '' after a clean lookup.
+    if (!localStorage.getItem(DOMAIN_CACHE_MIGRATION_KEY)) {
+      for (const k of Object.keys(parsed)) if (!parsed[k]) delete parsed[k];
+      localStorage.setItem(DOMAIN_CACHE_KEY, JSON.stringify(parsed));
+      localStorage.setItem(DOMAIN_CACHE_MIGRATION_KEY, '1');
+    }
+    return parsed;
+  } catch { return {}; }
 })();
 const inFlight = new Set<string>();
 

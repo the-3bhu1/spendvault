@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useFinance } from '../FinanceContext';
 import type { Account } from '../types';
-import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHistoryByRange, getLatestFetchedAt, getLatestCommodityFetchedAt, fetchCommodityPriceINR, getCachedPrice, getCachedCommodityPriceINR, fetchPrevClosesForSymbols, getCachedPrevPrice, getCachedPrevCommodityPriceINR } from '../services/MarketDataService';
+import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHistoryByRange, getLatestFetchedAt, getLatestCommodityFetchedAt, getCacheFetchedAt, fetchCommodityPriceINR, getCachedPrice, getCachedCommodityPriceINR, fetchPrevClosesForSymbols, getCachedPrevPrice, getCachedPrevCommodityPriceINR } from '../services/MarketDataService';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, RotateCcw, ChevronLeft, ChevronDown } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
@@ -695,6 +695,13 @@ export function Portfolio() {
       {selectedAsset && (() => {
         const stats = getAccountStats(selectedAsset);
         const oneDay = getOneDayReturn(selectedAsset);
+        // This holding's OWN last fetch time, not the portfolio-wide max shown in the list header.
+        // Commodities live under a cINR_ cache key; a manual ₹/g override has no fetch time at all.
+        const isManualCommodity = selectedAsset.type === 'commodity' && selectedAsset.manualPricePerGram !== undefined;
+        const selectedFetchedAt = !selectedAsset.marketSymbol || isManualCommodity ? null
+          : selectedAsset.type === 'commodity'
+            ? getLatestCommodityFetchedAt([selectedAsset.marketSymbol])
+            : getCacheFetchedAt(selectedAsset.marketSymbol);
         return (
         <div className="fade-in" style={{ boxSizing: 'border-box' }}>
           <div
@@ -756,6 +763,12 @@ export function Portfolio() {
                   color: stats.totalReturnPct >= 0 ? '#22c55e' : '#ef4444'
                 }}>
                   {stats.totalReturnPct >= 0 ? '+' : ''}₹{stats.totalReturn.toFixed(2)} ({stats.totalReturnPct.toFixed(2)}%)
+                </div>
+              )}
+
+              {(selectedFetchedAt || isManualCommodity) && (
+                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.75rem', letterSpacing: '0.5px' }}>
+                  {isManualCommodity ? 'Manual price' : `Last refresh at ${formatTime(new Date(selectedFetchedAt!))}`}
                 </div>
               )}
             </div>

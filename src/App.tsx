@@ -483,12 +483,13 @@ function App() {
         />
       )}
 
+      <div className="nav-scrim" aria-hidden="true" />
       <div className="nav-links">
         {activeIndex !== -1 && (
           <div
             className="nav-active-pill"
             style={{
-              transform: `translateX(calc(${activeIndex * 100}% + ${activeIndex * 0.5}rem))`
+              transform: `translateX(${activeIndex * 100}%)`
             }}
           />
         )}
@@ -497,28 +498,24 @@ function App() {
           onClick={() => setActiveTab('dashboard')}
         >
           <Home size={24} strokeWidth={activeTab === 'dashboard' ? 2.5 : 1.5} />
-          <span className="nav-label text-mono">home</span>
         </button>
         <button
           className={`nav-link ${activeTab === 'accounts' ? 'active' : ''}`}
           onClick={() => setActiveTab('accounts')}
         >
           <Wallet size={24} strokeWidth={activeTab === 'accounts' ? 2.5 : 1.5} />
-          <span className="nav-label text-mono">accounts</span>
         </button>
         <button
           className={`nav-link ${activeTab === 'transactions' ? 'active' : ''}`}
           onClick={() => setActiveTab('transactions')}
         >
           <ReceiptText size={24} strokeWidth={activeTab === 'transactions' ? 2.5 : 1.5} />
-          <span className="nav-label text-mono">ledger</span>
         </button>
         <button
           className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`}
           onClick={() => setActiveTab('settings')}
         >
-          <ProfileAvatar size={24} isActive={activeTab === 'settings'} />
-          <span className="nav-label text-mono">profile</span>
+          <ProfileAvatar size={30} />
         </button>
       </div>
       {showExitToast && (

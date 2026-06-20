@@ -1,4 +1,5 @@
 import { fetchVendorCommodityPrices } from './GeminiService';
+import type { VendorPrices } from './GeminiService';
 
 const CACHE_KEY = 'market_prices_cache';
 const HISTORY_CACHE_KEY = 'market_history_cache';
@@ -10,12 +11,15 @@ const HISTORY_TTL = 24 * 60 * 60 * 1000;
 // and ALWAYS respect it (no force path) — both auto and manual refreshes serve cache when it's
 // fresh, exactly like stocks/MFs. So Gemini is hit at most once per hour across all screens
 // (gold + silver share one grounded call) → max ~24 calls/day, regardless of how many times the
-// user taps refresh. The daily safety cap (30) is just a backstop against failure loops.
+// user taps refresh. The daily safety cap (50) is just a backstop against failure loops.
 const COMMODITY_TTL = 1 * 60 * 60 * 1000;
 
 interface CacheEntry {
   price: number;
   fetchedAt: number;
+  // Commodities only: whether this estimate came from the named vendor (true) or a generic market
+  // fallback (false). Undefined for stocks/MFs and for pre-existing cache entries.
+  vendorFound?: boolean;
 }
 
 interface HistoryEntry {
@@ -315,12 +319,12 @@ function metalFromTicker(metalTicker: string): 'gold' | 'silver' | null {
 
 // One in-flight Gemini request shared across callers, so fetching gold + silver together
 // (as the Accounts/Portfolio views do) costs a SINGLE grounded call, not two.
-let commodityInFlight: Promise<{ gold: number | null; silver: number | null }> | null = null;
+let commodityInFlight: Promise<VendorPrices> | null = null;
 
-function fetchBothMetals(): Promise<{ gold: number | null; silver: number | null }> {
+function fetchBothMetals(): Promise<VendorPrices> {
   if (!commodityInFlight) {
     commodityInFlight = fetchVendorCommodityPrices()
-      .catch(() => ({ gold: null, silver: null }))
+      .catch(() => ({ gold: null, silver: null, vendorFound: false }))
       .finally(() => { commodityInFlight = null; });
   }
   return commodityInFlight;
@@ -339,8 +343,8 @@ export async function fetchCommodityPriceINR(metalTicker: string): Promise<numbe
   // served from the same request.
   const all = await fetchBothMetals();
   const now = Date.now();
-  if (all.gold !== null) mem['cINR_GC=F'] = { price: all.gold, fetchedAt: now };
-  if (all.silver !== null) mem['cINR_SI=F'] = { price: all.silver, fetchedAt: now };
+  if (all.gold !== null) mem['cINR_GC=F'] = { price: all.gold, fetchedAt: now, vendorFound: all.vendorFound };
+  if (all.silver !== null) mem['cINR_SI=F'] = { price: all.silver, fetchedAt: now, vendorFound: all.vendorFound };
   if (all.gold !== null || all.silver !== null) persist();
 
   // Fresh value if we got one, else fall back to the last cached value (even if stale).
@@ -352,6 +356,13 @@ export function getCachedCommodityPriceINR(metalTicker: string): number | null {
   return mem[cacheKey]?.price ?? null;
 }
 
+// Whether the cached estimate for this metal came from the named vendor (true), a generic market
+// fallback (false), or is unknown (null — no fetch yet, or a pre-flag cache entry). The UI warns
+// only on an explicit false, so an unknown never cries wolf.
+export function getCommodityVendorFound(metalTicker: string): boolean | null {
+  return mem[`cINR_${metalTicker}`]?.vendorFound ?? null;
+}
+
 // Whether the cached commodity estimate is still within the 1h window. Used to gate the manual
 // refresh button (same freshness-gated pattern as stocks/MFs) so we don't spend Gemini calls
 // that can't return anything newer.
@@ -359,6 +370,18 @@ export function isCommodityCacheFresh(metalTicker: string): boolean {
   const entry = mem[`cINR_${metalTicker}`];
   if (!entry) return false;
   return fresh(entry, COMMODITY_TTL);
+}
+
+// Drop the cached gold/silver estimates so the next read does a fresh grounded fetch. The cache is
+// keyed by metal, not vendor, so without this a vendor switch would keep serving the OLD vendor's
+// price for up to COMMODITY_TTL. Called on an explicit vendor change — an "use a different source"
+// signal that should override the 1h TTL (costs one grounded call: both metals come back together).
+// Also drops any in-flight request so a fetch already running for the old vendor isn't reused.
+export function clearCommodityCache(): void {
+  delete mem['cINR_GC=F'];
+  delete mem['cINR_SI=F'];
+  commodityInFlight = null;
+  persist();
 }
 
 // The most recent real Gemini fetch time across the given commodity tickers (epoch ms), or null.

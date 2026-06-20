@@ -2,8 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import { format, addMonths, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown } from 'lucide-react';
-import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols, isCacheFresh, searchMFByName, searchStockByName, fetchCommodityPriceINR, getCachedCommodityPriceINR, isCommodityCacheFresh } from '../services/MarketDataService';
+import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols, isCacheFresh, searchMFByName, searchStockByName, fetchCommodityPriceINR, getCachedCommodityPriceINR, isCommodityCacheFresh, getCommodityVendorFound } from '../services/MarketDataService';
 import type { MFSearchResult, StockSearchResult } from '../services/MarketDataService';
+import { getCommodityVendor } from '../services/GeminiConfig';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardNetwork } from '../types';
@@ -656,6 +657,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   const commodityPriceSource: 'manual' | 'estimate' | null =
                     acc.type !== 'commodity' || commodityPricePerGram === null ? null
                     : acc.manualPricePerGram !== undefined ? 'manual' : 'estimate';
+                  // An estimate where Gemini couldn't identify the configured vendor → it's a generic
+                  // market price, not the vendor's. Warn so a typo/fake vendor isn't shown as real.
+                  const commodityVendorMissing = commodityPriceSource === 'estimate' && !!acc.marketSymbol
+                    && getCommodityVendorFound(acc.marketSymbol) === false;
+                  const commodityVendorName = commodityVendorMissing ? getCommodityVendor() : '';
                   const commodityCurrentValue = commodityPricePerGram !== null && commodityTotalGrams > 0 ? commodityPricePerGram * commodityTotalGrams : null;
                   const commodityEffectiveInvested = acc.type === 'commodity'
                     ? (acc.investedValue !== undefined ? acc.investedValue + rawBal : undefined)
@@ -1133,8 +1139,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                           </span>
                                       }
                                       {!isRefreshing && commodityPriceSource && (
-                                        <span className="text-mono text-muted" style={{ fontSize: '0.6rem', marginTop: '0.1rem', fontStyle: 'italic' }}>
-                                          {commodityPriceSource === 'manual' ? 'manual price' : 'approx · AI estimate'}
+                                        <span className="text-mono text-muted" style={{ fontSize: '0.6rem', marginTop: '0.1rem', fontStyle: 'italic', ...(commodityVendorMissing ? { color: 'var(--warning)' } : {}) }}>
+                                          {commodityPriceSource === 'manual'
+                                            ? 'manual price'
+                                            : commodityVendorMissing
+                                              ? `couldn't find “${commodityVendorName}” · market estimate`
+                                              : 'approx · AI estimate'}
                                         </span>
                                       )}
                                     </div>

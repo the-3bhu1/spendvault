@@ -327,21 +327,22 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 inputMode="decimal"
                 className={`input-field ${errors.amount ? 'border-danger' : ''}`} 
                 value={newTx.amount === 0 && !editId ? '' : (newTx.amount ?? '')} 
-                onChange={e => { 
+                onChange={e => {
                   const val = e.target.value;
                   if (val === '' || /^\d*\.?\d*$/.test(val)) {
                     const totalAmount = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
-                    const isInvestment = newTx.category?.toLowerCase() === 'sip' || newTx.category?.toLowerCase() === 'stocks';
-                    const allotted = newTx.sipAllottedAmount || 0;
-                    const charges = isInvestment ? Math.max(0, totalAmount - allotted) : undefined;
-                    setNewTx(prev => ({ 
-                      ...prev, 
-                      amount: totalAmount,
-                      sipCharges: charges !== undefined ? parseFloat(charges.toFixed(2)) : undefined
-                    })); 
+                    setNewTx(prev => {
+                      const isInvestment = prev.category?.toLowerCase() === 'sip' || prev.category?.toLowerCase() === 'stocks';
+                      if (!isInvestment) return { ...prev, amount: totalAmount };
+                      // Keep invested fixed; charges absorb the change (amount = invested + charges).
+                      // Read invested from prev (current state), not a stale render closure.
+                      const invested = prev.sipAllottedAmount || 0;
+                      const charges = Math.max(0, totalAmount - invested);
+                      return { ...prev, amount: totalAmount, sipCharges: parseFloat(charges.toFixed(2)) };
+                    });
                     if (errors.amount) setErrors(prev => ({ ...prev, amount: '' }));
                   }
-                }} 
+                }}
                 placeholder="0.00" 
               />
               {errors.amount && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.amount}</span>}
@@ -470,27 +471,43 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     inputMode="decimal"
                     className="input-field" 
                     value={newTx.sipAllottedAmount === 0 ? '' : (newTx.sipAllottedAmount ?? '')} 
-                    onChange={e => { 
+                    onChange={e => {
                       const val = e.target.value;
                       if (val === '' || /^\d*\.?\d*$/.test(val)) {
                         const allotted = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
-                        const totalAmount = Number(newTx.amount || 0);
-                        const charges = Math.max(0, totalAmount - allotted);
-                        setNewTx(prev => ({ 
-                          ...prev, 
-                          sipAllottedAmount: allotted,
-                          sipCharges: parseFloat(charges.toFixed(2))
-                        }));
+                        setNewTx(prev => {
+                          // Charges is the complement: charges = amount − invested.
+                          const totalAmount = Number(prev.amount || 0);
+                          const charges = Math.max(0, totalAmount - allotted);
+                          return { ...prev, sipAllottedAmount: allotted, sipCharges: parseFloat(charges.toFixed(2)) };
+                        });
                       }
-                    }} 
+                    }}
                     placeholder="0.00" 
                   />
                 </div>
                 <div className="input-group" style={{ marginBottom: 0 }}>
                   <label>{isStock ? 'Brokerage / Taxes' : 'Stamp Duty / Charges'}</label>
-                  <div className="input-field flex align-center text-muted text-mono" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', height: '42px', borderRadius: '12px', padding: '0.75rem 1rem' }}>
-                    {newTx.sipCharges !== undefined ? newTx.sipCharges : '0.00'}
-                  </div>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className="input-field"
+                    value={newTx.sipCharges === 0 ? '' : (newTx.sipCharges ?? '')}
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                        const charges = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
+                        setNewTx(prev => {
+                          // Complement of invested: invested = amount − charges, so you can fill in
+                          // whichever you know (invested or charges) and the other is derived.
+                          const totalAmount = Number(prev.amount || 0);
+                          const invested = Math.max(0, totalAmount - charges);
+                          return { ...prev, sipCharges: charges, sipAllottedAmount: parseFloat(invested.toFixed(2)) };
+                        });
+                      }
+                    }}
+                    placeholder="0.00"
+                  />
                 </div>
               </div>
             );
