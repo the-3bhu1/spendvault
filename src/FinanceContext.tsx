@@ -969,6 +969,36 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         })).filter(debt => debt.transactions.length > 0);
       }
       
+      // When the edit moved the date to a different day, the old `order` is stale for the new day's
+      // group (a tx that was order 0 on its old day would jump to the top of the new day). Re-stamp
+      // the moved transaction AND any linked legs that were date-synced along with it (all share the
+      // new date) to the END of the destination day, matching how addTransaction places new ones.
+      if (oldTx && oldTx.date !== updatedTransaction.date) {
+        const newDate = updatedTransaction.date;
+        const movedIds = new Set(
+          updatedTxs
+            .filter(t => t.date === newDate)
+            .filter(t => {
+              const old = prev.transactions.find(p => p.id === t.id);
+              return old && old.date !== newDate;
+            })
+            .map(t => t.id)
+        );
+        if (movedIds.size > 0) {
+          // Highest order among transactions already living on the destination day.
+          let maxOrder = updatedTxs
+            .filter(t => t.date === newDate && !movedIds.has(t.id))
+            .reduce((max, t, idx) => {
+              const ord = t.order !== undefined ? t.order : idx;
+              return ord > max ? ord : max;
+            }, -1);
+          // Assign sequential orders to the moved group, preserving their relative order.
+          const newOrders = new Map<string, number>();
+          updatedTxs.forEach(t => { if (movedIds.has(t.id)) newOrders.set(t.id, ++maxOrder); });
+          updatedTxs = updatedTxs.map(t => newOrders.has(t.id) ? { ...t, order: newOrders.get(t.id) } : t);
+        }
+      }
+
       return { ...prev, transactions: updatedTxs, debts: updatedDebts };
     });
   };
