@@ -35,7 +35,7 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
     });
 
     // Credit Card Dues calculation - Simple Version 1 Logic
-    data.accounts.filter(a => a.type === 'credit_card').forEach(cc => {
+    data.accounts.filter(a => a.type === 'credit_card' && !a.archived).forEach(cc => {
       const statementDay = cc.statementDay || 1;
       const billedCycle = getLatestBilledCycle(statementDay);
       const unbilledCycle = format(addMonths(parseISO(`${billedCycle}-01`), 1), 'yyyy-MM');

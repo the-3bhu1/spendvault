@@ -839,7 +839,7 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
   const [type, setType] = useState<'lent' | 'borrowed'>('lent');
   const [desc, setDesc] = useState('');
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [accountId, setAccountId] = useState(accounts[0]?.id || '');
+  const [accountId, setAccountId] = useState(accounts.find(a => !a.archived)?.id || '');
   const [logInLedger, setLogInLedger] = useState(true);
   const [isLinking, setIsLinking] = useState(false);
   const [linkedTxId, setLinkedTxId] = useState<string | null>(null);
@@ -866,7 +866,7 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
     const currentMonth = getCurrentMonthStr();
     const TYPE_ORDER = ['bank_account', 'credit_card', 'debit_card', 'cash', 'e_wallet'];
     return accounts
-      .filter(acc => !['stocks', 'sips', 'rewards', 'commodity'].includes(acc.type))
+      .filter(acc => !acc.archived && !['stocks', 'sips', 'rewards', 'commodity'].includes(acc.type))
       .sort((a, b) => {
         const ai = TYPE_ORDER.indexOf(a.type);
         const bi = TYPE_ORDER.indexOf(b.type);
@@ -1142,7 +1142,7 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
       : (currentBalance > 0 ? 'received' : 'sent')
   );
   const [date, setDate] = useState(initialTx ? initialTx.date.split('T')[0] : format(new Date(), 'yyyy-MM-dd'));
-  const [accountId, setAccountId] = useState(ledgerTx ? ledgerTx.accountId : (accounts[0]?.id || ''));
+  const [accountId, setAccountId] = useState(ledgerTx ? ledgerTx.accountId : (accounts.find(a => !a.archived)?.id || ''));
   const [logInLedger, setLogInLedger] = useState(initialTx ? !!ledgerTx : true);
   const [isLinking, setIsLinking] = useState(false);
   // If a ledgerTx already exists (auto-synced), don't also show the manual link as active
@@ -1159,7 +1159,7 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
     const currentMonth = getCurrentMonthStr();
     const TYPE_ORDER = ['bank_account', 'credit_card', 'debit_card', 'cash', 'e_wallet'];
     return accounts
-      .filter(acc => !['stocks', 'sips', 'rewards', 'commodity'].includes(acc.type))
+      .filter(acc => !acc.archived && !['stocks', 'sips', 'rewards', 'commodity'].includes(acc.type))
       .sort((a, b) => {
         const ai = TYPE_ORDER.indexOf(a.type);
         const bi = TYPE_ORDER.indexOf(b.type);

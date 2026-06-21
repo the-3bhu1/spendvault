@@ -126,9 +126,11 @@ export function Portfolio() {
       return next;
     });
 
+  // Archived (soft-deleted) accounts are excluded from the portfolio — they shouldn't count toward
+  // invested/current totals or appear in the holdings lists.
   const sipAccounts = useMemo(() => {
     try {
-      return (data?.accounts || []).filter((a: Account) => a.type === 'sips');
+      return (data?.accounts || []).filter((a: Account) => a.type === 'sips' && !a.archived);
     } catch {
       return [];
     }
@@ -136,7 +138,7 @@ export function Portfolio() {
 
   const stockAccounts = useMemo(() => {
     try {
-      return (data?.accounts || []).filter((a: Account) => a.type === 'stocks');
+      return (data?.accounts || []).filter((a: Account) => a.type === 'stocks' && !a.archived);
     } catch {
       return [];
     }
@@ -144,7 +146,7 @@ export function Portfolio() {
 
   const commodityAccounts = useMemo(() => {
     try {
-      return (data?.accounts || []).filter((a: Account) => a.type === 'commodity');
+      return (data?.accounts || []).filter((a: Account) => a.type === 'commodity' && !a.archived);
     } catch {
       return [];
     }
@@ -330,6 +332,31 @@ export function Portfolio() {
     return { amount, pct: (amount / prevTotal) * 100 };
   }, [portfolioView, sipAccounts, stockAccounts, commodityAccounts, prices, prevPrices, data.transactions]);
 
+  // The displayed "Last refresh at" is scoped to the active tab: each asset class has its own
+  // TTL (stocks 5m, MFs 8h, metals 1h), so a refresh only re-fetches what's stale. Showing the
+  // global max on the MF tab would surface the recent stock fetch time and mislead — so when a
+  // class is selected, show that class's own latest fetch. "All" keeps the overall max.
+  const displayRefreshedAt = useMemo(() => {
+    if (!lastRefreshed) return null;
+    const onlyStr = (arr: (string | undefined)[]) => arr.filter((s): s is string => !!s);
+    const mfSyms = onlyStr(sipAccounts.map((a: Account) => a.marketSymbol));
+    const stockSyms = onlyStr(stockAccounts.map((a: Account) => a.marketSymbol));
+    const metalTickers = onlyStr(
+      commodityAccounts
+        .filter((a: Account) => a.manualPricePerGram === undefined)
+        .map((a: Account) => a.marketSymbol)
+    );
+    let ts: number | null;
+    if (portfolioView === 'mf') ts = getLatestFetchedAt(mfSyms);
+    else if (portfolioView === 'stocks') ts = getLatestFetchedAt(stockSyms);
+    else if (portfolioView === 'commodity') ts = getLatestCommodityFetchedAt(metalTickers);
+    else ts = Math.max(
+      getLatestFetchedAt([...mfSyms, ...stockSyms]) ?? 0,
+      getLatestCommodityFetchedAt(metalTickers) ?? 0
+    ) || null;
+    return ts && ts > 0 ? new Date(ts) : lastRefreshed;
+  }, [portfolioView, lastRefreshed, sipAccounts, stockAccounts, commodityAccounts]);
+
   const formatCurrency = (value: number) =>
     `₹${Math.round(value).toLocaleString('en-IN')}`;
 
@@ -474,9 +501,9 @@ export function Portfolio() {
           {isRefreshing ? 'Refreshing...' : 'Refresh prices'}
         </button>
 
-        {lastRefreshed && (
+        {displayRefreshedAt && (
           <div className="text-mono uppercase" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginTop: '0.6rem', letterSpacing: '0.5px' }}>
-            Last refresh at {formatTime(lastRefreshed)}
+            Last refresh at {formatTime(displayRefreshedAt)}
           </div>
         )}
 

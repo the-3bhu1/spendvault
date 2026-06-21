@@ -15,7 +15,7 @@ import {
   setGeminiKey, clearGeminiKey, hasGeminiKey,
 } from '../services/GeminiConfig';
 import { getGeminiUsageToday } from '../services/GeminiService';
-import { clearCommodityCache } from '../services/MarketDataService';
+import { invalidateCommodityCache } from '../services/MarketDataService';
 import { APP_VERSION } from '../utils';
 
 const GridButton = ({ icon: Icon, label, onClick }: { icon: React.ElementType, label: string, onClick?: () => void }) => (
@@ -660,8 +660,9 @@ export default function Settings() {
       const vendorChanged = geminiVendorInput.trim() !== getCommodityVendor();
       setCommodityVendor(geminiVendorInput);
       // A vendor switch should fetch from the new source now, not serve the old vendor's price for
-      // up to an hour — drop the metal cache so the next read does a fresh grounded call.
-      if (vendorChanged) clearCommodityCache();
+      // up to an hour — invalidate the metal cache so the next read does a fresh grounded call
+      // (while keeping the last price as a fallback, so the portfolio doesn't flash ₹0).
+      if (vendorChanged) invalidateCommodityCache();
       if (keyEntered) {
         await setGeminiKey(geminiKeyInput.trim());
         setGeminiKeyInput('');
@@ -736,6 +737,8 @@ export default function Settings() {
     // Stocks / SIPs / Commodity investment fields
     numberOfShares: 'ns', marketSymbol: 'ms', investedValue: 'iv', commodityMetal: 'cm',
     manualPricePerGram: 'mpg', avgNav: 'an',
+    // Soft-delete flag (see Account.archived)
+    archived: 'arc',
   };
 
   const minifyPayload = (obj: any): any => {

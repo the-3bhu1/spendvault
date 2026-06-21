@@ -372,14 +372,20 @@ export function isCommodityCacheFresh(metalTicker: string): boolean {
   return fresh(entry, COMMODITY_TTL);
 }
 
-// Drop the cached gold/silver estimates so the next read does a fresh grounded fetch. The cache is
-// keyed by metal, not vendor, so without this a vendor switch would keep serving the OLD vendor's
-// price for up to COMMODITY_TTL. Called on an explicit vendor change — an "use a different source"
-// signal that should override the 1h TTL (costs one grounded call: both metals come back together).
+// Mark the cached gold/silver estimates stale (fetchedAt = 0) so the next read does a fresh
+// grounded fetch from the new vendor. The cache is keyed by metal, not vendor, so without this a
+// vendor switch would keep serving the OLD vendor's price for up to COMMODITY_TTL. Called on an
+// explicit vendor change — a "use a different source" signal that overrides the 1h TTL (costs one
+// grounded call: both metals come back together).
+//
+// We invalidate rather than DELETE: the last-known price is kept so getCachedCommodityPriceINR can
+// still serve it as a fallback while the fresh call is in flight (or if it fails). Deleting it made
+// the portfolio flash ₹0 during the post-vendor-change refresh instead of showing cached data.
 // Also drops any in-flight request so a fetch already running for the old vendor isn't reused.
-export function clearCommodityCache(): void {
-  delete mem['cINR_GC=F'];
-  delete mem['cINR_SI=F'];
+export function invalidateCommodityCache(): void {
+  for (const key of ['cINR_GC=F', 'cINR_SI=F'] as const) {
+    if (mem[key]) mem[key] = { ...mem[key], fetchedAt: 0 };
+  }
   commodityInFlight = null;
   persist();
 }

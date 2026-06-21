@@ -47,7 +47,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     amount: 0,
     type: 'debit',
     category: 'Bills',
-    accountId: data.accounts[0]?.id || '',
+    accountId: data.accounts.find(a => !a.archived)?.id || '',
     excludeFromStats: false,
     tags: [],
     ...initialData
@@ -80,7 +80,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           amount: 0,
           type: 'debit',
           category: 'Bills',
-          accountId: data.accounts[0]?.id || '',
+          accountId: data.accounts.find(a => !a.archived)?.id || '',
           excludeFromStats: false,
           tags: [],
           ...initialData
@@ -372,6 +372,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             placeholder="Select an account" 
             options={data.accounts
               .filter(acc => {
+                // Hide archived (deleted) accounts from selection, but keep the one already on this
+                // transaction so editing historical data doesn't blank the field.
+                if (acc.archived && acc.id !== newTx.accountId) return false;
                 if (newTx.category?.toLowerCase() === 'sip') {
                   return newTx.type === 'credit' ? acc.type === 'sips' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
                 }
@@ -383,8 +386,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 }
                 return true;
               })
-              .map(acc => ({ id: acc.id, name: acc.name, subtext: acc.type.replace('_', ' ') }))
-            } 
+              .sort((a, b) => (a.archived ? 1 : 0) - (b.archived ? 1 : 0))
+              .map(acc => ({ id: acc.id, name: acc.archived ? `${acc.name} (deleted)` : acc.name, subtext: acc.type.replace('_', ' ') }))
+            }
             onChange={val => {
               const isSip = newTx.category?.toLowerCase() === 'sip';
               const isStock = newTx.category?.toLowerCase() === 'stocks';
@@ -516,6 +520,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           {!editId && ((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') || isCCPayment || (newTx.category?.toLowerCase() === 'sip' || newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity')) && (
             <CustomPicker label={(newTx.category?.toLowerCase() === 'sip' || newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity') ? (newTx.type === 'debit' ? 'Credit To Investment Account' : 'Debit From Account') : (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' ? 'Debit From Account (Auto-Debit)' : 'Pay To Card (Auto-Credit)')} value={paymentSourceAccountId} placeholder="None (Manual Log)" options={[{ id: '', name: 'None (Manual Log)' }, ...data.accounts.filter(a => {
               if (a.id === newTx.accountId) return false;
+              if (a.archived) return false; // this picker only shows for new transactions
+
               if (newTx.category?.toLowerCase() === 'sip') {
                 return newTx.type === 'debit' ? a.type === 'sips' : (a.type === 'bank_account' || a.type === 'e_wallet');
               }
@@ -575,7 +581,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   placeholder="0.00" 
                 />
               </div>
-              <CustomPicker label="From Rewards" value={newTx.rewardUsedAccountId || ''} placeholder="Select Reward Account" options={data.accounts.filter(a => a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points')).map(acc => ({ id: acc.id, name: acc.name }))} onChange={val => setNewTx({ ...newTx, rewardUsedAccountId: val })} iconGetter={id => getAccountIcon(id, data.accounts)} />
+              <CustomPicker label="From Rewards" value={newTx.rewardUsedAccountId || ''} placeholder="Select Reward Account" options={data.accounts.filter(a => (!a.archived || a.id === newTx.rewardUsedAccountId) && (a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points'))).map(acc => ({ id: acc.id, name: acc.archived ? `${acc.name} (deleted)` : acc.name }))} onChange={val => setNewTx({ ...newTx, rewardUsedAccountId: val })} iconGetter={id => getAccountIcon(id, data.accounts)} />
             </div>
           )}
 

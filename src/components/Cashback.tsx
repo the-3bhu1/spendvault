@@ -664,7 +664,7 @@ export default function Cashback() {
                       label="Deposit Into"
                       value={depositAccountId}
                       placeholder="Select Reward Account"
-                      options={data.accounts.filter(a => a.type === 'rewards' || a.type === 'e_wallet').map(account => ({
+                      options={data.accounts.filter(a => !a.archived && (a.type === 'rewards' || a.type === 'e_wallet')).map(account => ({
                         id: account.id,
                         name: account.name,
                         subtext: account.type.replace('_', ' ')

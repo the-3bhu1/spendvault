@@ -61,6 +61,8 @@ interface FinanceContextType {
   addAccount: (account: Account) => void;
   updateAccount: (account: Account) => void;
   deleteAccount: (id: string) => void;
+  archiveAccount: (id: string) => void;
+  restoreAccount: (id: string) => void;
   addTransaction: (transaction: Transaction) => void;
   updateTransaction: (transaction: Transaction) => void;
   reorderTransactions: (...txs: Transaction[]) => void;
@@ -683,6 +685,23 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     setData(prev => ({
       ...prev,
       accounts: prev.accounts.filter(a => a.id !== id)
+    }));
+  };
+
+  // Soft-delete: hide the account everywhere but keep it in data so its past transactions still
+  // resolve a name. Restorable. This is what the "Delete account" button now does — a hard
+  // deleteAccount would orphan that history to "Unknown".
+  const archiveAccount = (id: string) => {
+    setData(prev => ({
+      ...prev,
+      accounts: prev.accounts.map(a => a.id === id ? { ...a, archived: true } : a)
+    }));
+  };
+
+  const restoreAccount = (id: string) => {
+    setData(prev => ({
+      ...prev,
+      accounts: prev.accounts.map(a => a.id === id ? { ...a, archived: false } : a)
     }));
   };
 
@@ -1506,6 +1525,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       addAccount,
       updateAccount,
       deleteAccount,
+      archiveAccount,
+      restoreAccount,
       addTransaction,
       updateTransaction,
       reorderTransactions,

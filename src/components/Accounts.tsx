@@ -13,7 +13,7 @@ import { CardNetworkLogo } from './CardNetworkLogo';
 import { ViewCardOverlay } from './ViewCardOverlay';
 
 export default function Accounts({ onViewStatement }: { onViewStatement: (acc: Account) => void }) {
-  const { data, setPendingTransfer, addAccount, updateAccount, deleteAccount } = useFinance();
+  const { data, setPendingTransfer, addAccount, updateAccount, archiveAccount, restoreAccount } = useFinance();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [viewingCard, setViewingCard] = useState<Account | null>(null);
@@ -59,10 +59,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
   useEffect(() => {
     const stockSipItems = data.accounts
-      .filter(a => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
+      .filter(a => !a.archived && (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
       .map(a => ({ symbol: a.marketSymbol!, kind: (a.type === 'stocks' ? 'stock' : 'sip') as 'stock' | 'sip' }));
     // Skip accounts with a manual price override — no need to spend a Gemini call for them.
-    const commodityAccs = data.accounts.filter(a => a.type === 'commodity' && a.marketSymbol && a.manualPricePerGram === undefined);
+    const commodityAccs = data.accounts.filter(a => !a.archived && a.type === 'commodity' && a.marketSymbol && a.manualPricePerGram === undefined);
     if (stockSipItems.length === 0 && commodityAccs.length === 0) return;
     const allSyms = [...stockSipItems.map(i => i.symbol), ...commodityAccs.map(a => a.marketSymbol!)];
     setRefreshingSymbols(new Set(allSyms));
@@ -550,7 +550,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             'commodity'
           ];
 
-          const grouped = data.accounts.reduce((acc, account) => {
+          // Archived accounts are hidden from the normal list — they get their own section below.
+          const grouped = data.accounts.filter(a => !a.archived).reduce((acc, account) => {
             if (!acc[account.type]) acc[account.type] = [];
             acc[account.type].push(account);
             return acc;
@@ -559,7 +560,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
           // Sort groups based on TYPE_ORDER, then append any remaining custom types
           const sortedTypes = [...TYPE_ORDER.filter(t => grouped[t]), ...Object.keys(grouped).filter(t => !TYPE_ORDER.includes(t))];
 
+          const hasArchived = data.accounts.some(a => a.archived);
           if (sortedTypes.length === 0) {
+            // Suppress the empty-state when only archived accounts remain — the Archived section
+            // below carries the content.
+            if (hasArchived) return null;
             return (
               <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                 <p className="text-muted text-center" style={{ padding: '2rem' }}>No accounts added yet.</p>
@@ -1202,6 +1207,36 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
           );
           });
         })()}
+
+        {/* Archived (soft-deleted) accounts — kept so their transaction history still resolves a
+            name. Restorable; hidden from pickers/totals everywhere else. */}
+        {data.accounts.some(a => a.archived) && (
+          <div className="flex-col gap-4" style={{ marginTop: '2.5rem' }}>
+            <div className="flex align-center gap-3" style={{ padding: '0 0.5rem', marginBottom: '0.5rem' }}>
+              <span className="text-mono" style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--text-muted)', opacity: 0.8 }}>
+                Archived
+              </span>
+              <div style={{ flex: 1, height: '1px', background: 'linear-gradient(to right, var(--text-muted), transparent)', opacity: 0.2 }}></div>
+            </div>
+            <div className="flex-col gap-3">
+              {data.accounts.filter(a => a.archived).map(acc => (
+                <div key={acc.id} className="card flex justify-between align-center" style={{ padding: '0.9rem 1rem', opacity: 0.7 }}>
+                  <div className="flex-col" style={{ gap: '0.15rem' }}>
+                    <span className="text-mono" style={{ fontSize: '0.9rem', fontWeight: 700 }}>{acc.name}</span>
+                    <span className="text-mono text-muted text-xs" style={{ textTransform: 'capitalize' }}>{acc.type.replace(/_/g, ' ')} · deleted</span>
+                  </div>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.72rem', padding: '0.4rem 0.9rem' }}
+                    onClick={() => restoreAccount(acc.id)}
+                  >
+                    Restore
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {isModalOpen && (
@@ -2161,12 +2196,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       <ConfirmDialog
         isOpen={!!deleteConfirmId}
         title="Delete Account?"
-        message="Are you sure you want to remove this account? This will also remove its associated transaction history."
+        message="This account will be removed from your accounts list and won't appear when adding new transactions. Its past transactions are kept and will show its name marked as deleted. You can restore it anytime from the Archived section."
         confirmLabel="Delete"
         cancelLabel="Cancel"
         onConfirm={() => {
           if (deleteConfirmId) {
-            deleteAccount(deleteConfirmId);
+            archiveAccount(deleteConfirmId);
             setDeleteConfirmId(null);
           }
         }}

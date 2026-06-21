@@ -613,7 +613,7 @@ export default function UpcomingBills() {
                   value={newBill.linkedSipAccountId || ''}
                   options={[
                     { id: '', name: 'None (Manual Log)' },
-                    ...data.accounts.filter(a => a.type === 'sips').map(a => ({ id: a.id, name: a.name }))
+                    ...data.accounts.filter(a => a.type === 'sips' && !a.archived).map(a => ({ id: a.id, name: a.name }))
                   ]}
                   onChange={val => {
                     const sipAcc = val ? data.accounts.find(a => a.id === val) : undefined;
@@ -647,7 +647,7 @@ export default function UpcomingBills() {
             description: 'isCC' in selectedBill ? 'CC Bill Payment' : selectedBill.name,
             amount: selectedBill.amount,
             category: 'isCC' in selectedBill ? 'CC Payment' : (selectedBill.category || 'Bills'),
-            accountId: selectedBill.accountId || data.accounts[0]?.id || '',
+            accountId: selectedBill.accountId || data.accounts.find(a => !a.archived)?.id || '',
             type: 'isCC' in selectedBill ? 'credit' : (selectedBill.type || 'debit'),
             recurringBillId: selectedBill.id,
             ...(isSip && sipAccount ? {

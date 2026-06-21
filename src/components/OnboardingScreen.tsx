@@ -43,6 +43,8 @@ const KEY_MAP: Record<string, string> = {
   cycles: 'cy', currentCycleId: 'cci', cycleStartDate: 'csd',
   cycleNumber: 'cnm', startDate: 'sdt', endDate: 'edt', carriedOverPeople: 'cop',
   markedDone: 'md', linkedSipAccountId: 'lsa',
+  // Soft-delete flag (see Account.archived)
+  archived: 'arc',
 };
 
 const REVERSE_MAP = Object.fromEntries(Object.entries(KEY_MAP).map(([k, v]) => [v, k]));

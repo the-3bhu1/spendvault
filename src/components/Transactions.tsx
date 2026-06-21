@@ -191,7 +191,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveUp, 
               )}
             </div>
             <div className="flex align-center gap-2" style={{ marginTop: '2px', flexWrap: 'nowrap', overflow: 'hidden' }}>
-              <span className="text-mono text-muted text-xs truncate" style={{ fontWeight: 600, flexShrink: 1 }}>{acc?.name || 'Unknown'}</span>
+              <span className="text-mono text-muted text-xs truncate" style={{ fontWeight: 600, flexShrink: 1 }}>{acc?.name || 'Unknown'}{acc?.archived ? ' (deleted)' : ''}</span>
               <span className="metric-pill truncate" style={{ flexShrink: 0 }}>{tx.category}</span>
               {(tx.tags || []).slice(0, 2).map(tag => (
                 <span key={tag} className="tag-pill" style={{ flexShrink: 0 }}>#{tag}</span>
@@ -385,7 +385,7 @@ export default function Transactions() {
   useEffect(() => {
     if (pendingTransfer) {
       // Find the first available bank account to suggest as destination
-      const bankAcc = data.accounts.find(a => a.type === 'bank_account');
+      const bankAcc = data.accounts.find(a => a.type === 'bank_account' && !a.archived);
 
       setEditId(null);
       const initialTx: Partial<Transaction> = {
@@ -1284,7 +1284,11 @@ export default function Transactions() {
                 isMulti={true}
                 options={[
                   { id: 'all', name: 'All Accounts' },
-                  ...[...data.accounts].sort(sortByAccountType).map(a => ({ id: a.id, name: a.name }))
+                  // Keep archived accounts here so their history is still filterable, just labelled
+                  // and pushed to the end of the list.
+                  ...[...data.accounts]
+                    .sort((a, b) => (a.archived ? 1 : 0) - (b.archived ? 1 : 0) || sortByAccountType(a, b))
+                    .map(a => ({ id: a.id, name: a.archived ? `${a.name} (deleted)` : a.name }))
                 ]}
                 onChange={setFilterAccountId}
                 iconGetter={(id) => id === 'all' ? <Wallet size={18} /> : getAccountIcon(id)}
@@ -1693,8 +1697,11 @@ export default function Transactions() {
                 value={newTx.accountId || ''}
                 placeholder="Select an account"
                 options={[...data.accounts]
-                  .sort(sortByAccountType)
+                  .sort((a, b) => (a.archived ? 1 : 0) - (b.archived ? 1 : 0) || sortByAccountType(a, b))
                   .filter(acc => {
+                    // Hide archived (deleted) accounts, but keep the one already on this transaction
+                    // so editing historical data doesn't blank the field (sorted to the end).
+                    if (acc.archived && acc.id !== newTx.accountId) return false;
                     if (isCCPayment) {
                       return newTx.type === 'debit' ? acc.type !== 'credit_card' : acc.type === 'credit_card';
                     }
@@ -1711,7 +1718,7 @@ export default function Transactions() {
                   })
                   .map(acc => ({
                     id: acc.id,
-                    name: acc.name,
+                    name: acc.archived ? `${acc.name} (deleted)` : acc.name,
                     subtext: acc.type.replace('_', ' ')
                   }))}
                 onChange={val => {
@@ -2027,6 +2034,8 @@ export default function Transactions() {
                       { id: '', name: 'None (Manual Log)' },
                       ...[...data.accounts].sort(sortByAccountType).filter(a => {
                         if (a.id === newTx.accountId) return false;
+                        // Hide archived, but keep the counterpart already selected on this transaction.
+                        if (a.archived && a.id !== paymentSourceAccountId) return false;
                         if (isCCPayment) {
                           return newTx.type === 'debit' ? a.type === 'credit_card' : a.type !== 'credit_card';
                         }
@@ -2260,9 +2269,9 @@ export default function Transactions() {
                           label="Deposit To"
                           value={newTx.rewardEarnedAccountId || ''}
                           placeholder="Select Account"
-                          options={[...data.accounts].sort(sortByAccountType).filter(a => a.type === 'rewards' || a.type === 'e_wallet').map(acc => ({
+                          options={[...data.accounts].sort(sortByAccountType).filter(a => (!a.archived || a.id === newTx.rewardEarnedAccountId) && (a.type === 'rewards' || a.type === 'e_wallet')).map(acc => ({
                             id: acc.id,
-                            name: acc.name,
+                            name: acc.archived ? `${acc.name} (deleted)` : acc.name,
                             subtext: acc.type.replace('_', ' ')
                           }))}
                           onChange={val => setNewTx({ ...newTx, rewardEarnedAccountId: val, rewardEarnedType: 'instant' })}
@@ -2343,9 +2352,9 @@ export default function Transactions() {
                     label="From Rewards"
                     value={newTx.rewardUsedAccountId || ''}
                     placeholder="Select Reward Account"
-                    options={[...data.accounts].sort(sortByAccountType).filter(a => a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points')).map(acc => ({
+                    options={[...data.accounts].sort(sortByAccountType).filter(a => (!a.archived || a.id === newTx.rewardUsedAccountId) && (a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points'))).map(acc => ({
                       id: acc.id,
-                      name: acc.name,
+                      name: acc.archived ? `${acc.name} (deleted)` : acc.name,
                       subtext: acc.rewardType === 'points'
                         ? `${calculateBalance(acc, data.transactions, getCurrentMonthStr(), false, true, data.cashbackStatements)} ${acc.rewardUnit || ''}`
                         : formatCurrency(calculateBalance(acc, data.transactions, getCurrentMonthStr(), false, false, data.cashbackStatements))
