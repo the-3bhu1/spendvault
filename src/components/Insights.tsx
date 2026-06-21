@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useFinance } from '../FinanceContext';
 import { formatCurrency, formatDateString } from '../utils';
-import { TrendingUp, TrendingDown, Star, Trophy, Calendar, ArrowUpRight, ArrowDownRight, Zap, Activity, Hash } from 'lucide-react';
+import { TrendingUp, TrendingDown, Star, Trophy, Calendar, ArrowUpRight, ArrowDownRight, Zap, Activity, Hash, Target, Pencil, Trash2, Check, X } from 'lucide-react';
 
 
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine, Label } from 'recharts';
@@ -26,8 +26,72 @@ const isCountableTransaction = (tx: Transaction) => {
   return true;
 };
 
+// Categories that aren't discretionary spend, so a monthly budget makes no sense for them.
+const NON_BUDGET_CATEGORIES = new Set([
+  'transfer', 'cc payment', 'ncmc travel recharge', 'sip', 'stocks', 'commodity', 'cashback', 'income', 'salary',
+]);
+
+// Inline ₹ editor for a category budget: a full-width field (with a ₹ prefix) plus Save / Cancel.
+// A `resolved` flag guards against onBlur firing a second commit after Enter/Escape/button already
+// resolved the edit (so Cancel truly discards without re-saving). The Save/Cancel buttons use
+// onMouseDown preventDefault so clicking them doesn't blur-commit the input first.
+function BudgetInput({ value, onChange, onCommit, onCancel }: {
+  value: string;
+  onChange: (v: string) => void;
+  onCommit: () => void;
+  onCancel: () => void;
+}) {
+  const resolved = useRef(false);
+  return (
+    <div className="flex align-center gap-2">
+      <div
+        className="flex align-center"
+        style={{ flex: 1, minWidth: 0, background: 'var(--bg-color)', border: '1px solid var(--accent)', borderRadius: '8px', padding: '0 0.7rem' }}
+      >
+        <span className="text-muted" style={{ fontWeight: 700, fontSize: '0.95rem', flexShrink: 0 }}>₹</span>
+        <input
+          type="number"
+          inputMode="numeric"
+          autoFocus
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          onBlur={() => { if (!resolved.current) onCommit(); }}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { resolved.current = true; onCommit(); }
+            if (e.key === 'Escape') { resolved.current = true; onCancel(); }
+          }}
+          placeholder="monthly cap"
+          style={{
+            flex: 1, minWidth: 0, width: '100%', padding: '0.55rem 0.4rem',
+            background: 'transparent', border: 'none', outline: 'none',
+            color: 'var(--text-primary)', fontWeight: 700, fontSize: '0.95rem',
+          }}
+        />
+      </div>
+      <button
+        className="btn btn-secondary"
+        style={{ width: '34px', height: '34px', padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--success)' }}
+        onMouseDown={e => e.preventDefault()}
+        onClick={() => { resolved.current = true; onCommit(); }}
+        title="Save"
+      >
+        <Check size={16} />
+      </button>
+      <button
+        className="btn btn-secondary"
+        style={{ width: '34px', height: '34px', padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
+        onMouseDown={e => e.preventDefault()}
+        onClick={() => { resolved.current = true; onCancel(); }}
+        title="Cancel"
+      >
+        <X size={16} />
+      </button>
+    </div>
+  );
+}
+
 export default function Insights() {
-  const { data } = useFinance();
+  const { data, updateCategoryBudgets } = useFinance();
   
   // Get all unique months from transactions, sorted descending (latest first)
   const availableMonths = useMemo(() => {
@@ -200,6 +264,62 @@ export default function Insights() {
 
   const [activeCatIndex, setActiveCatIndex] = useState<number | null>(null);
   const [activeAccIndex, setActiveAccIndex] = useState<number | null>(null);
+
+  // ── Category budgets ──────────────────────────────────────────────────────
+  // A budget is a monthly cap (₹) per category; progress is the SELECTED month's spend in that
+  // category (insights.catSpend), so switching months re-evaluates against the same cap.
+  const [editingBudgetCat, setEditingBudgetCat] = useState<string | null>(null);
+  const [budgetInput, setBudgetInput] = useState('');
+
+  // Categories eligible for a budget (discretionary spend only).
+  const spendableCats = useMemo(
+    () => data.categories.filter(c => !NON_BUDGET_CATEGORIES.has(c.toLowerCase())),
+    [data.categories]
+  );
+
+  // Only categories the user has actually set a budget for get a row + progress bar.
+  const budgetRows = useMemo(() => {
+    if (!insights) return [];
+    const budgets = data.categoryBudgets || {};
+    return spendableCats
+      .filter(c => (budgets[c] || 0) > 0)
+      .map(cat => ({ cat, budget: budgets[cat], spent: insights.catSpend[cat] || 0 }))
+      .sort((a, b) => b.spent / b.budget - a.spent / a.budget);
+  }, [insights, data.categoryBudgets, spendableCats]);
+
+  const budgetedCount = budgetRows.length;
+
+  // Categories offered in the "add a budget" picker: spendable, not yet budgeted, and not the one
+  // currently being added (its input is already showing).
+  const addableCats = useMemo(
+    () => spendableCats.filter(c => !((data.categoryBudgets || {})[c] > 0) && c !== editingBudgetCat),
+    [spendableCats, data.categoryBudgets, editingBudgetCat]
+  );
+
+  // A category picked from the add-picker that doesn't have a saved budget yet (input is open).
+  const pendingNewCat = editingBudgetCat && !((data.categoryBudgets || {})[editingBudgetCat] > 0)
+    ? editingBudgetCat : null;
+
+  const startEditBudget = (cat: string, current: number) => {
+    setEditingBudgetCat(cat);
+    setBudgetInput(current > 0 ? String(current) : '');
+  };
+
+  const saveBudget = (cat: string) => {
+    const val = Math.max(0, Math.round(Number(budgetInput) || 0));
+    const next = { ...(data.categoryBudgets || {}) };
+    if (val > 0) next[cat] = val;
+    else delete next[cat]; // clearing the field cancels/removes the budget
+    updateCategoryBudgets(next);
+    setEditingBudgetCat(null);
+  };
+
+  const removeBudget = (cat: string) => {
+    const next = { ...(data.categoryBudgets || {}) };
+    delete next[cat];
+    updateCategoryBudgets(next);
+    if (editingBudgetCat === cat) setEditingBudgetCat(null);
+  };
   const [highlightedBarMonth, setHighlightedBarMonth] = useState<string>(selectedMonth);
 
   // Reset bar highlight when dropdown month changes
@@ -498,6 +618,118 @@ export default function Insights() {
 
       {insights && (
         <div className="grid grid-cols-1 gap-6">
+          {spendableCats.length > 0 && (
+            <div className="card flex-col gap-8" style={{ padding: '2rem' }}>
+              <div className="flex-col gap-2">
+                <span className="text-mono text-xs text-muted uppercase font-bold" style={{ letterSpacing: '2px', opacity: 0.8 }}>Category Budgets</span>
+                <h3 className="text-serif" style={{ fontSize: '2.2rem', fontWeight: 800 }}>
+                  {budgetedCount > 0 ? `${budgetedCount} ${budgetedCount === 1 ? 'budget' : 'budgets'} set` : 'No budgets yet'}
+                </h3>
+                <p className="text-sm text-secondary">
+                  Pick a category and set a monthly cap. Bars turn <span style={{ color: 'var(--warning)', fontWeight: 700 }}>orange</span> past 80% and <span style={{ color: 'var(--danger)', fontWeight: 700 }}>red</span> once you cross it — showing {insights.displayMonth}.
+                </p>
+              </div>
+
+              {(budgetRows.length > 0 || pendingNewCat) && (
+                <div className="flex-col gap-5">
+                  {budgetRows.map(({ cat, budget, spent }) => {
+                    const pct = (spent / budget) * 100;
+                    const color = pct >= 100 ? 'var(--danger)' : pct >= 80 ? 'var(--warning)' : 'var(--success)';
+                    const isEditing = editingBudgetCat === cat;
+
+                    return (
+                      <div key={cat} className="flex-col gap-2">
+                        {/* Line 1: category name + edit/delete actions */}
+                        <div className="flex justify-between align-center gap-3">
+                          <div className="flex align-center gap-2 min-width-0">
+                            <Target size={15} style={{ color, flexShrink: 0 }} />
+                            <span className="truncate" style={{ fontWeight: 700, fontSize: '1rem' }}>{cat.toLowerCase()}</span>
+                          </div>
+                          {!isEditing && (
+                            <div className="flex align-center gap-3" style={{ flexShrink: 0 }}>
+                              <button
+                                className="btn btn-secondary"
+                                style={{ width: '34px', height: '34px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
+                                onClick={() => startEditBudget(cat, budget)}
+                                title="Edit"
+                              >
+                                <Pencil size={15} />
+                              </button>
+                              <button
+                                className="btn btn-secondary"
+                                style={{ width: '34px', height: '34px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }}
+                                onClick={() => removeBudget(cat)}
+                                title="Delete"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Line 2: spent / budget + percentage (or the inline editor) */}
+                        {isEditing ? (
+                          <BudgetInput
+                            value={budgetInput}
+                            onChange={setBudgetInput}
+                            onCommit={() => saveBudget(cat)}
+                            onCancel={() => setEditingBudgetCat(null)}
+                          />
+                        ) : (
+                          <div className="flex justify-between align-center gap-3">
+                            <span
+                              className="text-mono font-bold"
+                              style={{ fontSize: '0.95rem', cursor: 'pointer' }}
+                              onClick={() => startEditBudget(cat, budget)}
+                            >
+                              {formatCurrency(spent)} <span className="text-muted">/ {formatCurrency(budget)}</span>
+                            </span>
+                            <span className="text-mono font-bold" style={{ color, fontSize: '0.9rem', flexShrink: 0 }}>{Math.round(pct)}%</span>
+                          </div>
+                        )}
+
+                        {/* Line 3: progress bar */}
+                        <div style={{ height: '6px', background: 'var(--bg-hover)', borderRadius: '3px', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${Math.min(pct, 100)}%`, background: color, borderRadius: '3px', transition: 'width 0.4s cubic-bezier(0.175,0.885,0.32,1.275)' }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Category just picked from the add-picker — set its cap before it becomes a row. */}
+                  {pendingNewCat && (
+                    <div className="flex-col gap-2">
+                      <div className="flex align-center gap-2 min-width-0">
+                        <Target size={15} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                        <span className="truncate" style={{ fontWeight: 700, fontSize: '1rem' }}>{pendingNewCat.toLowerCase()}</span>
+                      </div>
+                      <BudgetInput
+                        value={budgetInput}
+                        onChange={setBudgetInput}
+                        onCommit={() => saveBudget(pendingNewCat)}
+                        onCancel={() => setEditingBudgetCat(null)}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {addableCats.length > 0 && (
+                <div style={{ maxWidth: '340px' }}>
+                  <CustomPicker
+                    label="Add a budget"
+                    hideLabel
+                    value=""
+                    placeholder="+ Add a budget for a category"
+                    options={addableCats.map(c => ({ id: c, name: c }))}
+                    onChange={(cat: string) => startEditBudget(cat, 0)}
+                    iconGetter={() => <Target size={16} />}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="card flex-col gap-8" style={{ padding: '2rem' }}>
             <div className="flex-col gap-2">
               <span className="text-mono text-xs text-muted uppercase font-bold" style={{ letterSpacing: '2px', opacity: 0.8 }}>Top Spends Category</span>

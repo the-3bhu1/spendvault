@@ -121,7 +121,9 @@ const STOCK_REGISTRY: Record<string, string> = {
 
 function logoFromDomain(domain: string): string {
   const token = getLogoDevToken();
-  if (token) return `https://img.logo.dev/${domain}?token=${encodeURIComponent(token)}&size=256&retina=true&format=png`;
+  // fallback=404 → logo.dev returns a 404 (not a generated single-letter monogram) when it has no
+  // logo for the domain, so the <img> errors out and LogoAvatar shows our 2-letter initials avatar.
+  if (token) return `https://img.logo.dev/${domain}?token=${encodeURIComponent(token)}&size=256&retina=true&format=png&fallback=404`;
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`;
 }
 
@@ -194,7 +196,8 @@ function stockTickerGuessUrl(symbol: string | undefined): string | null {
   if (!symbol) return null;
   const token = getLogoDevToken();
   if (!token) return null;
-  return `https://img.logo.dev/ticker/${encodeURIComponent(baseTicker(symbol))}?token=${encodeURIComponent(token)}&size=256&retina=true&format=png`;
+  // fallback=404 so an unknown ticker 404s into our initials avatar instead of logo.dev's monogram.
+  return `https://img.logo.dev/ticker/${encodeURIComponent(baseTicker(symbol))}?token=${encodeURIComponent(token)}&size=256&retina=true&format=png&fallback=404`;
 }
 
 /** Logo URL for a mutual-fund holding (resolved from its scheme name), or null if no AMC match. */

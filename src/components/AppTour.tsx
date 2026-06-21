@@ -44,7 +44,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
     onboarding: [
       {
         title: "Welcome to SpendVault",
-        description: "SpendVault is a private, local-first finance vault. All your accounts, transactions, and settings are stored 100% offline on this device. No servers, no tracking, and complete control.",
+        description: "SpendVault is a private, local-first finance vault. All your accounts, transactions, and settings are stored locally on this device. No tracking, and complete control.",
         icon: ShieldCheck
       },
       {
@@ -63,14 +63,14 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       },
       {
         title: "Interactive Ledger",
-        description: "All transaction logs support offline gestures! Watch below: Swipe right to delete, tap to edit details, and long-press to manually drag & reorder.",
+        description: "All transaction logs support quick gestures! Watch below: Swipe right to delete, tap to edit details, and long-press to manually drag & reorder.",
         selector: ".tour-demo-month-header, .tour-demo-day-group",
         tab: "transactions",
         icon: Smartphone
       },
       {
         title: "SpendVault Hub",
-        description: "Tap the Hub icon to access advanced offline features: Group Splits, Lending & Borrowing, Bills & SIPs, Rewards, and Smart Insights. Detailed tours activate automatically when you open them for the first time!",
+        description: "Tap the Hub icon to access advanced features: Group Splits, Lending & Borrowing, Bills & SIPs, Rewards, and Smart Insights. Detailed tours activate automatically when you open them for the first time!",
         selector: ".nav-header-btn",
         tab: "dashboard",
         icon: Zap
@@ -182,7 +182,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       },
       {
         title: "Consolidate & Log",
-        description: "Once confirmed, use Consolidate to automatically log the cashback credit back into your ledger. SpendVault handles the date and category for you — fully offline.",
+        description: "Once confirmed, use Consolidate to automatically log the cashback credit back into your ledger. SpendVault handles the date and category for you — instantly.",
         selector: ".cashback-tab-root",
         icon: Sparkles
       },

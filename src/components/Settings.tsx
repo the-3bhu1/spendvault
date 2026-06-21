@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, FileJson, ChevronDown, Sparkles, ShieldAlert, Hash, Bot, BotOff, Image as ImageIcon } from 'lucide-react';
+import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, ChevronDown, Sparkles, ShieldAlert, Hash, Bot, BotOff, Image as ImageIcon } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
 import ConfirmDialog from './ConfirmDialog';
 import TransparentLogo from './TransparentLogo';
@@ -616,7 +616,7 @@ export default function Settings() {
   const [geminiKeyInput, setGeminiKeyInput] = useState('');
   const [geminiVendorInput, setGeminiVendorInput] = useState('');
   const [geminiKeySaved, setGeminiKeySaved] = useState(false);
-  const [geminiUsage, setGeminiUsage] = useState<{ count: number; cap: number }>({ count: 0, cap: 30 });
+  const [geminiUsage, setGeminiUsage] = useState<{ count: number; cap: number }>({ count: 0, cap: 50 });
 
   useEffect(() => {
     (async () => {
@@ -690,6 +690,7 @@ export default function Settings() {
     // Root keys
     version: 'v', exportedAt: 't', user: 'u', accounts: 'A', transactions: 'T',
     categories: 'C', tags: 'tg', customAccountTypes: 'X', cashbackStatements: 'S',
+    categoryBudgets: 'CB',
     splitEvents: 'E', recurringBills: 'R', theme: 'm', debts: 'H',
     // User fields
     email: 'ue', profileImage: 'upi', pinHash: 'uph', recoveryKeyHash: 'urk',
@@ -771,6 +772,7 @@ export default function Settings() {
     accounts: data.accounts,
     transactions: data.transactions,
     categories: data.categories || [],
+    categoryBudgets: data.categoryBudgets || {},
     tags: data.tags || [],
     customAccountTypes: data.customAccountTypes || [],
     cashbackStatements: data.cashbackStatements || [],
@@ -1365,12 +1367,12 @@ export default function Settings() {
     );
   } else if (activeView === 'export') {
     viewContent = (
-      <SubviewWrapper title="Export Backup" onBack={() => { setActiveView('main'); setExportStatus(null); }}>
+      <SubviewWrapper title="Export Data" onBack={() => { setActiveView('main'); setExportStatus(null); }}>
         <div className="flex-col gap-4">
 
           {/* Primary: Download file */}
           <div className="card flex-col gap-4">
-            <SettingsCardHeader icon={FileJson} title="Download Backup File" />
+            <SettingsCardHeader icon={Download} title="Download Backup File" />
             <p className="text-muted text-sm">Saves a <code>.json</code> file to your device's Downloads folder. Import it anytime to restore.</p>
 
             {exportStatus ? (
@@ -1550,7 +1552,7 @@ export default function Settings() {
     viewContent = (
       <SubviewWrapper title="help" onBack={() => setActiveView('main')}>
         <div className="card flex-col gap-6">
-          <p className="text-sm text-muted">spendvault is an offline-first finance tracker. your data is stored locally on this device.</p>
+          <p className="text-sm text-muted">spendvault is a private finance tracker. your data is stored locally on this device.</p>
           <div className="flex-col gap-2">
             <span className="text-xs text-muted font-bold uppercase">support contact</span>
             <a href="mailto:tribhuvankomarla@gmail.com" className="btn btn-secondary flex align-center justify-center gap-2" style={{ textDecoration: 'none' }}>
@@ -1897,7 +1899,9 @@ export default function Settings() {
       </SubviewWrapper>
     );
   } else if (activeView === 'commodity') {
-    const FETCH_LIMIT = 24; // user-facing daily limit; the internal hard cap (GeminiService) is higher
+    // Show the real enforced cap (GeminiService.GEMINI_DAILY_CAP) so the bar matches when fetches
+    // actually stop — single source of truth, no separate user-facing number to drift out of sync.
+    const FETCH_LIMIT = geminiUsage.cap;
     const used = Math.min(geminiUsage.count, FETCH_LIMIT);
     const pct = Math.min(geminiUsage.count / FETCH_LIMIT, 1) * 100;
     const atLimit = geminiUsage.count >= FETCH_LIMIT;
@@ -2066,10 +2070,53 @@ export default function Settings() {
                   label="Auto-Log SMS" 
                   active={!!data.user?.autoLogSms} 
                   onClick={async () => {
-                    if (!data.user?.autoLogSms) {
+                    // Turning OFF — just disable, no prompts.
+                    if (data.user?.autoLogSms) {
+                      updateUser({ ...data.user!, autoLogSms: false });
+                      return;
+                    }
+
+                    // Local "background alerts" rationale dialog → requests the notification permission.
+                    // Shared by the first-run grant flow and the re-enable path below.
+                    const offerNotificationAlerts = () => {
                       setConfirmConfig({
-                        title: "SMS Permissions",
-                        message: "SpendVault only reads financial SMS from banks to help you log spends offline. No personal messages are ever accessed or uploaded. Grant SMS permission?",
+                        title: "Notification Alerts",
+                        message: "Would you also like to receive push-style local alerts when new transactions are auto-detected in the background?",
+                        confirmLabel: "Enable Alerts",
+                        cancelLabel: "Skip",
+                        onConfirm: async () => {
+                          try {
+                            if (Capacitor.isNativePlatform()) {
+                              await SmsReader.requestPermissions({ permissions: ['notifications'] });
+                            }
+                          } catch (e) {
+                            console.error("Notification permission skipped/failed:", e);
+                          }
+                          setConfirmConfig(null);
+                        }
+                      });
+                    };
+
+                    // Turning ON. If SMS permission was already granted in a prior session (e.g. the
+                    // user toggled this off and is now re-enabling), the OS won't re-prompt — so skip
+                    // the SMS rationale dialog and just re-enable silently. Still re-offer notification
+                    // alerts when that permission isn't granted yet, so a first-run "Skip" isn't permanent.
+                    try {
+                      if (Capacitor.isNativePlatform()) {
+                        const status = await SmsReader.checkPermissions();
+                        if (status.sms === 'granted') {
+                          updateUser({ ...data.user!, autoLogSms: true });
+                          if (status.notifications !== 'granted') offerNotificationAlerts();
+                          return;
+                        }
+                      }
+                    } catch (e) {
+                      console.error("SMS permission check failed:", e);
+                    }
+
+                    setConfirmConfig({
+                      title: "SMS Permissions",
+                        message: "SpendVault only reads financial SMS from banks to help you log spends automatically. No personal messages are ever accessed or uploaded. Grant SMS permission?",
                         confirmLabel: "Grant Permission",
                         onConfirm: async () => {
                           try {
@@ -2087,22 +2134,7 @@ export default function Settings() {
                               updateUser({ ...data.user!, autoLogSms: true });
 
                               // 2. Show background notification rationale
-                              setConfirmConfig({
-                                title: "Notification Alerts",
-                                message: "Would you also like to receive push-style local alerts when new transactions are auto-detected in the background?",
-                                confirmLabel: "Enable Alerts",
-                                cancelLabel: "Skip",
-                                onConfirm: async () => {
-                                  try {
-                                    if (Capacitor.isNativePlatform()) {
-                                      await SmsReader.requestPermissions({ permissions: ['notifications'] });
-                                    }
-                                  } catch (e) {
-                                    console.error("Notification permission skipped/failed:", e);
-                                  }
-                                  setConfirmConfig(null);
-                                }
-                              });
+                              offerNotificationAlerts();
                             } else {
                               showAlert("Permission denied. Auto-logging cannot be enabled.", "Permission Denied");
                               setConfirmConfig(null);
@@ -2114,10 +2146,7 @@ export default function Settings() {
                           }
                         }
                       });
-                    } else {
-                      updateUser({ ...data.user!, autoLogSms: false });
-                    }
-                  }} 
+                  }}
                 />
                 {Capacitor.isNativePlatform() && (
                   <GridButton icon={ShieldAlert} label="Background Guide" onClick={() => navigateTo('oem')} />
@@ -2145,7 +2174,7 @@ export default function Settings() {
 
           <SectionHeader title="data management" />
           <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-            <GridButton icon={Download} label="Export Backup" onClick={() => navigateTo('export')} />
+            <GridButton icon={Download} label="Export Data" onClick={() => navigateTo('export')} />
             <GridButton icon={Upload} label="Import Data" onClick={() => navigateTo('import')} />
             <GridButton icon={Database} label="Wipe Data" onClick={() => navigateTo('clear')} />
           </div>

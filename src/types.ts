@@ -222,6 +222,8 @@ export interface FinanceData {
   categories: string[];
   tags?: string[];
   customAccountTypes?: string[];
+  /** Monthly spend budget (₹) per category name, e.g. { Food: 10000 }. Absent = no budget set. */
+  categoryBudgets?: Record<string, number>;
   splitEvents?: SplitEvent[];
   recurringBills?: RecurringBill[];
   debts?: Debt[];

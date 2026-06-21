@@ -67,6 +67,7 @@ interface FinanceContextType {
   deleteTransaction: (id: string) => void;
   updateCashbackStatement: (statement: CashbackStatement) => void;
   updateCategories: (categories: string[]) => void;
+  updateCategoryBudgets: (budgets: Record<string, number>) => void;
   updateTags: (tags: string[]) => void;
   updateCustomAccountTypes: (accountTypes: string[]) => void;
   updateUser: (user: User) => void;
@@ -1124,6 +1125,10 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     setData(prev => ({ ...prev, categories }));
   };
 
+  const updateCategoryBudgets = (budgets: Record<string, number>) => {
+    setData(prev => ({ ...prev, categoryBudgets: budgets }));
+  };
+
   const updateTags = (tags: string[]) => {
     setData(prev => ({ ...prev, tags }));
   };
@@ -1507,6 +1512,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       deleteTransaction,
       updateCashbackStatement,
       updateCategories,
+      updateCategoryBudgets,
       updateTags,
       updateCustomAccountTypes,
       addSplitEvent,

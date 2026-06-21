@@ -477,7 +477,7 @@ export default function OnboardingScreen() {
             <div className="flex gap-3" style={{ padding: '1rem', background: 'rgba(251, 191, 36, 0.05)', borderRadius: '12px', border: '1px solid rgba(251, 191, 36, 0.2)' }}>
               <AlertTriangle size={24} className="text-warning" style={{ flexShrink: 0, marginTop: '0.1rem' }} />
               <p className="text-xs text-muted leading-relaxed">
-                <strong className="text-warning">WARNING:</strong> SpendVault is entirely offline. We do not store your data or recovery keys on any servers. If you lose this key and your PIN, your data cannot be recovered.
+                <strong className="text-warning">WARNING:</strong> SpendVault stores your data locally on this device. We do not store your data or recovery keys on any servers. If you lose this key and your PIN, your data cannot be recovered.
               </p>
             </div>
 
