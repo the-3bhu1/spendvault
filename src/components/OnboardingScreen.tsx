@@ -3,64 +3,7 @@ import { useFinance } from '../FinanceContext';
 import { Shield, Key, User as UserIcon, Check, Copy, AlertTriangle, ArrowRight, ArrowLeft, Upload, Database } from 'lucide-react';
 import type { User } from '../types';
 import { APP_VERSION } from '../utils';
-
-const KEY_MAP: Record<string, string> = {
-  version: 'v', exportedAt: 't', user: 'u', accounts: 'A', transactions: 'T',
-  categories: 'C', customAccountTypes: 'X', cashbackStatements: 'S',
-  splitEvents: 'E', recurringBills: 'R', theme: 'm', debts: 'H',
-  email: 'ue', profileImage: 'upi', pinHash: 'uph', recoveryKeyHash: 'urk',
-  biometricsEnabled: 'ube', autoLogSms: 'uas', enablePassiveTransactions: 'uep',
-  id: 'i', amount: 'a', date: 'd', description: 's', type: 'y',
-  accountId: 'x', category: 'k', excludeFromStats: 'e', excludedAmount: 'ea',
-  rewardUsed: 'r', rewardUsedAccountId: 'w', isTravelTransaction: 'l',
-  rewardEarned: 're', rewardEarnedType: 'ret', rewardEarnedAccountId: 'rea',
-  order: 'or', linkedTransactionId: 'lt', linkedTransactionIds: 'lts',
-  cashbackLevelId: 'cl', linkedTxId: 'lx',
-  appliedBillingCycleYearMonth: 'abc', recurringBillId: 'rbid',
-  paymentSourceAccountId: 'psid', ccPaymentCycleTarget: 'ctar', isCCPaymentRecord: 'iscr',
-  isRecurring: 'isrc', transactionId: 'txid',
-  name: 'n', balance: 'b', color: 'c', icon: 'o', isNcmcEnabled: 'z',
-  openingBalances: 'ob', statementDay: 'sd', dueDay: 'dd',
-  defaultCashbackRate: 'dr', cashbackRates: 'cr', roundOffCashback: 'ro',
-  cashbackCreditCycle: 'cc', travelOpeningBalances: 'tob', statementRounding: 'sr',
-  isCashbackEnabled: 'ice',
-  cardDetails: 'D', cardholderName: 'ch', cardNumber: 'cn', rate: 'rt',
-  expiryMonth: 'em', expiryYear: 'ey', cvv: 'cv', network: 'nt',
-  people: 'pp', items: 'it', involvedPeople: 'ip', includeMe: 'im',
-  splitType: 'st', paidBy: 'pb', shares: 'sh', customDays: 'cd',
-  personName: 'pn', frequency: 'fq', nextDueDate: 'nd',
-  isActive: 'ia', status: 'ss', createdAt: 'ca', updatedAt: 'ua',
-  billingCycleYearMonth: 'bc', expected: 'ex', realized: 'rl',
-  confirmed: 'cf', realizedIntoAccountId: 'ri', paidPeople: 'pd',
-  lastPaidDate: 'lpd',
-  balanceAdjustments: 'ba', travelBalanceAdjustments: 'tba',
-  rewardType: 'ryt', rewardUnit: 'ryu', pointsConversionRate: 'pcr',
-  rewardOpeningBalances: 'rob', rewardBalanceAdjustments: 'rba',
-  isRewardTransaction: 'irt', cashbackDestinationAccountId: 'cda',
-  // New fields for tours, sips, recurring splits, and debts
-  sipAllottedAmount: 'saa', sipCharges: 'sc',
-  hasSeenTour: 'hst', hasSeenFeatureTours: 'hsft',
-  cycles: 'cy', currentCycleId: 'cci', cycleStartDate: 'csd',
-  cycleNumber: 'cnm', startDate: 'sdt', endDate: 'edt', carriedOverPeople: 'cop',
-  markedDone: 'md', linkedSipAccountId: 'lsa',
-  // Soft-delete flag (see Account.archived)
-  archived: 'arc',
-};
-
-const REVERSE_MAP = Object.fromEntries(Object.entries(KEY_MAP).map(([k, v]) => [v, k]));
-
-function expandPayload(obj: any): any {
-  if (Array.isArray(obj)) return obj.map(expandPayload);
-  if (obj !== null && typeof obj === 'object') {
-    const expanded: any = {};
-    for (const key in obj) {
-      const originalKey = REVERSE_MAP[key] || key;
-      expanded[originalKey] = expandPayload(obj[key]);
-    }
-    return expanded;
-  }
-  return obj;
-}
+import { expandPayload } from '../services/backupCodec';
 
 function validateBackup(parsed: any): string | null {
   if (typeof parsed !== 'object' || parsed === null) return 'File is not a valid JSON object.';
