@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react';
 import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitEvent, RecurringBill, Debt } from './types';
+import { classifySmsIsTransaction } from './services/GeminiService';
 
 export interface PendingTransfer {
   fromAccountId: string;
@@ -103,7 +104,12 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [smsQueue, setSmsQueue] = useState<PendingSmsTransaction[]>([]);
   const [recentlyProcessedSms, setRecentlyProcessedSms] = useState<{ amount: number; type: string; sourceIdentifier?: string; source?: string; raw?: string; timestamp: number }[]>([]);
 
-  const addToSmsQueue = (tx: PendingSmsTransaction) => {
+  // Always-current snapshot of the user, so the async SMS second filter can read the
+  // latest aiSmsFilter opt-in without being captured in a stale closure.
+  const userRef = useRef<User | undefined>(undefined);
+
+  // Synchronous enqueue primitive: dedup + related-leg linking + append.
+  const enqueueSms = (tx: PendingSmsTransaction) => {
     setSmsQueue(prev => {
       const now = Date.now();
       const txDateString = new Date(tx.timestamp).toDateString();
@@ -211,6 +217,25 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     });
   };
 
+  // Optional Gemini second filter. When the user has opted in (aiSmsFilter) and a shared
+  // Gemini key is configured, ask Gemini whether the SMS is a real transaction before
+  // queuing it. Fail open — any API/network/timeout error lets the SMS through so a genuine
+  // transaction is never silently lost. OTPs are already excluded on-device (SmsParser.kt).
+  const addToSmsQueue = async (tx: PendingSmsTransaction) => {
+    if (userRef.current?.aiSmsFilter) {
+      try {
+        const ok = await classifySmsIsTransaction(tx.raw);
+        if (!ok) {
+          console.log("SpendVaultSms: Gemini second filter rejected SMS as non-transaction:", tx.raw);
+          return;
+        }
+      } catch (e) {
+        console.error("SpendVaultSms: Gemini second filter failed, failing open:", e);
+      }
+    }
+    enqueueSms(tx);
+  };
+
   const removeFromSmsQueue = (index: number) => {
     setSmsQueue(prev => prev.filter((_, i) => i !== index));
   };
@@ -313,8 +338,9 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           }
         }
 
+        const hasExistingData = ((parsed.accounts?.length || 0) > 0) || ((parsed.transactions?.length || 0) > 0);
         if (!parsed.user) {
-          parsed.user = { id: 'default', name: 'spendvault user', biometricsEnabled: false, enablePassiveTransactions: true };
+          parsed.user = { id: 'default', name: 'spendvault user', biometricsEnabled: false, enablePassiveTransactions: true, onboarded: hasExistingData };
         } else {
           // Migration: Remove old password if it exists
           if ((parsed.user as any).password) {
@@ -325,6 +351,11 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           }
           if (!parsed.user.hasSeenFeatureTours) {
             parsed.user.hasSeenFeatureTours = {};
+          }
+          // Migration: onboarding completion used to be inferred from having a PIN. Existing
+          // users (a PIN set, or any data) have already onboarded — don't send them back.
+          if (parsed.user.onboarded === undefined) {
+            parsed.user.onboarded = !!parsed.user.pinHash || hasExistingData;
           }
         }
 
@@ -641,6 +672,10 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       theme: 'dark'
     };
   });
+
+  useEffect(() => {
+    userRef.current = data.user;
+  }, [data.user]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', data.theme || 'dark');
@@ -1280,6 +1315,27 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         defaultCashbackRate: 1.5,
         cashbackCreditCycle: 'same_cycle',
         isCashbackEnabled: true
+      },
+      // Sample investment + commodity holdings so the tour's Smart Features step can showcase
+      // the Asset Logos and Commodity AI tiles (they only appear when such holdings exist).
+      {
+        id: 'demo_stock',
+        name: 'OLA Electric Mobility',
+        type: 'stocks',
+        marketSymbol: 'OLAELEC',
+        numberOfShares: 25,
+        investedValue: 1500,
+        openingBalances: {}
+      },
+      {
+        id: 'demo_gold',
+        name: 'Digital Gold',
+        type: 'commodity',
+        commodityMetal: 'gold',
+        marketSymbol: 'GOLD',
+        investedValue: 3300,
+        manualPricePerGram: 7200,
+        openingBalances: {}
       }
     ];
 

@@ -15,7 +15,8 @@ function validateBackup(parsed: any): string | null {
 
 export default function OnboardingScreen() {
   const { updateUser, setAuthenticated } = useFinance();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  // 1 = name, 2 = security choice, 3 = PIN entry, 4 = recovery key
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [showImport, setShowImport] = useState(false);
 
   // Import state
@@ -103,7 +104,7 @@ export default function OnboardingScreen() {
   const verifyAndProceedPin = (original: string, confirmation: string) => {
     if (original === confirmation) {
       setPinError('');
-      setStep(3);
+      setStep(4);
     } else {
       setPinError('PINs do not match. Please try again.');
       setTimeout(() => {
@@ -177,7 +178,8 @@ export default function OnboardingScreen() {
         recoveryKeyHash: hashedRecoveryKey,
         biometricsEnabled: false,
         autoLogSms: false,
-        enablePassiveTransactions: false // Default to false/off for new users
+        enablePassiveTransactions: false, // Default to false/off for new users
+        onboarded: true
       };
 
       // Set profile and authenticate
@@ -186,6 +188,21 @@ export default function OnboardingScreen() {
     } catch (e) {
       console.error('Failed to hash user credentials during onboarding:', e);
     }
+  };
+
+  // "Use without a lock" — finish onboarding with no PIN, no biometric, no recovery key.
+  // The app will never show a lock screen for this user (App gates on pinHash).
+  const handleCompleteNoPin = () => {
+    const newUser: User = {
+      id: 'default',
+      name: name.trim(),
+      biometricsEnabled: false,
+      autoLogSms: false,
+      enablePassiveTransactions: false,
+      onboarded: true
+    };
+    updateUser(newUser);
+    setAuthenticated(true);
   };
 
   if (showImport) {
@@ -348,6 +365,39 @@ export default function OnboardingScreen() {
         )}
 
         {step === 2 && (
+          <div className="flex-col gap-6 w-100 fade-in">
+            <div className="flex-center" style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'var(--primary-soft)', border: '1px solid var(--accent)', margin: '0 auto 0.5rem' }}>
+              <Shield size={28} className="text-accent" />
+            </div>
+            <div className="text-center">
+              <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>secure your vault?</h2>
+              <p className="text-muted text-sm">Add a 4-digit PIN to lock SpendVault on this device, or skip and use it without a lock. You can change this anytime in Settings.</p>
+            </div>
+            <button
+              className="btn btn-primary flex-center gap-2"
+              style={{ padding: '1rem', width: '100%' }}
+              onClick={() => setStep(3)}
+            >
+              <Shield size={18} /> Set up a PIN
+            </button>
+            <button
+              className="btn btn-secondary flex-center gap-2"
+              style={{ padding: '1rem', width: '100%' }}
+              onClick={handleCompleteNoPin}
+            >
+              Use without a lock <ArrowRight size={18} />
+            </button>
+            <button
+              className="text-muted text-xs"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', width: '100%', padding: '0.5rem' }}
+              onClick={() => setStep(1)}
+            >
+              <ArrowLeft size={14} /> Back
+            </button>
+          </div>
+        )}
+
+        {step === 3 && (
           <div className="flex-col gap-4 w-100 fade-in align-center">
             <div className="flex-center" style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'var(--primary-soft)', border: '1px solid var(--accent)', marginBottom: '0.5rem' }}>
               <Shield size={28} className="text-accent" />
@@ -388,7 +438,7 @@ export default function OnboardingScreen() {
               {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => (
                 <button key={n} className="pin-btn" onClick={() => handleKeyPress(n.toString())}>{n}</button>
               ))}
-              <button className="pin-btn" onClick={() => setStep(1)} style={{ background: 'transparent', border: 'none' }}>
+              <button className="pin-btn" onClick={() => { setStep(2); setPin(''); setConfirmPin(''); setIsConfirming(false); }} style={{ background: 'transparent', border: 'none' }}>
                 <ArrowLeft size={22} className="text-muted" />
               </button>
               <button className="pin-btn" onClick={() => handleKeyPress('0')}>0</button>
@@ -399,7 +449,7 @@ export default function OnboardingScreen() {
           </div>
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <div className="flex-col gap-6 w-100 fade-in">
             <div className="flex-center" style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(251, 191, 36, 0.1)', border: '1px solid var(--warning)', margin: '0 auto 0.5rem' }}>
               <Key size={28} className="text-warning" />

@@ -19,6 +19,7 @@ export const KEY_MAP: Record<string, string> = {
   // User fields
   email: 'ue', profileImage: 'upi', pinHash: 'uph', recoveryKeyHash: 'urk',
   biometricsEnabled: 'ube', autoLogSms: 'uas', enablePassiveTransactions: 'uep',
+  onboarded: 'uob', aiSmsFilter: 'uaf',
   // Object keys (Accounts/Transactions/Debts)
   id: 'i', amount: 'a', date: 'd', description: 's', type: 'y',
   accountId: 'x', category: 'k', excludeFromStats: 'e', excludedAmount: 'ea',

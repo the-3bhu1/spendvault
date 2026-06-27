@@ -148,7 +148,14 @@ function App() {
     const listener = CapApp.addListener('appStateChange', async (state) => {
       if (state.isActive) {
         console.log("SpendVaultSms: App resumed to active foreground. Checking launch intent and draining transactions...");
-        
+
+        // Safety net: if a drag gesture was interrupted by backgrounding, a stale 'no-scroll'
+        // lock can survive and freeze all scrolling until a cold start. On every resume, clear
+        // any leftover lock from the scroll containers. (The drag components also reset their own
+        // state via touchcancel; this is the belt-and-suspenders for any other stuck path.)
+        document.body.classList.remove('no-scroll');
+        document.querySelector('.app-root')?.classList.remove('no-scroll');
+
         // Proactively drain any pending SMS transactions when app is resumed (Android only)
         if (autoLogSmsRef.current && Capacitor.getPlatform() === 'android') {
           try {
@@ -278,7 +285,9 @@ function App() {
     };
   }, [data.user?.pinHash, isAuthenticated, setAuthenticated]);
 
-  const needsOnboarding = !data.user?.pinHash;
+  // Onboarding completion is now its own flag (not "has a PIN"), so a user can finish setup
+  // without ever setting a PIN. The lock screen still only appears when a PIN exists.
+  const needsOnboarding = !data.user?.onboarded;
   const needsAuth = data.user?.pinHash && !isAuthenticated;
 
   if (showSplash) {
@@ -303,6 +312,7 @@ function App() {
     if (activeTab === 'bills' && !featureTours.bills) return 'bills';
     if (activeTab === 'cashback' && !featureTours.cashback) return 'cashback';
     if (activeTab === 'insights' && !featureTours.insights) return 'insights';
+    if (activeTab === 'portfolio' && !featureTours.portfolio) return 'portfolio';
 
     return null;
   })();

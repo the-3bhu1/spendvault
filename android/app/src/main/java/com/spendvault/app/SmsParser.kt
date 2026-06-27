@@ -100,6 +100,26 @@ object SmsParser {
         val isCompleted = completedKeywords.any { lowerMessage.contains(it) }
         if (isReminder && !isCompleted) return null
 
+        // Exclude OTP/sensitive SMS. Privacy gate: such messages must never produce a
+        // Transaction, so they are never dispatched to JS and never sent off-device to the
+        // optional Gemini second filter. Real bank debit/credit confirmations do not contain
+        // these phrases.
+        val sensitiveKeywords = listOf(
+            "otp",
+            "one time password",
+            "one-time password",
+            "verification code",
+            "verification pin",
+            "security code",
+            "login code",
+            "auth code",
+            "do not share",
+            "never share",
+            "is your code",
+            "is your password"
+        )
+        if (sensitiveKeywords.any { lowerMessage.contains(it) }) return null
+
         val transactionKeywords = listOf("upi", "debited", "credited", "spent", "paid", "received", "txn", "sent", "top up", "topped up", "deducted", "card", "vpa")
         if (!transactionKeywords.any { lowerMessage.contains(it) }) return null
 

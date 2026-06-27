@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, ChevronDown, Sparkles, ShieldAlert, Hash, Bot, BotOff, Image as ImageIcon } from 'lucide-react';
+import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, ChevronDown, Sparkles, ShieldAlert, Hash, Bot, BotOff, Cuboid, Image as ImageIcon } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
 import ConfirmDialog from './ConfirmDialog';
 import TransparentLogo from './TransparentLogo';
@@ -14,7 +14,7 @@ import {
   getCommodityVendor, setCommodityVendor,
   setGeminiKey, clearGeminiKey, hasGeminiKey,
 } from '../services/GeminiConfig';
-import { getGeminiUsageToday } from '../services/GeminiService';
+import { getGeminiUsageToday, testGeminiKey } from '../services/GeminiService';
 import { invalidateCommodityCache } from '../services/MarketDataService';
 import { minifyPayload, expandPayload } from '../services/backupCodec';
 import { APP_VERSION } from '../utils';
@@ -109,7 +109,7 @@ export default function Settings() {
   const [newCat, setNewCat] = useState('');
   const [newAccountType, setNewAccountType] = useState('');
   const [newTagEntry, setNewTagEntry] = useState('');
-  const [activeView, setActiveView] = useState<'main' | 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem' | 'commodity' | 'logos'>('main');
+  const [activeView, setActiveView] = useState<'main' | 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem' | 'aiFeatures' | 'commodity' | 'logos'>('main');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
@@ -117,7 +117,7 @@ export default function Settings() {
   const touchStartY = useRef<number>(0);
   const savedScrollPos = useRef<number>(0);
 
-  const navigateTo = (view: 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem' | 'commodity' | 'logos') => {
+  const navigateTo = (view: 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem' | 'aiFeatures' | 'commodity' | 'logos') => {
     const appRoot = document.querySelector('.app-root');
     if (appRoot) savedScrollPos.current = (appRoot as HTMLElement).scrollTop;
     setActiveView(view);
@@ -282,7 +282,8 @@ export default function Settings() {
       ...data.user!,
       name: profileForm.name,
       pinHash: hashedPin,
-      biometricsEnabled: profileForm.biometricsEnabled
+      // Biometric unlock requires a PIN as fallback — never persist it enabled without one.
+      biometricsEnabled: hashedPin ? profileForm.biometricsEnabled : false
     };
 
     if (updatedUser && 'pin' in updatedUser) delete (updatedUser as { pin?: string }).pin;
@@ -383,6 +384,37 @@ export default function Settings() {
       onConfirm: () => {
         setConfirmConfig(null);
         setAuthenticated(false);
+      }
+    });
+  };
+
+  // Remove the PIN entirely → app becomes lock-free. Requires authorizing with the current PIN
+  // (or biometric). Also clears the recovery key and disables biometric (which needs a PIN).
+  const handleRemovePin = async () => {
+    if (!data.user?.pinHash) return;
+    let authorized = isOldPinVerified;
+    if (!authorized && profileForm.oldPin.length === 4) {
+      authorized = (await hashString(profileForm.oldPin)) === data.user.pinHash;
+    }
+    if (!authorized) {
+      showAlert("Enter your current PIN (or verify with biometrics) above to remove it.", "Authorize");
+      return;
+    }
+    setConfirmConfig({
+      title: "Remove PIN?",
+      message: "The app will no longer be locked. Biometric unlock and your recovery key will also be removed.",
+      confirmLabel: "Remove PIN",
+      onConfirm: () => {
+        const updated = { ...data.user! };
+        delete (updated as { pinHash?: string }).pinHash;
+        delete (updated as { recoveryKeyHash?: string }).recoveryKeyHash;
+        delete (updated as { pin?: string }).pin;
+        updated.biometricsEnabled = false;
+        updateUser(updated);
+        setProfileForm(prev => ({ ...prev, oldPin: '', pin: '', confirmPin: '', biometricsEnabled: false }));
+        setIsOldPinVerified(false);
+        setConfirmConfig(null);
+        showAlert("PIN removed. The app is now unlocked by default.", "Done");
       }
     });
   };
@@ -613,11 +645,13 @@ export default function Settings() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const advancedSectionRef = useRef<HTMLDivElement>(null);
 
-  // Commodity prices (Gemini, BYOK) — each user supplies their own key; stored in the OS keystore.
+  // Shared Gemini key (BYOK) — one key powers all AI features (commodity prices, asset logos,
+  // smarter SMS detection). Stored in the OS keystore. The commodity vendor is a separate setting.
   const [geminiKeyInput, setGeminiKeyInput] = useState('');
   const [geminiVendorInput, setGeminiVendorInput] = useState('');
   const [geminiKeySaved, setGeminiKeySaved] = useState(false);
   const [geminiUsage, setGeminiUsage] = useState<{ count: number; cap: number }>({ count: 0, cap: 50 });
+  const [geminiTestStatus, setGeminiTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
 
   useEffect(() => {
     (async () => {
@@ -627,13 +661,14 @@ export default function Settings() {
     })();
   }, []);
 
-  // Re-read key + today's usage each time the commodity screen is opened, so the green status
-  // and the fetch progress bar are current.
+  // Re-read key + today's usage each time the AI Features or commodity screen is opened, so the
+  // saved status and the fetch progress bar are current.
   useEffect(() => {
-    if (activeView !== 'commodity') return;
+    if (activeView !== 'commodity' && activeView !== 'aiFeatures') return;
     (async () => {
       setGeminiKeySaved(await hasGeminiKey());
       setGeminiUsage(getGeminiUsageToday());
+      setGeminiTestStatus('idle');
     })();
   }, [activeView]);
 
@@ -655,24 +690,16 @@ export default function Settings() {
     setLogoTokenInput('');
   };
 
-  const handleSaveGemini = async () => {
+  // AI Features view: save the shared Gemini key only. The vendor is configured separately.
+  const handleSaveGeminiKey = async () => {
+    const keyEntered = geminiKeyInput.trim() !== '';
+    if (!keyEntered) return;
     try {
-      const keyEntered = geminiKeyInput.trim() !== '';
-      const vendorChanged = geminiVendorInput.trim() !== getCommodityVendor();
-      setCommodityVendor(geminiVendorInput);
-      // A vendor switch should fetch from the new source now, not serve the old vendor's price for
-      // up to an hour — invalidate the metal cache so the next read does a fresh grounded call
-      // (while keeping the last price as a fallback, so the portfolio doesn't flash ₹0).
-      if (vendorChanged) invalidateCommodityCache();
-      if (keyEntered) {
-        await setGeminiKey(geminiKeyInput.trim());
-        setGeminiKeyInput('');
-        // The key-storage note is only relevant when a key was actually entered.
-        showAlert('Saved. Your Gemini key is stored in the device keystore, not in the app.', 'Commodity Prices');
-      } else {
-        showAlert('Vendor updated.', 'Commodity Prices');
-      }
+      await setGeminiKey(geminiKeyInput.trim());
+      setGeminiKeyInput('');
+      setGeminiTestStatus('idle');
       setGeminiKeySaved(await hasGeminiKey());
+      showAlert('Saved. Your Gemini key is stored in the device keystore, not in the app. It powers all AI features.', 'AI Features');
     } catch {
       showAlert('Could not save the key to secure storage. Make sure your device has a screen lock (PIN/biometric) enabled.', 'Secure Storage Error');
     }
@@ -682,7 +709,21 @@ export default function Settings() {
     await clearGeminiKey();
     setGeminiKeyInput('');
     setGeminiKeySaved(false);
-    showAlert('Gemini key removed. Set a manual ₹/g on each commodity account, or re-add a key.', 'Commodity Prices');
+    setGeminiTestStatus('idle');
+    // Turning off the key disables every AI feature that depends on it, including the SMS filter.
+    if (data.user?.aiSmsFilter) updateUser({ ...data.user!, aiSmsFilter: false });
+    showAlert('Gemini key removed. AI features now fall back to manual entry (e.g. set a ₹/g per commodity account).', 'AI Features');
+  };
+
+  // Commodity view: save the vendor (price reference) only.
+  const handleSaveVendor = () => {
+    const vendorChanged = geminiVendorInput.trim() !== getCommodityVendor();
+    setCommodityVendor(geminiVendorInput);
+    // A vendor switch should fetch from the new source now, not serve the old vendor's price for
+    // up to an hour — invalidate the metal cache so the next read does a fresh grounded call
+    // (while keeping the last price as a fallback, so the portfolio doesn't flash ₹0).
+    if (vendorChanged) invalidateCommodityCache();
+    showAlert('Vendor updated.', 'Commodity Prices');
   };
 
   const BACKUP_VERSION = 1;
@@ -1124,6 +1165,12 @@ export default function Settings() {
                     onTouchMove={e => handleTouchMove(idx, e)}
                     onContextMenu={e => e.preventDefault()}
                     onTouchEnd={() => {
+                      if (reorderTimer.current) clearTimeout(reorderTimer.current);
+                      setDraggedIdx(null);
+                    }}
+                    // touchcancel fires when the gesture is interrupted (app backgrounded /
+                    // notification) — without it draggedIdx stays set and the no-scroll lock sticks.
+                    onTouchCancel={() => {
                       if (reorderTimer.current) clearTimeout(reorderTimer.current);
                       setDraggedIdx(null);
                     }}
@@ -1741,34 +1788,52 @@ export default function Settings() {
                   </div>
                 )}
 
-                <div className="flex justify-between align-center" style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg-color)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                  <div className="flex align-center gap-3">
-                    <Fingerprint size={20} className={profileForm.biometricsEnabled ? "text-success" : "text-muted"} />
-                    <div className="flex-col">
-                      <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>Biometric Unlock</span>
-                      <span className="text-xs text-muted">FaceID / Fingerprint</span>
+                {/* Biometric unlock requires a PIN as fallback — gated on a PIN existing. */}
+                {(() => {
+                  const pinExists = !!(data.user?.pinHash || data.user?.pin);
+                  return (
+                    <div className="flex justify-between align-center" style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg-color)', borderRadius: '8px', border: '1px solid var(--border-color)', opacity: pinExists ? 1 : 0.55 }}>
+                      <div className="flex align-center gap-3">
+                        <Fingerprint size={20} className={profileForm.biometricsEnabled ? "text-success" : "text-muted"} />
+                        <div className="flex-col">
+                          <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>Biometric Unlock</span>
+                          <span className="text-xs text-muted">{pinExists ? 'FaceID / Fingerprint' : 'Set a PIN first to enable'}</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (!pinExists) {
+                            showAlert("Set a PIN first — biometric unlock needs a PIN as a fallback.", "PIN Required");
+                            return;
+                          }
+                          setProfileForm(prev => ({ ...prev, biometricsEnabled: !prev.biometricsEnabled }));
+                        }}
+                        style={{
+                          width: '44px', height: '24px', borderRadius: '12px',
+                          background: profileForm.biometricsEnabled ? 'var(--accent)' : 'var(--border-color)',
+                          position: 'relative', transition: '0.3s',
+                          cursor: pinExists ? 'pointer' : 'not-allowed'
+                        }}
+                      >
+                        <div style={{
+                          position: 'absolute', top: '2px',
+                          left: profileForm.biometricsEnabled ? '22px' : '2px',
+                          width: '20px', height: '20px', borderRadius: '50%',
+                          background: '#fff', transition: '0.3s'
+                        }} />
+                      </button>
                     </div>
-                  </div>
-                  <button
-                    onClick={() => setProfileForm(prev => ({ ...prev, biometricsEnabled: !prev.biometricsEnabled }))}
-                    style={{
-                      width: '44px', height: '24px', borderRadius: '12px',
-                      background: profileForm.biometricsEnabled ? 'var(--accent)' : 'var(--border-color)',
-                      position: 'relative', transition: '0.3s'
-                    }}
-                  >
-                    <div style={{
-                      position: 'absolute', top: '2px',
-                      left: profileForm.biometricsEnabled ? '22px' : '2px',
-                      width: '20px', height: '20px', borderRadius: '50%',
-                      background: '#fff', transition: '0.3s'
-                    }} />
-                  </button>
-                </div>
+                  );
+                })()}
               </div>
             </div>
             {hasProfileChanges && (
               <button className="btn btn-primary" style={{ padding: '1rem', fontWeight: 700 }} onClick={handleUpdateProfile}><Check size={20} /> Save Changes</button>
+            )}
+            {(data.user?.pinHash || data.user?.pin) && (
+              <button className="btn btn-secondary" style={{ padding: '1rem', color: 'var(--danger)' }} onClick={handleRemovePin}>
+                <Trash2 size={18} /> Remove PIN (use without a lock)
+              </button>
             )}
           </div>
         </SubviewWrapper>
@@ -1820,23 +1885,24 @@ export default function Settings() {
         </div>
       </SubviewWrapper>
     );
-  } else if (activeView === 'commodity') {
-    // Show the real enforced cap (GeminiService.GEMINI_DAILY_CAP) so the bar matches when fetches
-    // actually stop — single source of truth, no separate user-facing number to drift out of sync.
+  } else if (activeView === 'aiFeatures') {
+    // The shared Gemini key (BYOK) powers every AI feature. Usage bar reflects the real enforced
+    // grounded-call cap (commodity/logo lookups); the SMS filter is a cheap non-grounded call and
+    // does not consume it.
     const FETCH_LIMIT = geminiUsage.cap;
     const used = Math.min(geminiUsage.count, FETCH_LIMIT);
     const pct = Math.min(geminiUsage.count / FETCH_LIMIT, 1) * 100;
     const atLimit = geminiUsage.count >= FETCH_LIMIT;
-    // Enable Save only when something actually changed: a new key was typed, or the vendor edited.
-    const commodityDirty = geminiKeyInput.trim() !== '' || geminiVendorInput.trim() !== getCommodityVendor();
+    const keyDirty = geminiKeyInput.trim() !== '';
+    const smsFilterOn = !!data.user?.aiSmsFilter;
     viewContent = (
-      <SubviewWrapper title="Commodity Prices" onBack={() => setActiveView('main')}>
+      <SubviewWrapper title="AI Features" onBack={() => setActiveView('main')}>
         <div className="flex-col gap-4">
           <div className="card flex-col gap-3" style={{ padding: '1rem' }}>
-            <SettingsCardHeader icon={geminiKeySaved ? Bot : BotOff} title="Commodity Prices (AI)" level="h3" size={20} marginBottom="0.5rem" />
+            <SettingsCardHeader icon={geminiKeySaved ? Bot : BotOff} title="AI Features (Gemini)" level="h3" size={20} marginBottom="0.5rem" />
             <span className="text-xs text-muted">
-              Optional. Auto-fetches an approximate gold/silver ₹/g for your holdings using your own Google Gemini key (BYOK) — get a free one at{' '}
-              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'underline' }}>aistudio.google.com</a>. Your key is stored in the device keystore, never bundled or shared. Without a key, set a manual ₹/g per commodity account.
+              Optional. One Google Gemini key (BYOK) powers all of SpendVault's AI helpers — approximate commodity prices, asset logos, and smarter SMS transaction detection. Get a free key at{' '}
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'underline' }}>aistudio.google.com</a>. It's stored in the device keystore, never bundled or shared.
             </span>
             <div className="input-group" style={{ marginBottom: 0 }}>
               <label>Gemini API Key {geminiKeySaved && <span style={{ color: 'var(--success)' }}>· saved</span>}</label>
@@ -1844,7 +1910,7 @@ export default function Settings() {
                 type="password"
                 className="input-field"
                 value={geminiKeyInput}
-                onChange={e => setGeminiKeyInput(e.target.value)}
+                onChange={e => { setGeminiKeyInput(e.target.value); setGeminiTestStatus('idle'); }}
                 placeholder={geminiKeySaved ? '•••••••• (saved — type to replace)' : 'Paste your Gemini API key'}
                 autoComplete="off"
                 autoCapitalize="off"
@@ -1852,6 +1918,81 @@ export default function Settings() {
                 spellCheck={false}
               />
             </div>
+            {geminiTestStatus === 'ok' && <span className="text-xs" style={{ color: 'var(--success)' }}>✓ Key works.</span>}
+            {geminiTestStatus === 'fail' && <span className="text-xs" style={{ color: 'var(--danger)' }}>✕ Key test failed. Check the key and your connection.</span>}
+            {geminiKeySaved && (
+              <div className="flex-col gap-2">
+                <div className="flex justify-between align-center" style={{ fontSize: '0.7rem' }}>
+                  <span className="text-mono text-muted" style={{ textTransform: 'uppercase', letterSpacing: '1px' }}>AI fetches today</span>
+                  <span className="text-mono font-bold" style={{ color: atLimit ? 'var(--danger)' : 'var(--accent)' }}>{used} / {FETCH_LIMIT}</span>
+                </div>
+                <div style={{ height: '7px', background: 'var(--bg-hover)', borderRadius: '999px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: atLimit ? 'var(--danger)' : 'var(--accent)', borderRadius: '999px', transition: 'width 0.35s ease' }} />
+                </div>
+                <span className="text-xs text-muted">
+                  {atLimit ? 'Daily limit reached for grounded lookups — using cached/manual values until tomorrow.' : 'Grounded price/logo lookups refresh at most once an hour to stay within the limit.'}
+                </span>
+              </div>
+            )}
+            <div className="flex gap-3">
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1, opacity: keyDirty ? 1 : 0.5, cursor: keyDirty ? 'pointer' : 'not-allowed' }}
+                disabled={!keyDirty}
+                onClick={handleSaveGeminiKey}
+              >Save Key</button>
+              {geminiKeySaved && (
+                <button
+                  className="btn btn-secondary"
+                  disabled={geminiTestStatus === 'testing'}
+                  onClick={async () => { setGeminiTestStatus('testing'); const ok = await testGeminiKey(); setGeminiTestStatus(ok ? 'ok' : 'fail'); }}
+                >{geminiTestStatus === 'testing' ? 'Testing…' : 'Test'}</button>
+              )}
+              {geminiKeySaved && <button className="btn btn-secondary" onClick={handleClearGemini}>Remove Key</button>}
+            </div>
+          </div>
+
+          {/* AI SMS second filter — opt-in. Android only (SMS access is Android-only). */}
+          {Capacitor.getPlatform() === 'android' && (
+            <div className="card flex-col gap-3" style={{ padding: '1rem' }}>
+              <SettingsCardHeader icon={Sparkles} title="Smarter SMS Filter" level="h3" size={20} marginBottom="0.5rem" />
+              <span className="text-xs text-muted">
+                When on, bank SMS that pass the on-device keyword detection are sent to Gemini to confirm they're real transactions before logging — dropping EMI offers, promos, and reward-point "credits". OTPs and personal SMS are excluded on-device and never sent. Requires the key above.
+              </span>
+              <div className="flex justify-between align-center">
+                <span className="text-sm font-bold">{smsFilterOn ? 'Enabled' : 'Disabled'}</span>
+                <button
+                  className={`btn ${smsFilterOn ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => {
+                    if (!smsFilterOn && !geminiKeySaved) {
+                      showAlert('Add and save your Gemini key first to enable the AI SMS filter.', 'AI Features');
+                      return;
+                    }
+                    updateUser({ ...data.user!, aiSmsFilter: !smsFilterOn });
+                  }}
+                >{smsFilterOn ? 'Turn Off' : 'Turn On'}</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </SubviewWrapper>
+    );
+  } else if (activeView === 'commodity') {
+    // Vendor (price reference) only — the Gemini key and its daily usage live under AI Features.
+    const vendorDirty = geminiVendorInput.trim() !== getCommodityVendor();
+    viewContent = (
+      <SubviewWrapper title="Commodity Prices" onBack={() => setActiveView('main')}>
+        <div className="flex-col gap-4">
+          <div className="card flex-col gap-3" style={{ padding: '1rem' }}>
+            <SettingsCardHeader icon={Cuboid} title="Commodity Prices (AI)" level="h3" size={20} marginBottom="0.5rem" />
+            <span className="text-xs text-muted">
+              Auto-fetches an approximate gold/silver ₹/g for your holdings from the vendor below, using your shared Gemini key. Without a key, set a manual ₹/g per commodity account.
+            </span>
+            {!geminiKeySaved && (
+              <span className="text-xs" style={{ color: 'var(--accent)', cursor: 'pointer', fontWeight: 600 }} onClick={() => navigateTo('aiFeatures')}>
+                → Add your Gemini key under Settings → AI Features to enable auto-fetch.
+              </span>
+            )}
             <div className="input-group" style={{ marginBottom: 0 }}>
               <label>Vendor (price reference)</label>
               <input
@@ -1866,28 +2007,13 @@ export default function Settings() {
             <span className="text-xs text-muted">
               Prices are approximate AI estimates (may lag the live rate). Set a manual ₹/g on any commodity account for exact valuation.
             </span>
-            {geminiKeySaved && (
-              <div className="flex-col gap-2">
-                <div className="flex justify-between align-center" style={{ fontSize: '0.7rem' }}>
-                  <span className="text-mono text-muted" style={{ textTransform: 'uppercase', letterSpacing: '1px' }}>AI fetches today</span>
-                  <span className="text-mono font-bold" style={{ color: atLimit ? 'var(--danger)' : 'var(--accent)' }}>{used} / {FETCH_LIMIT}</span>
-                </div>
-                <div style={{ height: '7px', background: 'var(--bg-hover)', borderRadius: '999px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
-                  <div style={{ width: `${pct}%`, height: '100%', background: atLimit ? 'var(--danger)' : 'var(--accent)', borderRadius: '999px', transition: 'width 0.35s ease' }} />
-                </div>
-                <span className="text-xs text-muted">
-                  {atLimit ? 'Daily limit reached — using cached/manual prices until tomorrow.' : 'Prices refresh at most once an hour to stay within the limit.'}
-                </span>
-              </div>
-            )}
             <div className="flex gap-3">
               <button
                 className="btn btn-primary"
-                style={{ flex: 1, opacity: commodityDirty ? 1 : 0.5, cursor: commodityDirty ? 'pointer' : 'not-allowed' }}
-                disabled={!commodityDirty}
-                onClick={handleSaveGemini}
+                style={{ flex: 1, opacity: vendorDirty ? 1 : 0.5, cursor: vendorDirty ? 'pointer' : 'not-allowed' }}
+                disabled={!vendorDirty}
+                onClick={handleSaveVendor}
               >Save</button>
-              {geminiKeySaved && <button className="btn btn-secondary" onClick={handleClearGemini}>Remove Key</button>}
             </div>
           </div>
         </div>
@@ -1955,41 +2081,39 @@ export default function Settings() {
             <GridButton icon={Briefcase} label="Account Types" onClick={() => navigateTo('accountTypes')} />
             <GridButton icon={Hash} label="Tags" onClick={() => navigateTo('tags')} />
             <GridButton icon={Moon} label="App Theme" onClick={() => navigateTo('theme')} />
-            {/* tour-passive-logs: spotlight target in the union rect */}
-            <div className="tour-passive-logs">
-              <GridToggleButton 
-                icon={RotateCcw} 
-                label="Passive Logs" 
-                active={!!data.user?.enablePassiveTransactions} 
-                onClick={() => {
-                  if (!data.user?.enablePassiveTransactions) {
-                    setConfirmConfig({
-                      title: "Enable Passive Logs?",
-                      message: "Passive Logs allow you to flag specific transactions to be excluded from your main Spends and Income analytics. This is perfect for tracking passive movements, investments, or pass-through expenses without distorting your actual budget statistics.",
-                      confirmLabel: "Enable",
-                      onConfirm: () => {
-                        updateUser({ ...data.user!, enablePassiveTransactions: true });
-                        setConfirmConfig(null);
-                      }
-                    });
-                  } else {
-                    updateUser({ ...data.user!, enablePassiveTransactions: false });
-                  }
-                }} 
-              />
-            </div>
           </div>
 
-          {/* Smart Features: Android auto-log + background guide, plus the BYOK commodity AI
-              square when the user holds commodities (tour-smart-features-android union rect) */}
-          {(Capacitor.getPlatform() === 'android' || hasCommodity || hasInvestments) && (
+          {/* Smart Features — passive logging + automation + AI helpers. Always shown so every
+              feature is discoverable; platform-specific items gate themselves. Whole grid is the
+              tour spotlight target (tour-smart-features). */}
+          {(
             <>
               <SectionHeader title="Smart Features" />
-              <div className="grid tour-smart-features-android" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
-                {Capacitor.getPlatform() === 'android' && (<>
+              <div className="grid tour-smart-features" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
+                <GridToggleButton
+                  icon={RotateCcw}
+                  label="Passive Logs"
+                  active={!!data.user?.enablePassiveTransactions}
+                  onClick={() => {
+                    if (!data.user?.enablePassiveTransactions) {
+                      setConfirmConfig({
+                        title: "Enable Passive Logs?",
+                        message: "Passive Logs allow you to flag specific transactions to be excluded from your main Spends and Income analytics. This is perfect for tracking passive movements, investments, or pass-through expenses without distorting your actual budget statistics.",
+                        confirmLabel: "Enable",
+                        onConfirm: () => {
+                          updateUser({ ...data.user!, enablePassiveTransactions: true });
+                          setConfirmConfig(null);
+                        }
+                      });
+                    } else {
+                      updateUser({ ...data.user!, enablePassiveTransactions: false });
+                    }
+                  }}
+                />
+                {Capacitor.getPlatform() === 'android' && (
                 <GridToggleButton
                   icon={Sparkles}
-                  label="Auto-Log SMS" 
+                  label="Auto-Log SMS"
                   active={!!data.user?.autoLogSms} 
                   onClick={async () => {
                     // Turning OFF — just disable, no prompts.
@@ -2070,13 +2194,16 @@ export default function Settings() {
                       });
                   }}
                 />
-                {Capacitor.isNativePlatform() && (
-                  <GridButton icon={ShieldAlert} label="Background Guide" onClick={() => navigateTo('oem')} />
                 )}
-                </>)}
+                <GridToggleButton
+                  icon={geminiKeySaved ? Bot : BotOff}
+                  label="AI Features"
+                  active={geminiKeySaved}
+                  onClick={() => navigateTo('aiFeatures')}
+                />
                 {hasCommodity && (
                   <GridToggleButton
-                    icon={geminiKeySaved ? Bot : BotOff}
+                    icon={Cuboid}
                     label="Commodity AI"
                     active={geminiKeySaved}
                     onClick={() => navigateTo('commodity')}
@@ -2102,6 +2229,9 @@ export default function Settings() {
           </div>
           <SectionHeader title="support & info" />
           <div className="grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
+            {Capacitor.isNativePlatform() && (
+              <GridButton icon={ShieldAlert} label="Background Guide" onClick={() => navigateTo('oem')} />
+            )}
             <GridButton icon={HelpCircle} label="Help Center" onClick={() => navigateTo('help')} />
             <GridButton icon={Info} label="App About" onClick={() => navigateTo('about')} />
           </div>

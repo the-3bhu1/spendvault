@@ -181,3 +181,75 @@ Set "vendor_found" to true ONLY if you actually found ${vendor}'s own published 
     vendorFound: parsed.vendor_found === true,
   };
 }
+
+// ---- SMS second filter ----
+// Optional second pass over an SMS that already cleared the on-device keyword parser
+// (SmsParser.kt). Asks Gemini whether the message is a genuine completed money movement,
+// to drop misleading non-transactions (EMI offers, promos, reward-point "credits", etc.).
+// Unlike the commodity fetch this is a cheap, NON-grounded classification, so it does not
+// consume the commodity daily cap. THROWS on any failure so the caller can fail open
+// (treat the SMS as a transaction rather than silently lose a real one). OTPs/sensitive
+// SMS are excluded on-device and never reach this function.
+const SMS_CLASSIFY_TIMEOUT_MS = 6000;
+
+export async function classifySmsIsTransaction(rawSms: string): Promise<boolean> {
+  const key = await getGeminiKey();
+  if (!key) throw new Error('gemini: no key');
+
+  const model = getGeminiModel();
+  const prompt =
+`You are a strict classifier for bank/payment SMS messages.
+Decide whether the message reports an ACTUAL, COMPLETED movement of real money in or out of the user's own bank account, card, or UPI/wallet balance.
+Return true ONLY for genuine completed debits or credits (money debited/credited/spent/paid/received/withdrawn from the user's account or card).
+Return false for everything else: EMI/loan/"convert to EMI" offers; promotional, marketing, cashback or discount messages; loyalty/reward points or store "wallet credits" that are not real money; bill reminders, due notices, statement-generated notices; failed/declined/pending/requested transactions; and anything ambiguous.
+Respond with ONLY this strict minified JSON and NOTHING else: {"isTransaction":true} or {"isTransaction":false}
+
+SMS:
+"""
+${rawSms}
+"""`;
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SMS_CLASSIFY_TIMEOUT_MS);
+  let j: any = null;
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal }
+    );
+    j = await res.json();
+  } catch {
+    throw new Error('gemini: sms classify request failed');
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!j || j.error) throw new Error('gemini: no usable sms classify response');
+
+  const txt: string = (j?.candidates?.[0]?.content?.parts || [])
+    .map((p: any) => p?.text || '').join('');
+  const match = txt.match(/\{[\s\S]*\}/);
+  try {
+    const parsed = JSON.parse(match ? match[0] : txt);
+    return parsed?.isTransaction === true;
+  } catch {
+    throw new Error('gemini: unparseable sms classify response');
+  }
+}
+
+// Lightweight key check for Settings — runs a real classification and reports whether
+// the key works. Never throws.
+export async function testGeminiKey(): Promise<boolean> {
+  try {
+    await classifySmsIsTransaction('Rs 100 debited from your account at TEST STORE.');
+    return true;
+  } catch (e) {
+    console.error('Gemini key test failed:', e);
+    return false;
+  }
+}

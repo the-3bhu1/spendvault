@@ -452,7 +452,7 @@ export function Portfolio() {
     <div style={{ background: 'var(--bg-primary)', paddingBottom: '100px' }}>
       {!selectedAsset && (
       <>
-      <div style={{ padding: '1.75rem 1.5rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+      <div className="tour-portfolio-summary" style={{ padding: '1.75rem 1.5rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
         <div style={{ marginBottom: '1rem' }}>
           <ProfileAvatar size={64} />
         </div>
@@ -635,7 +635,7 @@ export function Portfolio() {
             const single = portfolioView !== 'all';
             const isCollapsed = single ? false : collapsedSections.has('mf');
             return (
-            <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+            <div className="tour-portfolio-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
               <div
                 className="flex align-center gap-3"
                 style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
@@ -663,7 +663,7 @@ export function Portfolio() {
             const single = portfolioView !== 'all';
             const isCollapsed = single ? false : collapsedSections.has('stocks');
             return (
-            <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+            <div className="tour-portfolio-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
               <div
                 className="flex align-center gap-3"
                 style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
@@ -691,7 +691,7 @@ export function Portfolio() {
             const single = portfolioView !== 'all';
             const isCollapsed = single ? false : collapsedSections.has('commodity');
             return (
-            <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+            <div className="tour-portfolio-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
               <div
                 className="flex align-center gap-3"
                 style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}

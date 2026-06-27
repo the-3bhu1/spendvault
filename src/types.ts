@@ -135,8 +135,14 @@ export interface User {
   /** @deprecated Use pinHash instead. Stays here only for migration. */
   pin?: string;
   recoveryKeyHash?: string;
+  /** True once the user has finished onboarding. Decoupled from pinHash so a user can
+   *  complete onboarding without setting a PIN (app-lock is optional). */
+  onboarded?: boolean;
   biometricsEnabled: boolean;
   autoLogSms?: boolean;
+  /** Opt-in: send SMS that pass the keyword parser to Gemini as a second filter to drop
+   *  misleading non-transactions. Requires the shared Gemini key (Settings → AI Features). */
+  aiSmsFilter?: boolean;
   enablePassiveTransactions?: boolean;
   hasSeenTour?: boolean;
   hasSeenFeatureTours?: Record<string, boolean>;

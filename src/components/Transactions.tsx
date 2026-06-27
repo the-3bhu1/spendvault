@@ -26,15 +26,14 @@ const isCountableTransaction = (tx: Transaction) => {
   return true;
 };
 
-function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveUp, onMoveDown, counterparts }: {
+function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, counterparts }: {
   tx: Transaction,
   acc: Account | undefined,
   isFirst: boolean,
   isLast: boolean,
   onEdit: (tx: Transaction) => void,
   onDelete: (id: string) => void,
-  onMoveUp: () => void,
-  onMoveDown: () => void,
+  onMoveBy: (steps: number) => void,
   counterparts?: { tx: Transaction; acc: Account | undefined }[]
 }) {
   const [isCounterpartExpanded, setIsCounterpartExpanded] = useState(false);
@@ -90,12 +89,17 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveUp, 
     } else {
       e.preventDefault();
       const rowHeight = rowRef.current?.offsetHeight || 60;
-      if (dy > rowHeight * 0.9 && !isLast) {
-        onMoveDown();
-        touchStart.current.y = touch.clientY;
-      } else if (dy < -rowHeight * 0.9 && !isFirst) {
-        onMoveUp();
-        touchStart.current.y = touch.clientY;
+      // Move as many rows as the finger has crossed since the anchor (1:1 tracking), so a fast
+      // drag advances multiple slots in a single event instead of one-per-event. Consume only the
+      // whole-row portion from the anchor and keep the sub-row remainder, so the item stays locked
+      // to the finger's position rather than lagging behind.
+      const steps = Math.trunc(dy / rowHeight);
+      if (steps > 0 && !isLast) {
+        onMoveBy(steps);
+        touchStart.current.y += steps * rowHeight;
+      } else if (steps < 0 && !isFirst) {
+        onMoveBy(steps);
+        touchStart.current.y += steps * rowHeight;
       }
     }
   };
@@ -119,12 +123,25 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveUp, 
     setIsDragging(false);
   };
 
+  // Android fires touchcancel (NOT touchend) when a gesture is interrupted — e.g. the app is
+  // backgrounded or a notification shade opens mid-drag. Without this, isDragging stays stuck
+  // true, the document-level touchmove blocker below is never removed, and ALL scrolling
+  // (lists and dropdowns) freezes until a cold start. Reset state only — no edit/delete.
+  const handleTouchCancel = () => {
+    if (reorderTimer.current) {
+      clearTimeout(reorderTimer.current);
+      reorderTimer.current = null;
+    }
+    setSwipeX(0);
+    setSwipeY(0);
+    setIsDragging(false);
+  };
+
   useEffect(() => {
     if (!isDragging) return;
 
     // For Native WebViews (Capacitor), explicitly lock the scroll container
-    const appRoot = document.querySelector('.app-root');
-    if (appRoot) appRoot.classList.add('no-scroll');
+    document.querySelector('.app-root')?.classList.add('no-scroll');
 
     const preventScroll = (e: TouchEvent) => {
       e.preventDefault();
@@ -132,7 +149,9 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveUp, 
     document.addEventListener('touchmove', preventScroll, { passive: false });
 
     return () => {
-      if (appRoot) appRoot.classList.remove('no-scroll');
+      // Re-query rather than reuse a captured node — the .app-root reference could be stale
+      // after a re-render, which would leave the lock applied to the live element.
+      document.querySelector('.app-root')?.classList.remove('no-scroll');
       document.removeEventListener('touchmove', preventScroll);
     };
   }, [isDragging]);
@@ -171,6 +190,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveUp, 
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchCancel}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
@@ -304,8 +324,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveUp, 
                   isLast={false}
                   onEdit={onEdit}
                   onDelete={onDelete}
-                  onMoveUp={() => {}}
-                  onMoveDown={() => {}}
+                  onMoveBy={() => {}}
                 />
               ))}
             </div>
@@ -452,9 +471,22 @@ export default function Transactions() {
   const [paymentSourceAccountId, setPaymentSourceAccountId] = useState('');
   const [ccPaymentCycleTarget, setCcPaymentCycleTarget] = useState<'current_cycle' | 'previous_statement'>('previous_statement');
   const [selectedCashbackLevelId, setSelectedCashbackLevelId] = useState('');
+  // Instant-cashback input as a percentage of the debited amount, instead of a fixed ₹ value.
+  const [cashbackPercentMode, setCashbackPercentMode] = useState(false);
+  const [cashbackPercentStr, setCashbackPercentStr] = useState('');
   const [showRewardSplit, setShowRewardSplit] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
   const rewardSplitRef = useRef<HTMLDivElement>(null);
+
+  // When entering instant cashback as a percentage, keep rewardEarned in sync with
+  // (percent × amount), recomputing whenever the percent or the debited amount changes.
+  useEffect(() => {
+    if (!cashbackPercentMode) return;
+    const pct = parseFloat(cashbackPercentStr);
+    const amt = Number(newTx.amount) || 0;
+    const computed = (!isNaN(pct) && amt > 0) ? Math.round((amt * pct) / 100 * 100) / 100 : 0;
+    setNewTx(prev => prev.rewardEarned === computed ? prev : { ...prev, rewardEarned: computed, rewardEarnedType: 'instant' });
+  }, [cashbackPercentMode, cashbackPercentStr, newTx.amount]);
   const passiveLogRef = useRef<HTMLDivElement>(null);
 
   const [descriptionSuggestions, setDescriptionSuggestions] = useState<string[]>([]);
@@ -750,7 +782,13 @@ export default function Transactions() {
         ? Math.max(0, Number(newTx.amount) - rewardUsed)
         : Number(newTx.amount));
 
-    if (newTx.rewardEarnedType === 'instant' && (newTx.rewardEarned || 0) > 0 && newTx.rewardEarnedAccountId && !editId) {
+    // On edit, updateTransaction syncs an EXISTING linked cashback leg but won't create one.
+    // So create the leg here when instant cashback is configured but no cashback leg exists yet
+    // (covers both new transactions and edits that add cashback for the first time).
+    const hasExistingCashbackLeg = editId
+      ? data.transactions.some(t => currentLinkedIds.includes(t.id) && t.category === 'Cashback')
+      : false;
+    if (newTx.rewardEarnedType === 'instant' && (newTx.rewardEarned || 0) > 0 && newTx.rewardEarnedAccountId && !hasExistingCashbackLeg) {
       const instantCbId = generateId();
       currentLinkedIds.push(instantCbId);
       addTransaction({
@@ -866,6 +904,8 @@ export default function Transactions() {
     setPaymentSourceAccountId('');
     setCcPaymentCycleTarget('previous_statement');
     setSelectedCashbackLevelId('');
+    setCashbackPercentMode(false);
+    setCashbackPercentStr('');
     setShowRewardSplit(false);
     setEditId(null);
     setErrors({});
@@ -911,6 +951,8 @@ export default function Transactions() {
     syncInputStrings(initialTx);
     setPaymentSourceAccountId('');
     setCcPaymentCycleTarget('previous_statement');
+    setCashbackPercentMode(false);
+    setCashbackPercentStr('');
     setShowRewardSplit(false);
     setNewTagInput('');
     setIsModalOpen(true);
@@ -949,6 +991,8 @@ export default function Transactions() {
       setCcPaymentCycleTarget('previous_statement');
     }
     setSelectedCashbackLevelId(tx.cashbackLevelId || '');
+    setCashbackPercentMode(false);
+    setCashbackPercentStr('');
     setShowRewardSplit((tx.rewardUsed || 0) > 0);
     setNewTx(sanitizedTx);
     syncInputStrings(sanitizedTx);
@@ -1482,31 +1526,23 @@ export default function Transactions() {
                                       isLast={isLastInGroupAndList}
                                       onEdit={openEditModal}
                                       onDelete={handleDelete}
-                                      onMoveUp={() => {
-                                        if (firstGroupIdx > 0) {
-                                          const prev = sortedTxs[firstGroupIdx - 1];
-                                          const startOrder = prev.order !== undefined ? prev.order : (firstGroupIdx - 1);
-                                          const updates: Transaction[] = [];
-                                          group.forEach((gtx, i) => {
-                                            updates.push({ ...gtx, order: startOrder + i });
-                                          });
-                                          updates.push({ ...prev, order: startOrder + group.length });
-                                          reorderTransactions(...updates);
-                                        }
-                                      }}
-                                      onMoveDown={() => {
-                                        if (lastGroupIdx < sortedTxs.length - 1) {
-                                          const next = sortedTxs[lastGroupIdx + 1];
-                                          const firstGroupItem = group[0];
-                                          const firstGroupIdxVal = sortedTxs.indexOf(firstGroupItem);
-                                          const startOrder = firstGroupItem.order !== undefined ? firstGroupItem.order : firstGroupIdxVal;
-                                          const updates: Transaction[] = [];
-                                          updates.push({ ...next, order: startOrder });
-                                          group.forEach((gtx, i) => {
-                                            updates.push({ ...gtx, order: startOrder + 1 + i });
-                                          });
-                                          reorderTransactions(...updates);
-                                        }
+                                      onMoveBy={(steps) => {
+                                        // Reposition the whole (possibly linked) group by `steps`
+                                        // slots within this date in one shot, then renumber the
+                                        // date's order field 0..N-1. Single pass keeps the dragged
+                                        // row locked to the finger even on fast multi-row drags.
+                                        const blockLen = lastGroupIdx - firstGroupIdx + 1;
+                                        const list = [...sortedTxs];
+                                        const block = list.splice(firstGroupIdx, blockLen);
+                                        let insertAt = firstGroupIdx + steps;
+                                        if (insertAt < 0) insertAt = 0;
+                                        if (insertAt > list.length) insertAt = list.length;
+                                        list.splice(insertAt, 0, ...block);
+                                        const updates: Transaction[] = [];
+                                        list.forEach((t, i) => {
+                                          if (t.order !== i) updates.push({ ...t, order: i });
+                                        });
+                                        if (updates.length) reorderTransactions(...updates);
                                       }}
                                       counterparts={txCounterpartsMap.get(tx.id)}
                                     />
@@ -2202,7 +2238,43 @@ export default function Transactions() {
                     <div className="flex justify-between align-center">
                       <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>Cashback Earned</span>
                       {showInstantUI && (
-                        <div className="flex gap-2">
+                        <div className="flex align-center" style={{ gap: '1rem' }}>
+                          <div className="flex" style={{ border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
+                            {(['amount', 'percent'] as const).map(mode => {
+                              const active = (mode === 'percent') === cashbackPercentMode;
+                              return (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  className="text-mono text-xs font-bold"
+                                  style={{
+                                    padding: '0.25rem 0.7rem',
+                                    minHeight: 'auto',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    background: active ? 'var(--accent)' : 'transparent',
+                                    color: active ? '#ffffff' : 'var(--text-secondary)'
+                                  }}
+                                  onClick={() => {
+                                    const toPercent = mode === 'percent';
+                                    if (toPercent === cashbackPercentMode) return;
+                                    const amt = Number(newTx.amount) || 0;
+                                    const earned = Number(newTx.rewardEarned) || 0;
+                                    if (toPercent) {
+                                      // Back-compute the percent from the current ₹ value so the switch is lossless.
+                                      setCashbackPercentStr(amt > 0 && earned > 0 ? String(Math.round((earned / amt) * 100 * 100) / 100) : '');
+                                    } else {
+                                      // Reflect the computed ₹ value into the amount input.
+                                      setInputStrings(prev => ({ ...prev, rewardEarned: earned === 0 ? '' : String(earned) }));
+                                    }
+                                    setCashbackPercentMode(toPercent);
+                                  }}
+                                >
+                                  {mode === 'percent' ? '%' : '₹'}
+                                </button>
+                              );
+                            })}
+                          </div>
                           <span className="text-mono text-xs text-success font-bold" style={{ display: 'flex', alignItems: 'center' }}>⚡ INSTANT</span>
                         </div>
                       )}
@@ -2241,6 +2313,29 @@ export default function Transactions() {
                             }}
                             iconGetter={() => '✨'}
                           />
+                        </div>
+                      ) : cashbackPercentMode ? (
+                        <div className="flex-col gap-1">
+                          <div style={{ position: 'relative' }}>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              className="input-field"
+                              value={cashbackPercentStr}
+                              onChange={e => {
+                                const val = e.target.value;
+                                if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                                  setCashbackPercentStr(val);
+                                }
+                              }}
+                              placeholder="1.6"
+                              style={{ width: '100%', paddingRight: '1.75rem' }}
+                            />
+                            <span className="text-muted text-mono font-bold" style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>%</span>
+                          </div>
+                          <span className="text-xs text-muted text-mono" style={{ opacity: 0.8 }}>
+                            = {formatCurrency(Number(newTx.rewardEarned) || 0)}
+                          </span>
                         </div>
                       ) : (
                         <input

@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { useFinance } from '../FinanceContext';
-import { Sparkles, ArrowRight, ArrowLeft, X, ShieldCheck, Eye, Smartphone, Zap, Gift } from 'lucide-react';
+import { Sparkles, ArrowRight, ArrowLeft, X, ShieldCheck, Eye, Smartphone, Zap, Gift, TrendingUp } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import type { Tab } from '../App';
 
-export type TourType = 'onboarding' | 'splits' | 'debts' | 'bills' | 'cashback' | 'insights';
+export type TourType = 'onboarding' | 'splits' | 'debts' | 'bills' | 'cashback' | 'insights' | 'portfolio';
 
 interface AppTourProps {
   tourType: TourType;
@@ -39,6 +40,11 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       clearDemoData();
     };
   }, [tourType]);
+
+  // Step 6 (Smart Features) is platform-aware: Android leads with automatic SMS logging, while
+  // web/iOS show the AI/portfolio helpers that apply there. Same spotlight target — the grid
+  // simply renders the subset of tiles available on each platform.
+  const isAndroid = Capacitor.getPlatform() === 'android';
 
   const tours: Record<TourType, TourStep[]> = {
     onboarding: [
@@ -76,9 +82,11 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
         icon: Zap
       },
       {
-        title: "Frictionless Logging",
-        description: "In your Profile tab, Passive Logs let you flag specific transactions to be excluded from your budget stats — ideal for investments or pass-through expenses that shouldn't distort your spending picture.",
-        selector: ".tour-passive-logs, .tour-smart-features-android",
+        title: "Smart Features",
+        description: isAndroid
+          ? "SpendVault does the busywork for you. Auto-Log SMS reads your bank's transaction texts and logs spends automatically — add a Gemini key to enable an AI filter that drops promos & OTPs. Commodity AI and Asset Logos enrich your portfolio, and Passive Logs let you keep investments or pass-through expenses out of your budget stats."
+          : "Power up your vault. Add a Gemini key for AI-estimated commodity prices and real brand logos on your holdings, and use Passive Logs to flag investments or pass-through expenses so they don't distort your budget stats. (Automatic bank-SMS logging is available on the Android app.)",
+        selector: ".tour-smart-features",
         tab: "settings",
         actionBefore: () => setIsHubOpen(false),
         icon: Sparkles
@@ -207,6 +215,31 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       {
         title: "Start Analyzing",
         description: "Excellent! Let's clear the sample insights and start tracking your finances.",
+        icon: ShieldCheck
+      }
+    ],
+    portfolio: [
+      {
+        title: "Portfolio Tour",
+        description: "Welcome to your Portfolio! Track the live value of your stocks, mutual funds, and gold or silver holdings — all in one place.",
+        icon: TrendingUp
+      },
+      {
+        title: "Live Net Worth",
+        description: "Your holdings' combined current value, today's gain or loss, and a Refresh button that pulls the latest market prices. When you hold more than one asset class, the tabs let you view each one on its own.",
+        selector: ".tour-portfolio-summary",
+        icon: Sparkles
+      },
+      {
+        title: "Your Holdings",
+        description: "Each holding shows what you invested, its current value, and returns. Tap any one for a detailed price chart — SpendVault even fetches real brand logos and AI-estimated metal prices automatically.",
+        selector: ".tour-portfolio-holdings",
+        icon: Sparkles,
+        cardPosition: 'bottom'
+      },
+      {
+        title: "Track Your Wealth",
+        description: "You're all set! We'll clear the sample holdings now so you can add your own from the Accounts tab.",
         icon: ShieldCheck
       }
     ]
