@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { Home, Wallet, ReceiptText, Gift, Users, Sparkles, LayoutGrid, ChevronRight, Calendar, HandCoins, LogOut, TrendingUpDown } from 'lucide-react';
+import { Home, Wallet, ReceiptText, Gift, Users, Sparkles, LayoutGrid, ChevronRight, Calendar, HandCoins, LogOut, TrendingUpDown, MessageSquare } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import Accounts from './components/Accounts';
 import Transactions from './components/Transactions';
@@ -13,6 +13,7 @@ import ProfileAvatar from './components/ProfileAvatar';
 import UpcomingBills from './components/UpcomingBills';
 import Debts from './components/Debts';
 import { Portfolio } from './components/Portfolio';
+import AskVault from './components/AskVault';
 
 import { useFinance } from './FinanceContext';
 import AuthScreen from './components/AuthScreen';
@@ -102,6 +103,7 @@ function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [selectedAccountForStatement, setSelectedAccountForStatement] = useState<Account | null>(null);
   const [isHubOpen, setIsHubOpen] = useState(false);
+  const [isAskVaultOpen, setIsAskVaultOpen] = useState(false);
 
   const mainTabs: Tab[] = ['dashboard', 'accounts', 'transactions', 'settings'];
   const activeIndex = mainTabs.indexOf(activeTab);
@@ -215,6 +217,10 @@ function App() {
 
   useEffect(() => {
     const handleBackButton = () => {
+      if (isAskVaultOpen) {
+        setIsAskVaultOpen(false);
+        return;
+      }
       if (isHubOpen) {
         setIsHubOpen(false);
         return;
@@ -255,7 +261,7 @@ function App() {
     return () => {
       listener.then((l: any) => l.remove());
     };
-  }, [isHubOpen, selectedAccountForStatement, activeTab, backPressCount]);
+  }, [isAskVaultOpen, isHubOpen, selectedAccountForStatement, activeTab, backPressCount]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -329,6 +335,13 @@ function App() {
           <h1 className="navbar-title" style={{ fontSize: '1.75rem', marginBottom: 0, textTransform: 'lowercase' }}>spendvault</h1>
         </div>
         <div className="flex align-center gap-4">
+          <button
+            className={`nav-header-btn ${isAskVaultOpen ? 'active' : ''}`}
+            onClick={() => setIsAskVaultOpen(true)}
+            title="Ask Vault"
+          >
+            <MessageSquare size={22} />
+          </button>
           <button
             className={`nav-header-btn ${isHubOpen ? 'active' : ''}`}
             onClick={() => setIsHubOpen(true)}
@@ -490,6 +503,13 @@ function App() {
           account={selectedAccountForStatement}
           transactions={data.transactions}
           onClose={() => setSelectedAccountForStatement(null)}
+        />
+      )}
+
+      {isAskVaultOpen && (
+        <AskVault
+          onClose={() => setIsAskVaultOpen(false)}
+          onOpenSettings={() => { setIsAskVaultOpen(false); setActiveTab('settings'); }}
         />
       )}
 

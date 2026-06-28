@@ -137,7 +137,7 @@ export default function Debts() {
       id: txId,
       amount,
       date: date || format(new Date(), 'yyyy-MM-dd'),
-      description: desc || (type === 'lent' ? 'Lent money' : 'Borrowed money'),
+      description: desc || (type === 'lent' ? 'Lent' : 'Borrowed'),
       type,
       linkedTxId
     };
@@ -1180,7 +1180,7 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
     if (type === 'repayment') {
       txType = repaymentType === 'received' ? 'repayment_received' : 'repayment_sent';
     }
-    const defaultDesc = type === 'lent' ? 'Lent money' : (type === 'borrowed' ? 'Borrowed money' : 'Repayment');
+    const defaultDesc = type === 'lent' ? 'Lent' : (type === 'borrowed' ? 'Borrowed' : 'Repayment');
     onAdd(numAmt, txType, desc || defaultDesc, date, accountId, logInLedger, linkedTxId || undefined);
   };
 

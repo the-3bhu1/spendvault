@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, ChevronDown, Sparkles, ShieldAlert, Hash, Bot, BotOff, Cuboid, Image as ImageIcon } from 'lucide-react';
+import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, ChevronDown, Sparkles, ShieldAlert, Hash, Bot, BotOff, Cuboid, Image as ImageIcon, MessageSquare } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
 import ConfirmDialog from './ConfirmDialog';
 import TransparentLogo from './TransparentLogo';
@@ -112,6 +112,7 @@ export default function Settings() {
   const [activeView, setActiveView] = useState<'main' | 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem' | 'aiFeatures' | 'commodity' | 'logos'>('main');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const oldPinInputRef = useRef<HTMLInputElement>(null);
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   const reorderTimer = useRef<number | null>(null);
   const touchStartY = useRef<number>(0);
@@ -313,7 +314,7 @@ export default function Settings() {
     }
   };
 
-  const handleBiometricVerify = async () => {
+  const handleBiometricVerify = async (onSuccess?: () => void) => {
     // If already verified, clicking again now acts as a 'reset/cancel'
     if (isOldPinVerified) {
       setIsOldPinVerified(false);
@@ -336,6 +337,7 @@ export default function Settings() {
 
           if (verified) {
             setIsOldPinVerified(true);
+            onSuccess?.();
             return;
           }
         }
@@ -350,6 +352,7 @@ export default function Settings() {
         onConfirm: () => {
           setIsOldPinVerified(true);
           setConfirmConfig(null);
+          onSuccess?.();
         }
       });
     }
@@ -390,16 +393,7 @@ export default function Settings() {
 
   // Remove the PIN entirely → app becomes lock-free. Requires authorizing with the current PIN
   // (or biometric). Also clears the recovery key and disables biometric (which needs a PIN).
-  const handleRemovePin = async () => {
-    if (!data.user?.pinHash) return;
-    let authorized = isOldPinVerified;
-    if (!authorized && profileForm.oldPin.length === 4) {
-      authorized = (await hashString(profileForm.oldPin)) === data.user.pinHash;
-    }
-    if (!authorized) {
-      showAlert("Enter your current PIN (or verify with biometrics) above to remove it.", "Authorize");
-      return;
-    }
+  const confirmRemovePin = () => {
     setConfirmConfig({
       title: "Remove PIN?",
       message: "The app will no longer be locked. Biometric unlock and your recovery key will also be removed.",
@@ -417,6 +411,33 @@ export default function Settings() {
         showAlert("PIN removed. The app is now unlocked by default.", "Done");
       }
     });
+  };
+
+  const handleRemovePin = async () => {
+    if (!data.user?.pinHash) return;
+    let authorized = isOldPinVerified;
+    if (!authorized && profileForm.oldPin.length === 4) {
+      authorized = (await hashString(profileForm.oldPin)) === data.user.pinHash;
+    }
+    if (authorized) {
+      confirmRemovePin();
+      return;
+    }
+    // Not authorized yet — drive the authorization instead of dead-ending on an alert.
+    // A wrong 4-digit PIN was entered: tell the user explicitly.
+    if (profileForm.oldPin.length === 4) {
+      showAlert("That PIN is incorrect. Re-enter your current PIN to remove it.", "Wrong PIN");
+      return;
+    }
+    // Prefer biometrics when available — verify, then continue straight to removal.
+    if (data.user?.biometricsEnabled) {
+      await handleBiometricVerify(confirmRemovePin);
+      return;
+    }
+    // No biometrics: bring the CURRENT PIN field into view and focus it.
+    oldPinInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    oldPinInputRef.current?.focus();
+    showAlert("Enter your current PIN above to remove it.", "Authorize");
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -710,8 +731,10 @@ export default function Settings() {
     setGeminiKeyInput('');
     setGeminiKeySaved(false);
     setGeminiTestStatus('idle');
-    // Turning off the key disables every AI feature that depends on it, including the SMS filter.
-    if (data.user?.aiSmsFilter) updateUser({ ...data.user!, aiSmsFilter: false });
+    // Turning off the key disables every AI feature that depends on it (SMS filter, Ask Vault).
+    if (data.user && (data.user.aiSmsFilter || data.user.aiAssistant)) {
+      updateUser({ ...data.user, aiSmsFilter: false, aiAssistant: false });
+    }
     showAlert('Gemini key removed. AI features now fall back to manual entry (e.g. set a ₹/g per commodity account).', 'AI Features');
   };
 
@@ -1676,6 +1699,7 @@ export default function Settings() {
                     <div className="flex gap-2 align-center">
                       <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
                         <input
+                          ref={oldPinInputRef}
                           type={showOldPin ? "text" : "password"}
                           maxLength={4}
                           className={`input-field ${isOldPinVerified ? 'border-success' : ''}`}
@@ -1707,7 +1731,7 @@ export default function Settings() {
                       </div>
                       {data.user?.biometricsEnabled && (
                         <button
-                          onClick={handleBiometricVerify}
+                          onClick={() => handleBiometricVerify()}
                           className={`btn ${isOldPinVerified ? 'btn-primary' : 'btn-secondary'}`}
                           style={{ padding: '0.75rem', borderRadius: '12px', minWidth: '54px' }}
                           title={isOldPinVerified ? "Reset / Cancel Verification" : "Verify with Biometrics"}
@@ -1949,6 +1973,29 @@ export default function Settings() {
                 >{geminiTestStatus === 'testing' ? 'Testing…' : 'Test'}</button>
               )}
               {geminiKeySaved && <button className="btn btn-secondary" onClick={handleClearGemini}>Remove Key</button>}
+            </div>
+          </div>
+
+          {/* Ask Vault assistant — opt-in. All platforms. */}
+          <div className="card flex-col gap-3" style={{ padding: '1rem' }}>
+            <SettingsCardHeader icon={MessageSquare} title="Ask Vault Assistant" level="h3" size={20} marginBottom="0.5rem" />
+            <span className="text-xs text-muted">
+              An in-app assistant that answers questions about your finances and how SpendVault works. When on, a
+              summary of your accounts and transactions (plus the question) is sent to Gemini to answer. Card numbers,
+              CVVs and your PIN are never sent. Requires the key above.
+            </span>
+            <div className="flex justify-between align-center">
+              <span className="text-sm font-bold">{data.user?.aiAssistant ? 'Enabled' : 'Disabled'}</span>
+              <button
+                className={`btn ${data.user?.aiAssistant ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => {
+                  if (!data.user?.aiAssistant && !geminiKeySaved) {
+                    showAlert('Add and save your Gemini key first to enable Ask Vault.', 'AI Features');
+                    return;
+                  }
+                  updateUser({ ...data.user!, aiAssistant: !data.user?.aiAssistant });
+                }}
+              >{data.user?.aiAssistant ? 'Turn Off' : 'Turn On'}</button>
             </div>
           </div>
 

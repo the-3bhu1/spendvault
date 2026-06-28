@@ -7,6 +7,22 @@ import { Cuboid } from 'lucide-react';
 
 const PALETTE = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#f9ca24', '#6c5ce7', '#a29bfe'];
 
+// logo.dev (with fallback=404) has no logo for plenty of real domains — e.g. nmdcsteel.com — so a
+// correctly-resolved domain still 404s into initials. Before giving up, try that same domain's
+// favicon via Google, which covers many of those gaps. Only applies to img.logo.dev *domain* URLs
+// (not the /ticker/ guess endpoint, which has no domain to fall back to).
+function faviconFallback(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (u.hostname !== 'img.logo.dev') return null;
+    const path = u.pathname.replace(/^\//, '');
+    if (!path || path.startsWith('ticker/')) return null;
+    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(path)}&sz=128`;
+  } catch {
+    return null;
+  }
+}
+
 export function getAvatarColor(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
@@ -26,9 +42,13 @@ export function getInitials(name: string): string {
 }
 
 export function LogoAvatar({ name, logoUrl, size, metal }: { name: string; logoUrl: string | null; size: number; metal?: 'gold' | 'silver' }) {
-  const [failed, setFailed] = useState(false);
-  // Reset the failure flag if the URL changes (e.g. user adds a logo.dev token).
-  useEffect(() => { setFailed(false); }, [logoUrl]);
+  // Ordered logo sources to try before initials: the resolved logo URL, then (for logo.dev domain
+  // URLs) that domain's favicon. `srcIdx` advances on each <img> error; when it runs past the end
+  // we render initials.
+  const sources = logoUrl ? [logoUrl, faviconFallback(logoUrl)].filter((s): s is string => !!s) : [];
+  const [srcIdx, setSrcIdx] = useState(0);
+  // Reset to the first source if the URL changes (e.g. user adds a logo.dev token).
+  useEffect(() => { setSrcIdx(0); }, [logoUrl]);
 
   // Commodities aren't a brand — render a metallic gold/silver bullion bar instead of a logo or
   // initials. The bar is a small inline SVG ingot (lucide has no bullion icon).
@@ -55,7 +75,7 @@ export function LogoAvatar({ name, logoUrl, size, metal }: { name: string; logoU
     );
   }
 
-  const showImg = !!logoUrl && !failed;
+  const showImg = srcIdx < sources.length;
 
   return (
     <div
@@ -76,10 +96,10 @@ export function LogoAvatar({ name, logoUrl, size, metal }: { name: string; logoU
     >
       {showImg ? (
         <img
-          src={logoUrl!}
+          src={sources[srcIdx]}
           alt={name}
           loading="lazy"
-          onError={() => setFailed(true)}
+          onError={() => setSrcIdx(i => i + 1)}
           // cover (not contain) so a brand icon's own square background fills the circle and gets
           // clipped round, instead of floating as a square inside it. These logo/favicon sources
           // are square icons, so nothing meaningful is cropped.

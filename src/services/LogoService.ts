@@ -117,6 +117,9 @@ const STOCK_REGISTRY: Record<string, string> = {
   ZOMATO: 'zomato.com',
   PAYTM: 'paytm.com',
   DMART: 'dmart.in',
+  // NMDC Steel: logo.dev has no logo for its own nmdcsteel.com (nor does Google's favicon), so pin
+  // it to the parent NMDC group domain, which logo.dev does cover, instead of falling to initials.
+  NSLNISP: 'nmdc.co.in',
 };
 
 function logoFromDomain(domain: string): string {

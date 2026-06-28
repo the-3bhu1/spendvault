@@ -143,6 +143,9 @@ export interface User {
   /** Opt-in: send SMS that pass the keyword parser to Gemini as a second filter to drop
    *  misleading non-transactions. Requires the shared Gemini key (Settings → AI Features). */
   aiSmsFilter?: boolean;
+  /** Opt-in: enable the "Ask Vault" in-app assistant. When on, a summary of the user's finances
+   *  and relevant transactions are sent to Gemini to answer questions. Requires the Gemini key. */
+  aiAssistant?: boolean;
   enablePassiveTransactions?: boolean;
   hasSeenTour?: boolean;
   hasSeenFeatureTours?: Record<string, boolean>;
