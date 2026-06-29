@@ -255,16 +255,16 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
 
       {hasCounterparts && (
         <>
-          <div style={{ width: '100%', borderTop: '1px solid rgba(99,102,241,0.4)' }} />
+          <div style={{ width: '100%', borderTop: '1px solid var(--border-color)' }} />
           <div style={{
             display: 'flex',
             flexDirection: 'column',
             margin: '0 0.6rem 0.5rem',
             borderRadius: '0 0 20px 20px',
             overflow: 'hidden',
-            borderLeft: '2px solid rgba(99,102,241,0.35)',
-            borderRight: '2px solid rgba(99,102,241,0.35)',
-            borderBottom: '2px solid rgba(99,102,241,0.35)'
+            borderLeft: '2px solid var(--border-color)',
+            borderRight: '2px solid var(--border-color)',
+            borderBottom: '2px solid var(--border-color)'
           }}>
           <button
             onClick={() => setIsCounterpartExpanded(!isCounterpartExpanded)}
@@ -273,7 +273,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
               alignItems: 'center',
               gap: '0.5rem',
               padding: '0.4rem 1rem',
-              background: 'rgba(99,102,241,0.04)',
+              background: 'transparent',
               border: 'none',
               color: 'var(--text-muted)',
               fontSize: '0.72rem',
@@ -285,8 +285,8 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
               letterSpacing: '0.3px',
               transition: 'background 0.2s'
             }}
-            onMouseOver={e => e.currentTarget.style.background = 'rgba(99,102,241,0.08)'}
-            onMouseOut={e => e.currentTarget.style.background = 'rgba(99,102,241,0.04)'}
+            onMouseOver={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+            onMouseOut={e => e.currentTarget.style.background = 'transparent'}
           >
             <span style={{ 
               display: 'inline-block',
@@ -313,7 +313,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
           {isCounterpartExpanded && (
             <div style={{ 
               background: 'rgba(255,255,255,0.005)',
-              borderTop: '1px solid rgba(99,102,241,0.15)'
+              borderTop: '1px solid var(--border-color)'
             }}>
               {counterparts!.map(c => (
                 <TransactionRow
