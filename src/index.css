@@ -1695,7 +1695,12 @@ tr:hover td {
 /* ─── Ask Vault (AI assistant) ─────────────────────────────────────────────── */
 .askvault-overlay {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* Height is driven inline from window.visualViewport so the overlay tracks the
+     area above the on-screen keyboard. This is the fallback for browsers without it. */
+  height: 100%;
   z-index: 9999;
   background: var(--bg-color);
   display: flex;
@@ -1768,6 +1773,41 @@ tr:hover td {
   transition: all 0.15s;
 }
 .askvault-suggestion:hover { background: var(--bg-hover); border-color: var(--accent); }
+
+/* Chat history list */
+.askvault-history-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 0.8rem 0.9rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.askvault-history-item:hover { background: var(--bg-hover); border-color: var(--accent); }
+.askvault-history-item.active { border-color: var(--accent); }
+.askvault-history-title {
+  font-size: 0.92rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.askvault-history-del {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0.3rem;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s, background 0.15s;
+}
+.askvault-history-del:hover { color: var(--danger); background: var(--bg-color); }
 
 .askvault-row { display: flex; }
 .askvault-row.user { justify-content: flex-end; }

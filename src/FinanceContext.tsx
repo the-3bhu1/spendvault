@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react';
 import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitEvent, RecurringBill, Debt } from './types';
 import { classifySmsIsTransaction } from './services/GeminiService';
+import { clearChatHistory } from './services/ChatHistoryService';
 
 export interface PendingTransfer {
   fromAccountId: string;
@@ -1595,6 +1596,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const clearAllData = () => {
     localStorage.removeItem(LOCAL_STORAGE_KEY);
+    clearChatHistory();   // Ask Vault chats can quote finances — wipe them too.
     setData({ user: { id: 'default', name: 'spendvault user', biometricsEnabled: false }, accounts: [], transactions: [], cashbackStatements: [], categories: DEFAULT_CATEGORIES, tags: DEFAULT_TAGS, customAccountTypes: DEFAULT_CUSTOM_ACCOUNT_TYPES, theme: 'dark' });
     window.location.reload();
   };

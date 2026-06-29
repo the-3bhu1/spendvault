@@ -144,9 +144,14 @@ function buildSummary(data: FinanceData): string {
     });
   }
 
-  // Debts (per-person net).
+  // Debts (per-person net + recent dated ledger entries, so "when was the last repayment"
+  // type questions can be answered — the entries live in debt.transactions, not data.transactions).
   const debts = (data.debts || []).filter(d => d.status === 'active');
   if (debts.length) {
+    const ENTRY_LABELS: Record<string, string> = {
+      lent: 'lent to them', borrowed: 'borrowed from them',
+      repayment_received: 'repayment received', repayment_sent: 'repayment sent',
+    };
     out.push('\n## Lending & borrowing (active)');
     debts.forEach(d => {
       const net = d.transactions.reduce((sum, tx) => {
@@ -159,6 +164,11 @@ function buildSummary(data: FinanceData): string {
       }, 0);
       const who = net > 0 ? `${d.personName} owes you` : net < 0 ? `you owe ${d.personName}` : `settled with ${d.personName}`;
       out.push(`  - ${who} ${formatCurrency(Math.abs(net))}`);
+      const recent = [...d.transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
+      recent.forEach(tx => {
+        out.push(`      ${tx.date} | ${ENTRY_LABELS[tx.type] || tx.type} | ${formatCurrency(tx.amount)}` +
+          (tx.description ? ` | ${tx.description}` : ''));
+      });
     });
   }
 
