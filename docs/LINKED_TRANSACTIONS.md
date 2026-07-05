@@ -40,8 +40,14 @@ For **child → parent** edits, two mechanisms keep things in sync:
    they have **dedicated reverse-propagation branches** and are explicitly excluded from
    the forward loop (which would otherwise corrupt the parent).
 
-`openEditModal()` deliberately does **not** reconstruct `paymentSourceAccountId` for
-reward/cashback children — they reciprocate via the reverse branches, not the leg path.
+For a **reward-split** group, `openEditModal()` reconstructs the full split context so each leg
+opens its own correct modal: the **bank leg** shows the total bill + the split (amount = the card
+anchor's amount, so "Primary Account Debit" derives to the real bank portion) with the card in its
+auto-credit picker; the **reward leg** shows the card in its auto-credit picker. Those reconstructed
+anchor fields are for display only — `updateTransaction` strips them from the child on save
+(`isRewardSplitBankEdit` clears `rewardUsed`; `isRewardSplitChildEdit` clears
+`paymentSourceAccountId`) so the anchor never duplicates onto a child. Cashback children still don't
+reconstruct `paymentSourceAccountId` — they reciprocate via the reverse cashback branch.
 
 ---
 
@@ -68,6 +74,15 @@ reward/cashback children — they reciprocate via the reverse branches, not the 
   always produces: **card credit (parent)** + **bank debit** + **reward debit**. The
   creation code is generic enough to support other categories / a 2-leg shape, but no UI
   path triggers that today.
+- **The card leg is always the anchor, regardless of logging direction.** Logged from
+  Credit POV the card credit *is* the main tx, so it naturally holds `rewardUsed` /
+  `rewardUsedAccountId` and links to both funding legs. Logged from Debit POV the card is the
+  *counterpart*, so `handleSave` moves the anchor onto it (`anchorOnCounterpart`): the card
+  counterpart carries `rewardUsed` + links to `[bank main, reward leg]`, the reward leg links
+  to the card, and the bank main tx stays a plain funding child (`rewardUsed: 0`). This makes
+  both directions produce an identical star (card = hub), so edit reconstruction
+  (`openEditModal`) and the Option-B rebalance below always see `card.amount` as the total.
+  Without it, Debit POV would anchor on the bank leg (partial ₹148) and corrupt the rebalance.
 - **Reward-split amount semantics (Option B):** the **card credit (`parent.amount`) is the
   fixed anchor** — it's a real fact (you paid the card that amount), so the two funding legs
   must always sum to it. Editing the **reward leg** rebalances the **bank leg**

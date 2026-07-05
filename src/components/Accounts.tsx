@@ -6,6 +6,7 @@ import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols, isC
 import type { MFSearchResult, StockSearchResult } from '../services/MarketDataService';
 import { getCommodityVendor } from '../services/GeminiConfig';
 import { CustomPicker } from './CustomPicker';
+import { getAccountEmoji } from './transactionIcons';
 import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardNetwork } from '../types';
 import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, calculateCycleBalanceForCycle, getBillingCycleForDate, getOrdinalSuffix } from '../utils';
@@ -158,6 +159,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const [editingCashbackRateId, setEditingCashbackRateId] = useState<string | null>(null);
   const [isEditingCardDetails, setIsEditingCardDetails] = useState(false);
   const [collapsedTypes, setCollapsedTypes] = useState<Set<string>>(new Set());
+  // Archived accounts are tucked away collapsed by default — they're history, not everyday accounts.
+  const [archivedCollapsed, setArchivedCollapsed] = useState(true);
 
   const [symbolInput, setSymbolInput] = useState('');
   const [symbolResults, setSymbolResults] = useState<(MFSearchResult | StockSearchResult)[]>([]);
@@ -491,19 +494,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const currentMonth = getCurrentMonthStr();
 
   const getAccountIcon = (acc: Account) => {
-    if (acc.isNcmcEnabled) return '🪪';
-    switch (acc.type) {
-      case 'credit_card': return '💳';
-      case 'debit_card': return '🪪';
-      case 'bank_account': return '🏦';
-      case 'e_wallet': return '🪙';
-      case 'stocks': return '📈';
-      case 'sips': return '💹';
-      case 'rewards': return '🎁';
-      case 'cash': return '💵';
-      case 'commodity': return acc.commodityMetal === 'silver' ? '🥈' : '🥇';
-      default: return '💼';
-    }
+    return getAccountEmoji(acc.type, { isNcmcEnabled: acc.isNcmcEnabled, commodityMetal: acc.commodityMetal });
   };
 
   const getDestAccountUnit = (acc: Partial<Account>) => {
@@ -1212,13 +1203,23 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             name. Restorable; hidden from pickers/totals everywhere else. */}
         {data.accounts.some(a => a.archived) && (
           <div className="flex-col gap-4" style={{ marginTop: '2.5rem' }}>
-            <div className="flex align-center gap-3" style={{ padding: '0 0.5rem', marginBottom: '0.5rem' }}>
+            <div
+              className="flex align-center gap-3"
+              style={{ padding: '0 0.5rem', marginBottom: archivedCollapsed ? '0' : '0.5rem', cursor: 'pointer', userSelect: 'none' }}
+              onClick={() => setArchivedCollapsed(prev => !prev)}
+            >
               <span className="text-mono" style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--text-muted)', opacity: 0.8 }}>
                 Archived
               </span>
+              {archivedCollapsed && (
+                <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
+                  {data.accounts.filter(a => a.archived).length} {data.accounts.filter(a => a.archived).length === 1 ? 'account' : 'accounts'}
+                </span>
+              )}
               <div style={{ flex: 1, height: '1px', background: 'linear-gradient(to right, var(--text-muted), transparent)', opacity: 0.2 }}></div>
+              <ChevronDown size={14} style={{ color: 'var(--text-muted)', opacity: 0.6, flexShrink: 0, transition: 'transform 0.2s ease', transform: archivedCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
             </div>
-            <div className="flex-col gap-3">
+            {!archivedCollapsed && <div className="flex-col gap-3">
               {data.accounts.filter(a => a.archived).map(acc => (
                 <div key={acc.id} className="card flex justify-between align-center" style={{ padding: '0.9rem 1rem', opacity: 0.7 }}>
                   <div className="flex-col" style={{ gap: '0.15rem' }}>
@@ -1234,7 +1235,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   </button>
                 </div>
               ))}
-            </div>
+            </div>}
           </div>
         )}
       </div>
@@ -1272,20 +1273,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   setSymbolDropdownOpen(false);
                 }}
                 error={errors.type}
-                iconGetter={id => {
-                  switch (id) {
-                    case 'bank_account': return '🏦';
-                    case 'credit_card': return '💳';
-                    case 'debit_card': return '🪪';
-                    case 'e_wallet': return '🪙';
-                    case 'stocks': return '📈';
-                    case 'sips': return '💹';
-                    case 'rewards': return '🎁';
-                    case 'cash': return '💵';
-                    case 'commodity': return '💎';
-                    default: return '💼';
-                  }
-                }}
+                iconGetter={id => getAccountEmoji(id)}
               />
               {newAccount.type !== 'sips' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && (
                 <div className="input-group">

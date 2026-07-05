@@ -55,12 +55,14 @@ export default function Cashback() {
       }
     }
 
-    const statementDate = new Date(year, month, statementDay);
-    const monthStr = (statementDate.getMonth() + 1).toString().padStart(2, '0');
-    const yearStr = statementDate.getFullYear();
-    const cycleLabel = `${monthStr}-${yearStr}`;
-    const suffix = statementDay === 1 ? 'st' : statementDay === 2 ? 'nd' : statementDay === 3 ? 'rd' : 'th';
-    return `Cycle ending ${statementDay}${suffix} ${cycleLabel}`;
+    // A statement closes on `statementDay`, so the cycle runs from the day after the previous
+    // close to this close — e.g. "17 May – 16 Jun 2026". Far clearer than "Cycle ending 16th 06-2026".
+    const end = new Date(year, month, statementDay);
+    const start = new Date(year, month - 1, statementDay + 1);
+    const fmt = (d: Date, withYear: boolean) =>
+      `${d.getDate()} ${d.toLocaleString('default', { month: 'short' })}${withYear ? ` ${d.getFullYear()}` : ''}`;
+    const sameYear = start.getFullYear() === end.getFullYear();
+    return `${fmt(start, !sameYear)} – ${fmt(end, true)}`;
   };
 
   const statements: Record<string, { expected: number, realized: number, confirmed: boolean, statementId: string | null, transaction: Transaction, account: any }> = {};
@@ -334,6 +336,13 @@ export default function Cashback() {
     setCollapsedGroups(prev => ({ ...prev, [name]: !currentCollapsed }));
   };
 
+  // Card-level accordion (used only in "Showing All"): each card collapses to just its name so the
+  // list of cards stays short as cycles accumulate month over month. Collapsed by default.
+  const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
+  const toggleCard = (name: string, currentCollapsed: boolean) => {
+    setCollapsedCards(prev => ({ ...prev, [name]: !currentCollapsed }));
+  };
+
   const [consolidatedFeedback, setConsolidatedFeedback] = useState<string[]>([]);
 
   const handleConsolidateClick = (accKey: string, accId: string, sts: any[]) => {
@@ -425,8 +434,48 @@ export default function Cashback() {
           </div>
         ) : (
           <div className="flex-col gap-6">
-            {cardsData.map((card) => (
+            {cardsData.map((card) => {
+              // In "Showing All", cards start collapsed to just their name (tap to reveal cycles).
+              // In the pending filter, keep cycles visible — there are far fewer of them.
+              const cardCollapsed = showCreditedCycles
+                ? (collapsedCards[card.cardName] !== undefined ? collapsedCards[card.cardName] : true)
+                : false;
+              const cardAccount = card.cycles[0]?.sts[0]?.account;
+              const cardTotal = card.cycles.reduce(
+                (sum, cyc) => sum + cyc.sts.reduce((a, st) => a + (st.confirmed ? st.realized : st.expected), 0),
+                0
+              );
+              const cardPendingCount = card.cycles.filter(cyc => cyc.sts.some(st => !st.confirmed)).length;
+
+              return (
               <div key={card.cardName} className="card flex-col tour-cashback-statement" style={{ padding: 0, overflow: 'hidden' }}>
+                {showCreditedCycles && (
+                  <div
+                    className="flex justify-between align-center clickable"
+                    onClick={() => toggleCard(card.cardName, cardCollapsed)}
+                    style={{ padding: '1rem 1.5rem', background: 'var(--bg-card)', borderBottom: cardCollapsed ? 'none' : '2px solid var(--border-color)', transition: '0.2s' }}
+                  >
+                    <span className="text-mono font-bold" style={{ textTransform: 'uppercase', color: 'var(--text-primary)', letterSpacing: '1px', fontSize: '0.9rem', flex: 1, marginRight: '1rem' }}>
+                      {card.cardName}
+                    </span>
+                    <div className="flex align-center gap-3" style={{ flexShrink: 0 }}>
+                      <span className="text-mono text-xs text-muted" style={{ opacity: 0.7 }}>
+                        {card.cycles.length} {card.cycles.length === 1 ? 'cycle' : 'cycles'}
+                        {cardPendingCount > 0 && ` · ${cardPendingCount} pending`}
+                      </span>
+                      <span className="text-mono font-bold" style={{ fontSize: '1rem', color: 'var(--text-primary)' }}>
+                        {formatCashback(cardTotal, cardAccount)}
+                      </span>
+                      <ChevronDown size={18} style={{
+                        transform: cardCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+                        transition: '0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+                        opacity: 0.5
+                      }} />
+                    </div>
+                  </div>
+                )}
+                <div style={{ display: 'grid', gridTemplateRows: cardCollapsed ? '0fr' : '1fr', transition: 'grid-template-rows 0.5s cubic-bezier(0.4, 0, 0.2, 1)' }}>
+                <div className="flex-col" style={{ overflow: 'hidden' }}>
                 {card.cycles.map((cycle, cycleIndex) => {
                   const { accKey: accName, sts } = cycle;
                   const isFullyCredited = sts.every(st => st.confirmed);
@@ -497,7 +546,8 @@ export default function Cashback() {
                         style={{ padding: '1rem 1.5rem', background: 'var(--bg-hover)', borderBottom: isCollapsed ? 'none' : '1px solid var(--border-color)', transition: '0.2s', alignItems: 'flex-start' }}
                       >
                         <span className="text-mono font-bold" style={{ textTransform: 'uppercase', color: 'var(--text-primary)', letterSpacing: '1px', fontSize: '0.85rem', flex: 1, marginRight: '1.5rem', marginTop: '0.15rem' }}>
-                          {accName}
+                          {/* Card name already shown in the card header in "Showing All" — just the cycle here. */}
+                          {showCreditedCycles ? accName.split(' — ').slice(1).join(' — ') : accName}
                         </span>
 
                         <div className="flex align-center gap-3" style={{ flexShrink: 0 }}>
@@ -626,8 +676,11 @@ export default function Cashback() {
                     </div>
                   );
                 })}
+                </div>
+                </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

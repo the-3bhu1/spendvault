@@ -1684,7 +1684,7 @@ tr:hover td {
 }
 
 .icon-spin {
-  animation: spin-ccw 0.9s linear infinite;
+  animation: spin-cw 0.9s linear infinite;
 }
 
 @keyframes spin-ccw {

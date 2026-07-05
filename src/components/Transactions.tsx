@@ -26,7 +26,7 @@ const isCountableTransaction = (tx: Transaction) => {
   return true;
 };
 
-function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, counterparts }: {
+function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, blockLen, counterparts }: {
   tx: Transaction,
   acc: Account | undefined,
   isFirst: boolean,
@@ -34,6 +34,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
   onEdit: (tx: Transaction) => void,
   onDelete: (id: string) => void,
   onMoveBy: (steps: number) => void,
+  blockLen: number,
   counterparts?: { tx: Transaction; acc: Account | undefined }[]
 }) {
   const [isCounterpartExpanded, setIsCounterpartExpanded] = useState(false);
@@ -88,19 +89,39 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
       setSwipeY(dy);
     } else {
       e.preventDefault();
-      const rowHeight = rowRef.current?.offsetHeight || 60;
-      // Move as many rows as the finger has crossed since the anchor (1:1 tracking), so a fast
-      // drag advances multiple slots in a single event instead of one-per-event. Consume only the
-      // whole-row portion from the anchor and keep the sub-row remainder, so the item stays locked
-      // to the finger's position rather than lagging behind.
-      const steps = Math.trunc(dy / rowHeight);
-      if (steps > 0 && !isLast) {
-        onMoveBy(steps);
-        touchStart.current.y += steps * rowHeight;
-      } else if (steps < 0 && !isFirst) {
-        onMoveBy(steps);
-        touchStart.current.y += steps * rowHeight;
+      // Walk the ACTUAL rendered neighbours (the outer wrappers) and consume their real heights,
+      // not a single assumed row height. A neighbour with a child leg renders as one tall row but
+      // spans several array slots (data-block-len), so crossing it visually must advance the array
+      // by that many slots — otherwise the drag stalls when passing a log that has children.
+      const wrapper = rowRef.current?.parentElement || null;
+      let consumedPx = 0;   // visual pixels of neighbours fully crossed since the anchor
+      let arraySteps = 0;   // array slots those neighbours occupy (signed)
+      if (wrapper) {
+        if (dy > 0 && !isLast) {
+          let sib = wrapper.nextElementSibling as HTMLElement | null;
+          while (sib && dy - consumedPx >= sib.offsetHeight) {
+            consumedPx += sib.offsetHeight;
+            arraySteps += Number(sib.dataset.blockLen) || 1;
+            sib = sib.nextElementSibling as HTMLElement | null;
+          }
+        } else if (dy < 0 && !isFirst) {
+          let sib = wrapper.previousElementSibling as HTMLElement | null;
+          while (sib && -dy - consumedPx >= sib.offsetHeight) {
+            consumedPx += sib.offsetHeight;
+            arraySteps -= Number(sib.dataset.blockLen) || 1;
+            sib = sib.previousElementSibling as HTMLElement | null;
+          }
+        }
       }
+      if (arraySteps !== 0) {
+        onMoveBy(arraySteps);
+        // Advance the anchor by the visual distance crossed (signed) so the leftover sub-row
+        // remainder becomes the live translateY below — the row stays glued to the finger.
+        touchStart.current.y += dy > 0 ? consumedPx : -consumedPx;
+      }
+      // Live follow: translate the whole group by whatever finger offset hasn't been consumed
+      // into a slot swap yet, so the dragged row sits under the finger instead of trailing it.
+      setSwipeY(touch.clientY - touchStart.current.y);
     }
   };
 
@@ -162,13 +183,21 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
   const hasCounterparts = counterparts && counterparts.length > 0;
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      width: '100%',
-      borderBottom: '1px solid var(--border-color)',
-      overflow: hasCounterparts ? 'visible' : undefined
-    }}>
+    <div
+      data-block-len={blockLen}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        borderBottom: '1px solid var(--border-color)',
+        overflow: hasCounterparts ? 'visible' : undefined,
+        // While dragging, lift the whole group and glide it under the finger (translateY). zIndex
+        // floats it above neighbours; transition off so it tracks 1:1 without easing lag.
+        transform: isDragging ? `translateY(${swipeY}px)` : undefined,
+        position: isDragging ? 'relative' : undefined,
+        zIndex: isDragging ? 20 : undefined,
+        transition: isDragging ? 'none' : undefined
+      }}>
       <div
         ref={rowRef}
         className={`fade-in transaction-row ${isDragging ? 'is-dragging' : ''}`}
@@ -210,11 +239,11 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                 </div>
               )}
             </div>
-            <div className="flex align-center gap-2" style={{ marginTop: '2px', flexWrap: 'nowrap', overflow: 'hidden' }}>
-              <span className="text-mono text-muted text-xs truncate" style={{ fontWeight: 600, flexShrink: 1 }}>{acc?.name || 'Unknown'}{acc?.archived ? ' (deleted)' : ''}</span>
-              <span className="metric-pill truncate" style={{ flexShrink: 0 }}>{tx.category}</span>
+            <div className="flex align-center gap-2" style={{ marginTop: '2px', flexWrap: 'wrap', rowGap: '4px' }}>
+              <span className="text-mono text-muted text-xs truncate" style={{ fontWeight: 600, flexShrink: 0, maxWidth: '100%' }}>{acc?.name || 'Unknown'}{acc?.archived ? ' (deleted)' : ''}</span>
+              <span className="metric-pill truncate" style={{ flexShrink: 0, maxWidth: '100%' }}>{tx.category}</span>
               {(tx.tags || []).slice(0, 2).map(tag => (
-                <span key={tag} className="tag-pill" style={{ flexShrink: 0 }}>#{tag}</span>
+                <span key={tag} className="tag-pill truncate" style={{ flexShrink: 0, maxWidth: '100%' }}>#{tag}</span>
               ))}
               {(tx.tags || []).length > 2 && (
                 <span className="tag-pill tag-pill-overflow" style={{ flexShrink: 0 }}>+{(tx.tags || []).length - 2}</span>
@@ -325,6 +354,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                   onEdit={onEdit}
                   onDelete={onDelete}
                   onMoveBy={() => {}}
+                  blockLen={1}
                 />
               ))}
             </div>
@@ -454,6 +484,7 @@ export default function Transactions() {
     rewardEarned: '',
     rewardUsed: '',
     excludedAmount: '',
+    activeShare: '',
     sipAllottedAmount: '',
     numberOfShares: ''
   });
@@ -464,6 +495,9 @@ export default function Transactions() {
       rewardEarned: (tx.rewardEarned === 0 || tx.rewardEarned === undefined) ? '' : tx.rewardEarned.toString(),
       rewardUsed: (tx.rewardUsed === 0 || tx.rewardUsed === undefined) ? '' : tx.rewardUsed.toString(),
       excludedAmount: (tx.excludedAmount === 0 || tx.excludedAmount === undefined) ? '' : tx.excludedAmount.toString(),
+      activeShare: (tx.excludeFromStats && tx.amount !== undefined)
+        ? (() => { const s = Math.max(0, (tx.amount || 0) - (tx.excludedAmount || 0)); return s === 0 ? '' : parseFloat(s.toFixed(2)).toString(); })()
+        : '',
       sipAllottedAmount: (tx.sipAllottedAmount === 0 || tx.sipAllottedAmount === undefined) ? '' : tx.sipAllottedAmount.toString(),
       numberOfShares: (tx.numberOfShares === undefined) ? '' : tx.numberOfShares.toString()
     });
@@ -542,13 +576,13 @@ export default function Transactions() {
       category: !isCategoryUnselected ? (newTx.category || '') : (pastTx?.category || newTx.category || ''),
       accountId: !isAccountIdUnselected ? (newTx.accountId || '') : (pastTx?.accountId || newTx.accountId || ''),
       type: !isTypeUnselected ? (newTx.type || 'debit') : (pastTx?.type || newTx.type || 'debit'),
-      isTravelTransaction: !isTravelUnselected ? (newTx.isTravelTransaction ?? false) : (pastTx?.isTravelTransaction ?? newTx.isTravelTransaction ?? false),
-      cashbackLevelId: pastTx?.cashbackLevelId ?? newTx.cashbackLevelId,
-      rewardEarnedType: pastTx?.rewardEarnedType ?? newTx.rewardEarnedType,
-      rewardEarnedAccountId: pastTx?.rewardEarnedAccountId ?? newTx.rewardEarnedAccountId
+      isTravelTransaction: !isTravelUnselected ? (newTx.isTravelTransaction ?? false) : (pastTx?.isTravelTransaction ?? newTx.isTravelTransaction ?? false)
+      // Deliberately do NOT carry cashback config (cashbackLevelId / rewardEarnedType /
+      // rewardEarnedAccountId) from the matched past transaction. Cashback is per-transaction, and
+      // copying the deposit account + type without an amount left a half-populated Instant Cashback
+      // (account selected, ₹0) that couldn't be cleared. Keep the new tx's own clean cashback state.
     };
     setNewTx(updatedTx);
-    setSelectedCashbackLevelId(pastTx?.cashbackLevelId || '');
     syncInputStrings(updatedTx);
     setDescriptionSuggestions([]);
   };
@@ -665,6 +699,17 @@ export default function Transactions() {
     const hasCommodityLeg = hasLinkedCategoryLeg('commodity');
     const hasTransferOrCCLeg = hasLinkedCategoryLeg('transfer') || hasLinkedCategoryLeg('cc payment');
 
+    // A reward split always anchors on the CARD leg (whose amount is the full bill), per
+    // docs/LINKED_TRANSACTIONS.md. Logged from Credit POV the card IS the main tx, so it holds the
+    // anchor (rewardUsed + the reward leg) naturally. Logged from Debit POV the card is the counterpart,
+    // so we move the anchor onto it and keep the bank main tx as a plain funding child. Without this,
+    // the anchor would sit on the bank leg (partial amount ₹148) and both openEditModal reconstruction
+    // and updateTransaction's Option-B rebalance would use the wrong total.
+    const isCcRewardSplit = isCCPayment && showRewardSplit && (Number(newTx.rewardUsed) || 0) > 0 && !!newTx.rewardUsedAccountId && !editId;
+    const anchorOnCounterpart = isCcRewardSplit && newTx.type === 'debit';
+    const rewardCounterpartId = isCcRewardSplit ? generateId() : null;
+    let cardAnchorId: string | null = null;
+
     if (isStocks && paymentSourceAccountId && !hasStocksLeg) {
       const bankCounterpartId = generateId();
       currentLinkedIds.push(bankCounterpartId);
@@ -737,6 +782,15 @@ export default function Transactions() {
 
       const rewardUsedForTransfer = showRewardSplit ? (Number(newTx.rewardUsed) || 0) : 0;
       const bankPortion = Number(newTx.amount) - rewardUsedForTransfer;
+      // The receiving/credit leg (e.g. CC bill reduction) must reflect the FULL payment
+      // (bank portion + rewards portion). Only the funding/debit leg is reduced by rewards.
+      const counterpartAmount = counterpartType === 'credit' ? Number(newTx.amount) : bankPortion;
+
+      // Debit POV split: this credit counterpart IS the card, so it becomes the split anchor —
+      // it holds rewardUsed + links to both the bank main tx and the reward leg. (Credit POV keeps
+      // the anchor on the main tx, so this leg stays a plain counterpart.)
+      const isCardAnchorLeg = anchorOnCounterpart && counterpartType === 'credit';
+      if (isCardAnchorLeg) cardAnchorId = bankCounterpartId;
 
       addTransaction({
         id: bankCounterpartId,
@@ -744,10 +798,12 @@ export default function Transactions() {
         description: counterpartDesc,
         accountId: paymentSourceAccountId,
         type: counterpartType,
-        amount: bankPortion,
+        amount: counterpartAmount,
         category: isCCPayment ? 'CC Payment' : 'Transfer',
         isRecurring: false,
-        linkedTransactionIds: [mainTxId],
+        linkedTransactionIds: isCardAnchorLeg ? [mainTxId, rewardCounterpartId as string] : [mainTxId],
+        rewardUsed: isCardAnchorLeg ? rewardUsedForTransfer : undefined,
+        rewardUsedAccountId: isCardAnchorLeg ? newTx.rewardUsedAccountId : undefined,
         appliedBillingCycleYearMonth: isCCPayment && counterpartType === 'credit' && destAccount?.type === 'credit_card'
           ? resolveCcPaymentCycle(newTx.date as string, destAccount.statementDay)
           : undefined
@@ -758,21 +814,27 @@ export default function Transactions() {
 
     const rewardUsed = showRewardSplit ? (Number(newTx.rewardUsed) || 0) : 0;
     if (rewardUsed > 0 && newTx.rewardUsedAccountId && !editId) {
-      const rewardCounterpartId = generateId();
-      currentLinkedIds.push(rewardCounterpartId);
+      const rewardLegId = rewardCounterpartId as string;
+      // Debit POV: link the reward leg to the card anchor and keep it OFF the bank main tx's link list
+      // (the card is the hub). Credit POV: the main tx IS the card, so link to it as before.
+      if (!anchorOnCounterpart) currentLinkedIds.push(rewardLegId);
       const rewardsSourceAcc = data.accounts.find(a => a.id === newTx.rewardUsedAccountId);
       const isInternalPoints = !!(rewardsSourceAcc?.isCashbackEnabled && rewardsSourceAcc?.rewardType === 'points');
+      // The rewards pay down the CARD's bill, not the funding bank. The card is the main account
+      // when logged as a Credit (Receive), or the paymentSourceAccountId ("Pay To Card") when logged
+      // as a Debit (Spend) — mirror the targetCardName logic used for the bank leg above.
+      const paidCardName = (newTx.type === 'credit' ? account : data.accounts.find(a => a.id === paymentSourceAccountId))?.name;
       addTransaction({
-        id: rewardCounterpartId,
+        id: rewardLegId,
         date: newTx.date as string,
-        description: isCCPayment ? `Rewards used for ${account?.name || 'CC'}` : `Rewards applied to: ${newTx.description}`,
+        description: isCCPayment ? `Rewards used for ${paidCardName || account?.name || 'CC'}` : `Rewards applied to: ${newTx.description}`,
         accountId: newTx.rewardUsedAccountId,
         type: 'debit',
         amount: rewardUsed,
         category: isCCPayment ? 'CC Payment' : (newTx.category as string),
         isRecurring: false,
         isRewardTransaction: isInternalPoints,
-        linkedTransactionIds: [mainTxId]
+        linkedTransactionIds: [(anchorOnCounterpart && cardAnchorId) ? cardAnchorId : mainTxId]
       });
     }
 
@@ -871,8 +933,9 @@ export default function Transactions() {
       rewardEarned: finalRewardEarned,
       rewardEarnedType: newTx.rewardEarnedType,
       rewardEarnedAccountId: newTx.rewardEarnedAccountId,
-      rewardUsed: rewardUsed,
-      rewardUsedAccountId: newTx.rewardUsedAccountId,
+      // Debit POV split: the anchor (rewardUsed) lives on the card counterpart, not this bank main tx.
+      rewardUsed: anchorOnCounterpart ? 0 : rewardUsed,
+      rewardUsedAccountId: anchorOnCounterpart ? undefined : newTx.rewardUsedAccountId,
       isTravelTransaction: newTx.isTravelTransaction,
       linkedTransactionIds: currentLinkedIds,
       cashbackLevelId: selectedCashbackLevelId,
@@ -929,11 +992,15 @@ export default function Transactions() {
     const raw = newTagInput.trim().replace(/^#/, '');
     if (!raw) return;
     const existing = data.tags || [];
-    if (!existing.includes(raw)) {
+    // Case-insensitive: reuse an existing tag (with its original casing) instead of creating a
+    // near-duplicate that differs only by case.
+    const match = existing.find(t => t.toLowerCase() === raw.toLowerCase());
+    const tagToApply = match || raw;
+    if (!match) {
       updateTags([...existing, raw]);
     }
-    if (!(newTx.tags || []).includes(raw)) {
-      setNewTx(prev => ({ ...prev, tags: [...(prev.tags || []), raw] }));
+    if (!(newTx.tags || []).includes(tagToApply)) {
+      setNewTx(prev => ({ ...prev, tags: [...(prev.tags || []), tagToApply] }));
     }
     setNewTagInput('');
   };
@@ -960,32 +1027,55 @@ export default function Transactions() {
 
   const openEditModal = (tx: Transaction) => {
     setEditId(tx.id);
-    const sanitizedTx = {
+    const sanitizedTx: Partial<Transaction> = {
       ...tx,
       date: tx.date.split('T')[0],
       type: (tx.type as string) === 'expense' ? 'debit' : ((tx.type as string) === 'income' ? 'credit' : tx.type)
     };
-    setNewTx(sanitizedTx);
 
     // Find linked counterpart account (Transfer/CC payment). Reward-split and cashback child
     // legs are excluded — they reciprocate via dedicated reverse-propagation in
     // updateTransaction, not the transfer/payment leg path. See docs/LINKED_TRANSACTIONS.md.
     const linkedIds = tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []);
     const linkedTxs = data.transactions.filter(t => linkedIds.includes(t.id) && t.id !== tx.id);
-    const isRewardChild = linkedTxs.some(p => p.rewardUsedAccountId && p.rewardUsedAccountId === tx.accountId);
     const isCashbackChild = tx.category === 'Cashback';
-    const counterpartTx = (isRewardChild || isCashbackChild) ? undefined : linkedTxs.find(t =>
-      t.category !== 'Cashback' &&
-      t.accountId !== tx.rewardUsedAccountId
-    );
-    if (counterpartTx) {
-      setPaymentSourceAccountId(counterpartTx.accountId);
-    } else {
-      setPaymentSourceAccountId('');
+
+    // A reward split anchors on the CARD leg (holds rewardUsed). Each leg opens its own modal, so we
+    // reconstruct the full split context per leg: the BANK leg shows the TOTAL bill + the split (so the
+    // "Primary Account Debit" line derives back to the real bank portion, matching the logging form),
+    // and both the bank and reward legs show the CARD in their auto-credit picker. The stored bank
+    // amount stays the portion; only the form shows the total. See docs/LINKED_TRANSACTIONS.md.
+    const rewardSplitAnchor = linkedTxs.find(t => t.category?.toLowerCase() === 'cc payment' && (t.rewardUsed || 0) > 0 && !!t.rewardUsedAccountId);
+    const isSplitAnchor = tx.category?.toLowerCase() === 'cc payment' && (tx.rewardUsed || 0) > 0 && !!tx.rewardUsedAccountId;
+    const isSplitRewardLeg = !!rewardSplitAnchor && rewardSplitAnchor.rewardUsedAccountId === tx.accountId;
+    const isSplitBankLeg = !!rewardSplitAnchor && !isSplitRewardLeg && !isSplitAnchor;
+
+    if (isSplitBankLeg && rewardSplitAnchor) {
+      sanitizedTx.amount = rewardSplitAnchor.amount;               // show the full bill (192), not the stored portion (148)
+      sanitizedTx.rewardUsed = rewardSplitAnchor.rewardUsed;       // 44
+      sanitizedTx.rewardUsedAccountId = rewardSplitAnchor.rewardUsedAccountId;
     }
+
+    const isRewardChild = linkedTxs.some(p => p.rewardUsedAccountId && p.rewardUsedAccountId === tx.accountId);
+    let paySrc = '';
+    if ((isSplitBankLeg || isSplitRewardLeg) && rewardSplitAnchor) {
+      paySrc = rewardSplitAnchor.accountId; // the card being paid
+    } else if (!isRewardChild && !isCashbackChild) {
+      const counterpartTx = linkedTxs.find(t => t.category !== 'Cashback' && t.accountId !== tx.rewardUsedAccountId);
+      if (counterpartTx) paySrc = counterpartTx.accountId;
+    }
+    setPaymentSourceAccountId(paySrc);
+
+    // Billing-cycle target ("Apply Payment To"): the cycle lives on the card leg, so for the bank/reward
+    // child we read it off the anchor (and use the card's statement day), not the child's own record.
     const account = data.accounts.find(a => a.id === tx.accountId);
-    if (account?.type === 'credit_card' && sanitizedTx.type === 'credit' && tx.appliedBillingCycleYearMonth) {
-      const txCycle = getBillingCycleForDate(sanitizedTx.date, account.statementDay || 1);
+    const cycleFromAnchor = (isSplitBankLeg || isSplitRewardLeg) ? rewardSplitAnchor : undefined;
+    if (cycleFromAnchor?.appliedBillingCycleYearMonth) {
+      const cardAcc = data.accounts.find(a => a.id === cycleFromAnchor.accountId);
+      const cyc = getBillingCycleForDate(sanitizedTx.date as string, cardAcc?.statementDay || 1);
+      setCcPaymentCycleTarget(cycleFromAnchor.appliedBillingCycleYearMonth === cyc ? 'current_cycle' : 'previous_statement');
+    } else if (account?.type === 'credit_card' && sanitizedTx.type === 'credit' && tx.appliedBillingCycleYearMonth) {
+      const txCycle = getBillingCycleForDate(sanitizedTx.date as string, account.statementDay || 1);
       setCcPaymentCycleTarget(tx.appliedBillingCycleYearMonth === txCycle ? 'current_cycle' : 'previous_statement');
     } else {
       setCcPaymentCycleTarget('previous_statement');
@@ -993,7 +1083,7 @@ export default function Transactions() {
     setSelectedCashbackLevelId(tx.cashbackLevelId || '');
     setCashbackPercentMode(false);
     setCashbackPercentStr('');
-    setShowRewardSplit((tx.rewardUsed || 0) > 0);
+    setShowRewardSplit(isSplitBankLeg || (tx.rewardUsed || 0) > 0);
     setNewTx(sanitizedTx);
     syncInputStrings(sanitizedTx);
     setIsModalOpen(true);
@@ -1474,10 +1564,17 @@ export default function Transactions() {
 
                                   const linkedIds = t.linkedTransactionIds || (t.linkedTransactionId ? [t.linkedTransactionId] : []);
                                   if (linkedIds.length > 0) {
-                                    const group = sortedTxs.filter(other => 
-                                      other.id === t.id || 
-                                      linkedIds.includes(other.id) || 
-                                      (other.linkedTransactionIds && other.linkedTransactionIds.includes(t.id))
+                                    // Linked legs use a STAR topology (children link only to the parent,
+                                    // not to each other). A 1-hop filter from a child misses its siblings,
+                                    // so also pull in txs that link to the same parent(s) `t` links to.
+                                    // Without this, a 3-leg group (e.g. reward split: card + bank + reward)
+                                    // whose parent is iterated AFTER its children maps only the last child
+                                    // and silently hides the other leg. See docs/LINKED_TRANSACTIONS.md.
+                                    const group = sortedTxs.filter(other =>
+                                      other.id === t.id ||
+                                      linkedIds.includes(other.id) ||
+                                      (other.linkedTransactionIds && other.linkedTransactionIds.includes(t.id)) ||
+                                      linkedIds.some(pid => other.linkedTransactionIds?.includes(pid))
                                     );
 
                                     const uncollapsedInGroup = group.filter(other => !collapsedTxIds.has(other.id));
@@ -1507,15 +1604,17 @@ export default function Transactions() {
                                   if (collapsedTxIds.has(tx.id)) return null;
 
                                   const linkedIds = tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []);
-                                  const group = sortedTxs.filter(t => 
-                                    t.id === tx.id || 
-                                    linkedIds.includes(t.id) || 
-                                    (t.linkedTransactionIds && t.linkedTransactionIds.includes(tx.id))
+                                  const group = sortedTxs.filter(t =>
+                                    t.id === tx.id ||
+                                    linkedIds.includes(t.id) ||
+                                    (t.linkedTransactionIds && t.linkedTransactionIds.includes(tx.id)) ||
+                                    linkedIds.some(pid => t.linkedTransactionIds?.includes(pid))
                                   );
                                   const firstGroupIdx = sortedTxs.indexOf(group[0]);
                                   const lastGroupIdx = sortedTxs.indexOf(group[group.length - 1]);
                                   const isFirstInGroupAndList = firstGroupIdx === 0;
                                   const isLastInGroupAndList = lastGroupIdx === sortedTxs.length - 1;
+                                  const groupBlockLen = lastGroupIdx - firstGroupIdx + 1;
 
                                   return (
                                     <TransactionRow
@@ -1526,6 +1625,7 @@ export default function Transactions() {
                                       isLast={isLastInGroupAndList}
                                       onEdit={openEditModal}
                                       onDelete={handleDelete}
+                                      blockLen={groupBlockLen}
                                       onMoveBy={(steps) => {
                                         // Reposition the whole (possibly linked) group by `steps`
                                         // slots within this date in one shot, then renumber the
@@ -1649,7 +1749,15 @@ export default function Transactions() {
                           amount: finalAmount,
                           sipCharges: charges !== undefined ? parseFloat(charges.toFixed(2)) : undefined
                         }));
-                        setInputStrings(s => ({ ...s, amount: val }));
+                        setInputStrings(s => ({
+                          ...s,
+                          amount: val,
+                          // Excluded amount is authoritative; refresh the derived active-share field
+                          // so it stays consistent when the total changes.
+                          activeShare: newTx.excludeFromStats
+                            ? (() => { const share = Math.max(0, finalAmount - (newTx.excludedAmount || 0)); return share === 0 ? '' : parseFloat(share.toFixed(2)).toString(); })()
+                            : s.activeShare
+                        }));
 
                         if (errors.amount) setErrors(prev => ({ ...prev, amount: '' }));
                         if (errors.excludedAmount && finalAmount >= (newTx.excludedAmount || 0)) {
@@ -2041,7 +2149,11 @@ export default function Transactions() {
               })()}
 
               {(
-                (newTx.type === 'credit' && (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' || (data.accounts.find(a => a.id === newTx.accountId)?.type === 'debit_card' && !newTx.isTravelTransaction)))
+                // Crediting a credit card only needs an auto-debit funding source for a CC Payment
+                // (handled by the isCCPayment clause below). A plain credit to a card (refund, reversal,
+                // statement credit) has no funding bank, so don't offer the picker there. The debit_card
+                // case keeps its generic credit auto-debit source.
+                (newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'debit_card' && !newTx.isTravelTransaction)
                 || isTransfer
                 || (isCCPayment && newTx.accountId && (
                   newTx.type === 'debit'
@@ -2463,6 +2575,24 @@ export default function Transactions() {
                 </div>
               )}
 
+              {((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') ||
+                (newTx.type === 'debit' && isCCPayment && paymentSourceAccountId && data.accounts.find(a => a.id === paymentSourceAccountId)?.type === 'credit_card')) && (
+                  <div style={{ marginTop: '1rem' }}>
+                    <CustomPicker
+                      label="Apply Payment To"
+                      value={ccPaymentCycleTarget}
+                      options={[
+                        { id: 'previous_statement', name: 'Previous Statement', subtext: 'Reduce already billed dues' },
+                        { id: 'current_cycle', name: 'Current Open Cycle', subtext: 'Count as an early payment for the active cycle' }
+                      ]}
+                      onChange={val => setCcPaymentCycleTarget(val as 'current_cycle' | 'previous_statement')}
+                      iconGetter={id => id === 'current_cycle' ? '🟦' : '🧾'}
+                    />
+                  </div>
+                )}
+
+              {/* Tags kept last so it stays at the end of the form across all scenarios (e.g. after
+                  the CC-payment "Apply Payment To" picker). */}
               {!data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled && (
                 <div className="input-group" style={{ marginBottom: 0 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
@@ -2497,22 +2627,6 @@ export default function Transactions() {
                 </div>
               )}
 
-              {((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') ||
-                (newTx.type === 'debit' && isCCPayment && paymentSourceAccountId && data.accounts.find(a => a.id === paymentSourceAccountId)?.type === 'credit_card')) && (
-                  <div style={{ marginTop: '1rem' }}>
-                    <CustomPicker
-                      label="Apply Payment To"
-                      value={ccPaymentCycleTarget}
-                      options={[
-                        { id: 'previous_statement', name: 'Previous Statement', subtext: 'Reduce already billed dues' },
-                        { id: 'current_cycle', name: 'Current Open Cycle', subtext: 'Count as an early payment for the active cycle' }
-                      ]}
-                      onChange={val => setCcPaymentCycleTarget(val as 'current_cycle' | 'previous_statement')}
-                      iconGetter={id => id === 'current_cycle' ? '🟦' : '🧾'}
-                    />
-                  </div>
-                )}
-
 
 
               {data.user?.enablePassiveTransactions && newTx.category?.toLowerCase() !== 'transfer' && newTx.category?.toLowerCase() !== 'cc payment' && newTx.category?.toLowerCase() !== 'ncmc travel recharge' && (
@@ -2536,7 +2650,8 @@ export default function Transactions() {
                         setNewTx(updatedTx);
                         setInputStrings(prev => ({
                           ...prev,
-                          excludedAmount: isExpanding ? (amountToExclude?.toString() || '') : ''
+                          excludedAmount: isExpanding ? (amountToExclude?.toString() || '') : '',
+                          activeShare: ''
                         }));
                         if (errors.excludedAmount) setErrors(prev => ({ ...prev, excludedAmount: '' }));
                         if (isExpanding) {
@@ -2551,27 +2666,63 @@ export default function Transactions() {
                   </div>
                   {newTx.excludeFromStats && (
                     <div className="flex-col gap-2 pt-2" style={{ borderTop: '1px dashed var(--border-color)', marginTop: '0.5rem' }}>
-                      <div className="flex justify-between align-center">
-                        <span className="text-xs text-muted">Excluded Amount</span>
-                        <span className="text-xs font-bold text-accent">Active Share: {formatCurrency(Math.max(0, (newTx.amount || 0) - (newTx.excludedAmount || 0)))}</span>
+                      <span className="text-xs text-muted" style={{ fontSize: '0.65rem' }}>Fill in whichever you know — the other is calculated for you.</span>
+                      <div className="flex gap-3">
+                        <div className="flex-col gap-1" style={{ flex: 1, minWidth: 0 }}>
+                          <span className="text-xs text-muted">Excluded Amount</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className={`input-field ${errors.excludedAmount ? 'border-danger' : ''}`}
+                            style={{ height: '38px', fontSize: '0.9rem' }}
+                            value={inputStrings.excludedAmount}
+                            onChange={e => {
+                              const val = e.target.value;
+                              if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                                const numVal = parseFloat(val);
+                                const excluded = val === '' ? undefined : (isNaN(numVal) ? 0 : numVal);
+                                // Excluded typed → derive the active share (clamped to the total).
+                                const share = Math.max(0, (newTx.amount || 0) - (excluded || 0));
+                                setInputStrings(prev => ({
+                                  ...prev,
+                                  excludedAmount: val,
+                                  activeShare: val === '' ? '' : parseFloat(share.toFixed(2)).toString()
+                                }));
+                                setNewTx({ ...newTx, excludedAmount: excluded });
+                                if (errors.excludedAmount) setErrors(prev => ({ ...prev, excludedAmount: '' }));
+                              }
+                            }}
+                            placeholder="e.g. 15915"
+                          />
+                        </div>
+                        <div className="flex-col gap-1" style={{ flex: 1, minWidth: 0 }}>
+                          <span className="text-xs font-bold text-accent">Active Share</span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className="input-field"
+                            style={{ height: '38px', fontSize: '0.9rem' }}
+                            value={inputStrings.activeShare}
+                            onChange={e => {
+                              const val = e.target.value;
+                              if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                                const numVal = parseFloat(val);
+                                const share = val === '' ? undefined : (isNaN(numVal) ? 0 : numVal);
+                                // Active share typed → back out the excluded amount (clamped to the total).
+                                const excluded = Math.max(0, (newTx.amount || 0) - (share || 0));
+                                setInputStrings(prev => ({
+                                  ...prev,
+                                  activeShare: val,
+                                  excludedAmount: val === '' ? '' : parseFloat(excluded.toFixed(2)).toString()
+                                }));
+                                setNewTx({ ...newTx, excludedAmount: val === '' ? undefined : parseFloat(excluded.toFixed(2)) });
+                                if (errors.excludedAmount) setErrors(prev => ({ ...prev, excludedAmount: '' }));
+                              }
+                            }}
+                            placeholder="e.g. 1832.2"
+                          />
+                        </div>
                       </div>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        className={`input-field ${errors.excludedAmount ? 'border-danger' : ''}`}
-                        style={{ height: '38px', fontSize: '0.9rem' }}
-                        value={inputStrings.excludedAmount}
-                        onChange={e => {
-                          const val = e.target.value;
-                          if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                            setInputStrings(prev => ({ ...prev, excludedAmount: val }));
-                            const numVal = parseFloat(val);
-                            setNewTx({ ...newTx, excludedAmount: val === '' ? undefined : (isNaN(numVal) ? 0 : numVal) });
-                            if (errors.excludedAmount) setErrors(prev => ({ ...prev, excludedAmount: '' }));
-                          }
-                        }}
-                        placeholder="Amount to exclude"
-                      />
                       {errors.excludedAmount && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.excludedAmount}</span>}
                     </div>
                   )}

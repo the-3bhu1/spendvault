@@ -32,6 +32,31 @@ export const getCategoryIcon = (category: string, size = 17) => {
   return <Coins size={size} />;
 };
 
+// Canonical emoji per account type — the "playful" style used on the Accounts page, the account-type
+// picker, and Upcoming Bills. Kept here (one source) so the three spots never drift apart. Pass the
+// account's isNcmcEnabled / commodityMetal when available: a specific metal account shows its medal
+// (🥇/🥈), while the generic commodity type (no account context, e.g. the type picker) shows 💎.
+export const getAccountEmoji = (
+  type: string,
+  opts?: { isNcmcEnabled?: boolean; commodityMetal?: 'gold' | 'silver' }
+): string => {
+  if (opts?.isNcmcEnabled) return '🪪';
+  switch (type) {
+    case 'credit_card': return '💳';
+    case 'debit_card': return '🪪';
+    case 'bank_account': return '🏦';
+    case 'e_wallet': return '🪙';
+    case 'stocks':
+    case 'investment': return '📈';
+    case 'sips': return '💹';
+    case 'rewards': return '🎁';
+    case 'cash': return '💵';
+    case 'commodity':
+      return opts?.commodityMetal === 'silver' ? '🥈' : opts?.commodityMetal === 'gold' ? '🥇' : '💎';
+    default: return '💼';
+  }
+};
+
 export const getAccountTypeIcon = (type: string, size = 18) => {
   switch (type) {
     case 'credit_card':

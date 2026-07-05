@@ -5,7 +5,7 @@ import CustomDatePicker from './CustomDatePicker';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account } from '../types';
 import { CustomPicker } from './CustomPicker';
-import { getCategoryIcon } from './transactionIcons';
+import { getCategoryIcon, getAccountEmoji } from './transactionIcons';
 import { getBillingCycleForDate } from '../utils';
 
 interface TransactionModalProps {
@@ -19,18 +19,7 @@ interface TransactionModalProps {
 export const getAccountIcon = (accountId: string, accounts: Account[]) => {
   const acc = accounts.find(a => a.id === accountId);
   if (!acc) return '💳';
-  switch (acc.type) {
-    case 'bank_account': return '🏦';
-    case 'credit_card': return '💳';
-    case 'e_wallet': return '📱';
-    case 'rewards': return '✨';
-    case 'investment':
-    case 'stocks': return '📈';
-    case 'sips': return '💹';
-    case 'cash': return '💵';
-    case 'debit_card': return '💳';
-    default: return '💰';
-  }
+  return getAccountEmoji(acc.type, { isNcmcEnabled: acc.isNcmcEnabled, commodityMetal: acc.commodityMetal });
 };
 
 export const TransactionModal: React.FC<TransactionModalProps> = ({

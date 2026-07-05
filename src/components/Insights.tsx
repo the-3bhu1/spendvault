@@ -951,10 +951,10 @@ export default function Insights() {
                     return (
                       <div key={tag} className="flex-col gap-2">
                         <div className="flex justify-between align-center">
-                          <div className="flex align-center gap-3">
+                          <div className="flex align-center" style={{ gap: '0.15rem' }}>
                             <Hash size={13} style={{ color: 'var(--accent)', opacity: 0.8, flexShrink: 0 }} />
                             <span style={{ fontWeight: 700, fontSize: '1rem' }}>{tag}</span>
-                            <span className="text-xs text-muted font-bold">{txCount} {txCount === 1 ? 'tx' : 'txs'}</span>
+                            <span className="text-xs text-muted font-bold" style={{ marginLeft: '0.5rem' }}>{txCount} {txCount === 1 ? 'tx' : 'txs'}</span>
                           </div>
                           <div className="flex align-center gap-3">
                             <span className="text-mono font-bold" style={{ fontSize: '1rem' }}>{formatCurrency(amount)}</span>

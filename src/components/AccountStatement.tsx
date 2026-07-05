@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
-import { CreditCard, Calendar, ShoppingBag, Utensils, Zap, Car, HeartPulse, Film, Wallet, ArrowRightLeft, MoreHorizontal, Coins, BadgeDollarSign, ArrowLeft } from 'lucide-react';
+import { CreditCard, Calendar, ArrowLeft } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
+import { getCategoryIcon } from './transactionIcons';
 import RollingNumber from './RollingNumber';
 import { getBillingCycleForDate, getCardGradients } from '../utils';
 import type { Account, Transaction } from '../types';
@@ -37,22 +38,6 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
     };
     requestAnimationFrame(step);
   };
-  const getCategoryIcon = (category: string) => {
-    const cat = category.toLowerCase();
-    if (cat.includes('shop')) return <ShoppingBag size={20} />;
-    if (cat.includes('food') || cat.includes('eat') || cat.includes('dine')) return <Utensils size={20} />;
-    if (cat.includes('travel') || cat.includes('transport') || cat.includes('fuel')) return <Car size={20} />;
-    if (cat.includes('bill') || cat.includes('recharge') || cat.includes('utility')) return <Zap size={20} />;
-    if (cat.includes('health') || cat.includes('med')) return <HeartPulse size={20} />;
-    if (cat.includes('entertain') || cat.includes('movie') || cat.includes('ott')) return <Film size={20} />;
-    if (cat.includes('salary')) return <BadgeDollarSign size={20} />;
-    if (cat.includes('income')) return <Wallet size={20} />;
-    if (cat.includes('cc payment')) return <CreditCard size={20} />;
-    if (cat.includes('transfer')) return <ArrowRightLeft size={20} />;
-    if (cat.includes('miscellaneous') || cat.includes('other')) return <MoreHorizontal size={20} />;
-    return <Coins size={20} />;
-  };
-
   const formatCredCurrency = (amount: number, font = 'serif') => {
     const parts = Math.abs(amount).toLocaleString('en-IN', {
       style: 'currency',
@@ -380,7 +365,7 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
                         color: 'var(--text-primary)',
                         flexShrink: 0,
                       }}>
-                        {getCategoryIcon(tx.category)}
+                        {getCategoryIcon(tx.category, 20)}
                       </div>
                       <div className="flex-col" style={{ minWidth: 0 }}>
                         <span style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{tx.description}</span>

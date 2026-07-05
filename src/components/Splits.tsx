@@ -27,6 +27,13 @@ export default function Splits() {
   const [newPerson, setNewPerson] = useState('');
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
+  // Suggest names seen in previous split events (and their carried-over people) as you type, so you
+  // don't have to retype recurring participants. Excludes names already added to the current event.
+  const pastSplitPeople = Array.from(new Set((data.splitEvents || []).flatMap(e => e.people || [])));
+  const personSuggestions = newPerson.trim()
+    ? pastSplitPeople.filter(p => p.toLowerCase().includes(newPerson.trim().toLowerCase()) && !newEvent.people.includes(p)).slice(0, 6)
+    : [];
+
   const selectedEvent = data.splitEvents?.find(e => e.id === selectedEventId);
 
   useEffect(() => {
@@ -355,6 +362,21 @@ export default function Splits() {
                   <Plus size={24} strokeWidth={3} />
                 </button>
               </div>
+              {personSuggestions.length > 0 && (
+                <div className="flex flex-wrap gap-2" style={{ marginBottom: '0.75rem' }}>
+                  {personSuggestions.map(p => (
+                    <button
+                      key={p}
+                      type="button"
+                      className="metric-pill clickable flex align-center gap-1"
+                      style={{ padding: '0.4rem 0.7rem', cursor: 'pointer', background: 'var(--bg-hover)' }}
+                      onClick={() => { setNewEvent({ ...newEvent, people: [...newEvent.people, p] }); setNewPerson(''); }}
+                    >
+                      <Plus size={12} strokeWidth={3} />{p}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="flex flex-wrap gap-2">
                 {newEvent.people.map((p, i) => (
                   <div key={i} className="metric-pill flex align-center gap-2" style={{ padding: '0.5rem 0.75rem' }}>

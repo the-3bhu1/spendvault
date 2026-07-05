@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, ChevronDown, Sparkles, ShieldAlert, Hash, Bot, BotOff, Cuboid, Image as ImageIcon, MessageSquare } from 'lucide-react';
+import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, ChevronDown, Sparkles, ShieldAlert, Hash, Bot, BotOff, Cuboid, Image as ImageIcon, MessageSquare, Pencil } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
 import ConfirmDialog from './ConfirmDialog';
 import TransparentLogo from './TransparentLogo';
@@ -109,6 +109,9 @@ export default function Settings() {
   const [newCat, setNewCat] = useState('');
   const [newAccountType, setNewAccountType] = useState('');
   const [newTagEntry, setNewTagEntry] = useState('');
+  const [tagHint, setTagHint] = useState('');
+  const [editingTag, setEditingTag] = useState<string | null>(null);
+  const [editTagValue, setEditTagValue] = useState('');
   const [activeView, setActiveView] = useState<'main' | 'categories' | 'accountTypes' | 'tags' | 'theme' | 'export' | 'import' | 'clear' | 'help' | 'about' | 'profile' | 'oem' | 'aiFeatures' | 'commodity' | 'logos'>('main');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -567,10 +570,44 @@ export default function Settings() {
 
   const handleAddTag = () => {
     const raw = newTagEntry.trim().replace(/^#/, '');
-    if (raw && !(data.tags || []).includes(raw)) {
-      updateTags([...(data.tags || []), raw]);
-      setNewTagEntry('');
+    if (!raw) return;
+    // Case-insensitive dedup: don't create a tag that differs only by case from an existing one.
+    const existing = (data.tags || []).find(t => t.toLowerCase() === raw.toLowerCase());
+    if (existing) {
+      setTagHint(`"#${existing}" already exists.`);
+      return;
     }
+    updateTags([...(data.tags || []), raw]);
+    setNewTagEntry('');
+    setTagHint('');
+  };
+
+  const startEditTag = (tag: string) => {
+    setEditingTag(tag);
+    setEditTagValue(tag);
+  };
+
+  const handleRenameTag = (oldTag: string) => {
+    const newTag = editTagValue.trim().replace(/^#/, '');
+    if (!newTag || newTag === oldTag) { setEditingTag(null); return; }
+    const tags = data.tags || [];
+    // Case-insensitive: if newTag matches a DIFFERENT existing tag, merge into that tag's casing.
+    // (A pure case-change of the same tag has no such match, so it renames in place.)
+    const existingMatch = tags.find(t => t !== oldTag && t.toLowerCase() === newTag.toLowerCase());
+    const canonical = existingMatch || newTag;
+    const newTags = existingMatch
+      ? tags.filter(t => t !== oldTag)
+      : tags.map(t => (t === oldTag ? newTag : t));
+    updateTags(newTags);
+    // Carry the rename onto every transaction that used the old tag (dedupe in case of a merge).
+    data.transactions
+      .filter(t => (t.tags || []).includes(oldTag))
+      .forEach(t => {
+        const renamed = Array.from(new Set((t.tags || []).map(tg => (tg === oldTag ? canonical : tg))));
+        updateTransaction({ ...t, tags: renamed });
+      });
+    setEditingTag(null);
+    setEditTagValue('');
   };
 
   const handleRemoveTag = (tag: string) => {
@@ -1269,16 +1306,46 @@ export default function Settings() {
                 return (
                   <div
                     key={tag}
-                    className="flex justify-between align-center"
+                    className="flex justify-between align-center gap-2"
                     style={{ padding: '0.75rem 1rem', background: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
                   >
-                    <div className="flex align-center gap-3">
-                      <span className="tag-pill" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}>#{tag}</span>
-                      {useCount > 0 && <span className="text-xs text-muted">{useCount} transaction{useCount !== 1 ? 's' : ''}</span>}
-                    </div>
-                    <button className="text-danger" style={{ background: 'none', border: 'none', padding: 0 }} onClick={() => handleRemoveTag(tag)}>
-                      <Trash2 size={16} />
-                    </button>
+                    {editingTag === tag ? (
+                      <>
+                        <input
+                          className="input-field"
+                          style={{ flex: 1, fontSize: '0.85rem', padding: '0.4rem 0.6rem' }}
+                          value={editTagValue}
+                          autoFocus
+                          onChange={e => setEditTagValue(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') handleRenameTag(tag);
+                            if (e.key === 'Escape') { setEditingTag(null); setEditTagValue(''); }
+                          }}
+                          placeholder="Tag name"
+                        />
+                        <button className="text-accent" style={{ background: 'none', border: 'none', padding: 0 }} onClick={() => handleRenameTag(tag)} aria-label="Save tag">
+                          <Check size={18} />
+                        </button>
+                        <button className="text-muted" style={{ background: 'none', border: 'none', padding: 0 }} onClick={() => { setEditingTag(null); setEditTagValue(''); }} aria-label="Cancel edit">
+                          <CloseIcon size={18} />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex align-center gap-3">
+                          <span className="tag-pill" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}>#{tag}</span>
+                          {useCount > 0 && <span className="text-xs text-muted">{useCount} transaction{useCount !== 1 ? 's' : ''}</span>}
+                        </div>
+                        <div className="flex align-center gap-3">
+                          <button className="text-muted" style={{ background: 'none', border: 'none', padding: 0 }} onClick={() => startEditTag(tag)} aria-label="Edit tag">
+                            <Pencil size={15} />
+                          </button>
+                          <button className="text-danger" style={{ background: 'none', border: 'none', padding: 0 }} onClick={() => handleRemoveTag(tag)} aria-label="Delete tag">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 );
               })
@@ -1289,12 +1356,13 @@ export default function Settings() {
               className="input-field"
               style={{ flex: 1 }}
               value={newTagEntry}
-              onChange={e => setNewTagEntry(e.target.value)}
+              onChange={e => { setNewTagEntry(e.target.value); if (tagHint) setTagHint(''); }}
               placeholder="New tag (e.g. Vacation2024)"
               onKeyDown={e => e.key === 'Enter' && handleAddTag()}
             />
             <button className="btn btn-primary" style={{ minWidth: '54px', padding: '0.75rem' }} onClick={handleAddTag} aria-label="Add Tag"><Plus size={20} /></button>
           </div>
+          {tagHint && <span className="text-xs text-danger" style={{ marginTop: '-0.25rem' }}>{tagHint}</span>}
         </div>
       </SubviewWrapper>
     );

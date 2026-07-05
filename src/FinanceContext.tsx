@@ -801,6 +801,18 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       ) : undefined;
       const isRewardSplitBankEdit = !!bankLegParent;
 
+      // The split anchors ONLY on the card leg. When editing a child leg, its edit form may carry
+      // reconstructed anchor fields (the bank leg shows the total + split; the reward leg shows the
+      // card as its payment source) so the modal reads correctly — but those must NOT persist onto the
+      // child, or two legs would claim the anchor. Strip them; the branches below rebalance the card.
+      if (isRewardSplitBankEdit) {
+        updatedTransaction.rewardUsed = 0;
+        updatedTransaction.rewardUsedAccountId = '';
+      }
+      if (isRewardSplitChildEdit) {
+        updatedTransaction.paymentSourceAccountId = '';
+      }
+
       // Guard: a reward/bank leg edit must NOT be mistaken for "payment source removed" (which would
       // delete the card parent). Those edits rebalance via the reverse blocks below instead.
       if (wasTransferOrCC && (!isNowTransferOrCC || !transaction.paymentSourceAccountId) && !isRewardSplitChildEdit && !isRewardSplitBankEdit) {
