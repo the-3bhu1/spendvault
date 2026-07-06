@@ -1692,6 +1692,10 @@ tr:hover td {
   to { transform: rotate(-360deg); }
 }
 
+.icon-spin-ccw {
+  animation: spin-ccw 0.9s linear infinite;
+}
+
 /* ─── Ask Vault (AI assistant) ─────────────────────────────────────────────── */
 .askvault-overlay {
   position: fixed;

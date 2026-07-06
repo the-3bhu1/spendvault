@@ -679,6 +679,7 @@ export default function Transactions() {
     // docs/LINKED_TRANSACTIONS.md — keep that matrix accurate when changing this block.
     const isTransfer = newTx.category?.toLowerCase() === 'transfer';
     const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
+    const hidesPassiveToggleFinal = ['transfer', 'cc payment', 'ncmc travel recharge'].includes((newTx.category || '').toLowerCase());
     const isSip = newTx.category?.toLowerCase() === 'sip';
     const isStocks = newTx.category?.toLowerCase() === 'stocks';
     const isCommodity = newTx.category?.toLowerCase() === 'commodity';
@@ -939,8 +940,8 @@ export default function Transactions() {
       isTravelTransaction: newTx.isTravelTransaction,
       linkedTransactionIds: currentLinkedIds,
       cashbackLevelId: selectedCashbackLevelId,
-      excludeFromStats: newTx.excludeFromStats,
-      excludedAmount: newTx.excludeFromStats ? newTx.excludedAmount : undefined,
+      excludeFromStats: hidesPassiveToggleFinal ? false : newTx.excludeFromStats,
+      excludedAmount: (!hidesPassiveToggleFinal && newTx.excludeFromStats) ? newTx.excludedAmount : undefined,
       paymentSourceAccountId: paymentSourceAccountId,
       sipAllottedAmount: isInvestment ? allottedAmount : undefined,
       sipCharges: isInvestment ? sipCharges : undefined,
@@ -2045,6 +2046,7 @@ export default function Transactions() {
                     }
                     setPaymentSourceAccountId('');
                   }
+                  const hidesPassiveToggle = ['transfer', 'cc payment', 'ncmc travel recharge'].includes(val.toLowerCase());
                   setNewTx({
                     ...newTx,
                     category: val,
@@ -2053,7 +2055,9 @@ export default function Transactions() {
                     isTravelTransaction: updatedIsTravel,
                     sipAllottedAmount: isInvestment ? newTx.sipAllottedAmount || newTx.amount : undefined,
                     sipCharges: isInvestment ? newTx.sipCharges || 0 : undefined,
-                    numberOfShares: isNowStocks ? newTx.numberOfShares : undefined
+                    numberOfShares: isNowStocks ? newTx.numberOfShares : undefined,
+                    excludeFromStats: hidesPassiveToggle ? false : newTx.excludeFromStats,
+                    excludedAmount: hidesPassiveToggle ? undefined : newTx.excludedAmount
                   });
                   if (errors.category) {
                     const newErr = { ...errors };

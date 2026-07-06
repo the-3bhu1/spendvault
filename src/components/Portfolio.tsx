@@ -497,7 +497,7 @@ export function Portfolio() {
             fontWeight: 600
           }}
         >
-          <RotateCcw size={15} className={isRefreshing ? 'icon-spin' : ''} />
+          <RotateCcw size={15} className={isRefreshing ? 'icon-spin-ccw' : ''} />
           {isRefreshing ? 'Refreshing...' : 'Refresh prices'}
         </button>
 
