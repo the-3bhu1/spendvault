@@ -486,6 +486,7 @@ export default function Transactions() {
     excludedAmount: '',
     activeShare: '',
     sipAllottedAmount: '',
+    sipCharges: '',
     numberOfShares: ''
   });
 
@@ -499,6 +500,7 @@ export default function Transactions() {
         ? (() => { const s = Math.max(0, (tx.amount || 0) - (tx.excludedAmount || 0)); return s === 0 ? '' : parseFloat(s.toFixed(2)).toString(); })()
         : '',
       sipAllottedAmount: (tx.sipAllottedAmount === 0 || tx.sipAllottedAmount === undefined) ? '' : tx.sipAllottedAmount.toString(),
+      sipCharges: (tx.sipCharges === 0 || tx.sipCharges === undefined) ? '' : tx.sipCharges.toString(),
       numberOfShares: (tx.numberOfShares === undefined) ? '' : tx.numberOfShares.toString()
     });
   };
@@ -761,7 +763,8 @@ export default function Transactions() {
         isRecurring: false,
         linkedTransactionIds: [mainTxId],
         sipAllottedAmount: allottedAmount,
-        sipCharges: sipCharges
+        sipCharges: sipCharges,
+        numberOfShares: newTx.numberOfShares
       });
     } else if ((isTransfer || isCCPayment) && paymentSourceAccountId && !hasTransferOrCCLeg) {
       const bankCounterpartId = generateId();
@@ -1663,6 +1666,13 @@ export default function Transactions() {
         )}
       </div>
 
+      {/* DUPLICATE MODAL WARNING: this inline Log/Edit Transaction form is a separate,
+          independent implementation from TransactionModal.tsx (used by the Upcoming Bills
+          "LOG" button and other initialData-driven quick-log entry points). They are NOT
+          the same component. Changing amount/decimal parsing, SIP/stock allotted-vs-charges
+          logic, reward-split handling, or account-icon rendering here must be mirrored in
+          TransactionModal.tsx (and vice versa), or the two log forms will silently drift
+          apart again. */}
       {isModalOpen && (
         <div className="modal-overlay">
           <div className="modal-content">
@@ -1741,18 +1751,19 @@ export default function Transactions() {
                       if (val === '' || /^\d*\.?\d*$/.test(val)) {
                         const numVal = parseFloat(val);
                         const finalAmount = isNaN(numVal) ? 0 : numVal;
-                        const isSip = newTx.category?.toLowerCase() === 'sip';
+                        const isInvestment = newTx.category?.toLowerCase() === 'sip' || newTx.category?.toLowerCase() === 'stocks';
                         const allotted = newTx.sipAllottedAmount || 0;
-                        const charges = isSip ? Math.max(0, finalAmount - allotted) : undefined;
+                        const charges = isInvestment ? Math.max(0, finalAmount - allotted) : undefined;
 
-                        setNewTx(prev => ({ 
-                          ...prev, 
+                        setNewTx(prev => ({
+                          ...prev,
                           amount: finalAmount,
                           sipCharges: charges !== undefined ? parseFloat(charges.toFixed(2)) : undefined
                         }));
                         setInputStrings(s => ({
                           ...s,
                           amount: val,
+                          sipCharges: charges !== undefined ? (parseFloat(charges.toFixed(2)) === 0 ? '' : parseFloat(charges.toFixed(2)).toString()) : s.sipCharges,
                           // Excluded amount is authoritative; refresh the derived active-share field
                           // so it stays consistent when the total changes.
                           activeShare: newTx.excludeFromStats
@@ -1848,7 +1859,7 @@ export default function Transactions() {
                     // so editing historical data doesn't blank the field (sorted to the end).
                     if (acc.archived && acc.id !== newTx.accountId) return false;
                     if (isCCPayment) {
-                      return newTx.type === 'debit' ? acc.type !== 'credit_card' : acc.type === 'credit_card';
+                      return newTx.type === 'debit' ? (acc.type === 'bank_account' || acc.type === 'e_wallet') : acc.type === 'credit_card';
                     }
                     if (newTx.category?.toLowerCase() === 'sip') {
                       return newTx.type === 'credit' ? acc.type === 'sips' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
@@ -2047,18 +2058,25 @@ export default function Transactions() {
                     setPaymentSourceAccountId('');
                   }
                   const hidesPassiveToggle = ['transfer', 'cc payment', 'ncmc travel recharge'].includes(val.toLowerCase());
+                  const nextAllotted = isInvestment ? (newTx.sipAllottedAmount || newTx.amount || 0) : undefined;
+                  const nextCharges = isInvestment ? (newTx.sipCharges || 0) : undefined;
                   setNewTx({
                     ...newTx,
                     category: val,
                     description: updatedDesc,
                     accountId: updatedAccountId,
                     isTravelTransaction: updatedIsTravel,
-                    sipAllottedAmount: isInvestment ? newTx.sipAllottedAmount || newTx.amount : undefined,
-                    sipCharges: isInvestment ? newTx.sipCharges || 0 : undefined,
+                    sipAllottedAmount: nextAllotted,
+                    sipCharges: nextCharges,
                     numberOfShares: isNowStocks ? newTx.numberOfShares : undefined,
                     excludeFromStats: hidesPassiveToggle ? false : newTx.excludeFromStats,
                     excludedAmount: hidesPassiveToggle ? undefined : newTx.excludedAmount
                   });
+                  setInputStrings(s => ({
+                    ...s,
+                    sipAllottedAmount: (nextAllotted === undefined || nextAllotted === 0) ? '' : nextAllotted.toString(),
+                    sipCharges: (nextCharges === undefined || nextCharges === 0) ? '' : nextCharges.toString()
+                  }));
                   if (errors.category) {
                     const newErr = { ...errors };
                     delete newErr.category;
@@ -2110,8 +2128,10 @@ export default function Transactions() {
                             if (val === '' || /^\d*\.?\d*$/.test(val)) {
                               setInputStrings(prev => ({ ...prev, sipAllottedAmount: val }));
                               const allotted = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
+                              // Charges is the complement: charges = amount − invested.
                               const totalAmount = Number(newTx.amount || 0);
                               const charges = Math.max(0, totalAmount - allotted);
+                              setInputStrings(s => ({ ...s, sipCharges: parseFloat(charges.toFixed(2)) === 0 ? '' : parseFloat(charges.toFixed(2)).toString() }));
                               setNewTx(prev => ({
                                 ...prev,
                                 sipAllottedAmount: allotted,
@@ -2124,9 +2144,30 @@ export default function Transactions() {
                       </div>
                       <div className="input-group" style={{ marginBottom: 0 }}>
                         <label>{isStock ? 'Brokerage / Taxes' : 'Stamp Duty / Charges'}</label>
-                        <div className="input-field flex align-center text-muted text-mono" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', height: '42px', borderRadius: '12px', padding: '0.75rem 1rem' }}>
-                          {newTx.sipCharges !== undefined ? newTx.sipCharges : '0.00'}
-                        </div>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="input-field"
+                          value={inputStrings.sipCharges}
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                              setInputStrings(prev => ({ ...prev, sipCharges: val }));
+                              const charges = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
+                              // Complement of invested: invested = amount − charges, so you can fill in
+                              // whichever you know (invested or charges) and the other is derived.
+                              const totalAmount = Number(newTx.amount || 0);
+                              const invested = Math.max(0, totalAmount - charges);
+                              setInputStrings(s => ({ ...s, sipAllottedAmount: parseFloat(invested.toFixed(2)) === 0 ? '' : parseFloat(invested.toFixed(2)).toString() }));
+                              setNewTx(prev => ({
+                                ...prev,
+                                sipCharges: charges,
+                                sipAllottedAmount: parseFloat(invested.toFixed(2))
+                              }));
+                            }
+                          }}
+                          placeholder="0.00"
+                        />
                       </div>
                     </div>
                     {isSip && (

@@ -154,8 +154,21 @@ export default function UpcomingBills() {
           return true; // For non-monthly, any recent link counts
         }
 
-        // Bills with a linked SIP account use only explicit recurringBillId — skip fuzzy
-        if (bill.linkedSipAccountId) return false;
+        // Bills with a linked SIP account skip the name-based fuzzy match below (SIP fund
+        // names can overlap/collide) and instead fuzzy-match on the account itself: any
+        // transaction leg credited into this bill's specific SIP account — e.g. one logged
+        // through the main Ledger's "+ Log Transaction" modal, which has no recurringBillId —
+        // counts as paying this bill. Keep this in sync with the plain fuzzy match below if
+        // that logic changes; see the DUPLICATE MODAL WARNING comments in TransactionModal.tsx
+        // / Transactions.tsx for why two independent log forms can log a matching SIP entry.
+        if (bill.linkedSipAccountId) {
+          const tDate = new Date(t.date);
+          const isSameMonth = tDate.getMonth() === today.getMonth() && tDate.getFullYear() === today.getFullYear();
+          const isSipAccountMatch = t.category?.toLowerCase() === 'sip' && t.type === 'credit' && t.accountId === bill.linkedSipAccountId;
+          if (bill.frequency === 'monthly') return isSameMonth && isSipAccountMatch;
+          const diffDays = Math.abs((tDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          return diffDays < 10 && isSipAccountMatch;
+        }
 
         // Fallback to fuzzy match
         const tDate = new Date(t.date);

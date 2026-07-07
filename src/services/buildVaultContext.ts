@@ -40,10 +40,11 @@ interface MonthStats {
   income: number;
   byCategory: Record<string, number>;
   byAccount: Record<string, number>;
+  byTag: Record<string, number>;
 }
 
 function monthStats(data: FinanceData, month: string): MonthStats {
-  const stats: MonthStats = { spend: 0, income: 0, byCategory: {}, byAccount: {} };
+  const stats: MonthStats = { spend: 0, income: 0, byCategory: {}, byAccount: {}, byTag: {} };
   data.transactions.filter(t => t.date.startsWith(month)).forEach(t => {
     if (isSystemCategory(t.category)) return;
     const amt = effectiveAmount(t);
@@ -54,6 +55,11 @@ function monthStats(data: FinanceData, month: string): MonthStats {
       const acc = data.accounts.find(a => a.id === t.accountId);
       const name = acc?.name || 'Unknown';
       stats.byAccount[name] = (stats.byAccount[name] || 0) + amt;
+      // A transaction with multiple tags counts its full amount under each — tags aren't
+      // mutually exclusive, so per-tag totals can legitimately exceed total spend.
+      (t.tags || []).forEach(tag => {
+        stats.byTag[tag] = (stats.byTag[tag] || 0) + amt;
+      });
     } else if (t.type === 'credit') {
       stats.income += amt;
     }
@@ -130,6 +136,10 @@ function buildSummary(data: FinanceData): string {
     if (offset === 0) {
       out.push('  By account:');
       out.push(topEntries(s.byAccount));
+      if (Object.keys(s.byTag).length) {
+        out.push('  By tag (a transaction can carry several, so these may overlap):');
+        out.push(topEntries(s.byTag));
+      }
     }
   });
 
@@ -226,6 +236,21 @@ function buildSlice(data: FinanceData, query: string): string {
   const acc = data.accounts.find(a => a.name && lower.includes(a.name.toLowerCase()));
   if (acc) { txs = txs.filter(t => t.accountId === acc.id); filtered = true; }
 
+  // Tags — matched either by "#tag" tokens in the question or by a whole-word mention of a
+  // known tag name. Filtering is AND with any month/category/account already applied above,
+  // so "spend on #WorkTravel this month" narrows correctly.
+  const hashTokens = (lower.match(/#([a-z0-9_]+)/g) || []).map(s => s.slice(1));
+  const queryTags = (data.tags || []).filter(tag => {
+    const t = tag.toLowerCase();
+    if (hashTokens.includes(t)) return true;
+    return new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(lower);
+  });
+  if (queryTags.length) {
+    const wanted = new Set(queryTags.map(t => t.toLowerCase()));
+    txs = txs.filter(t => (t.tags || []).some(tg => wanted.has(tg.toLowerCase())));
+    filtered = true;
+  }
+
   // If nothing structured matched, try keyword search on the description.
   if (!filtered) {
     const tokens = lower.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)
@@ -243,7 +268,8 @@ function buildSlice(data: FinanceData, query: string): string {
     .slice(0, filtered ? SLICE_CAP : RECENT_FALLBACK)
     .map(t => {
       const acct = data.accounts.find(a => a.id === t.accountId)?.name || 'Unknown';
-      return `${t.date} | ${t.description} | ${t.type === 'debit' ? '-' : '+'}${formatCurrency(t.amount)} | ${t.category} | ${acct}`;
+      const tagStr = (t.tags && t.tags.length) ? ` | ${t.tags.map(tg => `#${tg}`).join(' ')}` : '';
+      return `${t.date} | ${t.description} | ${t.type === 'debit' ? '-' : '+'}${formatCurrency(t.amount)} | ${t.category} | ${acct}${tagStr}`;
     });
 
   const header = filtered
@@ -252,6 +278,20 @@ function buildSlice(data: FinanceData, query: string): string {
   let body = rows.length ? rows.join('\n') : '  (no matching transactions)';
   if (matched > rows.length) {
     body += `\n(Truncated — ${matched - rows.length} more match. Ask the user to narrow by month, category, or account for the rest.)`;
+  }
+
+  // Accurate pre-computed totals for the full matched set (not just the shown rows), so tag/
+  // category/account questions are answered from an exact figure rather than the model summing
+  // a possibly-truncated list. Spend excludes internal-bookkeeping categories, matching the summary.
+  if (filtered && matched) {
+    let spend = 0, income = 0;
+    txs.forEach(t => {
+      if (isSystemCategory(t.category)) return;
+      const amt = effectiveAmount(t);
+      if (t.type === 'debit' && amt > 0) spend += amt;
+      else if (t.type === 'credit') income += amt;
+    });
+    body += `\n\nTotals for ALL ${matched} matching transactions — spend ${formatCurrency(spend)}, income ${formatCurrency(income)}.`;
   }
   return `${header}\n${body}`;
 }

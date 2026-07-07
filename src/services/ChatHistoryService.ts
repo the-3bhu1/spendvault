@@ -40,10 +40,28 @@ function write(sessions: ChatSession[]): ChatSession[] {
   return trimmed;
 }
 
+function clip(text: string): string {
+  const t = text.trim().replace(/\s+/g, ' ');
+  return t.length > TITLE_MAX ? `${t.slice(0, TITLE_MAX - 1)}…` : t;
+}
+
 function deriveTitle(messages: ChatMessage[]): string {
-  const firstUser = messages.find(m => m.role === 'user');
-  const text = (firstUser?.text || 'New chat').trim().replace(/\s+/g, ' ');
-  return text.length > TITLE_MAX ? `${text.slice(0, TITLE_MAX - 1)}…` : text;
+  const firstUserText = (messages.find(m => m.role === 'user')?.text || '').trim();
+
+  // A file-upload placeholder ("📎 filename") is a useless title — describe what the assistant
+  // actually did with the file instead (e.g. "Logged 4 stock trades from your contract note"),
+  // taken from the first line of its reply. Falls back to the bare filename if there's no reply yet.
+  if (firstUserText.startsWith('📎')) {
+    const firstModel = messages.find(m => m.role === 'model');
+    const summary = (firstModel?.text || '').split('\n')[0]
+      .replace(/^[^\p{L}\d]+/u, '')        // strip a leading status emoji like "✅ "
+      .replace(/\s*\([^)]*\)\.?\s*$/, '')  // strip a trailing "(₹… total)." parenthetical
+      .trim();
+    if (summary) return clip(summary);
+    return clip(firstUserText.replace(/^📎\s*/, '')); // no reply yet → filename without the clip icon
+  }
+
+  return clip(firstUserText || 'New chat');
 }
 
 // Insert or update a session by id, returning the refreshed (sorted, capped) list.

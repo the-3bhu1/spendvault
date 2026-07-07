@@ -1,13 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { format, parseISO } from 'date-fns';
-import { Sparkles, Calendar, Hash, BanknoteArrowUp, BanknoteArrowDown } from 'lucide-react';
+import { Sparkles, Calendar, Hash, BanknoteArrowUp, BanknoteArrowDown, Wallet } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account } from '../types';
 import { CustomPicker } from './CustomPicker';
-import { getCategoryIcon, getAccountEmoji } from './transactionIcons';
+import { getCategoryIcon, getAccountTypeIcon } from './transactionIcons';
 import { getBillingCycleForDate } from '../utils';
 
+// DUPLICATE MODAL WARNING: this is a separate, independent implementation of the
+// log/edit-transaction form from the one inlined in Transactions.tsx (the main Ledger's
+// "Log Transaction" modal). They are NOT the same component — this one is used by the
+// Upcoming Bills "LOG" button (and any other initialData-driven quick-log entry points).
+// Changing amount/decimal parsing, SIP/stock allotted-vs-charges logic, reward-split
+// handling, or account-icon rendering here must be mirrored in Transactions.tsx (and vice
+// versa), or the two log forms will silently drift apart again.
 interface TransactionModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -18,8 +25,8 @@ interface TransactionModalProps {
 
 export const getAccountIcon = (accountId: string, accounts: Account[]) => {
   const acc = accounts.find(a => a.id === accountId);
-  if (!acc) return '💳';
-  return getAccountEmoji(acc.type, { isNcmcEnabled: acc.isNcmcEnabled, commodityMetal: acc.commodityMetal });
+  if (!acc) return <Wallet size={18} />;
+  return getAccountTypeIcon(acc.type);
 };
 
 export const TransactionModal: React.FC<TransactionModalProps> = ({
@@ -42,6 +49,25 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     ...initialData
   });
 
+  // Mirrors the numeric fields as raw text so a trailing "." or "0" typed by the
+  // user isn't stripped by the numeric round-trip on every render (which would
+  // block entering decimals like "2999.85").
+  const toInputStr = (n?: number) => (n === 0 || n === undefined) ? '' : n.toString();
+  const syncInputStrings = (tx: Partial<Transaction>) => setInputStrings({
+    amount: toInputStr(tx.amount),
+    sipAllottedAmount: toInputStr(tx.sipAllottedAmount),
+    sipCharges: toInputStr(tx.sipCharges),
+    rewardUsed: toInputStr(tx.rewardUsed),
+    numberOfShares: toInputStr(tx.numberOfShares)
+  });
+  const [inputStrings, setInputStrings] = useState({
+    amount: toInputStr(newTx.amount),
+    sipAllottedAmount: toInputStr(newTx.sipAllottedAmount),
+    sipCharges: toInputStr(newTx.sipCharges),
+    rewardUsed: toInputStr(newTx.rewardUsed),
+    numberOfShares: toInputStr(newTx.numberOfShares)
+  });
+
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [descriptionSuggestions, setDescriptionSuggestions] = useState<string[]>([]);
   const [paymentSourceAccountId, setPaymentSourceAccountId] = useState('');
@@ -59,21 +85,24 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         const tx = data.transactions.find(t => t.id === editId);
         if (tx) {
           setNewTx(tx);
+          syncInputStrings(tx);
           if (tx.rewardUsed && tx.rewardUsed > 0) setShowRewardSplit(true);
           if (tx.paymentSourceAccountId) setPaymentSourceAccountId(tx.paymentSourceAccountId);
         }
       } else if (initialData) {
-        setNewTx({
+        const freshTx = {
           date: format(new Date(), 'yyyy-MM-dd'),
           description: '',
           amount: 0,
-          type: 'debit',
+          type: 'debit' as TransactionType,
           category: 'Bills',
           accountId: data.accounts.find(a => !a.archived)?.id || '',
           excludeFromStats: false,
           tags: [],
           ...initialData
-        });
+        };
+        setNewTx(freshTx);
+        syncInputStrings(freshTx);
         // Reset local UI states for new entry
         setShowRewardSplit(false);
         setPaymentSourceAccountId(initialData.paymentSourceAccountId || '');
@@ -208,6 +237,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           isRecurring: false,
           sipAllottedAmount: isInvestment ? allottedAmount : undefined,
           sipCharges: isInvestment ? sipCharges : undefined,
+          numberOfShares: isInvestment ? newTx.numberOfShares : undefined,
           appliedBillingCycleYearMonth: isCCPayment && counterpartType === 'credit' && destAccount?.type === 'credit_card'
             ? (() => {
                 const safeStatementDay = destAccount.statementDay || 1;
@@ -314,11 +344,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               <input 
                 type="text" 
                 inputMode="decimal"
-                className={`input-field ${errors.amount ? 'border-danger' : ''}`} 
-                value={newTx.amount === 0 && !editId ? '' : (newTx.amount ?? '')} 
+                className={`input-field ${errors.amount ? 'border-danger' : ''}`}
+                value={inputStrings.amount}
                 onChange={e => {
                   const val = e.target.value;
                   if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                    setInputStrings(prev => ({ ...prev, amount: val }));
                     const totalAmount = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
                     setNewTx(prev => {
                       const isInvestment = prev.category?.toLowerCase() === 'sip' || prev.category?.toLowerCase() === 'stocks';
@@ -327,6 +358,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                       // Read invested from prev (current state), not a stale render closure.
                       const invested = prev.sipAllottedAmount || 0;
                       const charges = Math.max(0, totalAmount - invested);
+                      setInputStrings(s => ({ ...s, sipCharges: toInputStr(parseFloat(charges.toFixed(2))) }));
                       return { ...prev, amount: totalAmount, sipCharges: parseFloat(charges.toFixed(2)) };
                     });
                     if (errors.amount) setErrors(prev => ({ ...prev, amount: '' }));
@@ -364,6 +396,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 // Hide archived (deleted) accounts from selection, but keep the one already on this
                 // transaction so editing historical data doesn't blank the field.
                 if (acc.archived && acc.id !== newTx.accountId) return false;
+                if (newTx.category?.toLowerCase() === 'cc payment') {
+                  return newTx.type === 'debit' ? (acc.type === 'bank_account' || acc.type === 'e_wallet') : acc.type === 'credit_card';
+                }
                 if (newTx.category?.toLowerCase() === 'sip') {
                   return newTx.type === 'credit' ? acc.type === 'sips' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
                 }
@@ -439,15 +474,25 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                  const stockAcc = mainAcc?.type === 'stocks' ? mainAcc : null;
                  newDesc = stockAcc ? stockAcc.name : 'Stock Trade';
               }
-              return { 
-                ...prev, 
-                category: val, 
+              const nextAllotted = isInvestment ? (prev.sipAllottedAmount || prev.amount || 0) : undefined;
+              const nextCharges = isInvestment ? (prev.sipCharges || 0) : undefined;
+              const nextShares = isSip ? prev.numberOfShares : undefined;
+              setInputStrings(s => ({
+                ...s,
+                sipAllottedAmount: (nextAllotted === undefined || nextAllotted === 0) ? '' : nextAllotted.toString(),
+                sipCharges: (nextCharges === undefined || nextCharges === 0) ? '' : nextCharges.toString(),
+                numberOfShares: toInputStr(nextShares)
+              }));
+              return {
+                ...prev,
+                category: val,
                 accountId: nextAccountId,
                 description: newDesc,
-                sipAllottedAmount: isInvestment ? prev.sipAllottedAmount || prev.amount : undefined,
-                sipCharges: isInvestment ? prev.sipCharges || 0 : undefined
+                sipAllottedAmount: nextAllotted,
+                sipCharges: nextCharges,
+                numberOfShares: nextShares
               };
-            }); 
+            });
             if (errors.category) { const newErr = { ...errors }; delete newErr.category; setErrors(newErr); } 
           }} iconGetter={c => getCategoryIcon(c)} error={errors.category} />
 
@@ -456,22 +501,25 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             const isStock = newTx.category?.toLowerCase() === 'stocks';
             const isInvestment = isSip || isStock;
             return isInvestment && (
-              <div className="grid grid-cols-2 gap-4" style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', marginBottom: '1rem' }}>
+              <div style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', marginBottom: '1rem' }}>
+              <div className="grid grid-cols-2 gap-4">
                 <div className="input-group" style={{ marginBottom: 0 }}>
                   <label>{isStock ? 'Invested Amount' : 'Allotted Amount'}</label>
                   <input 
                     type="text" 
                     inputMode="decimal"
-                    className="input-field" 
-                    value={newTx.sipAllottedAmount === 0 ? '' : (newTx.sipAllottedAmount ?? '')} 
+                    className="input-field"
+                    value={inputStrings.sipAllottedAmount}
                     onChange={e => {
                       const val = e.target.value;
                       if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                        setInputStrings(prev => ({ ...prev, sipAllottedAmount: val }));
                         const allotted = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
                         setNewTx(prev => {
                           // Charges is the complement: charges = amount − invested.
                           const totalAmount = Number(prev.amount || 0);
                           const charges = Math.max(0, totalAmount - allotted);
+                          setInputStrings(s => ({ ...s, sipCharges: toInputStr(parseFloat(charges.toFixed(2))) }));
                           return { ...prev, sipAllottedAmount: allotted, sipCharges: parseFloat(charges.toFixed(2)) };
                         });
                       }
@@ -485,16 +533,18 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     type="text"
                     inputMode="decimal"
                     className="input-field"
-                    value={newTx.sipCharges === 0 ? '' : (newTx.sipCharges ?? '')}
+                    value={inputStrings.sipCharges}
                     onChange={e => {
                       const val = e.target.value;
                       if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                        setInputStrings(prev => ({ ...prev, sipCharges: val }));
                         const charges = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
                         setNewTx(prev => {
                           // Complement of invested: invested = amount − charges, so you can fill in
                           // whichever you know (invested or charges) and the other is derived.
                           const totalAmount = Number(prev.amount || 0);
                           const invested = Math.max(0, totalAmount - charges);
+                          setInputStrings(s => ({ ...s, sipAllottedAmount: toInputStr(parseFloat(invested.toFixed(2))) }));
                           return { ...prev, sipCharges: charges, sipAllottedAmount: parseFloat(invested.toFixed(2)) };
                         });
                       }
@@ -502,6 +552,26 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     placeholder="0.00"
                   />
                 </div>
+              </div>
+              {isSip && (
+                <div className="input-group" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
+                  <label>Units Allotted</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className="input-field"
+                    value={inputStrings.numberOfShares}
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                        setInputStrings(prev => ({ ...prev, numberOfShares: val }));
+                        setNewTx(prev => ({ ...prev, numberOfShares: val === '' ? undefined : parseFloat(val) }));
+                      }
+                    }}
+                    placeholder="e.g. 78.234"
+                  />
+                </div>
+              )}
               </div>
             );
           })()}
@@ -551,7 +621,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               <div className="flex justify-between align-center col-span-2">
                 <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>Split Payment</span>
                 {showRewardSplit && (
-                  <button className="btn btn-danger flex align-center gap-1" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }} onClick={() => { setShowRewardSplit(false); setNewTx({ ...newTx, rewardUsed: 0, rewardUsedAccountId: '' }); }}>✕ Remove Split</button>
+                  <button className="btn btn-danger flex align-center gap-1" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }} onClick={() => { setShowRewardSplit(false); setInputStrings(prev => ({ ...prev, rewardUsed: '' })); setNewTx({ ...newTx, rewardUsed: 0, rewardUsedAccountId: '' }); }}>✕ Remove Split</button>
                 )}
               </div>
               <div className="input-group">
@@ -559,14 +629,15 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 <input 
                   type="text" 
                   inputMode="decimal"
-                  className="input-field" 
-                  value={newTx.rewardUsed === 0 ? '' : (newTx.rewardUsed ?? '')} 
-                  onChange={e => { 
+                  className="input-field"
+                  value={inputStrings.rewardUsed}
+                  onChange={e => {
                     const val = e.target.value;
                     if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                      setInputStrings(prev => ({ ...prev, rewardUsed: val }));
                       setNewTx({ ...newTx, rewardUsed: val === '' ? 0 : (val === '.' ? 0 : parseFloat(val)) });
                     }
-                  }} 
+                  }}
                   placeholder="0.00" 
                 />
               </div>

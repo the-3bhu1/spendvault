@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
-import { Sparkles, X, Plus, ArrowUp, Settings as SettingsIcon, History, Trash2, ArrowLeft } from 'lucide-react';
+import { Sparkles, X, Plus, ArrowUp, Settings as SettingsIcon, History, Trash2, ArrowLeft, Paperclip } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import { hasGeminiKey } from '../services/GeminiConfig';
@@ -7,6 +7,50 @@ import { askVault, type ChatMessage } from '../services/AskVaultService';
 import {
   getSessions, upsertSession, deleteSession, newSessionId, type ChatSession,
 } from '../services/ChatHistoryService';
+import { parseContractNote, allocateCharges, type AllocationResult } from '../services/ContractNoteService';
+import ContractNoteReview from './ContractNoteReview';
+
+type PendingReview =
+  | { status: 'loading'; fileLabel: string }
+  | { status: 'success'; fileLabel: string; result: AllocationResult }
+  | { status: 'error'; fileLabel: string; message: string; rawText?: string };
+
+const PENDING_REVIEW_KEY = 'askvault_pending_contract_note';
+
+// Downscales an image client-side before base64-encoding (canvas resize to ~2000px long edge,
+// JPEG ~85%) — guards payload size/latency for a full-res phone photo, not just a screenshot.
+// PDFs pass through as-is (Gemini handles them natively as inlineData).
+function fileToGeminiPart(file: File): Promise<{ base64: string; mimeType: string }> {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        resolve({ base64: dataUrl.split(',')[1] || '', mimeType: file.type || 'application/pdf' });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+      return;
+    }
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const MAX_EDGE = 2000;
+      const scale = Math.min(1, MAX_EDGE / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { URL.revokeObjectURL(url); reject(new Error('canvas unavailable')); return; }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      URL.revokeObjectURL(url);
+      resolve({ base64: dataUrl.split(',')[1] || '', mimeType: 'image/jpeg' });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image load failed')); };
+    img.src = url;
+  });
+}
 
 const SUGGESTIONS = [
   'How much did I spend this month?',
@@ -79,9 +123,19 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
   const [loading, setLoading] = useState(false);
   const [keyReady, setKeyReady] = useState<boolean | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [pendingReview, setPendingReview] = useState<PendingReview | null>(() => {
+    try {
+      const cached = sessionStorage.getItem(PENDING_REVIEW_KEY);
+      if (!cached) return null;
+      const c = JSON.parse(cached);
+      return { status: 'success', result: c.result, fileLabel: c.fileLabel || 'Uploaded file' };
+    } catch { return null; }
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadCountRef = useRef(0); // fallback numbering ("Image 2") when a file has no usable name
 
   const consented = !!data.user?.aiAssistant;
   const blocked = keyReady === false || !consented;
@@ -150,7 +204,67 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
     if (lastUser) send(lastUser.text);
   };
 
+  const handleAttachClick = () => fileInputRef.current?.click();
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || loading) return;
+    // Show a lightweight placeholder for the upload (filename, or a numbered "Image N"/"PDF N"
+    // fallback) — we never store the actual image, only this label, so history stays tiny.
+    const isImage = file.type.startsWith('image/');
+    const n = ++uploadCountRef.current;
+    const fileLabel = (file.name && file.name.trim()) ? file.name.trim() : (isImage ? `Image ${n}` : `PDF ${n}`);
+    setPendingReview({ status: 'loading', fileLabel });
+    try {
+      const { base64, mimeType } = await fileToGeminiPart(file);
+      const parsed = await parseContractNote(base64, mimeType);
+      const result = allocateCharges(parsed);
+      if (result.trades.length === 0) {
+        setPendingReview({ status: 'error', fileLabel, message: "Couldn't find any buy trades on that note — try a clearer screenshot, or log it manually." });
+        return;
+      }
+      setPendingReview({ status: 'success', fileLabel, result });
+      try { sessionStorage.setItem(PENDING_REVIEW_KEY, JSON.stringify({ result, fileLabel })); } catch { /* ignore */ }
+    } catch (err: any) {
+      setPendingReview({
+        status: 'error',
+        fileLabel,
+        message: "Couldn't fully parse that contract note — please check the details below, or log it manually.",
+        rawText: err?.rawText,
+      });
+    }
+  };
+
+  const clearPendingReview = () => {
+    setPendingReview(null);
+    try { sessionStorage.removeItem(PENDING_REVIEW_KEY); } catch { /* ignore */ }
+  };
+
+  const handleReviewConfirm = (summary: string) => {
+    // Persist the exchange as a real conversation turn: the upload placeholder (user) then the
+    // logged-trades summary (model). Only text is stored — the image itself is never saved.
+    const label = pendingReview?.fileLabel;
+    clearPendingReview();
+    setMessages(prev => [
+      ...prev,
+      ...(label ? [{ role: 'user' as const, text: `📎 ${label}` }] : []),
+      { role: 'model', text: summary },
+    ]);
+  };
+
+  const handleReviewDismiss = () => clearPendingReview();
+
+  // Closing is an intentional exit — drop any in-progress review so re-opening the assistant
+  // (which remounts fresh) starts a clean chat rather than resurrecting the last card. The
+  // sessionStorage cache still survives an accidental app RELOAD (which never calls this).
+  const handleClose = () => {
+    clearPendingReview();
+    onClose();
+  };
+
   const newChat = () => {
+    clearPendingReview();
     setMessages([]);
     setInput('');
     setSessionId(newSessionId());
@@ -188,10 +302,10 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
               title={showHistory ? 'Back to chat' : 'Chat history'}
             >{showHistory ? <ArrowLeft size={20} /> : <History size={20} />}</button>
           )}
-          {messages.length > 0 && !showHistory && (
+          {(messages.length > 0 || !!pendingReview) && !showHistory && (
             <button className="askvault-icon-btn" onClick={newChat} title="New chat"><Plus size={20} /></button>
           )}
-          <button className="askvault-icon-btn" onClick={onClose} title="Close"><X size={22} /></button>
+          <button className="askvault-icon-btn" onClick={handleClose} title="Close"><X size={22} /></button>
         </div>
       </div>
 
@@ -254,7 +368,7 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
           </div>
         )}
 
-        {!blocked && messages.length === 0 && (
+        {!blocked && messages.length === 0 && !pendingReview && (
           <div className="flex-col gap-4" style={{ marginTop: '2rem' }}>
             <div className="flex-col align-center gap-2 text-center" style={{ marginBottom: '0.5rem' }}>
               <div className="askvault-badge" style={{ width: 56, height: 56 }}><Sparkles size={28} /></div>
@@ -282,6 +396,43 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
           </div>
         ))}
 
+        {pendingReview && (
+          <div className="askvault-row user">
+            <div className="askvault-bubble user flex align-center gap-2">
+              <Paperclip size={14} style={{ flexShrink: 0, opacity: 0.8 }} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pendingReview.fileLabel}</span>
+            </div>
+          </div>
+        )}
+
+        {pendingReview?.status === 'loading' && (
+          <div className="askvault-row model">
+            <div className="askvault-bubble model">Reading your contract note…</div>
+          </div>
+        )}
+
+        {pendingReview?.status === 'error' && (
+          <div className="askvault-row model">
+            <div className="askvault-bubble model error">
+              {pendingReview.message}
+              {pendingReview.rawText && (
+                <pre className="text-xs text-muted" style={{ whiteSpace: 'pre-wrap', marginTop: '0.5rem' }}>{pendingReview.rawText}</pre>
+              )}
+              <button className="askvault-retry" onClick={() => setPendingReview(null)}>Dismiss</button>
+            </div>
+          </div>
+        )}
+
+        {pendingReview?.status === 'success' && (
+          <ContractNoteReview
+            trades={pendingReview.result.trades}
+            skippedSellRows={pendingReview.result.skippedSellRows}
+            reconciliationWarning={pendingReview.result.reconciliationWarning}
+            onConfirm={handleReviewConfirm}
+            onDismiss={handleReviewDismiss}
+          />
+        )}
+
         {loading && (
           <div className="askvault-row model">
             <div className="askvault-bubble model askvault-typing">
@@ -294,12 +445,27 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
       {/* Footer */}
       {!blocked && !showHistory && (
         <div className="askvault-footer">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,application/pdf"
+            style={{ display: 'none' }}
+            onChange={handleFileSelected}
+          />
+          <button
+            className="askvault-icon-btn"
+            onClick={handleAttachClick}
+            disabled={pendingReview?.status === 'loading'}
+            title="Attach a contract note"
+          >
+            <Paperclip size={18} />
+          </button>
           <textarea
             ref={inputRef}
             className="askvault-input no-scrollbar"
             value={input}
             rows={1}
-            placeholder="Ask about your money or the app…"
+            placeholder="Ask about your money…"
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); }

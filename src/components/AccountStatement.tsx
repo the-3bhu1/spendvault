@@ -61,10 +61,14 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
     }
     return getBillingCycleForDate(tx.date, statementDay);
   };
-  const relevantAccountTransactions = transactions.filter(t => {
-    if (t.accountId !== acc.id) return false;
-    return t.category.toLowerCase() !== 'transfer' && t.category.toLowerCase() !== 'ncmc travel recharge' && t.category.toLowerCase() !== 'sip';
-  });
+  // This is only ever opened for credit_card accounts (see Accounts.tsx's onViewStatement
+  // gating), so every transaction on this accountId is a real posting on the card — no
+  // category should be excluded from the due calculation. Matches calculateCycleBalanceForCycle
+  // (utils.ts), which Accounts.tsx's "Total Balance" uses and which has no category filter either.
+  // A prior version excluded 'transfer'/'ncmc travel recharge'/'sip' (borrowed from a
+  // spend-analytics pattern meant for dashboards), which silently dropped real balance-affecting
+  // transactions like a bank-reversed CC payment logged as a Transfer.
+  const relevantAccountTransactions = transactions.filter(t => t.accountId === acc.id);
   const cycleOptions = Array.from(new Set([
     currentCycle,
     ...relevantAccountTransactions.map(getTransactionCycle)
