@@ -108,6 +108,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         setPaymentSourceAccountId(initialData.paymentSourceAccountId || '');
       }
       setNewTagInput('');
+      setErrors({}); // clear stale validation errors from a previous open
     }
   }, [isOpen]); // Only run when modal opens
 

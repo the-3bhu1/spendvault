@@ -167,7 +167,9 @@ There's a daily safety cap on AI price/logo lookups, and prices are cached for a
 Pick a month to see: total spend and income (vs. the previous month), top category, top account,
 biggest transaction, transaction count, spend by category / account / tag, weekend spend, recurring
 spend, a daily spend streak, and budget-vs-actual per category. All spend figures exclude the system
-categories above and respect exclude-from-stats.
+categories above and respect exclude-from-stats. The Top Category and Biggest Expense highlights also
+exclude the "Rent" category (a predictable recurring bill) so they surface your most notable
+unplanned spend — total spend and the category breakdown still include Rent.
 
 # SMS auto-log (Android only)
 On Android the app can read bank SMS on-device and create transactions automatically (opt-in:
@@ -218,8 +220,12 @@ can tap "Restore from backup" on the first step to import an existing backup fil
   SMS auto-log keeps working in the background.
 
 # This assistant (Ask Vault)
-Read-only: it can explain the app and report on the user's data, but cannot add, edit, or delete
-anything. It's opt-in (Settings → AI Features), and the first time you open it you must tap
+Mostly read-only: it explains the app and reports on your data, and cannot edit or delete anything.
+The one exception is contract-note import: tap the paperclip in the Ask Vault input to attach a broker
+contract note (image or PDF, e.g. Groww/Zerodha style). It parses the buy trades and allocates the
+pooled charges (brokerage/STT/GST/stamp duty) across them, then lets you review/edit the rows, pick or
+create the stock account, and log them as stock buy transactions (sell rows are skipped). This needs
+the Gemini key. It's opt-in (Settings → AI Features), and the first time you open it you must tap
 "Enable & continue" to consent. It sends a summary of your finances plus your question to Gemini to
 answer; card numbers, CVVs and the PIN are never sent.
 `.trim();

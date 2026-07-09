@@ -982,21 +982,37 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
           <div className="modal-overlay flex-center" style={{ zIndex: 2000 }}>
             <div className="modal-content animate-in full-screen flex-col" style={{ padding: 0 }}>
               {/* Header: Changes based on state */}
-              <div className="flex justify-between align-center" style={{ padding: 'calc(1.5rem + env(safe-area-inset-top, 0px)) 1.75rem 1rem', borderBottom: '2px solid #000', width: '100%' }}>
-                <div className="flex align-center gap-3">
-                  {selectedTxId && !editingItemId && (
-                    <button className="btn-circle" onClick={() => { setSelectedTxId(null); setSplitType('equal'); setCustomShares({}); }} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', padding: 0 }}>
-                      <ChevronRight size={20} style={{ transform: 'rotate(180deg)' }} />
-                    </button>
-                  )}
+              {!selectedTxId && !editingItemId ? (
+                /* Select Transaction: original layout — left title + close (X) */
+                <div className="flex justify-between align-center" style={{ padding: 'calc(1.5rem + env(safe-area-inset-top, 0px)) 1.5rem 1rem', borderBottom: '2px solid #000', width: '100%' }}>
                   <h3 style={{ margin: 0, fontSize: '1.85rem', fontWeight: 700, letterSpacing: '-0.5px', color: 'var(--text-primary)' }}>
-                    {editingItemId ? 'Edit Split' : (selectedTxId ? 'Split Details' : 'Select Transaction')}
+                    Select Transaction
+                  </h3>
+                  <button onClick={() => { setIsItemModalOpen(false); resetForm(); }} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.25rem', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center' }}>
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                /* Split Details / Edit Split: back button + centered title */
+                <div className="align-center" style={{ display: 'flex', position: 'relative', padding: 'calc(1.5rem + env(safe-area-inset-top, 0px)) 1.5rem 1rem', borderBottom: '2px solid #000', width: '100%' }}>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ padding: '0.5rem' }}
+                    onClick={() => {
+                      if (selectedTxId && !editingItemId) {
+                        setSelectedTxId(null); setSplitType('equal'); setCustomShares({});
+                      } else {
+                        setIsItemModalOpen(false); resetForm();
+                      }
+                    }}
+                  >
+                    <ChevronLeft size={20} />
+                  </button>
+                  <h3 style={{ position: 'absolute', left: '4rem', right: '4rem', textAlign: 'center', margin: 0, fontSize: '1.85rem', fontWeight: 700, letterSpacing: '-0.5px', color: 'var(--text-primary)', pointerEvents: 'none' }}>
+                    {editingItemId ? 'Edit Split' : 'Split Details'}
                   </h3>
                 </div>
-                <button onClick={() => { setIsItemModalOpen(false); resetForm(); }} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.25rem', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center' }}>
-                  ✕
-                </button>
-              </div>
+              )}
 
               {/* View 1: Transaction Selector */}
               {!selectedTxId ? (
@@ -1119,7 +1135,14 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                                               </div>
                                               <div className="flex-col" style={{ minWidth: 0, flex: 1 }}>
                                                 <span className="font-bold truncate" style={{ fontSize: '0.9rem', display: 'block' }}>{t.description}</span>
-                                                <span className="text-xs text-muted">{t.category}</span>
+                                                {(() => {
+                                                  const acctName = data.accounts.find(a => a.id === t.accountId)?.name || '';
+                                                  return (
+                                                    <span className="text-xs text-muted truncate" style={{ display: 'block' }}>
+                                                      {acctName ? `${t.category} · ${acctName}` : t.category}
+                                                    </span>
+                                                  );
+                                                })()}
                                               </div>
                                             </div>
                                             <div className="flex-col align-end" style={{ flexShrink: 0, marginLeft: '1rem' }}>
@@ -1177,9 +1200,9 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
                         </div>
                       ) : (
                         <>
-                          <div className="flex align-center gap-2">
-                            <ReceiptIndianRupee size={16} className="text-primary" />
-                            <span className="font-medium">{selectedTx?.description}</span>
+                          <div className="text-center">
+                            <ReceiptIndianRupee size={16} className="text-primary" style={{ display: 'inline', verticalAlign: 'middle', marginRight: '0.4rem' }} />
+                            <span className="font-medium" style={{ verticalAlign: 'middle' }}>{selectedTx?.description}</span>
                           </div>
                           <span className="text-2xl font-bold text-primary">
                             ₹{selectedTx?.amount.toFixed(2)}

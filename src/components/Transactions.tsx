@@ -426,6 +426,7 @@ export default function Transactions() {
       };
       setNewTx(initialTx);
       syncInputStrings(initialTx);
+      setErrors({});
       setIsModalOpen(true);
       setProcessingSms(true);
     }
@@ -1026,11 +1027,13 @@ export default function Transactions() {
     setCashbackPercentStr('');
     setShowRewardSplit(false);
     setNewTagInput('');
+    setErrors({});
     setIsModalOpen(true);
   };
 
   const openEditModal = (tx: Transaction) => {
     setEditId(tx.id);
+    setErrors({});
     const sanitizedTx: Partial<Transaction> = {
       ...tx,
       date: tx.date.split('T')[0],

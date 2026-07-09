@@ -1239,8 +1239,8 @@ export default function Settings() {
                   </div>
                   <span className="text-sm font-bold">{c}</span>
                 </div>
-                <button className="text-danger" style={{ background: 'none', border: 'none', padding: 0 }} onClick={() => handleRemove(c)}>
-                  <Trash2 size={16} />
+                <button className="btn btn-secondary" style={{ width: '30px', height: '30px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }} onClick={() => handleRemove(c)} aria-label="Delete category">
+                  <Trash2 size={14} />
                 </button>
               </div>
             ))}
@@ -1277,8 +1277,8 @@ export default function Settings() {
                     <span style={{ fontSize: '1rem' }}>💼</span>
                     <span className="text-sm font-bold">{type}</span>
                   </div>
-                  <button className="text-danger" style={{ background: 'none', border: 'none', padding: 0 }} onClick={() => handleRemoveAccountType(type)}>
-                    <Trash2 size={16} />
+                  <button className="btn btn-secondary" style={{ width: '30px', height: '30px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }} onClick={() => handleRemoveAccountType(type)} aria-label="Delete account type">
+                    <Trash2 size={14} />
                   </button>
                 </div>
               ))
@@ -1306,14 +1306,14 @@ export default function Settings() {
                 return (
                   <div
                     key={tag}
-                    className="flex justify-between align-center gap-2"
-                    style={{ padding: '0.75rem 1rem', background: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
+                    className="flex justify-between align-center gap-3"
+                    style={{ padding: '0.75rem 1rem', background: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: '8px', flexWrap: 'nowrap' }}
                   >
                     {editingTag === tag ? (
                       <>
                         <input
                           className="input-field"
-                          style={{ flex: 1, fontSize: '0.85rem', padding: '0.4rem 0.6rem' }}
+                          style={{ flex: 1, minWidth: 0, fontSize: '0.85rem', padding: '0.4rem 0.6rem' }}
                           value={editTagValue}
                           autoFocus
                           onChange={e => setEditTagValue(e.target.value)}
@@ -1323,25 +1323,27 @@ export default function Settings() {
                           }}
                           placeholder="Tag name"
                         />
-                        <button className="text-accent" style={{ background: 'none', border: 'none', padding: 0 }} onClick={() => handleRenameTag(tag)} aria-label="Save tag">
-                          <Check size={18} />
-                        </button>
-                        <button className="text-muted" style={{ background: 'none', border: 'none', padding: 0 }} onClick={() => { setEditingTag(null); setEditTagValue(''); }} aria-label="Cancel edit">
-                          <CloseIcon size={18} />
-                        </button>
+                        <div className="flex align-center gap-3" style={{ flexShrink: 0 }}>
+                          <button className="btn btn-secondary" style={{ width: '30px', height: '30px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }} onClick={() => handleRenameTag(tag)} aria-label="Save tag">
+                            <Check size={14} />
+                          </button>
+                          <button className="btn btn-secondary" style={{ width: '30px', height: '30px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }} onClick={() => { setEditingTag(null); setEditTagValue(''); }} aria-label="Cancel edit">
+                            <CloseIcon size={14} />
+                          </button>
+                        </div>
                       </>
                     ) : (
                       <>
-                        <div className="flex align-center gap-3">
-                          <span className="tag-pill" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}>#{tag}</span>
-                          {useCount > 0 && <span className="text-xs text-muted">{useCount} transaction{useCount !== 1 ? 's' : ''}</span>}
+                        <div className="flex align-center gap-3" style={{ minWidth: 0, flex: 1 }}>
+                          <span className="tag-pill" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', display: 'block', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>#{tag}</span>
+                          {useCount > 0 && <span className="text-xs text-muted" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>{useCount} transaction{useCount !== 1 ? 's' : ''}</span>}
                         </div>
-                        <div className="flex align-center gap-3">
-                          <button className="text-muted" style={{ background: 'none', border: 'none', padding: 0 }} onClick={() => startEditTag(tag)} aria-label="Edit tag">
-                            <Pencil size={15} />
+                        <div className="flex align-center gap-3" style={{ flexShrink: 0 }}>
+                          <button className="btn btn-secondary" style={{ width: '30px', height: '30px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }} onClick={() => startEditTag(tag)} aria-label="Edit tag">
+                            <Pencil size={14} />
                           </button>
-                          <button className="text-danger" style={{ background: 'none', border: 'none', padding: 0 }} onClick={() => handleRemoveTag(tag)} aria-label="Delete tag">
-                            <Trash2 size={16} />
+                          <button className="btn btn-secondary" style={{ width: '30px', height: '30px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }} onClick={() => handleRemoveTag(tag)} aria-label="Delete tag">
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </>

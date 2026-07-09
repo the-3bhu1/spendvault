@@ -31,6 +31,15 @@ const NON_BUDGET_CATEGORIES = new Set([
   'transfer', 'cc payment', 'ncmc travel recharge', 'sip', 'stocks', 'commodity', 'cashback', 'income', 'salary',
 ]);
 
+// Categories treated as expected/planned spend — excluded from the Top Category & Biggest
+// Expense highlight cards so predictable bills like rent don't always dominate them. (These
+// still count toward total spend, budgets and the category pie.)
+const HIGHLIGHT_EXCLUDED_CATEGORIES = new Set(['rent']);
+
+// Account-to-account movements, not real spend (must match Dashboard.tsx) — excluded from every
+// spend metric on this screen: totals, velocity, weekend/tag spend, the category pie, etc.
+const SYSTEM_SPEND_CATEGORIES = new Set(['transfer', 'cc payment', 'ncmc travel recharge', 'sip', 'stocks', 'commodity']);
+
 // Inline ₹ editor for a category budget: a full-width field (with a ₹ prefix) plus Save / Cancel.
 // A `resolved` flag guards against onBlur firing a second commit after Enter/Escape/button already
 // resolved the edit (so Cancel truly discards without re-saving). The Save/Cancel buttons use
@@ -43,10 +52,10 @@ function BudgetInput({ value, onChange, onCommit, onCancel }: {
 }) {
   const resolved = useRef(false);
   return (
-    <div className="flex align-center gap-2">
+    <div className="flex align-center gap-3">
       <div
         className="flex align-center"
-        style={{ flex: 1, minWidth: 0, background: 'var(--bg-color)', border: '1px solid var(--accent)', borderRadius: '8px', padding: '0 0.7rem' }}
+        style={{ flex: 1, minWidth: 0, height: '30px', boxSizing: 'border-box', background: 'var(--bg-color)', border: '1px solid var(--accent)', borderRadius: '8px', padding: '0 0.7rem' }}
       >
         <span className="text-muted" style={{ fontWeight: 700, fontSize: '0.95rem', flexShrink: 0 }}>₹</span>
         <input
@@ -62,7 +71,7 @@ function BudgetInput({ value, onChange, onCommit, onCancel }: {
           }}
           placeholder="monthly cap"
           style={{
-            flex: 1, minWidth: 0, width: '100%', padding: '0.55rem 0.4rem',
+            flex: 1, minWidth: 0, width: '100%', padding: '0 0.4rem',
             background: 'transparent', border: 'none', outline: 'none',
             color: 'var(--text-primary)', fontWeight: 700, fontSize: '0.95rem',
           }}
@@ -70,21 +79,21 @@ function BudgetInput({ value, onChange, onCommit, onCancel }: {
       </div>
       <button
         className="btn btn-secondary"
-        style={{ width: '34px', height: '34px', padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--success)' }}
+        style={{ width: '30px', height: '30px', padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--success)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }}
         onMouseDown={e => e.preventDefault()}
         onClick={() => { resolved.current = true; onCommit(); }}
         title="Save"
       >
-        <Check size={16} />
+        <Check size={14} />
       </button>
       <button
         className="btn btn-secondary"
-        style={{ width: '34px', height: '34px', padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
+        style={{ width: '30px', height: '30px', padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }}
         onMouseDown={e => e.preventDefault()}
         onClick={() => { resolved.current = true; onCancel(); }}
         title="Cancel"
       >
-        <X size={16} />
+        <X size={14} />
       </button>
     </div>
   );
@@ -144,44 +153,50 @@ export default function Insights() {
       let spend = 0;
       let income = 0;
       const cat: Record<string, number> = {};
+      // Category spend excluding "expected" categories (e.g. rent) — used for the Top Category
+      // & Biggest Expense cards so predictable bills don't always dominate them.
+      const catHighlight: Record<string, number> = {};
       const acc: Record<string, number> = {};
       let biggest: Transaction | null = null;
       txs.forEach(t => {
-        const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge' || t.category.toLowerCase() === 'sip';
+        const isSystemType = SYSTEM_SPEND_CATEGORIES.has(t.category.toLowerCase());
         if (isSystemType) return;
         const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
-        
+
         if (t.type === 'debit' && !isSystemType) {
           spend += effectiveAmount;
           cat[t.category] = (cat[t.category] || 0) + effectiveAmount;
           const account = data.accounts.find(a => a.id === t.accountId);
           acc[account?.name || 'Unknown'] = (acc[account?.name || 'Unknown'] || 0) + effectiveAmount;
-          if (!biggest || effectiveAmount > (biggest.amount - (biggest.excludedAmount || (biggest.excludeFromStats ? biggest.amount : 0)))) biggest = t;
+          if (!HIGHLIGHT_EXCLUDED_CATEGORIES.has(t.category.toLowerCase())) {
+            catHighlight[t.category] = (catHighlight[t.category] || 0) + effectiveAmount;
+            if (!biggest || effectiveAmount > (biggest.amount - (biggest.excludedAmount || (biggest.excludeFromStats ? biggest.amount : 0)))) biggest = t;
+          }
         } else if (t.type === 'credit') {
           income += effectiveAmount;
         }
       });
-      return { spend, income, cat, acc, biggest };
+      return { spend, income, cat, catHighlight, acc, biggest };
     };
 
     const currentStats = calculateStats(monthTxs);
     const prevStats = calculateStats(prevMonthTxs);
 
-    const topCategory = Object.entries(currentStats.cat).sort((a, b) => b[1] - a[1])[0];
+    const topCategory = Object.entries(currentStats.catHighlight).sort((a, b) => b[1] - a[1])[0];
     const topAccount = Object.entries(currentStats.acc).sort((a, b) => b[1] - a[1])[0];
 
     const displayMonth = new Date(`${selectedMonth}-01`).toLocaleString('default', { month: 'long', year: 'numeric' });
     
     const weekendSpend = monthTxs.filter(t => {
       const d = new Date(t.date).getDay();
-      const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge' || t.category.toLowerCase() === 'sip';
+      const isSystemType = SYSTEM_SPEND_CATEGORIES.has(t.category.toLowerCase());
       if (isSystemType) return false;
       const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
       return (d === 0 || d === 6) && t.type === 'debit' && effectiveAmount > 0;
     }).reduce((s, t) => s + (t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0))), 0);
 
     const recurringSpend = monthTxs.filter(t => {
-      const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge' || t.category.toLowerCase() === 'sip';
+      const isSystemType = SYSTEM_SPEND_CATEGORIES.has(t.category.toLowerCase());
       if (isSystemType) return false;
       const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
       return t.isRecurring && t.type === 'debit' && effectiveAmount > 0;
@@ -193,7 +208,7 @@ export default function Insights() {
     const tagSpend: Record<string, number> = {};
     monthTxs.forEach(t => {
       if (t.type !== 'debit') return;
-      const isSystemType = ['transfer', 'cc payment', 'sip', 'ncmc travel recharge'].includes(t.category.toLowerCase());
+      const isSystemType = SYSTEM_SPEND_CATEGORIES.has(t.category.toLowerCase());
       if (isSystemType) return;
       const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
       if (effectiveAmount <= 0) return;
@@ -222,7 +237,7 @@ export default function Insights() {
       streakDays: Array.from({ length: daysInMonth }, (_, i) => {
         const dStr = `${y}-${m.toString().padStart(2, '0')}-${(i + 1).toString().padStart(2, '0')}`;
         const dayTxs = monthTxs.filter(t => {
-          const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge' || t.category.toLowerCase() === 'sip';
+          const isSystemType = SYSTEM_SPEND_CATEGORIES.has(t.category.toLowerCase());
           if (isSystemType) return false;
           const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
           return t.date === dStr && t.type === 'debit' && effectiveAmount > 0;
@@ -244,7 +259,7 @@ export default function Insights() {
     return last6Months.map(m => {
       const txs = data.transactions.filter(t => t.date.startsWith(m));
       const spend = txs.reduce((s, t) => {
-        const isSystemType = t.category.toLowerCase() === 'transfer' || t.category.toLowerCase() === 'cc payment' || t.category.toLowerCase() === 'ncmc travel recharge' || t.category.toLowerCase() === 'sip';
+        const isSystemType = SYSTEM_SPEND_CATEGORIES.has(t.category.toLowerCase());
         if (isSystemType) return s;
         const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
         return (t.type === 'debit' && effectiveAmount > 0) ? s + effectiveAmount : s;
@@ -631,7 +646,7 @@ export default function Insights() {
               </div>
 
               {(budgetRows.length > 0 || pendingNewCat) && (
-                <div className="flex-col gap-5">
+                <div className="flex-col" style={{ gap: '1.25rem' }}>
                   {budgetRows.map(({ cat, budget, spent }) => {
                     const pct = (spent / budget) * 100;
                     const color = pct >= 100 ? 'var(--danger)' : pct >= 80 ? 'var(--warning)' : 'var(--success)';
@@ -649,19 +664,19 @@ export default function Insights() {
                             <div className="flex align-center gap-3" style={{ flexShrink: 0 }}>
                               <button
                                 className="btn btn-secondary"
-                                style={{ width: '34px', height: '34px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
+                                style={{ width: '30px', height: '30px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }}
                                 onClick={() => startEditBudget(cat, budget)}
                                 title="Edit"
                               >
-                                <Pencil size={15} />
+                                <Pencil size={14} />
                               </button>
                               <button
                                 className="btn btn-secondary"
-                                style={{ width: '34px', height: '34px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }}
+                                style={{ width: '30px', height: '30px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }}
                                 onClick={() => removeBudget(cat)}
                                 title="Delete"
                               >
-                                <Trash2 size={15} />
+                                <Trash2 size={14} />
                               </button>
                             </div>
                           )}
@@ -928,7 +943,7 @@ export default function Insights() {
           {Object.keys(insights.tagSpend).length > 0 && (() => {
             const tagEntries = Object.entries(insights.tagSpend).sort((a, b) => b[1] - a[1]);
             const maxTagSpend = tagEntries[0]?.[1] || 1;
-            const totalTagged = insights.monthTxs.filter(t => t.type === 'debit' && (t.tags || []).length > 0 && !['transfer', 'cc payment', 'sip', 'ncmc travel recharge'].includes(t.category.toLowerCase())).reduce((s, t) => s + (t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0))), 0);
+            const totalTagged = insights.monthTxs.filter(t => t.type === 'debit' && (t.tags || []).length > 0 && !SYSTEM_SPEND_CATEGORIES.has(t.category.toLowerCase())).reduce((s, t) => s + (t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0))), 0);
 
             return (
               <div className="card flex-col gap-8" style={{ padding: '2rem' }}>
@@ -942,7 +957,7 @@ export default function Insights() {
                   </p>
                 </div>
 
-                <div className="flex-col gap-5">
+                <div className="flex-col" style={{ gap: '1.25rem' }}>
                   {tagEntries.map(([tag, amount]) => {
                     const txCount = insights.monthTxs.filter(t => (t.tags || []).includes(tag) && t.type === 'debit').length;
                     const pctOfTotal = ((amount / (insights.totalSpend || 1)) * 100).toFixed(1);

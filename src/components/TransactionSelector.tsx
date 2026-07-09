@@ -21,6 +21,7 @@ export const TransactionSelector: React.FC<TransactionSelectorProps> = ({
   filter
 }) => {
   const { data } = useFinance();
+  const accountName = (id: string) => data.accounts.find(a => a.id === id)?.name || '';
   const [search, setSearch] = useState('');
   const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>({
     [format(new Date(), 'yyyy-MM')]: true
@@ -137,7 +138,9 @@ export const TransactionSelector: React.FC<TransactionSelectorProps> = ({
                                       </div>
                                       <div className="flex-col" style={{ minWidth: 0, flex: 1 }}>
                                         <span className="font-bold truncate" style={{ fontSize: '0.9rem', display: 'block' }}>{t.description}</span>
-                                        <span className="text-xs text-muted">{t.category}</span>
+                                        <span className="text-xs text-muted truncate" style={{ display: 'block' }}>
+                                          {accountName(t.accountId) ? `${t.category} · ${accountName(t.accountId)}` : t.category}
+                                        </span>
                                       </div>
                                     </div>
                                     <div className="flex-col align-end" style={{ flexShrink: 0, marginLeft: '1rem' }}>
