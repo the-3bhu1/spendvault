@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account } from '../types';
-import { generateId, formatCurrency, formatAmount, formatDateString, getBillingCycleForDate, calculateBalance, getCurrentMonthStr } from '../utils';
+import { generateId, formatCurrency, formatAmount, formatDateString, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isStatsExcludedCategory } from '../utils';
 import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, Sparkles, ChevronRight, Hash, BanknoteArrowUp, BanknoteArrowDown, Shapes } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
@@ -33,7 +33,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
   isLast: boolean,
   onEdit: (tx: Transaction) => void,
   onDelete: (id: string) => void,
-  onMoveBy: (steps: number) => void,
+  onMoveBy: (steps: number) => boolean,
   blockLen: number,
   counterparts?: { tx: Transaction; acc: Account | undefined }[]
 }) {
@@ -114,10 +114,18 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
         }
       }
       if (arraySteps !== 0) {
-        onMoveBy(arraySteps);
-        // Advance the anchor by the visual distance crossed (signed) so the leftover sub-row
-        // remainder becomes the live translateY below — the row stays glued to the finger.
-        touchStart.current.y += dy > 0 ? consumedPx : -consumedPx;
+        // onMoveBy returns false when a prior reorder from THIS drag hasn't committed to
+        // React state yet (rapid touchmove on a fling). If we advanced the anchor anyway we'd
+        // drop that crossing on the floor; instead leave the anchor put so the very next event
+        // — after the DOM has caught up — re-detects and applies the same crossing. This stops
+        // overlapping full-day renumbers built from stale snapshots (the "rows above reversed"
+        // glitch).
+        const applied = onMoveBy(arraySteps);
+        if (applied) {
+          // Advance the anchor by the visual distance crossed (signed) so the leftover sub-row
+          // remainder becomes the live translateY below — the row stays glued to the finger.
+          touchStart.current.y += dy > 0 ? consumedPx : -consumedPx;
+        }
       }
       // Live follow: translate the whole group by whatever finger offset hasn't been consumed
       // into a slot swap yet, so the dragged row sits under the finger instead of trailing it.
@@ -353,7 +361,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                   isLast={false}
                   onEdit={onEdit}
                   onDelete={onDelete}
-                  onMoveBy={() => {}}
+                  onMoveBy={() => false}
                   blockLen={1}
                 />
               ))}
@@ -375,6 +383,16 @@ export default function Transactions() {
     const bi = ACCOUNT_TYPE_ORDER.indexOf(b.type);
     return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
   };
+
+  // Guards the drag reorder against re-entrancy: touchmove can fire faster than React can
+  // re-render, so without this a single fling would call onMoveBy several times against the
+  // same stale render closure, each doing a full 0..N-1 renumber of the day from a snapshot
+  // that no longer reflects committed state — which scrambled/reversed the untouched rows.
+  // Set true the instant we apply a reorder; cleared by the effect below once the resulting
+  // state actually commits (transactions reference changes), so the next crossing runs against
+  // a fresh closure.
+  const reorderPendingRef = useRef(false);
+  useEffect(() => { reorderPendingRef.current = false; }, [data.transactions]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -682,7 +700,7 @@ export default function Transactions() {
     // docs/LINKED_TRANSACTIONS.md — keep that matrix accurate when changing this block.
     const isTransfer = newTx.category?.toLowerCase() === 'transfer';
     const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
-    const hidesPassiveToggleFinal = ['transfer', 'cc payment', 'ncmc travel recharge'].includes((newTx.category || '').toLowerCase());
+    const hidesPassiveToggleFinal = ['transfer', 'cc payment', 'ncmc travel recharge', 'lending & borrowing'].includes((newTx.category || '').toLowerCase());
     const isSip = newTx.category?.toLowerCase() === 'sip';
     const isStocks = newTx.category?.toLowerCase() === 'stocks';
     const isCommodity = newTx.category?.toLowerCase() === 'commodity';
@@ -1164,16 +1182,12 @@ export default function Transactions() {
   };
 
   const filteredIncome = filteredTransactions.reduce((sum, tx) => {
-    const cat = tx.category.toLowerCase();
-    const isExcludedCategory = cat === 'transfer' || cat === 'cc payment' || cat === 'ncmc travel recharge' || cat === 'stocks' || cat === 'sip' || cat === 'commodity';
-    if (isExcludedCategory) return sum;
+    if (isStatsExcludedCategory(tx.category)) return sum;
     const effectiveAmount = tx.amount - (tx.excludedAmount || (tx.excludeFromStats ? tx.amount : 0));
     return sum + (tx.type === 'credit' ? effectiveAmount : 0);
   }, 0);
   const filteredSpend = filteredTransactions.reduce((sum, tx) => {
-    const cat = tx.category.toLowerCase();
-    const isExcludedCategory = cat === 'transfer' || cat === 'cc payment' || cat === 'ncmc travel recharge' || cat === 'stocks' || cat === 'sip' || cat === 'commodity';
-    if (isExcludedCategory) return sum;
+    if (isStatsExcludedCategory(tx.category)) return sum;
     const effectiveAmount = tx.amount - (tx.excludedAmount || (tx.excludeFromStats ? tx.amount : 0));
     return sum + (tx.type === 'debit' ? effectiveAmount : 0);
   }, 0);
@@ -1533,16 +1547,12 @@ export default function Transactions() {
                           return orderA - orderB;
                         });
                         const dailyIncome = txs.reduce((sum, t) => {
-                          const cat = t.category.toLowerCase();
-                          const isExcludedCategory = cat === 'transfer' || cat === 'cc payment' || cat === 'ncmc travel recharge' || cat === 'sip' || cat === 'stocks' || cat === 'commodity';
-                          if (isExcludedCategory) return sum;
+                          if (isStatsExcludedCategory(t.category)) return sum;
                           const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
                           return sum + (t.type === 'credit' ? effectiveAmount : 0);
                         }, 0);
                         const dailySpend = txs.reduce((sum, t) => {
-                          const cat = t.category.toLowerCase();
-                          const isExcludedCategory = cat === 'transfer' || cat === 'cc payment' || cat === 'ncmc travel recharge' || cat === 'sip' || cat === 'stocks' || cat === 'commodity';
-                          if (isExcludedCategory) return sum;
+                          if (isStatsExcludedCategory(t.category)) return sum;
                           const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
                           return sum + (t.type === 'debit' ? effectiveAmount : 0);
                         }, 0);
@@ -1638,6 +1648,12 @@ export default function Transactions() {
                                         // slots within this date in one shot, then renumber the
                                         // date's order field 0..N-1. Single pass keeps the dragged
                                         // row locked to the finger even on fast multi-row drags.
+                                        //
+                                        // Bail if a prior reorder from this same drag hasn't committed
+                                        // yet: our `sortedTxs`/`firstGroupIdx` closure would be stale and
+                                        // the renumber would fight the in-flight one. Returning false tells
+                                        // the row not to consume this crossing so it retries post-commit.
+                                        if (reorderPendingRef.current) return false;
                                         const blockLen = lastGroupIdx - firstGroupIdx + 1;
                                         const list = [...sortedTxs];
                                         const block = list.splice(firstGroupIdx, blockLen);
@@ -1649,7 +1665,11 @@ export default function Transactions() {
                                         list.forEach((t, i) => {
                                           if (t.order !== i) updates.push({ ...t, order: i });
                                         });
-                                        if (updates.length) reorderTransactions(...updates);
+                                        if (updates.length) {
+                                          reorderPendingRef.current = true;
+                                          reorderTransactions(...updates);
+                                        }
+                                        return true;
                                       }}
                                       counterparts={txCounterpartsMap.get(tx.id)}
                                     />
@@ -2060,7 +2080,7 @@ export default function Transactions() {
                     }
                     setPaymentSourceAccountId('');
                   }
-                  const hidesPassiveToggle = ['transfer', 'cc payment', 'ncmc travel recharge'].includes(val.toLowerCase());
+                  const hidesPassiveToggle = ['transfer', 'cc payment', 'ncmc travel recharge', 'lending & borrowing'].includes(val.toLowerCase());
                   const nextAllotted = isInvestment ? (newTx.sipAllottedAmount || newTx.amount || 0) : undefined;
                   const nextCharges = isInvestment ? (newTx.sipCharges || 0) : undefined;
                   setNewTx({

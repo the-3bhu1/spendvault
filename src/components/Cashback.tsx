@@ -14,6 +14,9 @@ export default function Cashback() {
   const [confirmingStatement, setConfirmingStatement] = useState<{ txId: string, expected: number, prevId: string | null, accountId: string } | null>(null);
   const [depositAccountId, setDepositAccountId] = useState('');
   const [showCreditedCycles, setShowCreditedCycles] = useState(false);
+  // Bulk "Confirm All" for a cycle group whose account needs a manual deposit target.
+  const [bulkConfirm, setBulkConfirm] = useState<{ sts: any[]; accountId: string } | null>(null);
+  const [bulkDepositAccountId, setBulkDepositAccountId] = useState('');
 
   const getRewardUnitAndRate = (account: any) => {
     if (!account) return { unit: '', rate: 1 };
@@ -292,6 +295,61 @@ export default function Cashback() {
     setEditingId(null);
   };
 
+  // Confirm every pending statement in a cycle group at its expected amount, then consolidate once.
+  // Mirrors handleConfirmAction's per-item logic but applied across the whole group in one pass.
+  // `depositAccountId` is only used for non-automatic accounts (rewards/e_wallet with no auto target).
+  const applyConfirmAll = (sts: any[], depositAccountId?: string) => {
+    const pending = sts.filter(s => !s.confirmed);
+    if (!pending.length) return;
+    const account = pending[0].account;
+    const isCC = account?.type === 'credit_card';
+    const isAutomatic = isCC || account?.type === 'bank_account' || account?.type === 'debit_card' || !!account?.cashbackDestinationAccountId;
+    const finalDepositAccountId = account?.cashbackDestinationAccountId || (isAutomatic ? account.id : depositAccountId);
+    if (!finalDepositAccountId) return;
+
+    pending.forEach(st => {
+      updateCashbackStatement({
+        id: st.statementId || generateId(),
+        accountId: account.id,
+        billingCycleYearMonth: st.transaction.id,
+        expected: st.expected,
+        realized: st.expected,
+        confirmed: true,
+        realizedIntoAccountId: finalDepositAccountId
+      });
+    });
+
+    const pendingIds = new Set(pending.map(p => p.transaction.id));
+    const updatedGroupSts = sts.map(gs =>
+      pendingIds.has(gs.transaction.id)
+        ? { ...gs, confirmed: true, realized: gs.expected, realizedIntoAccountId: finalDepositAccountId }
+        : gs
+    );
+    consolidateCycleGroup(account.id, updatedGroupSts);
+  };
+
+  const handleConfirmAllClick = (sts: any[]) => {
+    const pending = sts.filter(s => !s.confirmed);
+    if (!pending.length) return;
+    const account = pending[0].account;
+    const isCC = account?.type === 'credit_card';
+    const isAutomatic = isCC || account?.type === 'bank_account' || account?.type === 'debit_card' || !!account?.cashbackDestinationAccountId;
+    if (isAutomatic) {
+      applyConfirmAll(pending);
+    } else {
+      // Needs a manual deposit target — ask once, then apply to all.
+      setBulkDepositAccountId('');
+      setBulkConfirm({ sts: pending, accountId: account.id });
+    }
+  };
+
+  const handleBulkConfirmAction = () => {
+    if (!bulkConfirm) return;
+    applyConfirmAll(bulkConfirm.sts, bulkDepositAccountId);
+    setBulkConfirm(null);
+    setBulkDepositAccountId('');
+  };
+
   const handleUndoConfirmation = (txId: string) => {
     const st = statements[txId];
     if (!st || !st.statementId) return;
@@ -451,27 +509,31 @@ export default function Cashback() {
               <div key={card.cardName} className="card flex-col tour-cashback-statement" style={{ padding: 0, overflow: 'hidden' }}>
                 {showCreditedCycles && (
                   <div
-                    className="flex justify-between align-center clickable"
+                    className="clickable"
                     onClick={() => toggleCard(card.cardName, cardCollapsed)}
-                    style={{ padding: '1rem 1.5rem', background: 'var(--bg-card)', borderBottom: cardCollapsed ? 'none' : '2px solid var(--border-color)', transition: '0.2s' }}
+                    style={{ padding: '1rem 1.5rem', background: 'var(--bg-card)', borderBottom: cardCollapsed ? 'none' : '2px solid var(--border-color)', transition: '0.2s', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', columnGap: '1rem', rowGap: '0.6rem', alignItems: 'center' }}
                   >
-                    <span className="text-mono font-bold" style={{ textTransform: 'uppercase', color: 'var(--text-primary)', letterSpacing: '1px', fontSize: '0.9rem', flex: 1, marginRight: '1rem' }}>
+                    {/* Row 1: card name — total */}
+                    <span className="text-mono font-bold truncate" style={{ gridColumn: 1, gridRow: 1, textTransform: 'uppercase', color: 'var(--text-primary)', letterSpacing: '1px', fontSize: '0.9rem' }}>
                       {card.cardName}
                     </span>
-                    <div className="flex align-center gap-3" style={{ flexShrink: 0 }}>
-                      <span className="text-mono text-xs text-muted" style={{ opacity: 0.7 }}>
-                        {card.cycles.length} {card.cycles.length === 1 ? 'cycle' : 'cycles'}
-                        {cardPendingCount > 0 && ` · ${cardPendingCount} pending`}
-                      </span>
-                      <span className="text-mono font-bold" style={{ fontSize: '1rem', color: 'var(--text-primary)' }}>
-                        {formatCashback(cardTotal, cardAccount)}
-                      </span>
-                      <ChevronDown size={18} style={{
-                        transform: cardCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-                        transition: '0.5s cubic-bezier(0.4, 0, 0.2, 1)',
-                        opacity: 0.5
-                      }} />
-                    </div>
+                    <span className="text-mono font-bold" style={{ gridColumn: 2, gridRow: '1 / span 2', alignSelf: 'center', justifySelf: 'end', fontSize: '1rem', color: 'var(--text-primary)' }}>
+                      {formatCashback(cardTotal, cardAccount)}
+                    </span>
+                    {/* Chevron spans both rows, centered at the far right */}
+                    <ChevronDown size={18} style={{
+                      gridColumn: 3,
+                      gridRow: '1 / span 2',
+                      alignSelf: 'center',
+                      transform: cardCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+                      transition: '0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+                      opacity: 0.5
+                    }} />
+                    {/* Row 2: cycles · pending */}
+                    <span className="text-mono text-xs text-muted truncate" style={{ gridColumn: 1, gridRow: 2, opacity: 0.7 }}>
+                      {card.cycles.length} {card.cycles.length === 1 ? 'cycle' : 'cycles'}
+                      {cardPendingCount > 0 && ` · ${cardPendingCount} pending`}
+                    </span>
                   </div>
                 )}
                 <div style={{ display: 'grid', gridTemplateRows: cardCollapsed ? '0fr' : '1fr', transition: 'grid-template-rows 0.5s cubic-bezier(0.4, 0, 0.2, 1)' }}>
@@ -483,6 +545,7 @@ export default function Cashback() {
                   const total = sts.reduce((sum, st) => sum + (st.confirmed ? st.realized : st.expected), 0);
 
                   const confirmedSts = sts.filter(s => s.confirmed);
+                  const pendingSts = sts.filter(s => !s.confirmed);
                   const allLinkedIds = confirmedSts.map(s => s.transaction.id);
                   const isPerfectlyConsolidated = confirmedSts.length > 0 && data.transactions.some(t =>
                     t.type === 'credit' &&
@@ -492,12 +555,19 @@ export default function Cashback() {
                   );
                   const isInternalRewards = !!(sts[0]?.account?.isCashbackEnabled && sts[0]?.account?.rewardType === 'points');
 
+                  // Header split into two rows: card name ↔ amount, then cycle range ↔ actions.
+                  const cardNameOnly = accName.split(' — ')[0];
+                  const cycleRangeOnly = accName.split(' — ').slice(1).join(' — ');
+                  const showCardNameRow = !showCreditedCycles; // in "Showing All" the card name lives in the card header
+                  const showConsolidate = confirmedSts.length > 1 && !isPerfectlyConsolidated && !isInternalRewards;
+                  const showConfirmAll = pendingSts.length >= 2;
+
                   const isLastCycle = cycleIndex === card.cycles.length - 1;
 
                   return (
                     <div key={accName} className="flex-col" style={{ borderBottom: isLastCycle ? 'none' : '1px solid var(--border-color)' }}>
                       <div
-                        className="flex justify-between clickable"
+                        className="clickable"
                         onClick={(e) => {
                           toggleGroup(accName, isCollapsed);
                           if (isCollapsed) {
@@ -543,51 +613,83 @@ export default function Cashback() {
                             }, 550);
                           }
                         }}
-                        style={{ padding: '1rem 1.5rem', background: 'var(--bg-hover)', borderBottom: isCollapsed ? 'none' : '1px solid var(--border-color)', transition: '0.2s', alignItems: 'flex-start' }}
+                        style={{ padding: '1rem 1.5rem', background: 'var(--bg-hover)', borderBottom: isCollapsed ? 'none' : '1px solid var(--border-color)', transition: '0.2s', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', columnGap: '1rem', rowGap: '0.6rem', alignItems: 'center' }}
                       >
-                        <span className="text-mono font-bold" style={{ textTransform: 'uppercase', color: 'var(--text-primary)', letterSpacing: '1px', fontSize: '0.85rem', flex: 1, marginRight: '1.5rem', marginTop: '0.15rem' }}>
-                          {/* Card name already shown in the card header in "Showing All" — just the cycle here. */}
-                          {showCreditedCycles ? accName.split(' — ').slice(1).join(' — ') : accName}
+                        {/* Row 1: card name (cycle range in "Showing All") — amount */}
+                        <span className="text-mono font-bold truncate" style={{ gridColumn: 1, gridRow: 1, textTransform: 'uppercase', color: 'var(--text-primary)', letterSpacing: '1px', fontSize: '0.85rem' }}>
+                          {showCardNameRow ? cardNameOnly : cycleRangeOnly}
                         </span>
-
-                        <div className="flex align-center gap-3" style={{ flexShrink: 0 }}>
-                          <div className="flex align-center gap-2">
-                            {confirmedSts.length > 1 && !isPerfectlyConsolidated && !isInternalRewards && (
-                              <button
-                                className="btn-text text-accent text-mono"
-                                style={{
-                                  fontSize: '10px',
-                                  padding: '2px 8px',
-                                  border: `1px solid ${consolidatedFeedback.includes(accName) ? 'var(--success)' : 'var(--accent)'}`,
-                                  borderRadius: '4px',
-                                  opacity: 0.8,
-                                  color: consolidatedFeedback.includes(accName) ? 'var(--success)' : 'var(--accent)',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '4px'
-                                }}
-                                onClick={(e) => { e.stopPropagation(); handleConsolidateClick(accName, sts[0].account.id, sts); }}
-                              >
-                                {consolidatedFeedback.includes(accName) ? (
-                                  <>
-                                    <Check size={10} /> DONE
-                                  </>
-                                ) : (
-                                  'CONSOLIDATE'
-                                )}
-                              </button>
-                            )}
-                            <span className="text-mono font-bold" style={{ fontSize: '1rem', color: 'var(--text-primary)' }}>
-                              {formatCashback(total, sts[0]?.account)}
+                        <span className="text-mono font-bold" style={{ gridColumn: 2, gridRow: 1, justifySelf: 'end', fontSize: '1rem', color: 'var(--text-primary)' }}>
+                          {formatCashback(total, sts[0]?.account)}
+                        </span>
+                        {/* Chevron spans both rows, centered at the far right */}
+                        <ChevronDown size={18} style={{
+                          gridColumn: 3,
+                          gridRow: (showCardNameRow || showConsolidate || showConfirmAll) ? '1 / span 2' : 1,
+                          alignSelf: 'center',
+                          transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+                          transition: '0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+                          opacity: 0.5
+                        }} />
+                        {/* Row 2: cycle range — actions (button cell shares column 2, so it matches the amount width) */}
+                        {(showCardNameRow || showConsolidate || showConfirmAll) && (
+                          <>
+                            <span className="text-mono text-xs text-muted truncate" style={{ gridColumn: 1, gridRow: 2, letterSpacing: '0.5px' }}>
+                              {showCardNameRow ? cycleRangeOnly : ''}
                             </span>
-                          </div>
-                          <ChevronDown size={18} style={{
-                            transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-                            transition: '0.5s cubic-bezier(0.4, 0, 0.2, 1)',
-                            opacity: 0.5,
-                            marginTop: '0.1rem'
-                          }} />
-                        </div>
+                            {(showConsolidate || showConfirmAll) && (
+                              <div className="flex align-center gap-2" style={{ gridColumn: 2, gridRow: 2, justifySelf: 'stretch' }}>
+                                {showConsolidate && (
+                                  <button
+                                    className="btn-text text-accent text-mono"
+                                    style={{
+                                      fontSize: '10px',
+                                      padding: '5px 12px',
+                                      lineHeight: 1,
+                                      border: `1px solid ${consolidatedFeedback.includes(accName) ? 'var(--success)' : 'var(--accent)'}`,
+                                      borderRadius: '4px',
+                                      opacity: 0.8,
+                                      color: consolidatedFeedback.includes(accName) ? 'var(--success)' : 'var(--accent)',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}
+                                    onClick={(e) => { e.stopPropagation(); handleConsolidateClick(accName, sts[0].account.id, sts); }}
+                                  >
+                                    {consolidatedFeedback.includes(accName) ? (
+                                      <>
+                                        <Check size={10} /> DONE
+                                      </>
+                                    ) : (
+                                      'CONSOLIDATE'
+                                    )}
+                                  </button>
+                                )}
+                                {showConfirmAll && (
+                                  <button
+                                    className="btn-text text-mono"
+                                    style={{
+                                      flex: 1,
+                                      fontSize: '10px',
+                                      lineHeight: 1,
+                                      padding: '5px 0',
+                                      border: '1px solid var(--success)',
+                                      borderRadius: '4px',
+                                      color: 'var(--success)',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center'
+                                    }}
+                                    title="Confirm all pending cashback in this cycle"
+                                    onClick={(e) => { e.stopPropagation(); handleConfirmAllClick(sts); }}
+                                  >
+                                    <Check size={14} />
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
                       <div
                         style={{
@@ -737,6 +839,43 @@ export default function Cashback() {
         );
       })()}
 
+      {bulkConfirm && (() => {
+        const acc = data.accounts.find(a => a.id === bulkConfirm.accountId);
+        const count = bulkConfirm.sts.length;
+        const total = bulkConfirm.sts.reduce((s, st) => s + st.expected, 0);
+        return (
+          <div className="modal-overlay">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h3>Confirm All Cashback</h3>
+                <button onClick={() => setBulkConfirm(null)}>✕</button>
+              </div>
+              <div className="modal-body flex-col gap-4">
+                <p className="text-sm text-muted">
+                  Confirming <strong>{count}</strong> pending cashbacks ({formatCashback(total, acc)}) at their expected amounts. Select the Rewards account where they were credited.
+                </p>
+                <CustomPicker
+                  label="Deposit Into"
+                  value={bulkDepositAccountId}
+                  placeholder="Select Reward Account"
+                  options={data.accounts.filter(a => !a.archived && (a.type === 'rewards' || a.type === 'e_wallet')).map(account => ({
+                    id: account.id,
+                    name: account.name,
+                    subtext: account.type.replace('_', ' ')
+                  }))}
+                  onChange={setBulkDepositAccountId}
+                  iconGetter={(_id: string) => '🎁'}
+                />
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={() => setBulkConfirm(null)}>Cancel</button>
+                <button className="btn btn-primary" disabled={!bulkDepositAccountId} onClick={handleBulkConfirmAction}>Confirm All</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {selectedTx && (
         <div className="modal-overlay">
           <div className="modal-content">
@@ -745,9 +884,9 @@ export default function Cashback() {
               <button onClick={() => setSelectedTx(null)}>✕</button>
             </div>
             <div className="modal-body flex-col gap-4 text-sm" style={{ paddingBottom: '1rem' }}>
-              <div className="flex justify-between" style={{ paddingBottom: '0.75rem', borderBottom: '1px dashed var(--border-color)' }}>
-                <span className="text-muted">Description</span>
-                <span style={{ fontWeight: 600 }}>{selectedTx.description}</span>
+              <div className="flex justify-between" style={{ paddingBottom: '0.75rem', borderBottom: '1px dashed var(--border-color)', gap: '1.5rem' }}>
+                <span className="text-muted" style={{ flexShrink: 0 }}>Description</span>
+                <span style={{ fontWeight: 600, textAlign: 'right' }}>{selectedTx.description}</span>
               </div>
               <div className="flex justify-between" style={{ paddingBottom: '0.75rem', borderBottom: '1px dashed var(--border-color)' }}>
                 <span className="text-muted">Date</span>

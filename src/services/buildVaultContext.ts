@@ -15,6 +15,7 @@ import {
   getCurrentMonthStr,
   getBillingCycleForDate,
   getLatestBilledCycle,
+  isStatsExcludedCategory,
 } from '../utils';
 import { format, parseISO, addMonths, subMonths } from 'date-fns';
 
@@ -22,11 +23,8 @@ const SLICE_CAP = 60;
 const RECENT_FALLBACK = 40;
 const TOP_N = 8;
 
-// Categories that are internal bookkeeping, not real spending — mirrors Dashboard/Insights.
-const SYSTEM_CATEGORIES = new Set([
-  'transfer', 'cc payment', 'ncmc travel recharge', 'sip', 'stocks', 'commodity',
-]);
-const isSystemCategory = (c: string) => SYSTEM_CATEGORIES.has(c.toLowerCase());
+// Categories that are internal bookkeeping, not real spending — shared with Dashboard/Insights/Transactions.
+const isSystemCategory = (c: string) => isStatsExcludedCategory(c);
 
 // Spend net of any explicit exclusion (mirrors the effectiveAmount logic in Insights/Dashboard).
 const effectiveAmount = (t: Transaction) =>

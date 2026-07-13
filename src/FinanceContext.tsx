@@ -95,6 +95,37 @@ interface FinanceContextType {
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_KEY = 'minimalist_finance_data_v1';
+
+// Renumber each day's `order` to a gap-free, duplicate-free 0..N-1 run that matches the order the
+// list already renders in. Drag-reorder renumbers a day 0..N-1 on every move and assumes those
+// values start clean; a backup/restore, a legacy record with no `order`, or an interrupted drag can
+// leave gaps, duplicates, or undefined orders — the dirty state that let one drag scramble/reverse
+// untouched rows. This heals such days on load WITHOUT changing their visible order (it sorts by the
+// exact comparator the UI uses, then reassigns contiguous integers). Untouched days return their
+// original objects so nothing re-renders needlessly.
+function normalizeTransactionOrders(transactions: Transaction[]): Transaction[] {
+  const byDate = new Map<string, Transaction[]>();
+  transactions.forEach(t => {
+    const arr = byDate.get(t.date);
+    if (arr) arr.push(t); else byDate.set(t.date, [t]);
+  });
+  const normalized = new Map<string, number>();
+  byDate.forEach(dayTxs => {
+    const sorted = [...dayTxs].sort((a, b) => {
+      const oa = a.order !== undefined ? a.order : dayTxs.indexOf(a);
+      const ob = b.order !== undefined ? b.order : dayTxs.indexOf(b);
+      return oa - ob;
+    });
+    sorted.forEach((t, i) => normalized.set(t.id, i));
+  });
+  let changed = false;
+  const result = transactions.map(t => {
+    const o = normalized.get(t.id);
+    if (o !== undefined && t.order !== o) { changed = true; return { ...t, order: o }; }
+    return t;
+  });
+  return changed ? result : transactions;
+}
 const DEFAULT_CATEGORIES = ['Food', 'Shopping', 'Income', 'Salary', 'Rent', 'Travel', 'Bills', 'Entertainment', 'CC Payment', 'Loans', 'Lending & Borrowing', 'NCMC Travel Recharge', 'Cashback', 'SIP', 'Stocks', 'Commodity', 'Other/Miscellaneous'];
 const DEFAULT_CUSTOM_ACCOUNT_TYPES: string[] = [];
 const DEFAULT_TAGS: string[] = [];
@@ -654,6 +685,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
 
         if (!parsed.debts) parsed.debts = [];
         if (!parsed.tags) parsed.tags = [];
+        parsed.transactions = normalizeTransactionOrders(parsed.transactions || []);
         return parsed;
       } catch (e) {
         console.error("Failed to parse local storage", e);
@@ -685,6 +717,35 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   useEffect(() => {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
   }, [data]);
+
+  // Dev-only diagnostic: the drag-reorder logic requires each day's `order` to be a gap-free,
+  // duplicate-free 0..N-1 run with linked-group legs sitting on adjacent indices. If either
+  // invariant ever breaks at runtime, log the offending day so we can trace what produced it
+  // (this is the state that let a single drag scramble untouched rows). Warn-only, no mutation.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const byDate = new Map<string, Transaction[]>();
+    data.transactions.forEach(t => {
+      const arr = byDate.get(t.date);
+      if (arr) arr.push(t); else byDate.set(t.date, [t]);
+    });
+    byDate.forEach((dayTxs, date) => {
+      const sorted = [...dayTxs].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      if (!sorted.every((t, i) => t.order === i)) {
+        console.warn(`[order-invariant] ${date}: order is not a clean 0..N-1 run`, sorted.map(t => t.order));
+      }
+      const idxById = new Map(sorted.map((t, i) => [t.id, i]));
+      sorted.forEach(t => {
+        const links = (t.linkedTransactionIds || (t.linkedTransactionId ? [t.linkedTransactionId] : []))
+          .filter(id => idxById.has(id));
+        if (!links.length) return;
+        const idxs = [idxById.get(t.id)!, ...links.map(id => idxById.get(id)!)].sort((a, b) => a - b);
+        if (!idxs.every((v, i) => i === 0 || v === idxs[i - 1] + 1)) {
+          console.warn(`[order-invariant] ${date}: linked group not adjacent`, t.id, idxs);
+        }
+      });
+    });
+  }, [data.transactions]);
 
 
   // Migration: Hash legacy plain PIN

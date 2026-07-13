@@ -1,5 +1,64 @@
 import { format, parseISO, addMonths, subMonths, addDays, addWeeks, addQuarters, addYears, setDate, isAfter, isBefore, startOfDay } from 'date-fns';
-import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitEvent, SplitCycle, RecurringFrequency } from './types';
+import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitEvent, SplitCycle, SplitItem, RecurringFrequency } from './types';
+
+// Categories that never count toward Spends/Income stats: pure ledger movements (transfers, CC bill
+// payments, NCMC recharges), investments tracked separately (SIP/stocks/commodity), and lending &
+// borrowing (money lent out or borrowed isn't a real spend/income — it's expected to be returned).
+// Single source of truth so every stats surface (Dashboard, Insights, Transactions) stays in sync.
+export const STATS_EXCLUDED_CATEGORIES = new Set([
+  'transfer', 'cc payment', 'ncmc travel recharge', 'sip', 'stocks', 'commodity', 'lending & borrowing'
+]);
+export const isStatsExcludedCategory = (category: string) =>
+  STATS_EXCLUDED_CATEGORIES.has((category || '').toLowerCase());
+
+// ---- Split settlement math ----------------------------------------------------------------
+// 'me' is the self key used across split items (paidBy/shares); everything else is a friend name.
+export const splitDisplayName = (key: string) => (key === 'me' ? 'Me' : key);
+
+export interface SplitSettlement { from: string; to: string; amount: number; }
+
+// Net balance per participant (including the self key 'me') across a set of split items.
+// Positive = they should RECEIVE money; negative = they OWE money. Unlike the old me-centric
+// calculation, this tracks EVERY participant, so a friend paying for another friend's share is
+// captured instead of silently dropped — which is what a correct "who owes whom" needs.
+export const computeSplitNetBalances = (items: SplitItem[]): Record<string, number> => {
+  const net: Record<string, number> = {};
+  const bump = (k: string, v: number) => { net[k] = (net[k] || 0) + v; };
+  items.forEach(item => {
+    const participants = item.includeMe ? [...item.involvedPeople, 'me'] : [...item.involvedPeople];
+    if (participants.length === 0 || !(item.amount > 0)) return;
+    const isUnequal = item.splitType === 'unequal';
+    const payer = item.paidBy || 'me';
+    bump(payer, item.amount); // the payer fronted the whole bill
+    participants.forEach(p => {
+      const share = isUnequal ? (item.shares?.[p] ?? 0) : (item.amount / participants.length);
+      bump(p, -share); // each participant consumed their share
+    });
+  });
+  Object.keys(net).forEach(k => { net[k] = Math.round(net[k] * 100) / 100; });
+  return net;
+};
+
+// Greedy debt simplification: collapse net balances into a minimal-ish set of "from pays to"
+// transfers so everyone settles in as few payments as possible (largest debtor pays largest
+// creditor each step). This is what turns a pile of shared bills into "X pays Y ₹Z".
+export const simplifyDebts = (net: Record<string, number>): SplitSettlement[] => {
+  const creditors = Object.entries(net).filter(([, v]) => v > 0.005).map(([p, v]) => ({ p, v }));
+  const debtors = Object.entries(net).filter(([, v]) => v < -0.005).map(([p, v]) => ({ p, v: -v }));
+  creditors.sort((a, b) => b.v - a.v);
+  debtors.sort((a, b) => b.v - a.v);
+  const settlements: SplitSettlement[] = [];
+  let i = 0, j = 0;
+  while (i < debtors.length && j < creditors.length) {
+    const amount = Math.min(debtors[i].v, creditors[j].v);
+    settlements.push({ from: debtors[i].p, to: creditors[j].p, amount: Math.round(amount * 100) / 100 });
+    debtors[i].v -= amount;
+    creditors[j].v -= amount;
+    if (debtors[i].v < 0.005) i++;
+    if (creditors[j].v < 0.005) j++;
+  }
+  return settlements;
+};
 
 export const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {

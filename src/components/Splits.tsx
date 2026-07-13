@@ -1,10 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { format } from 'date-fns';
-import { Plus, Users, ChevronRight, Share2, Trash2, ReceiptIndianRupee, Check, Search, ChevronDown, Calendar, Edit2, Repeat, ChevronLeft, AlertTriangle, Copy } from 'lucide-react';
+import { Plus, Users, ChevronRight, Share2, Trash2, ReceiptIndianRupee, Check, Search, ChevronDown, Calendar, Edit2, Repeat, ChevronLeft, AlertTriangle, Copy, ArrowRight, ImageDown } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import ConfirmDialog from './ConfirmDialog';
 import { useFinance } from '../FinanceContext';
 import type { SplitEvent, SplitItem, SplitCycle, RecurringFrequency } from '../types';
-import { generateId, formatDateString, isCycleDue, buildNewCycle, migrateEventToCycles } from '../utils';
+import { generateId, formatDateString, isCycleDue, buildNewCycle, migrateEventToCycles, computeSplitNetBalances, simplifyDebts, splitDisplayName } from '../utils';
+import { buildSplitShareImages, blobToBase64 } from '../services/splitImage';
 import { SubviewWrapper } from './SubviewWrapper.tsx';
 import { CustomPicker } from './CustomPicker';
 
@@ -22,6 +26,8 @@ export default function Splits() {
   const { data, addSplitEvent, updateSplitEvent, deleteSplitEvent } = useFinance();
   const [activeView, setActiveView] = useState<'main' | 'detail' | 'create_event'>('main');
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  // Guards against a double-tap / synthetic touch+click firing the image share twice.
+  const sharingImageRef = useRef(false);
 
   const [newEvent, setNewEvent] = useState({ name: '', people: [] as string[], isRecurring: false, frequency: 'monthly' as RecurringFrequency, customDays: 1, cycleStartDate: format(new Date(), 'yyyy-MM-dd') });
   const [newPerson, setNewPerson] = useState('');
@@ -92,26 +98,32 @@ export default function Splits() {
     setActiveView('main');
   };
 
-  const handleShareSummary = (event: SplitEvent) => {
-    const tempBalances: Record<string, { owesMe: number; iOweThem: number }> = {};
-    event.people.forEach(p => {
-      tempBalances[p] = { owesMe: 0, iOweThem: 0 };
-    });
+  // Shared by both the text and image share paths. Recurring events keep expenses per cycle;
+  // non-recurring keep them on the event.
+  const getShareData = (event: SplitEvent) => {
+    const currentCycle = event.isRecurring ? event.cycles?.find(c => c.id === event.currentCycleId) : undefined;
+    const shareItems = event.isRecurring ? (currentCycle?.items ?? []) : event.items;
+    const settlements = simplifyDebts(computeSplitNetBalances(shareItems));
+    const totalSpent = shareItems.reduce((s, it) => s + it.amount, 0);
+    const subtitle = event.isRecurring && currentCycle ? `Cycle ${currentCycle.cycleNumber}` : undefined;
+    return { shareItems, settlements, totalSpent, subtitle };
+  };
 
+  const buildSummaryMessage = (event: SplitEvent) => {
+    const { shareItems, settlements } = getShareData(event);
     let message = `💰 *Split Summary: ${event.name}*\n\n`;
 
     // 1. Deep Itemized Breakdown
-    if (event.items.length > 0) {
+    if (shareItems.length > 0) {
       message += `📋 *Itemized Expense Breakdown:*\n`;
-      event.items.forEach(item => {
+      shareItems.forEach(item => {
         const splitCount = item.involvedPeople.length + (item.includeMe ? 1 : 0);
         if (splitCount === 0) return;
         const isUnequal = item.splitType === 'unequal';
-        const payerName = item.paidBy === 'me' || !item.paidBy ? 'Me' : item.paidBy;
+        const payerName = splitDisplayName(item.paidBy || 'me');
 
         message += `\n🔹 *${item.description}* (₹${item.amount.toFixed(2)}) - Paid by: *${payerName}*\n`;
 
-        // Show people in this specific item
         if (item.includeMe) {
           const myShare = isUnequal ? (item.shares?.['me'] ?? 0) : (item.amount / splitCount);
           message += `  • Me: ₹${myShare.toFixed(2)}\n`;
@@ -120,54 +132,97 @@ export default function Splits() {
           const friendShare = isUnequal ? (item.shares?.[p] ?? 0) : (item.amount / splitCount);
           message += `  • ${p}: ₹${friendShare.toFixed(2)}\n`;
         });
-
-        const payer = item.paidBy || 'me';
-        if (payer === 'me') {
-          item.involvedPeople.forEach(p => {
-            const friendShare = isUnequal ? (item.shares?.[p] ?? 0) : (item.amount / splitCount);
-            if (tempBalances[p]) tempBalances[p].owesMe += friendShare;
-          });
-        } else {
-          if (item.includeMe && tempBalances[payer]) {
-            const myShare = isUnequal ? (item.shares?.['me'] ?? 0) : (item.amount / splitCount);
-            tempBalances[payer].iOweThem += myShare;
-          }
-        }
       });
       message += `\n`;
     }
 
-    // 2. Final Consolidated Net Balances
-    message += `💳 *Final Net Balances:*\n`;
-    let hasBalances = false;
-    Object.entries(tempBalances).forEach(([name, b]) => {
-      const net = b.owesMe - b.iOweThem;
-      if (net > 0) {
-        message += `🟢 ${name} owes Me: ₹${net.toFixed(2)}\n`;
-        hasBalances = true;
-      } else if (net < 0) {
-        message += `🔴 I owe ${name}: ₹${Math.abs(net).toFixed(2)}\n`;
-        hasBalances = true;
-      }
-    });
-
-    if (!hasBalances) {
+    // 2. Settle Up — minimal set of payments across EVERYONE (not just me), so friend↔friend
+    // debts are included and the numbers actually balance.
+    message += `💳 *Settle Up (who pays whom):*\n`;
+    if (settlements.length === 0) {
       message += `✅ All settled up! No active debts.\n`;
+    } else {
+      settlements.forEach(s => {
+        message += `➡️ *${splitDisplayName(s.from)}* pays *${splitDisplayName(s.to)}*: ₹${s.amount.toFixed(2)}\n`;
+      });
     }
 
     message += `\nGenerated via SpendVault`;
+    return message;
+  };
 
+  const handleShareSummary = (event: SplitEvent) => {
+    const message = buildSummaryMessage(event);
     if (navigator.share) {
-      navigator.share({
-        title: ``,
-        text: message
-      }).catch(() => {
+      navigator.share({ title: ``, text: message }).catch(() => {
         const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
         window.open(url, '_blank');
       });
     } else {
       const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
       window.open(url, '_blank');
+    }
+  };
+
+  // Renders the summary to PNG(s) and shares them together with the text message. A short split
+  // produces one combined image; a large one produces a Settle-Up image + paginated Expenses images.
+  const handleShareImage = async (event: SplitEvent) => {
+    if (sharingImageRef.current) return; // ignore a second tap while a share is already in flight
+    sharingImageRef.current = true;
+    try {
+      const { shareItems, settlements, totalSpent, subtitle } = getShareData(event);
+      const message = buildSummaryMessage(event);
+      const blobs = await buildSplitShareImages({
+        title: event.name,
+        subtitle,
+        totalSpent,
+        settlements: settlements.map(s => ({ from: splitDisplayName(s.from), to: splitDisplayName(s.to), amount: s.amount })),
+        items: shareItems.map(it => {
+          const parts = it.includeMe ? [...it.involvedPeople, 'me'] : [...it.involvedPeople];
+          return {
+            description: it.description,
+            amount: it.amount,
+            paidBy: splitDisplayName(it.paidBy || 'me'),
+            participantNames: parts.map(splitDisplayName),
+          };
+        }),
+      });
+
+      const safeName = (event.name || 'summary').replace(/[^a-z0-9]+/gi, '-');
+      const fileName = (i: number) => blobs.length > 1
+        ? `SpendVault-Split-${safeName}-${i + 1}.png`
+        : `SpendVault-Split-${safeName}.png`;
+
+      if (Capacitor.isNativePlatform()) {
+        const uris: string[] = [];
+        for (let i = 0; i < blobs.length; i++) {
+          const base64 = await blobToBase64(blobs[i]);
+          const res = await Filesystem.writeFile({ path: fileName(i), data: base64, directory: Directory.Cache });
+          uris.push(res.uri);
+        }
+        await Share.share({ text: message, files: uris });
+      } else {
+        const files = blobs.map((b, i) => new File([b], fileName(i), { type: 'image/png' }));
+        const nav = navigator as Navigator & { canShare?: (d?: ShareData) => boolean };
+        if (nav.canShare && nav.canShare({ files })) {
+          await nav.share({ text: message, files });
+        } else {
+          // Desktop browsers can't share files — download the PNG(s) so they can be attached manually.
+          files.forEach(file => {
+            const url = URL.createObjectURL(file);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = file.name;
+            a.click();
+            URL.revokeObjectURL(url);
+          });
+        }
+      }
+    } catch (err: any) {
+      if (String(err?.message ?? err).toLowerCase().includes('cancel')) return;
+      console.error('Share image failed', err);
+    } finally {
+      sharingImageRef.current = false;
     }
   };
 
@@ -397,6 +452,7 @@ export default function Splits() {
           onUpdate={updateSplitEvent}
           onDelete={() => setIsDeleteConfirmOpen(true)}
           onShare={() => handleShareSummary(selectedEvent)}
+          onShareImage={() => handleShareImage(selectedEvent)}
         />
       )}
       {/* Custom Confirmation Dialog */}
@@ -420,12 +476,13 @@ export default function Splits() {
   );
 }
 
-function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
+function SplitDetail({ event, onBack, onUpdate, onDelete, onShare, onShareImage }: {
   event: SplitEvent,
   onBack: () => void,
   onUpdate: (e: SplitEvent) => void,
   onDelete: () => void,
-  onShare: () => void
+  onShare: () => void,
+  onShareImage: () => void
 }) {
   const { data } = useFinance();
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
@@ -797,10 +854,18 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
               <Check size={18} strokeWidth={3} />
             </button>
             <button
+              className="btn btn-secondary"
+              style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
+              onClick={onShareImage}
+              title="Share as Image"
+            >
+              <ImageDown size={18} />
+            </button>
+            <button
               className="btn btn-secondary tour-split-share-btn"
               style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
               onClick={onShare}
-              title="Share Summary"
+              title="Share as Text"
             >
               <Share2 size={18} />
             </button>
@@ -837,8 +902,35 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare }: {
           </div>
         </div>
  
+        {(() => {
+          // Minimal set of payments to square everyone up, across ALL participants (incl. friend↔friend).
+          const settlements = simplifyDebts(computeSplitNetBalances(effectiveItems));
+          return (
+            <div className="flex-col">
+              <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px', marginBottom: '0.5rem', padding: '0 0.5rem' }}>Settle Up · Who Pays Whom</span>
+              {settlements.length === 0 ? (
+                <p className="text-center text-sm text-muted" style={{ padding: '1rem 0' }}>All settled up — no payments needed.</p>
+              ) : (
+                settlements.map((s, i) => (
+                  <div key={`${s.from}-${s.to}-${i}`} className="flex justify-between align-center" style={{
+                    padding: '0.75rem 0.5rem',
+                    borderBottom: i === settlements.length - 1 ? 'none' : '1px solid rgba(255,255,255,0.05)'
+                  }}>
+                    <div className="flex align-center gap-2" style={{ minWidth: 0 }}>
+                      <span className="text-mono font-bold truncate" style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--danger)' }}>{splitDisplayName(s.from)}</span>
+                      <ArrowRight size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                      <span className="text-mono font-bold truncate" style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--success)' }}>{splitDisplayName(s.to)}</span>
+                    </div>
+                    <span className="font-bold text-sm" style={{ color: 'var(--text-primary)', flexShrink: 0 }}>₹{s.amount.toFixed(2)}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          );
+        })()}
+
         <div className="flex-col tour-split-per-person">
-          <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px', marginBottom: '0.5rem', padding: '0 0.5rem' }}>Per Person</span>
+          <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px', marginBottom: '0.5rem', padding: '0 0.5rem' }}>Your Balance Per Person</span>
           {event.people.map((person, idx) => {
             const isPaid = event.paidPeople?.includes(person);
             const isSettled = event.status === 'settled';

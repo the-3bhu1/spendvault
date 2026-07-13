@@ -104,8 +104,10 @@ row by its handle to reorder; "Other/Misc" always stays last). Set or change a m
 category in the Insights screen (not Settings), which shows actual-vs-budget progress. Deleting a
 category leaves existing transactions with their old category text.
 System categories (internal bookkeeping, EXCLUDED from spend totals so transfers/payments/investments
-don't look like spending): Transfer, CC Payment, NCMC Travel Recharge, SIP, Stocks, Commodity. The
-"Cashback" category is a credit (income into a rewards/account), not spend.
+don't look like spending): Transfer, CC Payment, NCMC Travel Recharge, SIP, Stocks, Commodity, and
+Lending & Borrowing. Lending & Borrowing is auto-excluded from both Spends and Income everywhere
+(Dashboard, Insights, Ask Vault) because money lent out or borrowed is expected to be returned — it's
+not a real spend or income. The "Cashback" category is a credit (income into a rewards/account), not spend.
 
 # Credit cards & billing cycles
 A card has a statement day and a due day.
@@ -122,14 +124,21 @@ vs. realized cashback per card per billing cycle. Cashback can be instant or del
 same cycle or the next, as rupees or as reward points, and deposited into a chosen account. In the
 Rewards & Offers screen the user confirms realized cashback, which posts a consolidated "Cashback"
 credit into that account. Before confirming you can tap the pencil to edit a cycle's cashback amount;
-you can also undo a confirmed cashback, or consolidate several confirmed entries into one credit.
+you can also undo a confirmed cashback, or consolidate several confirmed entries into one credit. When
+a cycle has two or more pending cashbacks, a "Confirm All" button in that cycle's header confirms them
+all at once (at their expected amounts).
 
 # Group Splits
-Split shared expenses among people. Create an event with a name and people. Events can be one-off or
-recurring (with cycles, a frequency, and a start date). Each item can be split equally or unequally
-and tracks who paid and who has settled. Mark people paid, end a cycle (carrying unpaid people over),
-or mark the whole event settled (and re-open it). Starting a new cycle can carry forward the previous
-cycle's items; unequal splits have an "Auto-Split Remaining" helper.
+Split shared expenses among people. Create an event with a name and people. Each item can be split
+equally or unequally, among any subset of people, and tracks who paid and who has settled. Events can
+be one-off or recurring (with cycles, a frequency, and a start date). Mark people paid, end a cycle
+(carrying unpaid people over), or mark the whole event settled (and re-open it). Starting a new cycle
+can carry forward the previous cycle's items; unequal splits have an "Auto-Split Remaining" helper.
+The detail screen has a "Settle Up · Who Pays Whom" section that simplifies everyone's balances into
+the fewest payments across ALL participants (including friend-to-friend debts, not just yours), plus
+a per-person balance list. Share the summary as text or as an image: the image shows settle-up and
+the itemized expenses (each expense lists who it was split among); a large split is split into a
+Settle-Up image plus paginated Expenses images.
 
 # Lending & Borrowing (Debts)
 A per-person ledger of money lent or borrowed, plus repayments. Add a person/debt, log repayments
@@ -137,7 +146,8 @@ A per-person ledger of money lent or borrowed, plus repayments. Add a person/deb
 net balance: they owe you, or you owe them. Ledger entries can be linked to real transactions; when you
 delete a linked entry you can choose to delete both or keep the ledger transaction ("Remove from
 History Only"). Settling a debt that still has a balance offers "Settle Now", which adds a closing
-Final Settlement entry.
+Final Settlement entry. Entries logged to the main ledger use the "Lending & Borrowing" category, so
+they never count toward Spends or Income (see Categories & Budgets) — only the account balance moves.
 
 # Bills & SIPs
 Recurring obligations (rent, subscriptions, SIPs) with an amount, frequency (daily/weekly/monthly/

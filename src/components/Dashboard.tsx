@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useFinance } from '../FinanceContext';
-import { getCurrentMonthStr, formatCurrency, getOrdinalSuffix, getBillingCycleForDate, getLatestBilledCycle } from '../utils';
+import { getCurrentMonthStr, formatCurrency, getOrdinalSuffix, getBillingCycleForDate, getLatestBilledCycle, isStatsExcludedCategory } from '../utils';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import RollingNumber from './RollingNumber';
 import type { Account } from '../types';
@@ -24,8 +24,7 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
       if (t.type === 'debit') {
         const account = data.accounts.find(a => a.id === t.accountId);
         {
-          const cat = t.category.toLowerCase();
-          if (cat === 'transfer' || cat === 'cc payment' || cat === 'ncmc travel recharge' || cat === 'sip' || cat === 'stocks' || cat === 'commodity') return;
+          if (isStatsExcludedCategory(t.category)) return;
           const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
           spend += effectiveAmount;
           catSpend[t.category] = (catSpend[t.category] || 0) + effectiveAmount;

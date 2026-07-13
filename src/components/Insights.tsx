@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useFinance } from '../FinanceContext';
-import { formatCurrency, formatDateString } from '../utils';
+import { formatCurrency, formatDateString, STATS_EXCLUDED_CATEGORIES } from '../utils';
 import { TrendingUp, TrendingDown, Star, Trophy, Calendar, ArrowUpRight, ArrowDownRight, Zap, Activity, Hash, Target, Pencil, Trash2, Check, X } from 'lucide-react';
 
 
@@ -36,9 +36,9 @@ const NON_BUDGET_CATEGORIES = new Set([
 // still count toward total spend, budgets and the category pie.)
 const HIGHLIGHT_EXCLUDED_CATEGORIES = new Set(['rent']);
 
-// Account-to-account movements, not real spend (must match Dashboard.tsx) — excluded from every
-// spend metric on this screen: totals, velocity, weekend/tag spend, the category pie, etc.
-const SYSTEM_SPEND_CATEGORIES = new Set(['transfer', 'cc payment', 'ncmc travel recharge', 'sip', 'stocks', 'commodity']);
+// Excluded from every spend metric on this screen (totals, velocity, weekend/tag spend, category pie).
+// Shared with Dashboard/Transactions via utils so the exclusion list can't drift out of sync.
+const SYSTEM_SPEND_CATEGORIES = STATS_EXCLUDED_CATEGORIES;
 
 // Inline ₹ editor for a category budget: a full-width field (with a ₹ prefix) plus Save / Cancel.
 // A `resolved` flag guards against onBlur firing a second commit after Enter/Escape/button already
@@ -946,7 +946,8 @@ export default function Insights() {
             const totalTagged = insights.monthTxs.filter(t => t.type === 'debit' && (t.tags || []).length > 0 && !SYSTEM_SPEND_CATEGORIES.has(t.category.toLowerCase())).reduce((s, t) => s + (t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0))), 0);
 
             return (
-              <div className="card flex-col gap-8" style={{ padding: '2rem' }}>
+              // order:-1 lifts this card to the top of the grid so it sits directly below Spend Trends.
+              <div className="card flex-col gap-8" style={{ padding: '2rem', order: -1 }}>
                 <div className="flex-col gap-2">
                   <span className="text-mono text-xs text-muted uppercase font-bold" style={{ letterSpacing: '2px', opacity: 0.8 }}>Spend by Tag</span>
                   <h3 className="text-serif" style={{ fontSize: '2.2rem', fontWeight: 800 }}>
