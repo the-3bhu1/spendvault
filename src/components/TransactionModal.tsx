@@ -138,7 +138,20 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     if (!newTx.category) newErrors.category = 'Category is required';
 
     setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    if (Object.keys(newErrors).length > 0) {
+      setTimeout(() => {
+        const modalBody = document.querySelector('.modal-body');
+        if (modalBody) {
+          const firstErrorEl = modalBody.querySelector('.border-danger');
+          if (firstErrorEl) {
+            const inputGroup = firstErrorEl.closest('.input-group') || firstErrorEl;
+            inputGroup.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }
+      }, 50);
+      return false;
+    }
+    return true;
   };
 
   const handleSave = () => {

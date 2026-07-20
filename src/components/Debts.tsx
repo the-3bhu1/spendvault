@@ -1130,9 +1130,13 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
   onClose: () => void
 }) {
   const { data } = useFinance();
-  const ledgerTx = useMemo(() =>
-    initialTx ? data.transactions.find(t => t.linkedTransactionIds?.includes(initialTx.id)) : null
-    , [initialTx, data.transactions]);
+  const ledgerTx = useMemo(() => {
+    if (!initialTx) return null;
+    return data.transactions.find(t =>
+      t.linkedTransactionIds?.includes(initialTx.id) ||
+      t.id === initialTx.linkedTxId
+    );
+  }, [initialTx, data.transactions]);
 
   const [amount, setAmount] = useState(initialTx ? initialTx.amount.toString() : '');
   const [desc, setDesc] = useState(initialTx ? initialTx.description : '');

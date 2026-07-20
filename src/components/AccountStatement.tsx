@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { format } from 'date-fns';
-import { CreditCard, Calendar, ArrowLeft } from 'lucide-react';
+import { CreditCard, Calendar, ChevronLeft } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import { getCategoryIcon } from './transactionIcons';
 import RollingNumber from './RollingNumber';
@@ -160,10 +160,10 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
           zIndex: 10,
           borderBottom: '1px solid var(--border-color)'
         }}>
-          <div className="flex align-center gap-3">
-            <div style={{ cursor: 'pointer', padding: '0.35rem', display: 'flex', alignItems: 'center', color: 'var(--text-primary)', opacity: 0.9 }} onClick={onClose}>
-              <ArrowLeft size={24} strokeWidth={2.25} />
-            </div>
+          <div className="flex align-center gap-4">
+            <button className="btn btn-secondary" style={{ padding: '0.5rem', flexShrink: 0 }} onClick={onClose}>
+              <ChevronLeft size={20} />
+            </button>
             <div className="flex-col">
               <span className="text-mono font-bold uppercase" style={{ opacity: 0.72, color: 'var(--text-primary)', fontSize: '1rem' }}>{acc.name}</span>
               <span className="text-mono font-bold uppercase" style={{ color: selectedCycle === currentCycle ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '0.72rem', marginTop: '0.3rem' }}>{cycleTitle}</span>

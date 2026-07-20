@@ -143,11 +143,15 @@ Settle-Up image plus paginated Expenses images.
 # Lending & Borrowing (Debts)
 A per-person ledger of money lent or borrowed, plus repayments. Add a person/debt, log repayments
 (received or sent), mark individual entries done, and settle (or re-open) a debt. Each person shows a
-net balance: they owe you, or you owe them. Ledger entries can be linked to real transactions; when you
-delete a linked entry you can choose to delete both or keep the ledger transaction ("Remove from
-History Only"). Settling a debt that still has a balance offers "Settle Now", which adds a closing
-Final Settlement entry. Entries logged to the main ledger use the "Lending & Borrowing" category, so
-they never count toward Spends or Income (see Categories & Budgets) — only the account balance moves.
+net balance: they owe you, or you owe them. This feature supports 2-way sync: logging an entry in the
+Debt ledger can automatically create a transaction, and conversely, logging, editing, or deleting a
+transaction under the "Lending & Borrowing" category with a description format of "<PersonName> : <Lent/Borrowed/Repayment>"
+automatically creates, updates, or deletes the corresponding entry in the Debt ledger in real-time. Ledger
+entries can be linked to real transactions; when you delete a linked entry you can choose to delete both
+or keep the ledger transaction ("Remove from History Only"). Settling a debt that still has a balance
+offers "Settle Now", which adds a closing Final Settlement entry. Entries logged to the main ledger use the
+"Lending & Borrowing" category, so they never count toward Spends or Income (see Categories & Budgets) —
+only the account balance moves.
 
 # Bills & SIPs
 Recurring obligations (rent, subscriptions, SIPs) with an amount, frequency (daily/weekly/monthly/
@@ -166,7 +170,7 @@ and transactions.
 # Commodity (gold / silver) prices
 Gold/silver per-gram prices are approximate AI estimates fetched from a vendor (price reference) using
 the Gemini key, and may lag the live rate. To fix or change them:
-- Change the vendor (price source): Settings → Commodity Prices → "Vendor (price reference)" field →
+- Change the vendor (price source): Settings → Commodity AI → "Vendor (price reference)" field →
   type the vendor name (default MMTC-PAMP) → Save. The next fetch uses that source.
 - Set an exact price: open the commodity account's editor and set a manual ₹/gram override, which
   takes precedence over the AI estimate.
@@ -218,7 +222,7 @@ can tap "Restore from backup" on the first step to import an existing backup fil
 - Import: Settings → Import Data — restore from a backup file or by pasting a copied code. Importing
   OVERWRITES current data.
 - Demo data can be loaded to explore the app and cleared without touching real data.
-- "Clear all data" wipes everything after confirmation.
+- Wipe data: Settings → Wipe Data → "delete forever" button clears all accounts, transactions, and settings after confirmation.
 
 # AI features & integrations
 - The optional Gemini API key powers commodity prices, brand logos, the SMS filter, and this assistant.

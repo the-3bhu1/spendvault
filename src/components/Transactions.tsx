@@ -677,6 +677,16 @@ export default function Transactions() {
     if (Object.keys(newErrors).length > 0) {
       console.log("Validation Failed! newErrors:", newErrors);
       setErrors(newErrors);
+      setTimeout(() => {
+        const modalBody = document.querySelector('.modal-body');
+        if (modalBody) {
+          const firstErrorEl = modalBody.querySelector('.border-danger');
+          if (firstErrorEl) {
+            const inputGroup = firstErrorEl.closest('.input-group') || firstErrorEl;
+            inputGroup.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }
+      }, 50);
       return;
     }
     console.log("Validation Passed! Saving transaction...");
@@ -1541,10 +1551,14 @@ export default function Transactions() {
                   {isExpanded && (
                     <div className="fade-in">
                       {Object.entries(groupedByDate).sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime()).map(([date, txs]) => {
-                        const sortedTxs = [...txs].sort((a, b) => {
-                          const orderA = a.order !== undefined ? a.order : txs.indexOf(a);
-                          const orderB = b.order !== undefined ? b.order : txs.indexOf(b);
+                        const allTxsOnDate = data.transactions.filter(t => t.date === date);
+                        const sortedAllTxsOnDate = [...allTxsOnDate].sort((a, b) => {
+                          const orderA = a.order !== undefined ? a.order : allTxsOnDate.indexOf(a);
+                          const orderB = b.order !== undefined ? b.order : allTxsOnDate.indexOf(b);
                           return orderA - orderB;
+                        });
+                        const sortedTxs = [...txs].sort((a, b) => {
+                          return sortedAllTxsOnDate.indexOf(a) - sortedAllTxsOnDate.indexOf(b);
                         });
                         const dailyIncome = txs.reduce((sum, t) => {
                           if (isStatsExcludedCategory(t.category)) return sum;
@@ -2697,7 +2711,7 @@ export default function Transactions() {
 
 
 
-              {data.user?.enablePassiveTransactions && newTx.category?.toLowerCase() !== 'transfer' && newTx.category?.toLowerCase() !== 'cc payment' && newTx.category?.toLowerCase() !== 'ncmc travel recharge' && (
+              {data.user?.enablePassiveTransactions && newTx.category?.toLowerCase() !== 'transfer' && newTx.category?.toLowerCase() !== 'cc payment' && newTx.category?.toLowerCase() !== 'ncmc travel recharge' && newTx.category?.toLowerCase() !== 'lending & borrowing' && (
                 <div ref={passiveLogRef} className="flex-col gap-3" style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-hover)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
                   <div className="flex justify-between align-center">
                     <div className="flex-col">

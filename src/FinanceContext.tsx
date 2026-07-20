@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react';
-import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitEvent, RecurringBill, Debt } from './types';
+import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitEvent, RecurringBill, Debt, DebtTransaction } from './types';
 import { classifySmsIsTransaction } from './services/GeminiService';
 import { clearChatHistory } from './services/ChatHistoryService';
 
@@ -417,6 +417,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           if (t.rewardEarnedType === undefined) {
             t.rewardEarnedType = (t.rewardEarned > 0 || t.expectedCashback > 0) ? 'delayed' : 'none';
           }
+          // Migration: Lending & Borrowing is now always stats-excluded via its category
+          // (STATS_EXCLUDED_CATEGORIES), so the per-transaction passive flag is meaningless for it.
+          // Clear any stale excludeFromStats/excludedAmount so no orphan "passive" icon lingers in the ledger.
+          if ((t.category || '').toLowerCase() === 'lending & borrowing' && (t.excludeFromStats || t.excludedAmount !== undefined)) {
+            t.excludeFromStats = false;
+            t.excludedAmount = undefined;
+          }
           return t;
         });
 
@@ -802,6 +809,177 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     }));
   };
 
+  const parseDebtDescription = (description: string, category: string, type: 'credit' | 'debit') => {
+    if (category?.toLowerCase() !== 'lending & borrowing') return null;
+    const colonIndex = description.indexOf(':');
+    if (colonIndex === -1) return null;
+    
+    const personName = description.substring(0, colonIndex).trim();
+    const actionPart = description.substring(colonIndex + 1).trim();
+    const actionLower = actionPart.toLowerCase();
+    
+    if (actionLower === 'lent') {
+      return { personName, action: 'Lent', type: 'lent' as const };
+    } else if (actionLower === 'borrowed') {
+      return { personName, action: 'Borrowed', type: 'borrowed' as const };
+    } else if (actionLower.startsWith('repayment')) {
+      const debtTxType = type === 'debit' ? 'repayment_sent' : 'repayment_received';
+      return { personName, action: 'Repayment', type: debtTxType as 'repayment_sent' | 'repayment_received' };
+    }
+    return null;
+  };
+
+  const calcDebtBalance = (txs: DebtTransaction[]) => {
+    return txs.reduce((sum, t) => {
+      if (t.type === 'lent' || t.type === 'repayment_sent') {
+        return sum + t.amount;
+      }
+      return sum - t.amount;
+    }, 0);
+  };
+
+  const updateDebtStatus = (debt: Debt): Debt => {
+    const balanced = calcDebtBalance(debt.transactions) === 0;
+    return {
+      ...debt,
+      transactions: balanced ? debt.transactions.map(t => ({ ...t, markedDone: true })) : debt.transactions.map(t => ({ ...t, markedDone: false })),
+      status: balanced ? 'settled' : 'active',
+      updatedAt: Date.now()
+    };
+  };
+
+  const syncDebtsForTransaction = (
+    prevDebts: Debt[],
+    oldTx: Transaction | undefined,
+    newTx: Transaction
+  ): { updatedDebts: Debt[]; updatedTx: Transaction } => {
+    let updatedDebts = [...prevDebts];
+    let updatedTx = { ...newTx };
+
+    const oldMatch = oldTx ? parseDebtDescription(oldTx.description, oldTx.category || '', oldTx.type) : null;
+    const newMatch = parseDebtDescription(updatedTx.description, updatedTx.category || '', updatedTx.type);
+
+    // Scenario A: Was not matching debt, but now matches
+    if (!oldMatch && newMatch) {
+      const debtTxId = crypto.randomUUID();
+      const newDebtTx: DebtTransaction = {
+        id: debtTxId,
+        amount: updatedTx.amount,
+        date: updatedTx.date,
+        description: newMatch.action,
+        type: newMatch.type,
+        linkedTxId: updatedTx.id
+      };
+
+      updatedTx.linkedTransactionIds = [...(updatedTx.linkedTransactionIds || []), debtTxId];
+
+      const personIndex = updatedDebts.findIndex(d => d.personName.toLowerCase() === newMatch.personName.toLowerCase());
+      if (personIndex > -1) {
+        const existingDebt = updatedDebts[personIndex];
+        updatedDebts[personIndex] = updateDebtStatus({
+          ...existingDebt,
+          transactions: [...existingDebt.transactions, newDebtTx]
+        });
+      } else {
+        const newDebt = updateDebtStatus({
+          id: crypto.randomUUID(),
+          personName: newMatch.personName,
+          transactions: [newDebtTx],
+          status: 'active',
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        });
+        updatedDebts.push(newDebt);
+      }
+    }
+    // Scenario B: Was matching debt, but now does NOT match
+    else if (oldMatch && !newMatch) {
+      updatedDebts = updatedDebts.map(debt => {
+        const filteredTxs = debt.transactions.filter(dt => dt.linkedTxId !== updatedTx.id && !(updatedTx.linkedTransactionIds || []).includes(dt.id));
+        return {
+          ...debt,
+          transactions: filteredTxs
+        };
+      })
+      .map(updateDebtStatus)
+      .filter(debt => debt.transactions.length > 0);
+
+      updatedTx.linkedTransactionIds = (updatedTx.linkedTransactionIds || []).filter(id => {
+        return !prevDebts.some(d => d.transactions.some(dt => dt.id === id));
+      });
+    }
+    // Scenario C: Was matching debt, and still matches
+    else if (oldMatch && newMatch) {
+      let linkedDebtTxId = (updatedTx.linkedTransactionIds || []).find(id => 
+        prevDebts.some(d => d.transactions.some(dt => dt.id === id))
+      );
+
+      if (!linkedDebtTxId) {
+        for (const d of prevDebts) {
+          const found = d.transactions.find(dt => dt.linkedTxId === updatedTx.id);
+          if (found) {
+            linkedDebtTxId = found.id;
+            break;
+          }
+        }
+      }
+
+      if (linkedDebtTxId) {
+        const oldPersonIndex = updatedDebts.findIndex(d => d.transactions.some(dt => dt.id === linkedDebtTxId));
+        
+        const updatedDebtTx: DebtTransaction = {
+          id: linkedDebtTxId,
+          amount: updatedTx.amount,
+          date: updatedTx.date,
+          description: newMatch.action,
+          type: newMatch.type,
+          linkedTxId: updatedTx.id
+        };
+
+        if (oldMatch.personName.toLowerCase() !== newMatch.personName.toLowerCase()) {
+          if (oldPersonIndex > -1) {
+            const oldDebt = updatedDebts[oldPersonIndex];
+            updatedDebts[oldPersonIndex] = updateDebtStatus({
+              ...oldDebt,
+              transactions: oldDebt.transactions.filter(dt => dt.id !== linkedDebtTxId)
+            });
+          }
+
+          const newPersonIndex = updatedDebts.findIndex(d => d.personName.toLowerCase() === newMatch.personName.toLowerCase());
+          if (newPersonIndex > -1) {
+            const existingDebt = updatedDebts[newPersonIndex];
+            updatedDebts[newPersonIndex] = updateDebtStatus({
+              ...existingDebt,
+              transactions: [...existingDebt.transactions, updatedDebtTx]
+            });
+          } else {
+            const newDebt = updateDebtStatus({
+              id: crypto.randomUUID(),
+              personName: newMatch.personName,
+              transactions: [updatedDebtTx],
+              status: 'active',
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            });
+            updatedDebts.push(newDebt);
+          }
+        } else {
+          if (oldPersonIndex > -1) {
+            const oldDebt = updatedDebts[oldPersonIndex];
+            updatedDebts[oldPersonIndex] = updateDebtStatus({
+              ...oldDebt,
+              transactions: oldDebt.transactions.map(dt => dt.id === linkedDebtTxId ? updatedDebtTx : dt)
+            });
+          }
+        }
+
+        updatedDebts = updatedDebts.filter(d => d.transactions.length > 0);
+      }
+    }
+
+    return { updatedDebts, updatedTx };
+  };
+
   const addTransaction = (transaction: Transaction) => {
     setData(prev => {
       const txsOnDate = prev.transactions.filter(t => t.date === transaction.date);
@@ -809,13 +987,20 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         const ord = t.order !== undefined ? t.order : idx;
         return ord > max ? ord : max;
       }, -1);
-      const newTx = {
+      
+      const newTxId = transaction.id || crypto.randomUUID();
+      const initialTx = {
         ...transaction,
+        id: newTxId,
         order: transaction.order !== undefined ? transaction.order : (maxOrder + 1)
       };
+
+      const { updatedDebts, updatedTx } = syncDebtsForTransaction(prev.debts || [], undefined, initialTx);
+
       return {
         ...prev,
-        transactions: [...prev.transactions, newTx]
+        transactions: [...prev.transactions, updatedTx],
+        debts: updatedDebts
       };
     });
   };
@@ -1063,7 +1248,10 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         });
       }
 
-      let updatedDebts = prev.debts || [];
+      const syncResult = syncDebtsForTransaction(prev.debts || [], oldTx, updatedTransaction);
+      let updatedDebts = syncResult.updatedDebts;
+      updatedTransaction = syncResult.updatedTx;
+
       if (allLinkedIds.length > 0 || txsToDelete.length > 0) {
         updatedDebts = updatedDebts.map(debt => ({
           ...debt,
@@ -1077,6 +1265,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
             })
         })).filter(debt => debt.transactions.length > 0);
       }
+      
+      updatedDebts = updatedDebts.map(updateDebtStatus);
       
       // When the edit moved the date to a different day, the old `order` is stale for the new day's
       // group (a tx that was order 0 on its old day would jump to the top of the new day). Re-stamp
@@ -1169,7 +1359,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
             return t;
           });
         const debtsAfter = (prev.debts || [])
-          .map(debt => ({ ...debt, transactions: debt.transactions.filter(dt => dt.id !== tx.id) }))
+          .map(debt => ({ ...debt, transactions: debt.transactions.filter(dt => dt.id !== tx.id && dt.linkedTxId !== tx.id) }))
+          .map(updateDebtStatus)
           .filter(debt => debt.transactions.length > 0);
         return { ...prev, transactions: remaining, debts: debtsAfter };
       }
@@ -1177,12 +1368,12 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       const linkedIds = (tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []));
       
       let updatedDebts = prev.debts || [];
-      if (linkedIds.length > 0) {
-        updatedDebts = updatedDebts.map(debt => ({
-          ...debt,
-          transactions: debt.transactions.filter(dt => !linkedIds.includes(dt.id))
-        })).filter(debt => debt.transactions.length > 0);
-      }
+      updatedDebts = updatedDebts.map(debt => ({
+        ...debt,
+        transactions: debt.transactions.filter(dt => !linkedIds.includes(dt.id) && dt.linkedTxId !== tx.id)
+      }))
+      .map(updateDebtStatus)
+      .filter(debt => debt.transactions.length > 0);
 
       // Leg-type links (Transfer/CC/NCMC/SIP/Stocks/Commodity) form a STAR around the parent:
       // children link to the parent, not to each other. Deleting one child must take the whole
