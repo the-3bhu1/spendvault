@@ -842,7 +842,10 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     const balanced = calcDebtBalance(debt.transactions) === 0;
     return {
       ...debt,
-      transactions: balanced ? debt.transactions.map(t => ({ ...t, markedDone: true })) : debt.transactions.map(t => ({ ...t, markedDone: false })),
+      // Only derive the debt-level `status` from the balance. `markedDone` is a
+      // manual per-transaction tick the user sets in the debt log (Debts.tsx) and
+      // must be preserved — rewriting it here wiped the user's ticks on every
+      // add/edit/delete elsewhere in the app.
       status: balanced ? 'settled' : 'active',
       updatedAt: Date.now()
     };

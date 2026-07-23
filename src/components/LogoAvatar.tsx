@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Cuboid } from 'lucide-react';
+import { getCachedLogo, cacheLogoImage } from '../services/LogoService';
 
 // Circular avatar for an investment holding. Renders the real brand logo when a URL resolves and
 // loads; otherwise (no URL, or the image 404s / a registry domain is wrong) it falls back to the
@@ -44,8 +45,10 @@ export function getInitials(name: string): string {
 export function LogoAvatar({ name, logoUrl, size, metal }: { name: string; logoUrl: string | null; size: number; metal?: 'gold' | 'silver' }) {
   // Ordered logo sources to try before initials: the resolved logo URL, then (for logo.dev domain
   // URLs) that domain's favicon. `srcIdx` advances on each <img> error; when it runs past the end
-  // we render initials.
-  const sources = logoUrl ? [logoUrl, faviconFallback(logoUrl)].filter((s): s is string => !!s) : [];
+  // we render initials. Each remote source is transparently swapped for its cached base64 data:
+  // URL when one exists, so real logos render instantly and work with no network (see LogoService).
+  const remoteSources = logoUrl ? [logoUrl, faviconFallback(logoUrl)].filter((s): s is string => !!s) : [];
+  const sources = remoteSources.map(s => getCachedLogo(s) || s);
   const [srcIdx, setSrcIdx] = useState(0);
   // Reset to the first source if the URL changes (e.g. user adds a logo.dev token).
   useEffect(() => { setSrcIdx(0); }, [logoUrl]);
@@ -99,6 +102,10 @@ export function LogoAvatar({ name, logoUrl, size, metal }: { name: string; logoU
           src={sources[srcIdx]}
           alt={name}
           loading="lazy"
+          // Once a remote source paints successfully, persist its bytes so the next open (and any
+          // offline render) shows the real logo instead of falling back to initials. No-op when the
+          // source is already a cached data: URL.
+          onLoad={() => cacheLogoImage(sources[srcIdx])}
           onError={() => setSrcIdx(i => i + 1)}
           // cover (not contain) so a brand icon's own square background fills the circle and gets
           // clipped round, instead of floating as a square inside it. These logo/favicon sources

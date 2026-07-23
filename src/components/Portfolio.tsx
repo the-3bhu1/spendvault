@@ -782,7 +782,7 @@ export function Portfolio() {
                 }}>
                   {oneDay.perUnitChange >= 0 ? '↑' : '↓'} ₹{Math.abs(oneDay.perUnitChange).toFixed(2)} ({oneDay.pct >= 0 ? '+' : ''}{oneDay.pct.toFixed(2)}%)
                 </div>
-              ) : (
+              ) : selectedAsset.type === 'commodity' ? null : (
                 <div style={{
                   fontSize: '1rem',
                   fontWeight: 600,

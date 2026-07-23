@@ -180,6 +180,93 @@ function notifyLogosUpdated() {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(LOGOS_UPDATED_EVENT));
 }
 
+// --- Logo image byte-cache (offline support) ------------------------------------------
+// URL *resolution* above is synchronous, but the logo IMAGE is a remote fetch (img.logo.dev /
+// Google favicon) on every render. In a network-less area or on a cold HTTP cache, stocks/MFs
+// therefore fall back to initials (see LogoAvatar). To render real logos offline, we persist the
+// image bytes as a base64 data: URL the first time an <img> successfully loads a source, keyed by
+// the (token-stripped) source URL. Stored under its OWN localStorage key, deliberately OUTSIDE
+// FinanceData, so it never bloats or leaks into exports/backups. It's a pure cache: dropping it
+// only costs a re-fetch when back online. On device, CapacitorHttp (enabled in capacitor.config)
+// routes fetch() through native HTTP, bypassing CORS; on web a CORS-blocked source just skips
+// caching (no regression). Every stored entry is validated as a real image, so a 404/error page
+// can't poison the cache.
+const LOGO_IMG_CACHE_KEY = 'logo_image_cache';
+const LOGO_IMG_CACHE_MAX_BYTES = 2_000_000; // ~2MB budget across all cached logos
+const LOGO_IMG_MAX_ASSET_BYTES = 200_000;   // skip any single asset larger than this
+
+let imgCache: Record<string, string> = (() => {
+  try {
+    const raw = localStorage.getItem(LOGO_IMG_CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+})();
+const imgInFlight = new Set<string>();
+
+// Drop the token query param so the key is stable across token changes and never stores the
+// secret; the cached image is identical regardless of token.
+function imgCacheKey(url: string): string {
+  try {
+    const u = new URL(url);
+    u.searchParams.delete('token');
+    return u.toString();
+  } catch { return url; }
+}
+
+function persistImgCache(): void {
+  try {
+    localStorage.setItem(LOGO_IMG_CACHE_KEY, JSON.stringify(imgCache));
+  } catch {
+    // QuotaExceeded (or serialization failure) — clear the whole cache once so the app keeps
+    // working; logos simply re-fetch online next time. Simpler and safer than partial eviction.
+    try { imgCache = {}; localStorage.removeItem(LOGO_IMG_CACHE_KEY); } catch { /* ignore */ }
+  }
+}
+
+/** Cached base64 data: URL for a logo source URL, or null if not yet cached. Synchronous. */
+export function getCachedLogo(url: string): string | null {
+  return imgCache[imgCacheKey(url)] || null;
+}
+
+/** Fire-and-forget: fetch a successfully-displayed logo URL's bytes and persist them as a base64
+ *  data URL for offline / cold-cache renders. No-op if already cached, already a data URL, or the
+ *  fetch fails or doesn't return a real image. */
+export async function cacheLogoImage(url: string): Promise<void> {
+  if (!url || url.startsWith('data:')) return;
+  const key = imgCacheKey(url);
+  if (imgCache[key] || imgInFlight.has(key)) return;
+
+  imgInFlight.add(key);
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const blob = await res.blob();
+    if (!blob.type.startsWith('image/')) return;        // guard against 404 HTML / text bodies
+    if (blob.size > LOGO_IMG_MAX_ASSET_BYTES) return;    // skip oversized assets
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+    if (!dataUrl.startsWith('data:image/')) return;      // final sanity check on the encoded result
+
+    // If this entry would push the cache past its budget, reset first (cheap, correct, rare).
+    const projected = JSON.stringify(imgCache).length + key.length + dataUrl.length + 8;
+    if (projected > LOGO_IMG_CACHE_MAX_BYTES) imgCache = {};
+
+    imgCache[key] = dataUrl;
+    persistImgCache();
+    // No notifyLogosUpdated() here: the image is already on screen from the remote URL, and
+    // swapping its src to the freshly-cached data URL would only cause a needless reload/flicker.
+    // The cache is consumed on the NEXT mount, where getCachedLogo() serves it from the start.
+  } catch {
+    /* offline / CORS / decode failure — leave uncached; a later successful load retries */
+  } finally {
+    imgInFlight.delete(key);
+  }
+}
+
 // Stocks key off the (stable) ticker; MFs off the scheme name.
 function aiCacheKey(account: AccountLike): string {
   return account.type === 'stocks'
