@@ -36,7 +36,8 @@ android/key.properties
 patch_transactions.cjs
 
 # Local tooling config (Claude Code)
-.claude/
+.claude/*
+!.claude/commands/
 
 # Exported user data backups — never commit personal financial data
 spendvault_backup_*.json
