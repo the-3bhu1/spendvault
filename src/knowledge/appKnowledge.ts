@@ -161,12 +161,11 @@ advance the due date), LINK (attach an existing transaction instead), or PAID (m
 can be linked to a SIP account so logging it auto-credits that account.
 
 # Portfolio
-Aggregates stocks and SIP/mutual-fund accounts (and commodity holdings): invested value vs. current
+Aggregates stocks, SIP/mutual-fund accounts, commodity holdings, and EPF (Employee Provident Fund): invested value vs. current
 value, with gain/loss. Prices: stocks/funds are fetched online; gold/silver are AI-estimated via the
-optional Gemini integration or set manually (₹/gram). Refresh all prices from the Portfolio screen, or
+optional Gemini integration or set manually (₹/gram). EPF accounts project running balance, monthly credit breakdown (12% employee + 3.67% employer EPF + 8.33% EPS pension), monthly accrued interest (credited March 31st), and 1-year projected balance. Refresh all prices from the Portfolio screen, or
 an individual holding from its account card. You can switch view modes, expand/collapse each asset
-class (Mutual Funds / Stocks / Commodities), and tap any holding to see its performance, allocation
-and transactions.
+class (Mutual Funds / Stocks / Commodities / EPF), and tap any holding to see its performance, allocation, subscreen details and transactions.
 
 # Commodity (gold / silver) prices
 Gold/silver per-gram prices are approximate AI estimates fetched from a vendor (price reference) using
