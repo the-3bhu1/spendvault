@@ -548,7 +548,7 @@ export function Portfolio() {
             <div style={{
               position: 'relative',
               display: 'flex',
-              marginTop: '1.5rem',
+              marginTop: portfolioView === 'epf' ? '1rem' : '1.5rem',
               padding: `${PAD}px`,
               background: 'rgba(255,255,255,0.05)',
               borderRadius: '999px',
@@ -616,13 +616,15 @@ export function Portfolio() {
             const totalEpfBalance = epfAccounts.reduce((sum, a) => sum + calculateEPFProjection(a).balance, 0);
             const totalAccruedInterest = epfAccounts.reduce((sum, a) => sum + calculateEPFProjection(a).accruedInterest, 0);
             return (<>
-              <div style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                 <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Current Value</div>
                 <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>{formatCurrency(totalEpfBalance)}</div>
               </div>
               <div style={{ width: '1px', background: 'var(--border-color)' }} />
-              <div style={{ flex: 1, textAlign: 'center' }}>
-                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Interest Earned (Current FY)</div>
+              <div style={{ flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem', lineHeight: 1.3 }}>
+                  Interest Earned<br />(Current FY)
+                </div>
                 <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--success)' }}>
                   {formatCurrency(totalAccruedInterest)}
                 </div>
