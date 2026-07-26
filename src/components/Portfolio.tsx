@@ -495,36 +495,38 @@ export function Portfolio() {
               Today{portfolioView === 'all' && commodityAccounts.length > 0 && todayScope ? ` (${todayScope})` : ''}
             </div>
           </div>
-        ) : portfolioView !== 'commodity' && (sipAccounts.length > 0 || stockAccounts.length > 0) ? (
+        ) : (portfolioView !== 'commodity' && portfolioView !== 'epf') && (sipAccounts.length > 0 || stockAccounts.length > 0) ? (
           <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.75rem', letterSpacing: '0.5px' }}>— today</div>
         ) : null}
 
-        <button
-          onClick={() => handleRefresh()}
-          disabled={isRefreshing}
-          style={{
-            marginTop: '1.25rem',
-            padding: '0.55rem 1.25rem',
-            background: 'transparent',
-            border: '1px solid var(--border-color)',
-            color: 'var(--text-primary)',
-            borderRadius: '999px',
-            cursor: isRefreshing ? 'default' : 'pointer',
-            opacity: isRefreshing ? 0.6 : 1,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.72rem',
-            fontWeight: 700,
-            fontFamily: 'var(--font-mono)',
-            letterSpacing: '0.5px'
-          }}
-        >
-          <RotateCcw size={15} className={isRefreshing ? 'icon-spin-ccw' : ''} />
-          {isRefreshing ? 'Refreshing...' : 'Refresh prices'}
-        </button>
+        {portfolioView !== 'epf' && (
+          <button
+            onClick={() => handleRefresh()}
+            disabled={isRefreshing}
+            style={{
+              marginTop: '1.25rem',
+              padding: '0.55rem 1.25rem',
+              background: 'transparent',
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-primary)',
+              borderRadius: '999px',
+              cursor: isRefreshing ? 'default' : 'pointer',
+              opacity: isRefreshing ? 0.6 : 1,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              fontSize: '0.72rem',
+              fontWeight: 700,
+              fontFamily: 'var(--font-mono)',
+              letterSpacing: '0.5px'
+            }}
+          >
+            <RotateCcw size={15} className={isRefreshing ? 'icon-spin-ccw' : ''} />
+            {isRefreshing ? 'Refreshing...' : 'Refresh prices'}
+          </button>
+        )}
 
-        {displayRefreshedAt && (
+        {portfolioView !== 'epf' && displayRefreshedAt && (
           <div className="text-mono uppercase" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginTop: '0.6rem', letterSpacing: '0.5px' }}>
             Last refresh at {formatTime(displayRefreshedAt)}
           </div>
@@ -610,6 +612,24 @@ export function Portfolio() {
         gap: '0.5rem'
       }}>
         {(() => {
+          if (portfolioView === 'epf') {
+            const totalEpfBalance = epfAccounts.reduce((sum, a) => sum + calculateEPFProjection(a).balance, 0);
+            const totalAccruedInterest = epfAccounts.reduce((sum, a) => sum + calculateEPFProjection(a).accruedInterest, 0);
+            return (<>
+              <div style={{ flex: 1, textAlign: 'center' }}>
+                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Current Value</div>
+                <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>{formatCurrency(totalEpfBalance)}</div>
+              </div>
+              <div style={{ width: '1px', background: 'var(--border-color)' }} />
+              <div style={{ flex: 1, textAlign: 'center' }}>
+                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Interest Earned (Current FY)</div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--success)' }}>
+                  {formatCurrency(totalAccruedInterest)}
+                </div>
+              </div>
+            </>);
+          }
+
           const s = portfolioStats[portfolioView];
           return (<>
             <div style={{ flex: 1, textAlign: 'center' }}>
