@@ -188,6 +188,8 @@ export const getMostRecentStatementDate = (statementDay: number) => {
   return candidate;
 };
 
+import { calculateEPFProjection } from './utils/epfEngine';
+
 export const calculateBalance = (
   account: Account,
   transactions: Transaction[],
@@ -196,6 +198,10 @@ export const calculateBalance = (
   isRewardPoints: boolean = false,
   cashbackStatements: CashbackStatement[] = []
 ) => {
+  if (account.type === 'epf') {
+    return calculateEPFProjection(account, monthStr).balance;
+  }
+
   const balancesMap = isRewardPoints 
     ? (account.rewardOpeningBalances || {}) 
     : isTravel 

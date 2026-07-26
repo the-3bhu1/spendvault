@@ -51,6 +51,7 @@ export const getAccountEmoji = (
     case 'sips': return '💹';
     case 'rewards': return '🎁';
     case 'cash': return '💵';
+    case 'epf': return '🏛️';
     case 'commodity':
       return opts?.commodityMetal === 'silver' ? '🥈' : opts?.commodityMetal === 'gold' ? '🥇' : '💎';
     default: return '💼';
@@ -63,6 +64,7 @@ export const getAccountTypeIcon = (type: string, size = 18) => {
     case 'debit_card':
       return <CreditCard size={size} />;
     case 'bank_account':
+    case 'epf':
       return <Landmark size={size} />;
     case 'e_wallet':
       return <WalletCards size={size} />;

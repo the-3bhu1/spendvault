@@ -1,6 +1,43 @@
-export type BuiltInAccountType = 'credit_card' | 'bank_account' | 'cash' | 'debit_card' | 'e_wallet' | 'stocks' | 'sips' | 'rewards' | 'commodity';
+export type BuiltInAccountType = 'credit_card' | 'bank_account' | 'cash' | 'debit_card' | 'e_wallet' | 'stocks' | 'sips' | 'rewards' | 'commodity' | 'epf';
 export type AccountType = BuiltInAccountType | (string & {});
 export type RoundingRule = 'round' | 'floor' | 'ceil' | 'none';
+
+export interface EPFSalaryRevision {
+  id: string;
+  effectiveDate: string; // 'YYYY-MM-DD'
+  basicSalary: number;
+  dearnessAllowance?: number; // defaults to 0
+  employeeContributionPct?: number; // default 12%
+  employerContributionPct?: number; // default 12%
+  notes?: string; // e.g. "Annual Increment", "Promotion", "Job Change"
+}
+
+export interface EPFInterestRateConfig {
+  financialYear: string; // e.g. "FY 2024-25", "FY 2025-26"
+  annualRate: number; // e.g. 8.25
+}
+
+export interface EPFBalanceAdjustment {
+  id: string;
+  date: string; // 'YYYY-MM-DD'
+  balance: number;
+  notes?: string; // e.g. "Passbook Verification", "Manual Correction"
+}
+
+export interface EPFProjectionResult {
+  balance: number;
+  employeeContribution: number;
+  employerEPFContribution: number;
+  employerEPSContribution: number;
+  totalContribution: number;
+  accruedInterest: number;
+  projectedOneYearBalance: number;
+  effectiveSalary: {
+    basic: number;
+    da: number;
+    effectiveDate: string;
+  };
+}
 
 export interface CashbackRate {
   id: string;
@@ -73,6 +110,17 @@ export interface Account {
   rewardType?: 'rupee' | 'points';
   rewardOpeningBalances?: Record<string, number>;
   rewardBalanceAdjustments?: Record<string, number>;
+
+  // Specific to EPF (Employee Provident Fund)
+  joiningDate?: string;
+  baseBalance?: number;
+  baseBalanceDate?: string;
+  epfContributionBasis?: 'statutory_ceiling' | 'actual_basic';
+  salaryRevisions?: EPFSalaryRevision[];
+  isEpsDisabled?: boolean;
+  epsWageCeiling?: number;
+  interestRateOverrides?: EPFInterestRateConfig[];
+  epfBalanceAdjustments?: EPFBalanceAdjustment[];
 }
 
 export type TransactionType = 'credit' | 'debit';

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Cuboid } from 'lucide-react';
+import { Cuboid, Landmark } from 'lucide-react';
 import { getCachedLogo, cacheLogoImage } from '../services/LogoService';
 
 // Circular avatar for an investment holding. Renders the real brand logo when a URL resolves and
@@ -42,7 +42,7 @@ export function getInitials(name: string): string {
     .slice(0, 2);
 }
 
-export function LogoAvatar({ name, logoUrl, size, metal }: { name: string; logoUrl: string | null; size: number; metal?: 'gold' | 'silver' }) {
+export function LogoAvatar({ name, logoUrl, size, metal, isEpf }: { name: string; logoUrl: string | null; size: number; metal?: 'gold' | 'silver'; isEpf?: boolean }) {
   // Ordered logo sources to try before initials: the resolved logo URL, then (for logo.dev domain
   // URLs) that domain's favicon. `srcIdx` advances on each <img> error; when it runs past the end
   // we render initials. Each remote source is transparently swapped for its cached base64 data:
@@ -52,6 +52,27 @@ export function LogoAvatar({ name, logoUrl, size, metal }: { name: string; logoU
   const [srcIdx, setSrcIdx] = useState(0);
   // Reset to the first source if the URL changes (e.g. user adds a logo.dev token).
   useEffect(() => { setSrcIdx(0); }, [logoUrl]);
+
+  if (isEpf) {
+    return (
+      <div
+        style={{
+          width: `${size}px`,
+          height: `${size}px`,
+          borderRadius: '50%',
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'linear-gradient(135deg, #ffb703 0%, #fb8500 100%)',
+          color: '#ffffff',
+          boxShadow: '0 2px 8px rgba(251, 133, 0, 0.25)'
+        }}
+      >
+        <Landmark size={Math.round(size * 0.52)} color="#ffffff" strokeWidth={2} />
+      </div>
+    );
+  }
 
   // Commodities aren't a brand — render a metallic gold/silver bullion bar instead of a logo or
   // initials. The bar is a small inline SVG ingot (lucide has no bullion icon).

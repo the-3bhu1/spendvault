@@ -37,6 +37,7 @@ An account is any place money sits or is owed. Built-in types:
 - credit_card — a debit (spend) INCREASES the outstanding balance; a credit (payment) reduces it.
 - stocks / sips — investments; track invested value and units/shares and current value.
 - commodity — gold or silver, valued at a ₹/gram price (AI-estimated or a manual override).
+- epf — Employee Provident Fund; tracks running EPF balance, monthly employer/employee credit breakdown, monthly accrued interest for current FY (credited on March 31st), and 1-year projections. Options include Statutory Wage Ceiling (₹15,000 cap) vs Actual Basic + DA.
 - rewards — a reward-points wallet (points, not rupees), with a reward unit and conversion rate.
 Add or remove custom account types in Settings → Account Types (a type that's in use can't be deleted).
 Actions (each account is a card on the Accounts tab):

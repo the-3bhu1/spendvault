@@ -7,6 +7,7 @@ import { TrendingUp, RotateCcw, ChevronLeft, ChevronDown } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
 import { LogoAvatar } from './LogoAvatar';
 import { getAssetLogoUrl, ensureAssetLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
+import { calculateEPFProjection } from '../utils/epfEngine';
 
 type HistoryDataPoint = { date: number; close: number };
 type StockHistoryRange = '1d' | '5d' | '1mo' | '3mo' | '1y' | '5y';
@@ -115,7 +116,7 @@ export function Portfolio() {
   const [stockRange, setStockRange] = useState<StockHistoryRange>('1mo');
   const [mfRange, setMFRange] = useState<MFHistoryRange>('1y');
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
-  const [portfolioView, setPortfolioView] = useState<'all' | 'mf' | 'stocks' | 'commodity'>('all');
+  const [portfolioView, setPortfolioView] = useState<'all' | 'mf' | 'stocks' | 'commodity' | 'epf'>('all');
   // Bumped when a background AI logo lookup resolves, so resolved logos appear without a reload.
   const [, setLogoTick] = useState(0);
 
@@ -147,6 +148,14 @@ export function Portfolio() {
   const commodityAccounts = useMemo(() => {
     try {
       return (data?.accounts || []).filter((a: Account) => a.type === 'commodity' && !a.archived);
+    } catch {
+      return [];
+    }
+  }, [data?.accounts]);
+
+  const epfAccounts = useMemo(() => {
+    try {
+      return (data?.accounts || []).filter((a: Account) => a.type === 'epf' && !a.archived);
     } catch {
       return [];
     }
@@ -255,6 +264,17 @@ export function Portfolio() {
       .reduce((sum: number, t: any) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0);
 
   const getAccountStats = (account: Account) => {
+    if (account.type === 'epf') {
+      const proj = calculateEPFProjection(account);
+      return {
+        totalUnits: 1,
+        totalInvested: proj.balance,
+        currentValue: proj.balance,
+        totalReturn: 0,
+        totalReturnPct: 0,
+        currentPrice: proj.balance
+      };
+    }
     const symbol = account.marketSymbol || '';
     // Commodity manual override (₹/g) wins over the fetched estimate; harmless for others.
     const currentPrice = account.manualPricePerGram ?? prices[symbol] ?? 0;
@@ -306,11 +326,12 @@ export function Portfolio() {
   };
 
   const portfolioStats = useMemo(() => ({
-    all: buildStats([...sipAccounts, ...stockAccounts, ...commodityAccounts]),
+    all: buildStats([...sipAccounts, ...stockAccounts, ...commodityAccounts, ...epfAccounts]),
     mf: buildStats(sipAccounts),
     stocks: buildStats(stockAccounts),
     commodity: buildStats(commodityAccounts),
-  }), [sipAccounts, stockAccounts, commodityAccounts, prices, data.transactions]);
+    epf: buildStats(epfAccounts),
+  }), [sipAccounts, stockAccounts, commodityAccounts, epfAccounts, prices, data.transactions]);
 
   const portfolioOneDayReturn = useMemo(() => {
     const accounts = portfolioView === 'all' ? [...sipAccounts, ...stockAccounts, ...commodityAccounts]
@@ -366,7 +387,7 @@ export function Portfolio() {
     return `${hours}:${minutes}`;
   };
 
-  const hasInvestments = sipAccounts.length > 0 || stockAccounts.length > 0 || commodityAccounts.length > 0;
+  const hasInvestments = sipAccounts.length > 0 || stockAccounts.length > 0 || commodityAccounts.length > 0 || epfAccounts.length > 0;
 
   // The 1-day return excludes commodities (no previous-day price). When commodities are part of
   // the "All" view, spell out which classes the figure actually covers so it's not mistaken for
@@ -399,7 +420,7 @@ export function Portfolio() {
           gap: '0.9rem'
         }}
       >
-        <LogoAvatar name={account.name} logoUrl={getAssetLogoUrl(account)} size={42} metal={account.type === 'commodity' ? (account.commodityMetal === 'silver' ? 'silver' : 'gold') : undefined} />
+        <LogoAvatar name={account.name} logoUrl={getAssetLogoUrl(account)} size={42} metal={account.type === 'commodity' ? (account.commodityMetal === 'silver' ? 'silver' : 'gold') : undefined} isEpf={account.type === 'epf'} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
             fontSize: '0.92rem',
@@ -475,7 +496,7 @@ export function Portfolio() {
             </div>
           </div>
         ) : portfolioView !== 'commodity' && (sipAccounts.length > 0 || stockAccounts.length > 0) ? (
-          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.75rem' }}>— today</div>
+          <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.75rem', letterSpacing: '0.5px' }}>— today</div>
         ) : null}
 
         <button
@@ -493,8 +514,10 @@ export function Portfolio() {
             display: 'flex',
             alignItems: 'center',
             gap: '0.5rem',
-            fontSize: '0.85rem',
-            fontWeight: 600
+            fontSize: '0.72rem',
+            fontWeight: 700,
+            fontFamily: 'var(--font-mono)',
+            letterSpacing: '0.5px'
           }}
         >
           <RotateCcw size={15} className={isRefreshing ? 'icon-spin-ccw' : ''} />
@@ -508,14 +531,12 @@ export function Portfolio() {
         )}
 
         {(() => {
-          // One tab per asset class that's actually present, plus "All". The bar only appears
-          // when more than one class exists — with a single class "All" is identical to it, so
-          // the bar would be noise (and with only MFs, there's nothing to filter at all).
           const presentTabs = [
             sipAccounts.length > 0 ? { v: 'mf' as const, label: 'MF' } : null,
             stockAccounts.length > 0 ? { v: 'stocks' as const, label: 'Stocks' } : null,
             commodityAccounts.length > 0 ? { v: 'commodity' as const, label: 'Metals' } : null,
-          ].filter((t): t is { v: 'mf' | 'stocks' | 'commodity'; label: string } => t !== null);
+            epfAccounts.length > 0 ? { v: 'epf' as const, label: 'EPF' } : null,
+          ].filter((t): t is { v: 'mf' | 'stocks' | 'commodity' | 'epf'; label: string } => t !== null);
           if (presentTabs.length < 2) return null;
           const tabs = [{ v: 'all' as const, label: 'All' }, ...presentTabs];
           const N = tabs.length;
@@ -714,6 +735,34 @@ export function Portfolio() {
             </div>
             );
           })()}
+
+          {epfAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'epf') && (() => {
+            const single = portfolioView !== 'all';
+            const isCollapsed = single ? false : collapsedSections.has('epf');
+            return (
+            <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+              <div
+                className="flex align-center gap-3"
+                style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
+                onClick={single ? undefined : () => toggleSection('epf')}
+              >
+                <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
+                  Employee Provident Fund (EPF)
+                </span>
+                <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
+                  {epfAccounts.length}
+                </span>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
+                {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
+              </div>
+              {!isCollapsed && (
+                <div>
+                  {epfAccounts.map((account: Account) => renderAssetRow(account))}
+                </div>
+              )}
+            </div>
+            );
+          })()}
         </>
       )}
       </>
@@ -750,14 +799,14 @@ export function Portfolio() {
             {/* Asset identity — centered, CRED style */}
             <div style={{ padding: '0 1.5rem 1.5rem', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
               <div style={{ marginBottom: '1rem' }}>
-                <LogoAvatar name={selectedAsset.name} logoUrl={getAssetLogoUrl(selectedAsset)} size={60} metal={selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'silver' : 'gold') : undefined} />
+                <LogoAvatar name={selectedAsset.name} logoUrl={getAssetLogoUrl(selectedAsset)} size={60} metal={selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'silver' : 'gold') : undefined} isEpf={selectedAsset.type === 'epf'} />
               </div>
 
               <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.35, maxWidth: '90%' }}>
                 {selectedAsset.name}
               </div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
-                {selectedAsset.type === 'sips' ? 'Mutual Fund' : selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'Silver' : 'Gold') : 'Stock'}
+                {selectedAsset.type === 'epf' ? 'Employee Provident Fund' : selectedAsset.type === 'sips' ? 'Mutual Fund' : selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'Silver' : 'Gold') : 'Stock'}
               </div>
 
               <div className="text-serif" style={{
@@ -767,9 +816,11 @@ export function Portfolio() {
                 marginTop: '1.25rem',
                 lineHeight: 1
               }}>
-                {selectedAsset.type === 'commodity'
-                  ? `₹${stats.currentPrice.toFixed(2)}/g`
-                  : `₹${stats.currentPrice.toFixed(2)}`
+                {selectedAsset.type === 'epf'
+                  ? `₹${Math.round(stats.currentValue).toLocaleString('en-IN')}`
+                  : selectedAsset.type === 'commodity'
+                    ? `₹${(stats.currentPrice ?? 0).toFixed(2)}/g`
+                    : `₹${(stats.currentPrice ?? 0).toFixed(2)}`
                 }
               </div>
 
@@ -782,7 +833,7 @@ export function Portfolio() {
                 }}>
                   {oneDay.perUnitChange >= 0 ? '↑' : '↓'} ₹{Math.abs(oneDay.perUnitChange).toFixed(2)} ({oneDay.pct >= 0 ? '+' : ''}{oneDay.pct.toFixed(2)}%)
                 </div>
-              ) : selectedAsset.type === 'commodity' ? null : (
+              ) : (selectedAsset.type === 'commodity' || selectedAsset.type === 'epf') ? null : (
                 <div style={{
                   fontSize: '1rem',
                   fontWeight: 600,
@@ -801,7 +852,7 @@ export function Portfolio() {
             </div>
 
             {/* Chart — CRED style: auto-scaled, no axes/grid clutter, thin trend line */}
-            {selectedAsset.type === 'commodity' ? null : historyLoading ? (
+            {selectedAsset.type === 'commodity' || selectedAsset.type === 'epf' ? null : historyLoading ? (
               <div style={{ padding: '0.5rem 0 0.5rem', width: '100%', boxSizing: 'border-box' }}>
                 {/* Skeleton mirrors the real chart's box: 280px tall, 70px top / 30px axis padding */}
                 <div style={{ width: '100%', height: '280px', padding: '70px 0 30px', boxSizing: 'border-box' }}>
@@ -923,7 +974,7 @@ export function Portfolio() {
             )}
 
             {/* Range Selector — below chart, CRED style */}
-            {selectedAsset.type !== 'commodity' && (
+            {selectedAsset.type !== 'commodity' && selectedAsset.type !== 'epf' && (
               <div style={{ padding: '0.75rem 1rem 0.5rem', boxSizing: 'border-box', borderBottom: '1px solid var(--border-color)' }}>
                 <div className="no-scrollbar" style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', gap: '0.25rem' }}>
                   {(selectedAsset.type === 'stocks'
@@ -959,30 +1010,78 @@ export function Portfolio() {
               </div>
             )}
 
-            {/* Stats List */}
-            <div style={{ padding: '0.5rem 1.25rem 1.5rem', boxSizing: 'border-box' }}>
-              <StatRow
-                label={selectedAsset.type === 'stocks' ? 'Shares' : selectedAsset.type === 'commodity' ? 'Grams' : 'Units'}
-                value={`${stats.totalUnits.toLocaleString('en-IN', { maximumFractionDigits: 3 })}${selectedAsset.type === 'commodity' ? ' g' : ''}`}
-              />
-              <StatRow
-                label="Total Returns"
-                value={`${stats.totalReturn >= 0 ? '↑' : '↓'} ₹${Math.abs(stats.totalReturn).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${stats.totalReturnPct >= 0 ? '+' : ''}${stats.totalReturnPct.toFixed(2)}%)`}
-                color={stats.totalReturn >= 0 ? '#4ade80' : '#f87171'}
-              />
-              {oneDay && (
+            {/* EPF Clean StatRow Subscreen */}
+            {selectedAsset.type === 'epf' ? (() => {
+              const epfProj = calculateEPFProjection(selectedAsset);
+              const monthlyCredit = epfProj.employeeContribution + epfProj.employerEPFContribution + epfProj.employerEPSContribution;
+
+              return (
+                <div style={{ padding: '0.5rem 1.25rem 1.5rem', boxSizing: 'border-box' }}>
+                  <StatRow
+                    label="Monthly Credit"
+                    value={formatFullCurrency(monthlyCredit)}
+                  />
+                  <StatRow
+                    label="Employee Share (12%)"
+                    value={formatFullCurrency(epfProj.employeeContribution)}
+                  />
+                  <StatRow
+                    label="Employer EPF Share"
+                    value={formatFullCurrency(epfProj.employerEPFContribution)}
+                  />
+                  <StatRow
+                    label="Employer EPS (Pension)"
+                    value={formatFullCurrency(epfProj.employerEPSContribution)}
+                    color="var(--warning)"
+                  />
+
+                  <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.75rem 0' }} />
+
+                  <StatRow
+                    label="Interest Earned (Current FY)"
+                    value={formatFullCurrency(epfProj.accruedInterest)}
+                    color="var(--success)"
+                  />
+
+                  <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.75rem 0' }} />
+
+                  <StatRow
+                    label="Est. Balance (1 Year)"
+                    value={formatFullCurrency(epfProj.projectedOneYearBalance)}
+                  />
+                  <StatRow
+                    label="Projected Annual Growth"
+                    value={`+ ${formatFullCurrency(epfProj.projectedOneYearBalance - epfProj.balance)}`}
+                    color="var(--success)"
+                  />
+                </div>
+              );
+            })() : (
+              /* Stats List for Stocks & Mutual Funds */
+              <div style={{ padding: '0.5rem 1.25rem 1.5rem', boxSizing: 'border-box' }}>
                 <StatRow
-                  label="1 Day Returns"
-                  value={`${oneDay.amount >= 0 ? '↑' : '↓'} ₹${Math.abs(oneDay.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${oneDay.pct >= 0 ? '+' : ''}${oneDay.pct.toFixed(2)}%)`}
-                  color={oneDay.amount >= 0 ? '#4ade80' : '#f87171'}
+                  label={selectedAsset.type === 'stocks' ? 'Shares' : selectedAsset.type === 'commodity' ? 'Grams' : 'Units'}
+                  value={`${stats.totalUnits.toLocaleString('en-IN', { maximumFractionDigits: 3 })}${selectedAsset.type === 'commodity' ? ' g' : ''}`}
                 />
-              )}
+                <StatRow
+                  label="Total Returns"
+                  value={`${stats.totalReturn >= 0 ? '↑' : '↓'} ₹${Math.abs(stats.totalReturn).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${stats.totalReturnPct >= 0 ? '+' : ''}${stats.totalReturnPct.toFixed(2)}%)`}
+                  color={stats.totalReturn >= 0 ? '#4ade80' : '#f87171'}
+                />
+                {oneDay && (
+                  <StatRow
+                    label="1 Day Returns"
+                    value={`${oneDay.amount >= 0 ? '↑' : '↓'} ₹${Math.abs(oneDay.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${oneDay.pct >= 0 ? '+' : ''}${oneDay.pct.toFixed(2)}%)`}
+                    color={oneDay.amount >= 0 ? '#4ade80' : '#f87171'}
+                  />
+                )}
 
-              <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.5rem 0' }} />
+                <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.5rem 0' }} />
 
-              <StatRow label="Current" value={formatFullCurrency(stats.currentValue)} />
-              <StatRow label="Invested" value={formatFullCurrency(stats.totalInvested)} />
-            </div>
+                <StatRow label="Current" value={formatFullCurrency(stats.currentValue)} />
+                <StatRow label="Invested" value={formatFullCurrency(stats.totalInvested)} />
+              </div>
+            )}
           </div>
         </div>
         );

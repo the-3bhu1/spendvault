@@ -58,9 +58,14 @@ export const KEY_MAP: Record<string, string> = {
   cycles: 'cy', currentCycleId: 'cci', cycleStartDate: 'csd',
   cycleNumber: 'cnm', startDate: 'sdt', endDate: 'edt', carriedOverPeople: 'cop',
   markedDone: 'md', linkedSipAccountId: 'lsa',
-  // Stocks / SIPs / Commodity investment fields
+  // Stocks / SIPs / Commodity / EPF investment fields
   numberOfShares: 'ns', marketSymbol: 'ms', investedValue: 'iv', commodityMetal: 'cm',
-  manualPricePerGram: 'mpg', avgNav: 'an',
+  manualPricePerGram: 'mpg', avgNav: 'an', epfContributionBasis: 'ecb',
+  joiningDate: 'jd', baseBalance: 'bb', baseBalanceDate: 'bbd',
+  salaryRevisions: 'srv', isEpsDisabled: 'ied', epsWageCeiling: 'ewc',
+  interestRateOverrides: 'iro', epfBalanceAdjustments: 'eba',
+  basicSalary: 'bs', dearnessAllowance: 'da', employeeContributionPct: 'ecp', employerContributionPct: 'ercp',
+  effectiveDate: 'efd',
   // Soft-delete flag (see Account.archived)
   archived: 'arc',
 };

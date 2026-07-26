@@ -6,6 +6,7 @@ import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols, isC
 import type { MFSearchResult, StockSearchResult } from '../services/MarketDataService';
 import { getCommodityVendor } from '../services/GeminiConfig';
 import { CustomPicker } from './CustomPicker';
+import CustomDatePicker from './CustomDatePicker';
 import { getAccountEmoji } from './transactionIcons';
 import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardNetwork } from '../types';
@@ -13,12 +14,16 @@ import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calcu
 import { CardNetworkLogo } from './CardNetworkLogo';
 import { ViewCardOverlay } from './ViewCardOverlay';
 
+import { EPFDetailsView } from './EPFDetailsModal';
+
 export default function Accounts({ onViewStatement }: { onViewStatement: (acc: Account) => void }) {
   const { data, setPendingTransfer, addAccount, updateAccount, archiveAccount, restoreAccount } = useFinance();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [viewingCard, setViewingCard] = useState<Account | null>(null);
+  const [viewingEPFAccount, setViewingEPFAccount] = useState<Account | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [datePickerTarget, setDatePickerTarget] = useState<{ type: 'joining' | 'revision'; index?: number } | null>(null);
   const [prices, setPrices] = useState<Record<string, number>>(() => {
     const cached: Record<string, number> = {};
     data.accounts
@@ -128,6 +133,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     { id: 'credit_card', name: 'Credit Card', subtext: 'Credit line with cycles' },
     { id: 'debit_card', name: 'Debit Card', subtext: 'Linked to bank account' },
     { id: 'e_wallet', name: 'E-Wallet', subtext: 'Digital Currency' },
+    { id: 'epf', name: 'EPF', subtext: 'Employee Provident Fund Auto-Projection' },
     { id: 'stocks', name: 'Stocks', subtext: 'Market Investments' },
     { id: 'sips', name: 'SIPs', subtext: 'Systematic Investment Plan' },
     { id: 'rewards', name: 'Rewards', subtext: 'Cashback & Points' },
@@ -242,7 +248,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setEditingCashbackRateId(null);
     setIsEditingCardDetails(false);
 
-    const currentBalance = calculateBalance(acc, data.transactions, month);
+    const currentBalance = acc.type === 'epf' ? (acc.baseBalance || 0) : calculateBalance(acc, data.transactions, month);
     setOpeningBalanceInput(currentBalance.toString());
 
     const currentTravelBalance = calculateBalance(acc, data.transactions, month, true);
@@ -480,6 +486,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       rewardType: (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.isCashbackEnabled ? (newAccount.rewardType || 'rupee') : undefined,
       rewardOpeningBalances: updatedRewardOpeningBalances,
       rewardBalanceAdjustments: updatedRewardBalanceAdjustments,
+      baseBalance: newAccount.type === 'epf' ? (parseFloat(openingBalanceInput) || 0) : undefined,
+      baseBalanceDate: newAccount.type === 'epf' ? `${getCurrentMonthStr()}-01` : undefined,
+      joiningDate: newAccount.type === 'epf' ? newAccount.joiningDate : undefined,
+      epfContributionBasis: newAccount.type === 'epf' ? (newAccount.epfContributionBasis || 'statutory_ceiling') : undefined,
+      salaryRevisions: newAccount.type === 'epf' ? (newAccount.salaryRevisions || []) : undefined,
+      isEpsDisabled: newAccount.type === 'epf' ? newAccount.isEpsDisabled : undefined,
+      interestRateOverrides: newAccount.type === 'epf' ? newAccount.interestRateOverrides : undefined,
+      epfBalanceAdjustments: newAccount.type === 'epf' ? newAccount.epfBalanceAdjustments : undefined,
     };
 
     if (editId) {
@@ -506,6 +520,19 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     return '';
   };
 
+  if (viewingEPFAccount) {
+    return (
+      <EPFDetailsView
+        account={viewingEPFAccount}
+        onClose={() => setViewingEPFAccount(null)}
+        onUpdateAccount={(updatedAcc) => {
+          updateAccount(updatedAcc);
+          setViewingEPFAccount(updatedAcc);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="flex-col gap-6" style={{ maxWidth: '600px', margin: '0 auto', width: '100%' }}>
       <div className="flex justify-between align-center" style={{ marginBottom: '1rem' }}>
@@ -522,6 +549,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             credit_card: 'Credit Cards',
             debit_card: 'Debit Cards',
             e_wallet: 'E-Wallets',
+            epf: 'Employee Provident Fund (EPF)',
             stocks: 'Stocks & Investments',
             sips: 'SIPs',
             rewards: 'Rewards & Cashback',
@@ -536,6 +564,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             'cash',
             'e_wallet',
             'rewards',
+            'epf',
             'stocks',
             'sips',
             'commodity'
@@ -898,6 +927,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           </div>
                         </div>
                       )}
+
+                      {/* EPF Account has clean card layout with Opening & Total Balance */}
 
                       {acc.type === 'debit_card' && !acc.isNcmcEnabled && acc.cardDetails?.cardNumber && (
                         <div className="flex justify-end align-center gap-4" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)' }}>
@@ -1374,6 +1405,48 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       </p>
                     </div>
                   )}
+                </>
+              )}
+
+              {newAccount.type === 'epf' && (
+                <>
+                  {/* Contribution Basis */}
+                  <div style={{ marginBottom: '1rem' }}>
+                    <CustomPicker
+                      label="Contribution Basis"
+                      value={newAccount.epfContributionBasis || 'statutory_ceiling'}
+                      options={[
+                        { id: 'statutory_ceiling', name: 'Statutory Wage Ceiling (₹15,000)', subtext: '12% capped at ₹15,000 basic (Default EPFO rule)' },
+                        { id: 'actual_basic', name: 'Actual Basic + DA', subtext: '12% calculated on full actual basic salary' }
+                      ]}
+                      onChange={val => setNewAccount({ ...newAccount, epfContributionBasis: val as 'statutory_ceiling' | 'actual_basic' })}
+                      iconGetter={id => id === 'statutory_ceiling' ? '🛡️' : '💼'}
+                    />
+                  </div>
+
+                  {/* Monthly Basic Salary */}
+                  <div className="input-group">
+                    <label>Monthly Basic + DA Salary — ₹</label>
+                    <input
+                      type="number"
+                      className="input-field"
+                      placeholder="e.g. 33700"
+                      value={newAccount.salaryRevisions?.[0]?.basicSalary || ''}
+                      onChange={e => {
+                        const basic = parseFloat(e.target.value) || 0;
+                        setNewAccount({
+                          ...newAccount,
+                          salaryRevisions: [{
+                            id: generateId(),
+                            effectiveDate: newAccount.joiningDate || `${getCurrentMonthStr()}-01`,
+                            basicSalary: basic,
+                            employeeContributionPct: 12,
+                            employerContributionPct: 12,
+                          }]
+                        });
+                      }}
+                    />
+                  </div>
                 </>
               )}
 
@@ -2180,6 +2253,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
           onClose={() => setViewingCard(null)}
         />
       )}
+
       {/* Custom Confirmation Dialog */}
       <ConfirmDialog
         isOpen={!!deleteConfirmId}
@@ -2195,6 +2269,36 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
         }}
         onCancel={() => setDeleteConfirmId(null)}
       />
+
+      {/* Custom Date Picker Modal */}
+      {datePickerTarget && (
+        <CustomDatePicker
+          isOpen={!!datePickerTarget}
+          onClose={() => setDatePickerTarget(null)}
+          label={datePickerTarget.type === 'joining' ? 'Select Date of Joining' : 'Select Revision Effective Date'}
+          value={
+            datePickerTarget.type === 'joining'
+              ? (newAccount.joiningDate || newAccount.baseBalanceDate || format(new Date(), 'yyyy-MM-dd'))
+              : (() => {
+                  const rev = newAccount.salaryRevisions?.[datePickerTarget.index || 0];
+                  if (!rev || !rev.effectiveDate) return format(new Date(), 'yyyy-MM-dd');
+                  return rev.effectiveDate.length === 7 ? `${rev.effectiveDate}-01` : rev.effectiveDate;
+                })()
+          }
+          onChange={selectedDate => {
+            if (datePickerTarget.type === 'joining') {
+              setNewAccount({ ...newAccount, joiningDate: selectedDate, baseBalanceDate: selectedDate });
+            } else if (datePickerTarget.type === 'revision' && datePickerTarget.index !== undefined) {
+              const nextRevs = [...(newAccount.salaryRevisions || [])];
+              if (nextRevs[datePickerTarget.index]) {
+                nextRevs[datePickerTarget.index] = { ...nextRevs[datePickerTarget.index], effectiveDate: selectedDate };
+                setNewAccount({ ...newAccount, salaryRevisions: nextRevs });
+              }
+            }
+            setDatePickerTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 }
