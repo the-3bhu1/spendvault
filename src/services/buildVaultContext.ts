@@ -18,6 +18,7 @@ import {
   isStatsExcludedCategory,
 } from '../utils';
 import { format, parseISO, addMonths, subMonths } from 'date-fns';
+import { calculateEPFProjection } from '../utils/epfEngine';
 
 const SLICE_CAP = 60;
 const RECENT_FALLBACK = 40;
@@ -97,6 +98,10 @@ function buildSummary(data: FinanceData): string {
     if (a.type === 'commodity' && a.commodityMetal) line += ` (${a.commodityMetal})`;
     if (a.type === 'stocks' || a.type === 'sips') {
       if (a.investedValue != null) line += ` (invested ${formatCurrency(a.investedValue)})`;
+    }
+    if (a.type === 'epf') {
+      const proj = calculateEPFProjection(a, currentMonth);
+      line += ` (Monthly Credit: ${formatCurrency(proj.totalContribution)}, Accrued Interest FY: ${formatCurrency(proj.accruedInterest)}, 1-Yr Projection: ${formatCurrency(proj.projectedOneYearBalance)})`;
     }
     out.push(line);
   });
