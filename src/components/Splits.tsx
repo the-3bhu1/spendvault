@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { format } from 'date-fns';
-import { Plus, Users, ChevronRight, Share2, Trash2, ReceiptIndianRupee, Check, Search, ChevronDown, Calendar, Edit2, Repeat, ChevronLeft, AlertTriangle, Copy, ArrowRight, ImageDown } from 'lucide-react';
+import { Plus, Users, ChevronRight, Trash2, ReceiptIndianRupee, Check, Search, ChevronDown, Calendar, Edit2, Repeat, ChevronLeft, AlertTriangle, Copy, ArrowRight, ImageDown } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -151,19 +151,6 @@ export default function Splits() {
     return message;
   };
 
-  const handleShareSummary = (event: SplitEvent) => {
-    const message = buildSummaryMessage(event);
-    if (navigator.share) {
-      navigator.share({ title: ``, text: message }).catch(() => {
-        const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-        window.open(url, '_blank');
-      });
-    } else {
-      const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-      window.open(url, '_blank');
-    }
-  };
-
   // Renders the summary to PNG(s) and shares them together with the text message. A short split
   // produces one combined image; a large one produces a Settle-Up image + paginated Expenses images.
   const handleShareImage = async (event: SplitEvent) => {
@@ -227,11 +214,11 @@ export default function Splits() {
   };
 
   return (
-    <div className="flex-col gap-6 animate-in splits-tab-root" style={{ padding: '0.5rem 0' }}>
+    <div className="flex-col gap-6 animate-in splits-tab-root">
       {activeView === 'main' && (
         <>
           <div className="flex justify-between align-center">
-            <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>group splits</h2>
+            <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>group splits</h2>
             <button className="btn btn-primary flex align-center gap-2" onClick={() => setActiveView('create_event')}>
               <Plus size={18} strokeWidth={3} /> New Event
             </button>
@@ -451,7 +438,6 @@ export default function Splits() {
           onBack={() => setActiveView('main')}
           onUpdate={updateSplitEvent}
           onDelete={() => setIsDeleteConfirmOpen(true)}
-          onShare={() => handleShareSummary(selectedEvent)}
           onShareImage={() => handleShareImage(selectedEvent)}
         />
       )}
@@ -476,12 +462,11 @@ export default function Splits() {
   );
 }
 
-function SplitDetail({ event, onBack, onUpdate, onDelete, onShare, onShareImage }: {
+function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
   event: SplitEvent,
   onBack: () => void,
   onUpdate: (e: SplitEvent) => void,
   onDelete: () => void,
-  onShare: () => void,
   onShareImage: () => void
 }) {
   const { data } = useFinance();
@@ -854,20 +839,12 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare, onShareImage 
               <Check size={18} strokeWidth={3} />
             </button>
             <button
-              className="btn btn-secondary"
-              style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
-              onClick={onShareImage}
-              title="Share as Image"
-            >
-              <ImageDown size={18} />
-            </button>
-            <button
               className="btn btn-secondary tour-split-share-btn"
               style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
-              onClick={onShare}
-              title="Share as Text"
+              onClick={onShareImage}
+              title="Share Split Summary"
             >
-              <Share2 size={18} />
+              <ImageDown size={18} />
             </button>
             <button
               className="btn btn-secondary"
@@ -992,14 +969,13 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare, onShareImage 
             <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>Expenses ({effectiveItems.length})</span>
             {event.status !== 'settled' && isViewingCurrentCycle && (
               <button
-                className="btn btn-primary flex align-center gap-2 text-xs"
-                style={{ padding: '0.4rem 0.8rem' }}
+                className="btn btn-primary flex align-center gap-2"
                 onClick={() => {
                   resetForm();
                   setIsItemModalOpen(true);
                 }}
               >
-                <Plus size={14} /> Add Expense
+                <Plus size={16} /> Add Expense
               </button>
             )}
           </div>
@@ -1086,10 +1062,10 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare, onShareImage 
                 </div>
               ) : (
                 /* Split Details / Edit Split: back button + centered title */
-                <div className="align-center" style={{ display: 'flex', position: 'relative', padding: 'calc(1.5rem + env(safe-area-inset-top, 0px)) 1.5rem 1rem', borderBottom: '2px solid #000', width: '100%' }}>
+                <div className="align-center" style={{ display: 'flex', position: 'relative', padding: 'calc(1.5rem + env(safe-area-inset-top, 0px)) 0.5rem 1rem 0.5rem', borderBottom: '2px solid #000', width: '100%' }}>
                   <button
                     className="btn btn-secondary"
-                    style={{ padding: '0.5rem' }}
+                    style={{ padding: '0.5rem', flexShrink: 0 }}
                     onClick={() => {
                       if (selectedTxId && !editingItemId) {
                         setSelectedTxId(null); setSplitType('equal'); setCustomShares({});
@@ -1100,7 +1076,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShare, onShareImage 
                   >
                     <ChevronLeft size={20} />
                   </button>
-                  <h3 style={{ position: 'absolute', left: '4rem', right: '4rem', textAlign: 'center', margin: 0, fontSize: '1.85rem', fontWeight: 700, letterSpacing: '-0.5px', color: 'var(--text-primary)', pointerEvents: 'none' }}>
+                  <h3 style={{ position: 'absolute', left: '3.5rem', right: '3.5rem', textAlign: 'center', margin: 0, fontSize: '1.85rem', fontWeight: 700, letterSpacing: '-0.5px', color: 'var(--text-primary)', pointerEvents: 'none' }}>
                     {editingItemId ? 'Edit Split' : 'Split Details'}
                   </h3>
                 </div>

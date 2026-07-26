@@ -536,8 +536,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   return (
     <div className="flex-col gap-6" style={{ maxWidth: '600px', margin: '0 auto', width: '100%' }}>
       <div className="flex justify-between align-center" style={{ marginBottom: '1rem' }}>
-        <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>accounts</h2>
-        <button className="btn btn-primary" onClick={openAddModal} style={{ padding: '0.6rem 1.25rem' }}>
+        <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>accounts</h2>
+        <button className="btn btn-primary" onClick={openAddModal}>
           + Add New
         </button>
       </div>
@@ -1416,11 +1416,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       label="Contribution Basis"
                       value={newAccount.epfContributionBasis || 'statutory_ceiling'}
                       options={[
-                        { id: 'statutory_ceiling', name: 'Statutory Wage Ceiling (₹15,000)', subtext: '12% capped at ₹15,000 basic (Default EPFO rule)' },
+                        { id: 'statutory_ceiling', name: 'Statutory Wage Ceiling', subtext: '12% capped at ₹15,000 basic (Default EPFO rule)' },
                         { id: 'actual_basic', name: 'Actual Basic + DA', subtext: '12% calculated on full actual basic salary' }
                       ]}
                       onChange={val => setNewAccount({ ...newAccount, epfContributionBasis: val as 'statutory_ceiling' | 'actual_basic' })}
-                      iconGetter={id => id === 'statutory_ceiling' ? '🛡️' : '💼'}
+                      iconGetter={id => id === 'statutory_ceiling' ? '📜' : '💸'}
                     />
                   </div>
 

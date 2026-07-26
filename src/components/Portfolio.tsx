@@ -548,7 +548,7 @@ export function Portfolio() {
             <div style={{
               position: 'relative',
               display: 'flex',
-              marginTop: portfolioView === 'epf' ? '1rem' : '1.5rem',
+              marginTop: (portfolioView === 'epf' || !displayRefreshedAt) ? '2.2rem' : '1.5rem',
               padding: `${PAD}px`,
               background: 'rgba(255,255,255,0.05)',
               borderRadius: '999px',
@@ -866,11 +866,13 @@ export function Portfolio() {
                 </div>
               )}
 
-              {(selectedFetchedAt || isManualCommodity) && (
+              {(selectedFetchedAt || isManualCommodity) ? (
                 <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.75rem', letterSpacing: '0.5px' }}>
                   {isManualCommodity ? 'Manual price' : `Last refresh at ${formatTime(new Date(selectedFetchedAt!))}`}
                 </div>
-              )}
+              ) : selectedAsset.type === 'epf' ? (
+                <div style={{ height: '0.75rem' }} />
+              ) : null}
             </div>
 
             {/* Chart — CRED style: auto-scaled, no axes/grid clutter, thin trend line */}

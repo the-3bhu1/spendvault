@@ -27,8 +27,10 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
           if (isStatsExcludedCategory(t.category)) return;
           const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
           spend += effectiveAmount;
-          catSpend[t.category] = (catSpend[t.category] || 0) + effectiveAmount;
-          accSpend[account?.name || 'Unknown'] = (accSpend[account?.name || 'Unknown'] || 0) + effectiveAmount;
+          if (effectiveAmount > 0) {
+            catSpend[t.category] = (catSpend[t.category] || 0) + effectiveAmount;
+            accSpend[account?.name || 'Unknown'] = (accSpend[account?.name || 'Unknown'] || 0) + effectiveAmount;
+          }
         }
       }
     });

@@ -148,8 +148,8 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
       <div className="flex-col" style={{ gap: 0, height: '100vh', background: 'var(--bg-color)' }}>
         <div style={{
           paddingTop: 'calc(2.5rem + env(safe-area-inset-top, 24px))',
-          paddingLeft: '1.5rem',
-          paddingRight: '1.5rem',
+          paddingLeft: '0.5rem',
+          paddingRight: '0.5rem',
           paddingBottom: '1.25rem',
           display: 'flex',
           justifyContent: 'space-between',
@@ -328,9 +328,11 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
             </div>
           </div>
 
-          <h4 className="text-mono text-xs text-muted uppercase font-bold" style={{ opacity: 0.4, marginTop: '1.2rem', marginBottom: '0.25rem', flexShrink: 0 }}>
-            {showAllTransactions ? 'All Transactions' : 'Top Transactions'}
-          </h4>
+          {cycleTxs.length > 0 && (
+            <h4 className="text-mono text-xs text-muted uppercase font-bold" style={{ opacity: 0.4, marginTop: '1.2rem', marginBottom: '0.25rem', flexShrink: 0 }}>
+              {showAllTransactions ? 'All Transactions' : 'Top Transactions'}
+            </h4>
+          )}
 
           <div
             ref={transactionsViewportRef}

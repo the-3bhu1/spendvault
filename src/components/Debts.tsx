@@ -255,7 +255,7 @@ export default function Debts() {
         <div className="flex-col gap-6 fade-in debts-tab-root">
           <div className="flex justify-between align-center">
             <div className="flex-col">
-              <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>money owed</h2>
+              <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>money owed</h2>
             </div>
             <button
               className="btn btn-primary flex align-center gap-2"

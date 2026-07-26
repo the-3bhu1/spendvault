@@ -1256,7 +1256,7 @@ export default function Transactions() {
         <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
           <div className="flex gap-3 align-center">
             <button
-              className={`btn ${showFilters ? 'btn-primary' : 'btn-secondary'}`}
+              className="btn btn-primary"
               style={{ fontWeight: 800, letterSpacing: '1px' }}
               onClick={() => setShowFilters(!showFilters)}
             >
@@ -1264,7 +1264,7 @@ export default function Transactions() {
             </button>
             {isFilterActive && (
               <button
-                className="btn btn-secondary"
+                className="btn btn-primary"
                 onClick={clearFilters}
                 style={{ fontWeight: 800, letterSpacing: '1px' }}
               >

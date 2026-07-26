@@ -237,11 +237,11 @@ export default function UpcomingBills() {
   }, [data.transactions, data.recurringBills, data.accounts]);
 
   return (
-    <div className="flex-col gap-6 animate-in bills-tab-root" style={{ padding: '0.5rem 0' }}>
+    <div className="flex-col gap-6 animate-in bills-tab-root">
       {activeView === 'main' && (
         <>
           <div className="flex justify-between align-center">
-            <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>upcoming bills</h2>
+            <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>upcoming bills</h2>
             <button className="btn btn-primary flex align-center gap-2" onClick={() => setActiveView('add')}>
               <Plus size={18} strokeWidth={3} /> New Bill
             </button>
