@@ -18,7 +18,7 @@ The doc is the `APP_KNOWLEDGE` string in `src/knowledge/appKnowledge.ts`.
      (AI Features, Commodity Prices, Asset Logos, Categories, Account Types, Tags, Security/User
      Details, Export/Import, Theme, Manage Accounts, Background Guide, Help, About, Smart Features, etc.).
    - Every tab/feature and the actions it exposes (taps, swipes, long-press, modals, buttons):
-     Dashboard, Accounts, Transactions, Cashback, Splits, Debts, UpcomingBills, Portfolio, Insights,
+     Dashboard, Accounts, Transactions, Cashback, Splits, Debts, UpcomingBills, Wealth, Insights,
      plus modals (TransactionModal, AccountStatement, ViewCardOverlay, CustomPicker, CustomDatePicker).
    - All account types and all transaction categories with special behaviour, and every auto-generated
      (linked) transaction that any action creates (`src/FinanceContext.tsx`).

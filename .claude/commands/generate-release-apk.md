@@ -61,7 +61,7 @@ for data it genuinely can't see, an honest "I can't find that") instead of a rea
 Check whether recent user-facing UI changes, feature renames, tab additions, or workflow updates require updates to the in-app guided tours (in `src/components/AppTour.tsx` or feature tour definitions):
 
 - Review recent changes (`git log`/`git diff` since the last release build) for renamed tabs, updated button labels, new Hub features, or modified UI layouts.
-- Check `src/components/AppTour.tsx` to verify that step titles, descriptions, target CSS selectors, sample mock data, and feature tour titles (e.g. Wealth/Portfolio, Mutual Funds, EPF, Hub cards) accurately match the current UI.
+- Check `src/components/AppTour.tsx` to verify that step titles, descriptions, target CSS selectors, sample mock data, and feature tour titles (e.g. Wealth, Mutual Funds, EPF, Hub cards) accurately match the current UI.
 - Fix any stale tour text, target selectors, or broken tour steps, and verify with `npx tsc --noEmit`.
 
 ## 4. Push and merge to `build-ver-2.1`

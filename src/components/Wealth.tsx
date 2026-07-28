@@ -121,7 +121,7 @@ export function Wealth() {
   const [stockRange, setStockRange] = useState<StockHistoryRange>('1mo');
   const [mfRange, setMFRange] = useState<MFHistoryRange>('1y');
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
-  const [portfolioView, setPortfolioView] = useState<'all' | 'mf' | 'stocks' | 'commodity' | 'epf'>('all');
+  const [wealthView, setWealthView] = useState<'all' | 'mf' | 'stocks' | 'commodity' | 'epf'>('all');
   // Bumped when a background AI logo lookup resolves, so resolved logos appear without a reload.
   const [, setLogoTick] = useState(0);
 
@@ -342,7 +342,7 @@ export function Wealth() {
     return { invested, current, pnl, pnlPct };
   };
 
-  const portfolioStats = useMemo(() => {
+  const wealthStats = useMemo(() => {
     const nonEpfStats = buildStats([...mfAccounts, ...stockAccounts, ...commodityAccounts]);
     const epfStats = buildStats(epfAccounts);
     return {
@@ -359,10 +359,10 @@ export function Wealth() {
     };
   }, [mfAccounts, stockAccounts, commodityAccounts, epfAccounts, prices, data.transactions]);
 
-  const portfolioOneDayReturn = useMemo(() => {
-    const accounts = portfolioView === 'all' ? [...mfAccounts, ...stockAccounts, ...commodityAccounts]
-      : portfolioView === 'mf' ? mfAccounts
-      : portfolioView === 'stocks' ? stockAccounts
+  const wealthOneDayReturn = useMemo(() => {
+    const accounts = wealthView === 'all' ? [...mfAccounts, ...stockAccounts, ...commodityAccounts]
+      : wealthView === 'mf' ? mfAccounts
+      : wealthView === 'stocks' ? stockAccounts
       : commodityAccounts;
     let amount = 0;
     let prevTotal = 0;
@@ -377,7 +377,7 @@ export function Wealth() {
     }
     if (prevTotal === 0) return null;
     return { amount, pct: (amount / prevTotal) * 100 };
-  }, [portfolioView, mfAccounts, stockAccounts, commodityAccounts, prices, prevPrices, data.transactions]);
+  }, [wealthView, mfAccounts, stockAccounts, commodityAccounts, prices, prevPrices, data.transactions]);
 
   const displayRefreshedAt = useMemo(() => {
     if (!lastRefreshed) return null;
@@ -390,15 +390,15 @@ export function Wealth() {
         .map((a: Account) => a.marketSymbol)
     );
     let ts: number | null;
-    if (portfolioView === 'mf') ts = getLatestFetchedAt(mfSyms);
-    else if (portfolioView === 'stocks') ts = getLatestFetchedAt(stockSyms);
-    else if (portfolioView === 'commodity') ts = getLatestCommodityFetchedAt(metalTickers);
+    if (wealthView === 'mf') ts = getLatestFetchedAt(mfSyms);
+    else if (wealthView === 'stocks') ts = getLatestFetchedAt(stockSyms);
+    else if (wealthView === 'commodity') ts = getLatestCommodityFetchedAt(metalTickers);
     else ts = Math.max(
       getLatestFetchedAt([...mfSyms, ...stockSyms]) ?? 0,
       getLatestCommodityFetchedAt(metalTickers) ?? 0
     ) || null;
     return ts && ts > 0 ? new Date(ts) : lastRefreshed;
-  }, [portfolioView, lastRefreshed, mfAccounts, stockAccounts, commodityAccounts]);
+  }, [wealthView, lastRefreshed, mfAccounts, stockAccounts, commodityAccounts]);
 
   const formatCurrency = (value: number) =>
     `₹${Math.round(value).toLocaleString('en-IN')}`;
@@ -497,7 +497,7 @@ export function Wealth() {
     <div style={{ background: 'var(--bg-primary)', paddingBottom: '100px' }}>
       {!selectedAsset && (
       <>
-      <div className="tour-portfolio-summary" style={{ padding: '1.75rem 1.5rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+      <div className="tour-wealth-summary" style={{ padding: '1.75rem 1.5rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
         <div style={{ marginBottom: '1rem' }}>
           <ProfileAvatar size={64} />
         </div>
@@ -507,23 +507,23 @@ export function Wealth() {
         </div>
 
         <div className="text-serif" style={{ fontSize: '2.75rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
-          ₹{Math.round(portfolioStats[portfolioView].current).toLocaleString('en-IN')}
+          ₹{Math.round(wealthStats[wealthView].current).toLocaleString('en-IN')}
         </div>
 
-        {isRefreshing && !hasRefreshed ? null : portfolioOneDayReturn !== null ? (
+        {isRefreshing && !hasRefreshed ? null : wealthOneDayReturn !== null ? (
           <div style={{ marginTop: '0.75rem', textAlign: 'center' }}>
-            <div style={{ fontSize: '0.95rem', fontWeight: 600, color: portfolioOneDayReturn.amount >= 0 ? '#22c55e' : '#ef4444' }}>
-              {portfolioOneDayReturn.amount >= 0 ? '↑' : '↓'} ₹{Math.abs(portfolioOneDayReturn.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(portfolioOneDayReturn.pct).toFixed(2)}%)
+            <div style={{ fontSize: '0.95rem', fontWeight: 600, color: wealthOneDayReturn.amount >= 0 ? '#22c55e' : '#ef4444' }}>
+              {wealthOneDayReturn.amount >= 0 ? '↑' : '↓'} ₹{Math.abs(wealthOneDayReturn.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(wealthOneDayReturn.pct).toFixed(2)}%)
             </div>
             <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.2rem', letterSpacing: '0.5px' }}>
-              Today{portfolioView === 'all' && commodityAccounts.length > 0 && todayScope ? ` (${todayScope})` : ''}
+              Today{wealthView === 'all' && commodityAccounts.length > 0 && todayScope ? ` (${todayScope})` : ''}
             </div>
           </div>
-        ) : (portfolioView !== 'commodity' && portfolioView !== 'epf') && (mfAccounts.length > 0 || stockAccounts.length > 0) ? (
+        ) : (wealthView !== 'commodity' && wealthView !== 'epf') && (mfAccounts.length > 0 || stockAccounts.length > 0) ? (
           <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.75rem', letterSpacing: '0.5px' }}>— today</div>
         ) : null}
 
-        {portfolioView !== 'epf' && (
+        {wealthView !== 'epf' && (
           <button
             onClick={() => handleRefresh()}
             disabled={isRefreshing}
@@ -550,7 +550,7 @@ export function Wealth() {
           </button>
         )}
 
-        {portfolioView !== 'epf' && displayRefreshedAt && (
+        {wealthView !== 'epf' && displayRefreshedAt && (
           <div className="text-mono uppercase" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginTop: '0.6rem', letterSpacing: '0.5px' }}>
             Last refresh at {formatTime(displayRefreshedAt)}
           </div>
@@ -566,13 +566,13 @@ export function Wealth() {
           if (presentTabs.length < 2) return null;
           const tabs = [{ v: 'all' as const, label: 'All' }, ...presentTabs];
           const N = tabs.length;
-          const activeIdx = tabs.findIndex(t => t.v === portfolioView);
+          const activeIdx = tabs.findIndex(t => t.v === wealthView);
           const PAD = 4;
           return (
-            <div className="tour-portfolio-tabs" style={{
+            <div className="tour-wealth-tabs" style={{
               position: 'relative',
               display: 'flex',
-              marginTop: (portfolioView === 'epf' || !displayRefreshedAt) ? '2.2rem' : '1.5rem',
+              marginTop: (wealthView === 'epf' || !displayRefreshedAt) ? '2.2rem' : '1.5rem',
               padding: `${PAD}px`,
               background: 'rgba(255,255,255,0.05)',
               borderRadius: '999px',
@@ -593,12 +593,12 @@ export function Wealth() {
                 pointerEvents: 'none'
               }} />
               {tabs.map(({ v, label }) => {
-                const active = portfolioView === v;
+                const active = wealthView === v;
                 return (
                   <button
                     key={v}
-                    onClick={() => setPortfolioView(v)}
-                    className="tour-portfolio-tab-btn"
+                    onClick={() => setWealthView(v)}
+                    className="tour-wealth-tab-btn"
                     data-view={v}
                     style={{
                       flex: 1,
@@ -628,8 +628,8 @@ export function Wealth() {
         })()}
       </div>
 
-      <div className="tour-portfolio-holdings-section">
-        <div className="tour-portfolio-holdings-container">
+      <div className="tour-wealth-holdings-section">
+        <div className="tour-wealth-holdings-container">
         <div style={{
           margin: '0 1.5rem',
           padding: '1.25rem 0',
@@ -640,7 +640,7 @@ export function Wealth() {
           gap: '0.5rem'
         }}>
           {(() => {
-            if (portfolioView === 'epf') {
+            if (wealthView === 'epf') {
               const totalEpfBalance = epfAccounts.reduce((sum, a) => sum + calculateEPFProjection(a).balance, 0);
               const totalAccruedInterest = epfAccounts.reduce((sum, a) => sum + calculateEPFProjection(a).accruedInterest, 0);
               return (<>
@@ -660,7 +660,7 @@ export function Wealth() {
               </>);
             }
 
-            const s = portfolioStats[portfolioView];
+            const s = wealthStats[wealthView];
             return (<>
               <div style={{ flex: 1, textAlign: 'center' }}>
                 <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Invested</div>
@@ -715,11 +715,11 @@ export function Wealth() {
           </div>
         ) : (
           <>
-            {mfAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'mf') && (() => {
-              const single = portfolioView !== 'all';
+            {mfAccounts.length > 0 && (wealthView === 'all' || wealthView === 'mf') && (() => {
+              const single = wealthView !== 'all';
               const isCollapsed = single ? false : collapsedSections.has('mf');
               return (
-              <div className="tour-portfolio-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+              <div className="tour-wealth-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
                 <div
                   className="flex align-center gap-3"
                   style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
@@ -743,11 +743,11 @@ export function Wealth() {
               );
             })()}
 
-            {stockAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'stocks') && (() => {
-              const single = portfolioView !== 'all';
+            {stockAccounts.length > 0 && (wealthView === 'all' || wealthView === 'stocks') && (() => {
+              const single = wealthView !== 'all';
               const isCollapsed = single ? false : collapsedSections.has('stocks');
               return (
-              <div className="tour-portfolio-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+              <div className="tour-wealth-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
                 <div
                   className="flex align-center gap-3"
                   style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
@@ -771,11 +771,11 @@ export function Wealth() {
               );
             })()}
 
-            {commodityAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'commodity') && (() => {
-              const single = portfolioView !== 'all';
+            {commodityAccounts.length > 0 && (wealthView === 'all' || wealthView === 'commodity') && (() => {
+              const single = wealthView !== 'all';
               const isCollapsed = single ? false : collapsedSections.has('commodity');
               return (
-              <div className="tour-portfolio-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+              <div className="tour-wealth-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
                 <div
                   className="flex align-center gap-3"
                   style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
@@ -799,8 +799,8 @@ export function Wealth() {
               );
             })()}
 
-            {epfAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'epf') && (() => {
-              const single = portfolioView !== 'all';
+            {epfAccounts.length > 0 && (wealthView === 'all' || wealthView === 'epf') && (() => {
+              const single = wealthView !== 'all';
               const isCollapsed = single ? false : collapsedSections.has('epf');
               return (
               <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
@@ -944,12 +944,12 @@ export function Wealth() {
               const lineColor = up ? '#22c55e' : '#ef4444';
               return (
               <div style={{ padding: '0.5rem 0 0.5rem', width: '100%', boxSizing: 'border-box' }}>
-                <div className="portfolio-chart" style={{ width: '100%', height: '280px' }}>
+                <div className="wealth-chart" style={{ width: '100%', height: '280px' }}>
                   <ResponsiveContainer width="100%" height="100%">
                     {/* plot bottom baseline: container 280 - x-axis height 30 */}
                     <AreaChart data={historyData} margin={{ top: 70, right: 0, left: 0, bottom: 0 }}>
                       <defs>
-                        <linearGradient id="portfolioChartFill" x1="0" y1="0" x2="0" y2="1">
+                        <linearGradient id="wealthChartFill" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor={lineColor} stopOpacity={0.22}/>
                           <stop offset="100%" stopColor={lineColor} stopOpacity={0}/>
                         </linearGradient>
@@ -1011,7 +1011,7 @@ export function Wealth() {
                         dataKey="close"
                         stroke={lineColor}
                         strokeWidth={1.5}
-                        fill="url(#portfolioChartFill)"
+                        fill="url(#wealthChartFill)"
                         dot={false}
                         activeDot={(props: any) => {
                           const { cx, cy } = props;

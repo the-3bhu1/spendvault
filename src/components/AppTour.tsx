@@ -5,7 +5,7 @@ import { Sparkles, ArrowRight, ArrowLeft, X, ShieldCheck, Eye, Smartphone, Zap, 
 import { Capacitor } from '@capacitor/core';
 import type { Tab } from '../App';
 
-export type TourType = 'onboarding' | 'splits' | 'debts' | 'bills' | 'cashback' | 'insights' | 'portfolio';
+export type TourType = 'onboarding' | 'splits' | 'debts' | 'bills' | 'cashback' | 'insights' | 'wealth';
 
 interface AppTourProps {
   tourType: TourType;
@@ -228,7 +228,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
         icon: ShieldCheck
       }
     ],
-    portfolio: [
+    wealth: [
       {
         title: "Wealth Tour",
         description: "Welcome to your Wealth dashboard! Track the live value of your stocks, mutual funds, metals, and EPF holdings — all in one place.",
@@ -237,13 +237,13 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       {
         title: "Live Net Worth",
         description: "Your holdings' combined current value, today's gain or loss, and a Refresh button that pulls the latest market prices. When you hold more than one asset class, the tabs let you view each one on its own.",
-        selector: ".tour-portfolio-summary",
+        selector: ".tour-wealth-summary",
         icon: Sparkles
       },
       {
         title: "Your Holdings",
         description: "Each holding shows what you invested, its current value, and returns. Tap any tab to filter by asset class — SpendVault even fetches real brand logos and AI-estimated metal prices automatically.",
-        selector: ".tour-portfolio-tabs, .tour-portfolio-holdings-section",
+        selector: ".tour-wealth-tabs, .tour-wealth-holdings-section",
         cardPosition: 'top',
         icon: Sparkles
       },
@@ -293,7 +293,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       document.querySelectorAll('.nav-header-btn, .tour-hub-btn, .tour-askvault-btn').forEach(btn => {
         btn.classList.remove('demo-hub-active', 'demo-hub-finger', 'demo-askvault-active', 'demo-askvault-finger');
       });
-      document.querySelectorAll('.tour-portfolio-tab-btn').forEach(btn => {
+      document.querySelectorAll('.tour-wealth-tab-btn').forEach(btn => {
         btn.classList.remove('demo-tab-active', 'demo-tab-finger');
       });
     };
@@ -311,8 +311,8 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
     let askTimer1: number | null = null;
     let askTimer2: number | null = null;
     let askInterval: number | null = null;
-    let portfolioTimer: number | null = null;
-    let portfolioInterval: number | null = null;
+    let wealthTimer: number | null = null;
+    let wealthInterval: number | null = null;
     let insightsScrollCleanup: (() => void) | null = null;
 
     if (tourType === 'onboarding' && stepInfo) {
@@ -489,10 +489,10 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       }
     }
 
-    if (tourType === 'portfolio' && stepInfo && stepInfo.title === "Your Holdings") {
+    if (tourType === 'wealth' && stepInfo && stepInfo.title === "Your Holdings") {
       let tabIdx = 0;
       const triggerTabCycle = () => {
-        const btns = document.querySelectorAll('.tour-portfolio-tab-btn');
+        const btns = document.querySelectorAll('.tour-wealth-tab-btn');
         if (btns.length === 0) return;
 
         btns.forEach(b => {
@@ -515,9 +515,9 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
         tabIdx++;
       };
 
-      portfolioTimer = window.setTimeout(() => {
+      wealthTimer = window.setTimeout(() => {
         triggerTabCycle();
-        portfolioInterval = window.setInterval(triggerTabCycle, 1800);
+        wealthInterval = window.setInterval(triggerTabCycle, 1800);
       }, 1000);
     }
 
@@ -536,8 +536,8 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       if (askTimer1) clearTimeout(askTimer1);
       if (askTimer2) clearTimeout(askTimer2);
       if (askInterval) clearInterval(askInterval);
-      if (portfolioTimer) clearTimeout(portfolioTimer);
-      if (portfolioInterval) clearInterval(portfolioInterval);
+      if (wealthTimer) clearTimeout(wealthTimer);
+      if (wealthInterval) clearInterval(wealthInterval);
       if (insightsScrollCleanup) insightsScrollCleanup();
       window.dispatchEvent(new CustomEvent('tour-close-edit'));
       document.body.classList.remove('tour-debt-inside-active');
@@ -967,10 +967,10 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
           animation: demoHubFinger 2s ease-in-out forwards;
         }
 
-        .tour-portfolio-tab-btn.demo-tab-active {
+        .tour-wealth-tab-btn.demo-tab-active {
           position: relative;
         }
-        .tour-portfolio-tab-btn.demo-tab-finger::after {
+        .tour-wealth-tab-btn.demo-tab-finger::after {
           content: '';
           position: absolute;
           width: 22px;

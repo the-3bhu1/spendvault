@@ -26,7 +26,7 @@ import SmsReader from './services/SmsService';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 
-export type Tab = 'dashboard' | 'accounts' | 'transactions' | 'cashback' | 'insights' | 'settings' | 'splits' | 'bills' | 'debts' | 'portfolio';
+export type Tab = 'dashboard' | 'accounts' | 'transactions' | 'cashback' | 'insights' | 'settings' | 'splits' | 'bills' | 'debts' | 'wealth';
 
 function App() {
   const { data, pendingTransfer, addToSmsQueue, isAuthenticated, setAuthenticated } = useFinance();
@@ -49,7 +49,7 @@ function App() {
   autoLogSmsRef.current = data.user?.autoLogSms;
 
   // Define which tabs should reset to top vs resume
-  const resettingTabs = ['dashboard', 'insights', 'portfolio', 'cashback', 'splits', 'bills', 'debts'];
+  const resettingTabs = ['dashboard', 'insights', 'wealth', 'cashback', 'splits', 'bills', 'debts'];
 
   // Restore scroll position synchronously, before the browser paints the new
   // tab. useLayoutEffect runs after the DOM updates (display toggled to block)
@@ -281,7 +281,7 @@ function App() {
     if (activeTab === 'bills' && !featureTours.bills) return 'bills';
     if (activeTab === 'cashback' && !featureTours.cashback) return 'cashback';
     if (activeTab === 'insights' && !featureTours.insights) return 'insights';
-    if (activeTab === 'portfolio' && !featureTours.portfolio) return 'portfolio';
+    if (activeTab === 'wealth' && !featureTours.wealth && !featureTours.portfolio) return 'wealth';
 
     return null;
   })();
@@ -396,7 +396,7 @@ function App() {
               {data.accounts.some(acc => acc.type === 'mutual_funds' || acc.type === 'stocks' || acc.type === 'commodity' || acc.type === 'epf') && (
                 <div
                   className="card flex align-center gap-4 clickable"
-                  onClick={() => { setActiveTab('portfolio'); setIsHubOpen(false); }}
+                  onClick={() => { setActiveTab('wealth'); setIsHubOpen(false); }}
                   style={{ padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}
                 >
                   <div className="flex-center" style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'linear-gradient(135deg, #06b6d4, #10b981)', color: 'white', flexShrink: 0 }}>
@@ -447,7 +447,7 @@ function App() {
         )}
 
         {activeTab === 'cashback' && <div className="fade-in"><Cashback /></div>}
-        {activeTab === 'portfolio' && <div className="fade-in" style={{ height: '100%' }}><Wealth /></div>}
+        {activeTab === 'wealth' && <div className="fade-in" style={{ height: '100%' }}><Wealth /></div>}
         {activeTab === 'insights' && <div className="fade-in"><Insights /></div>}
         {activeTab === 'settings' && <div className="fade-in"><Settings /></div>}
         {activeTab === 'splits' && <div className="fade-in"><Splits /></div>}
