@@ -1559,7 +1559,7 @@ export default function Settings() {
                 </button>
               </div>
             ) : (
-              <button className="btn btn-primary flex align-center justify-center" style={{ padding: '0.9rem' }} onClick={() => importFileRef.current?.click()}>
+              <button className="btn btn-primary w-100 flex align-center justify-center" style={{ padding: '0.9rem', minHeight: '52px' }} onClick={() => importFileRef.current?.click()}>
                 <Upload size={20} style={backupActionIconStyle} /> Choose Backup File
               </button>
             )}
@@ -1586,8 +1586,8 @@ export default function Settings() {
                   onChange={e => setClipboardText(e.target.value)}
                 />
                 <button
-                  className="btn btn-secondary"
-                  style={{ padding: '0.9rem' }}
+                  className="btn btn-secondary w-100 flex align-center justify-center"
+                  style={{ padding: '0.9rem', minHeight: '52px' }}
                   onClick={() => handleClipboardImport(clipboardText)}
                   disabled={!clipboardText.trim()}
                 >
