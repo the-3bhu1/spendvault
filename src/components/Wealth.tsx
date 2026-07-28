@@ -54,10 +54,6 @@ function currentDayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function hasRefreshedToday(): boolean {
-  try { return localStorage.getItem(WEALTH_REFRESH_DAY_KEY) === currentDayStr(); } catch { return false; }
-}
-
 export function Wealth() {
   const { data } = useFinance();
 
