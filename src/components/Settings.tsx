@@ -1465,10 +1465,10 @@ export default function Settings() {
               </div>
             ) : (
               <div className="flex-col gap-3">
-                <button className="btn btn-primary w-100 flex align-center justify-center" style={{ padding: '0.9rem', minHeight: '52px' }} onClick={() => exportBackup(false)}>
-                  <Download size={20} style={backupActionIconStyle} /> Save to Downloads
+                <button className="btn btn-primary w-100 flex align-center justify-center" style={{ padding: '0.9rem 1.5rem', minHeight: '48px' }} onClick={() => exportBackup(false)}>
+                  <Download size={18} style={backupActionIconStyle} /> Save to Downloads
                 </button>
-                <button className="btn btn-secondary w-100 flex align-center justify-center" style={{ padding: '0.9rem', minHeight: '52px' }} onClick={() => exportBackup(true)}>
+                <button className="btn btn-secondary w-100 flex align-center justify-center" style={{ padding: '0.9rem 1.5rem', minHeight: '48px' }} onClick={() => exportBackup(true)}>
                   <Share2 size={18} style={backupActionIconStyle} /> Share Directly
                 </button>
               </div>
@@ -1496,7 +1496,7 @@ export default function Settings() {
             {showAdvanced && (
               <div className="flex-col gap-2">
                 <p className="text-xs text-muted">Legacy option: copies a Base64 backup code to clipboard. Use only if file export is unavailable.</p>
-                <button className="btn btn-secondary w-100 flex align-center justify-center" style={{ padding: '0.9rem', minHeight: '52px' }} onClick={handleCopyBackup}>
+                <button className="btn btn-secondary w-100 flex align-center justify-center" style={{ padding: '0.9rem 1.5rem', minHeight: '48px' }} onClick={handleCopyBackup}>
                   <Clipboard size={18} style={backupActionIconStyle} /> Copy to Clipboard
                 </button>
               </div>
@@ -1551,16 +1551,16 @@ export default function Settings() {
                     </div>
                   </div>
                 </div>
-                <button className="btn btn-primary w-100 flex align-center justify-center" style={{ padding: '0.9rem', minHeight: '52px', background: 'var(--success)' }} onClick={confirmImport}>
-                  <Check size={20} style={backupActionIconStyle} /> Restore This Backup
+                <button className="btn btn-primary w-100 flex align-center justify-center" style={{ padding: '0.9rem 1.5rem', minHeight: '48px', background: 'var(--success)' }} onClick={confirmImport}>
+                  <Check size={18} style={backupActionIconStyle} /> Restore This Backup
                 </button>
-                <button className="btn btn-secondary w-100 flex align-center justify-center" style={{ padding: '0.9rem', minHeight: '52px' }} onClick={() => { setImportPreview(null); setImportError(null); }}>
+                <button className="btn btn-secondary w-100 flex align-center justify-center" style={{ padding: '0.9rem 1.5rem', minHeight: '48px' }} onClick={() => { setImportPreview(null); setImportError(null); }}>
                   Choose Different File
                 </button>
               </div>
             ) : (
-              <button className="btn btn-primary w-100 flex align-center justify-center" style={{ padding: '0.9rem', minHeight: '52px' }} onClick={() => importFileRef.current?.click()}>
-                <Upload size={20} style={backupActionIconStyle} /> Choose Backup File
+              <button className="btn btn-primary w-100 flex align-center justify-center" style={{ padding: '0.9rem 1.5rem', minHeight: '48px' }} onClick={() => importFileRef.current?.click()}>
+                <Upload size={18} style={backupActionIconStyle} /> Choose Backup File
               </button>
             )}
           </div>
@@ -1587,7 +1587,7 @@ export default function Settings() {
                 />
                 <button
                   className="btn btn-secondary w-100 flex align-center justify-center"
-                  style={{ padding: '0.9rem', minHeight: '52px' }}
+                  style={{ padding: '0.9rem 1.5rem', minHeight: '48px' }}
                   onClick={() => handleClipboardImport(clipboardText)}
                   disabled={!clipboardText.trim()}
                 >
