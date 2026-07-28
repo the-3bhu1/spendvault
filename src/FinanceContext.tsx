@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react';
 import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitEvent, RecurringBill, Debt, DebtTransaction } from './types';
+import { BUILT_IN_ACCOUNT_TYPES } from './types';
 import { classifySmsIsTransaction } from './services/GeminiService';
 import { clearChatHistory } from './services/ChatHistoryService';
+import { MUTUAL_FUNDS_CATEGORY } from './utils';
 
 export interface PendingTransfer {
   fromAccountId: string;
@@ -39,7 +41,8 @@ const classifySmsSemantic = (tx: { raw?: string; merchant?: string | null; sourc
   // Credit-card bill payment confirmation, e.g. "payment of Rs 310 for your ... Credit Card was successful".
   if (/credit\s*card/.test(text) && /(payment|paid|received|successful|towards)/.test(text)) return 'cc_payment';
   if (/\bcard\b/.test(text) && /(payment|paid).*(success|received|done|processed)/.test(text)) return 'cc_payment';
-  // Investment legs (SIP / mutual fund / stock purchase).
+  // Investment legs (mutual fund / SIP debit / stock purchase). 'sip' stays in the keyword set
+  // because that is the word bank/AMC SMS actually uses — it matches message text, not a category.
   if (/(sip|mutual fund|folio|\bnav\b|units?\s*allot)/.test(text)) return 'investment';
   if (/(equity|demat|broker|shares?\s*(bought|allot))/.test(text)) return 'investment';
   // Explicit transfers.
@@ -126,7 +129,7 @@ function normalizeTransactionOrders(transactions: Transaction[]): Transaction[] 
   });
   return changed ? result : transactions;
 }
-const DEFAULT_CATEGORIES = ['Food', 'Shopping', 'Income', 'Salary', 'Rent', 'Travel', 'Bills', 'Entertainment', 'CC Payment', 'Loans', 'Lending & Borrowing', 'NCMC Travel Recharge', 'Cashback', 'SIP', 'Stocks', 'Commodity', 'Other/Miscellaneous'];
+const DEFAULT_CATEGORIES = ['Food', 'Shopping', 'Income', 'Salary', 'Rent', 'Travel', 'Bills', 'Entertainment', 'CC Payment', 'Loans', 'Lending & Borrowing', 'NCMC Travel Recharge', 'Cashback', 'Mutual Funds', 'Stocks', 'Commodity', 'Other/Miscellaneous'];
 const DEFAULT_CUSTOM_ACCOUNT_TYPES: string[] = [];
 const DEFAULT_TAGS: string[] = [];
 
@@ -309,11 +312,17 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         const parsed = JSON.parse(saved);
         
         // Data Migration: Convert old ncmc_card type to debit_card with NCMC enabled
-        const nativeTypes = ['credit_card', 'debit_card', 'bank_account', 'e_wallet', 'stocks', 'sips', 'rewards', 'cash', 'commodity'];
-        
+        const nativeTypes: readonly string[] = BUILT_IN_ACCOUNT_TYPES;
+
         parsed.accounts = (parsed.accounts || []).map((acc: any) => {
           if (acc.type === 'ncmc_card') {
             return { ...acc, type: 'debit_card', isNcmcEnabled: true };
+          }
+          // Migration: the 'sips' account type is now 'mutual_funds'. The type was always used for
+          // mutual-fund holdings — a SIP is just one way to buy into one — so it is named after the
+          // asset. Nothing else about the account changes.
+          if (acc.type === 'sips') {
+            return { ...acc, type: 'mutual_funds' };
           }
           // Migration: Convert custom 'eWallet' variations to native 'e_wallet' type
           const lowerType = acc.type.toLowerCase();
@@ -327,6 +336,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           parsed.customAccountTypes = [];
         }
 
+        // A native type must never also be listed as a custom one — the pickers would show it twice.
+        // (The 'sips' -> 'mutual_funds' rename and 'epf' being absent from nativeTypes both used to
+        // leak entries in here.)
+        parsed.customAccountTypes = parsed.customAccountTypes.filter(
+          (t: string) => !nativeTypes.includes(t) && t !== 'sips'
+        );
+
         // Recovery: Re-add any custom account types found in the accounts list that are missing
         parsed.accounts.forEach((acc: any) => {
           if (!nativeTypes.includes(acc.type) && !parsed.customAccountTypes.includes(acc.type)) {
@@ -334,9 +350,28 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           }
         });
 
-        // Migration: Rename 'SIP / Mutual Funds' to 'SIP' in categories list
+        // Migration: the mutual-fund category has been renamed twice — 'SIP / Mutual Funds' -> 'SIP'
+        // -> 'Mutual Funds'. Rename IN PLACE so the user's category ordering survives, then de-dupe
+        // in case a vault somehow carries both spellings.
         if (parsed.categories) {
-          parsed.categories = parsed.categories.map((c: string) => c === 'SIP / Mutual Funds' ? 'SIP' : c);
+          parsed.categories = Array.from(new Set(
+            parsed.categories.map((c: string) =>
+              (c === 'SIP / Mutual Funds' || c === 'SIP') ? MUTUAL_FUNDS_CATEGORY : c
+            )
+          ));
+        }
+
+        // Category budgets are keyed by category NAME, so they must be re-keyed alongside the rename
+        // or the user's mutual-fund budget would silently detach.
+        if (parsed.categoryBudgets) {
+          for (const legacy of ['SIP', 'SIP / Mutual Funds']) {
+            if (parsed.categoryBudgets[legacy] !== undefined) {
+              if (parsed.categoryBudgets[MUTUAL_FUNDS_CATEGORY] === undefined) {
+                parsed.categoryBudgets[MUTUAL_FUNDS_CATEGORY] = parsed.categoryBudgets[legacy];
+              }
+              delete parsed.categoryBudgets[legacy];
+            }
+          }
         }
 
         if (!parsed.categories || parsed.categories.length === 0) {
@@ -352,8 +387,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           if (!parsed.categories.includes('Lending & Borrowing')) {
             parsed.categories.push('Lending & Borrowing');
           }
-          if (!parsed.categories.includes('SIP')) {
-            parsed.categories.push('SIP');
+          if (!parsed.categories.includes('Mutual Funds')) {
+            parsed.categories.push('Mutual Funds');
           }
           if (!parsed.categories.includes('Stocks')) {
             parsed.categories.push('Stocks');
@@ -399,8 +434,20 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           if (t.linkedTransactionId && !t.linkedTransactionIds) {
             t = { ...t, linkedTransactionIds: [t.linkedTransactionId] };
           }
-          if (t.category === 'SIP / Mutual Funds') {
-            t.category = 'SIP';
+          // Migration: mutual-fund category rename ('SIP / Mutual Funds' -> 'SIP' -> 'Mutual Funds').
+          if (t.category === 'SIP / Mutual Funds' || t.category === 'SIP') {
+            t.category = MUTUAL_FUNDS_CATEGORY;
+          }
+          // Migration: sipAllottedAmount/sipCharges were renamed to allottedAmount/investmentCharges
+          // (they always applied to stock buys too, so the sip* prefix was wrong). Same values, new
+          // names — move them across and drop the old keys so nothing reads a stale field.
+          if (t.sipAllottedAmount !== undefined) {
+            if (t.allottedAmount === undefined) t.allottedAmount = t.sipAllottedAmount;
+            delete t.sipAllottedAmount;
+          }
+          if (t.sipCharges !== undefined) {
+            if (t.investmentCharges === undefined) t.investmentCharges = t.sipCharges;
+            delete t.sipCharges;
           }
           // Migration: Map legacy types and strip time from dates
           if (t.type === 'expense') t.type = 'debit';
@@ -689,6 +736,49 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           return t;
         });
 
+
+        // CLEANUP of the old SIP-in-Bills feature, whose defining behaviour — linking a bill to a
+        // mutual fund account so LOG auto-credited it — no longer exists. Those entries are stale, so
+        // they're dropped rather than left behind half-wired.
+        //
+        // Mutual Funds IS still a selectable bill category (see UpcomingBills): a fund instalment is a
+        // fine thing to want a due-date reminder for, it just gets no special treatment any more.
+        //
+        // So the match is on the LEGACY category SPELLINGS ONLY, never on isMutualFundCategory(). Bill
+        // categories are not touched by the category rename above, so a pre-rename bill still reads
+        // 'SIP' verbatim while anything the user creates from now on reads 'Mutual Funds'. That makes
+        // this self-limiting: it runs on every load (as all migrations here do), but can only ever
+        // match pre-rename data, so a brand-new Mutual Funds bill is safe. Widening this to the
+        // canonical name would delete the user's own bills on their next app launch.
+        //
+        // Logged mutual-fund TRANSACTIONS and the fund ACCOUNTS themselves are untouched either way —
+        // only the stale bill reminders go.
+        {
+          const isLegacySipBill = (b: any) =>
+            b?.category === 'SIP' || b?.category === 'SIP / Mutual Funds';
+          const bills = (parsed.recurringBills || []).filter((b: any) => !isLegacySipBill(b));
+          const droppedIds = new Set(
+            (parsed.recurringBills || [])
+              .filter(isLegacySipBill)
+              .map((b: any) => b.id)
+          );
+          parsed.recurringBills = bills.map((b: any) => {
+            if (b.linkedSipAccountId === undefined && b.lsa === undefined) return b;
+            const cleaned = { ...b };
+            delete cleaned.linkedSipAccountId;
+            delete cleaned.lsa;
+            return cleaned;
+          });
+          // Clear the now-dangling recurringBillId on transactions that pointed at a dropped bill,
+          // so nothing keeps looking up a reminder that no longer exists.
+          if (droppedIds.size > 0) {
+            parsed.transactions = (parsed.transactions || []).map((t: any) =>
+              t.recurringBillId && droppedIds.has(t.recurringBillId)
+                ? { ...t, recurringBillId: undefined }
+                : t
+            );
+          }
+        }
 
         if (!parsed.debts) parsed.debts = [];
         if (!parsed.tags) parsed.tags = [];
@@ -1017,14 +1107,14 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         oldTx.category?.toLowerCase() === 'transfer' ||
         oldTx.category?.toLowerCase() === 'cc payment' ||
         oldTx.category?.toLowerCase() === 'ncmc travel recharge' ||
-        oldTx.category?.toLowerCase() === 'sip' ||
+        oldTx.category?.toLowerCase() === 'mutual funds' ||
         oldTx.category?.toLowerCase() === 'stocks' ||
         oldTx.category?.toLowerCase() === 'commodity'
       );
       const isNowTransferOrCC = transaction.category?.toLowerCase() === 'transfer' ||
                                  transaction.category?.toLowerCase() === 'cc payment' ||
                                  transaction.category?.toLowerCase() === 'ncmc travel recharge' ||
-                                 transaction.category?.toLowerCase() === 'sip' ||
+                                 transaction.category?.toLowerCase() === 'mutual funds' ||
                                  transaction.category?.toLowerCase() === 'stocks' ||
                                  transaction.category?.toLowerCase() === 'commodity';
       
@@ -1069,7 +1159,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         const counterpartTxs = prev.transactions.filter(t => 
           allLinkedIds.includes(t.id) && 
           t.id !== transaction.id &&
-          (t.category?.toLowerCase() === 'transfer' || t.category?.toLowerCase() === 'cc payment' || t.category?.toLowerCase() === 'ncmc travel recharge' || t.category?.toLowerCase() === 'sip' || t.category?.toLowerCase() === 'stocks' || t.category?.toLowerCase() === 'commodity')
+          (t.category?.toLowerCase() === 'transfer' || t.category?.toLowerCase() === 'cc payment' || t.category?.toLowerCase() === 'ncmc travel recharge' || t.category?.toLowerCase() === 'mutual funds' || t.category?.toLowerCase() === 'stocks' || t.category?.toLowerCase() === 'commodity')
         );
         txsToDelete = counterpartTxs.map(t => t.id);
         
@@ -1111,11 +1201,11 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
               const rewardsSourceAcc = prev.accounts.find(a => a.id === updatedTransaction.rewardUsedAccountId);
               updated.isRewardTransaction = !!(rewardsSourceAcc?.isCashbackEnabled && rewardsSourceAcc?.rewardType === 'points');
             } 
-            // Otherwise it's a Transfer counterpart, SIP, or CC payment bank portion
+            // Otherwise it's a Transfer counterpart, Mutual Funds, or CC payment bank portion
             else {
               const isCCPayment = updatedTransaction.category?.toLowerCase() === 'cc payment';
               const isNcmcRecharge = updatedTransaction.category?.toLowerCase() === 'ncmc travel recharge';
-              const isSip = updatedTransaction.category?.toLowerCase() === 'sip';
+              const isMf = updatedTransaction.category?.toLowerCase() === 'mutual funds';
               const isStocks = updatedTransaction.category?.toLowerCase() === 'stocks';
               const isCommodity = updatedTransaction.category?.toLowerCase() === 'commodity';
               if (isCCPayment) {
@@ -1126,23 +1216,23 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
                   // Standard 1:1
                   updated.amount = updatedTransaction.amount;
                 }
-              } else if (isSip) {
+              } else if (isMf) {
                 if (updated.type === 'credit') {
-                  updated.amount = Number(updatedTransaction.sipAllottedAmount) || 0;
+                  updated.amount = Number(updatedTransaction.allottedAmount) || 0;
                 } else {
-                  updated.amount = (Number(updatedTransaction.sipAllottedAmount) || 0) + (Number(updatedTransaction.sipCharges) || 0);
+                  updated.amount = (Number(updatedTransaction.allottedAmount) || 0) + (Number(updatedTransaction.investmentCharges) || 0);
                 }
-                updated.sipAllottedAmount = updatedTransaction.sipAllottedAmount;
-                updated.sipCharges = updatedTransaction.sipCharges;
+                updated.allottedAmount = updatedTransaction.allottedAmount;
+                updated.investmentCharges = updatedTransaction.investmentCharges;
                 updated.numberOfShares = updatedTransaction.numberOfShares;
               } else if (isStocks) {
                 if (updated.type === 'credit') {
-                  updated.amount = Number(updatedTransaction.sipAllottedAmount) || updatedTransaction.amount;
+                  updated.amount = Number(updatedTransaction.allottedAmount) || updatedTransaction.amount;
                 } else {
-                  updated.amount = (Number(updatedTransaction.sipAllottedAmount) || updatedTransaction.amount) + (Number(updatedTransaction.sipCharges) || 0);
+                  updated.amount = (Number(updatedTransaction.allottedAmount) || updatedTransaction.amount) + (Number(updatedTransaction.investmentCharges) || 0);
                 }
-                updated.sipAllottedAmount = updatedTransaction.sipAllottedAmount;
-                updated.sipCharges = updatedTransaction.sipCharges;
+                updated.allottedAmount = updatedTransaction.allottedAmount;
+                updated.investmentCharges = updatedTransaction.investmentCharges;
                 updated.numberOfShares = updatedTransaction.numberOfShares;
               } else if (isCommodity) {
                 updated.amount = updatedTransaction.amount;
@@ -1156,8 +1246,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
                 updated.category = 'NCMC Travel Recharge';
               } else if (updatedTransaction.category === 'Transfer') {
                 updated.category = 'Transfer';
-              } else if (isSip) {
-                updated.category = 'SIP';
+              } else if (isMf) {
+                updated.category = 'Mutual Funds';
               } else if (isStocks) {
                 updated.category = 'Stocks';
                 updated.description = updatedTransaction.description;
@@ -1180,7 +1270,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
                     const targetCardName = updatedTransaction.type === 'credit' ? parentAcc?.name : counterpartAcc?.name;
                     updated.description = `CC Payment: ${targetCardName || 'Unknown'}`;
                   }
-                } else if (isSip || isStocks || isCommodity) {
+                } else if (isMf || isStocks || isCommodity) {
                   updated.description = updatedTransaction.description;
                 } else {
                   updated.description = updatedTransaction.type === 'credit' ? `Transfer to ${parentAcc?.name || 'Unknown'}` : `Transfer from ${parentAcc?.name || 'Unknown'}`;
@@ -1378,11 +1468,11 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       .map(updateDebtStatus)
       .filter(debt => debt.transactions.length > 0);
 
-      // Leg-type links (Transfer/CC/NCMC/SIP/Stocks/Commodity) form a STAR around the parent:
+      // Leg-type links (Transfer/CC/NCMC/Mutual Funds/Stocks/Commodity) form a STAR around the parent:
       // children link to the parent, not to each other. Deleting one child must take the whole
       // group — otherwise a 3-leg reward-split CC payment orphans its sibling leg. So we expand
       // to the full transitively-linked leg group. See docs/LINKED_TRANSACTIONS.md.
-      const LEG_CATS = ['transfer', 'cc payment', 'ncmc travel recharge', 'sip', 'stocks', 'commodity'];
+      const LEG_CATS = ['transfer', 'cc payment', 'ncmc travel recharge', 'mutual funds', 'stocks', 'commodity'];
       const isLegCat = (c?: string) => LEG_CATS.includes((c || '').toLowerCase());
       const legGroup = new Set<string>([id]);
       if (isLegCat(tx.category)) {
@@ -1596,6 +1686,16 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         openingBalances: {}
       },
       {
+        id: 'demo_mf',
+        name: 'Parag Parikh Flexi Cap Fund',
+        type: 'mutual_funds',
+        marketSymbol: '122639',
+        numberOfShares: 150,
+        avgNav: 72.5,
+        investedValue: 10875,
+        openingBalances: {}
+      },
+      {
         id: 'demo_gold',
         name: 'Digital Gold',
         type: 'commodity',
@@ -1603,6 +1703,14 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         marketSymbol: 'GOLD',
         investedValue: 3300,
         manualPricePerGram: 7200,
+        openingBalances: {}
+      },
+      {
+        id: 'demo_epf',
+        name: 'EPFO Savings',
+        type: 'epf',
+        baseBalance: 34683,
+        baseBalanceDate: `${currentMonth}-01`,
         openingBalances: {}
       }
     ];

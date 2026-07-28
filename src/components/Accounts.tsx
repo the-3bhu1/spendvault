@@ -27,7 +27,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const [prices, setPrices] = useState<Record<string, number>>(() => {
     const cached: Record<string, number> = {};
     data.accounts
-      .filter(a => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
+      .filter(a => (a.type === 'stocks' || a.type === 'mutual_funds') && a.marketSymbol)
       .forEach(a => { const p = getCachedPrice(a.marketSymbol!); if (p !== null) cached[a.marketSymbol!] = p; });
     data.accounts
       .filter(a => a.type === 'commodity' && a.marketSymbol)
@@ -64,23 +64,23 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   }, [viewingCard, isModalOpen, deleteConfirmId]);
 
   useEffect(() => {
-    const stockSipItems = data.accounts
-      .filter(a => !a.archived && (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
-      .map(a => ({ symbol: a.marketSymbol!, kind: (a.type === 'stocks' ? 'stock' : 'sip') as 'stock' | 'sip' }));
+    const stockMfItems = data.accounts
+      .filter(a => !a.archived && (a.type === 'stocks' || a.type === 'mutual_funds') && a.marketSymbol)
+      .map(a => ({ symbol: a.marketSymbol!, kind: (a.type === 'stocks' ? 'stock' : 'mf') as 'stock' | 'mf' }));
     // Skip accounts with a manual price override — no need to spend a Gemini call for them.
     const commodityAccs = data.accounts.filter(a => !a.archived && a.type === 'commodity' && a.marketSymbol && a.manualPricePerGram === undefined);
-    if (stockSipItems.length === 0 && commodityAccs.length === 0) return;
-    const allSyms = [...stockSipItems.map(i => i.symbol), ...commodityAccs.map(a => a.marketSymbol!)];
+    if (stockMfItems.length === 0 && commodityAccs.length === 0) return;
+    const allSyms = [...stockMfItems.map(i => i.symbol), ...commodityAccs.map(a => a.marketSymbol!)];
     setRefreshingSymbols(new Set(allSyms));
     const clearRefreshing = (syms: string[]) =>
       setRefreshingSymbols(prev => { const s = new Set(prev); syms.forEach(sym => s.delete(sym)); return s; });
 
     // Stocks + MFs (Yahoo / mfapi.in) un-skeleton as soon as their batch lands — independent
     // of the slower Gemini commodity call, so quick price sources don't wait on the estimate.
-    if (stockSipItems.length) {
-      fetchPricesForSymbols(stockSipItems).then(stockSipPrices => {
-        setPrices(prev => ({ ...prev, ...stockSipPrices }));
-        clearRefreshing(stockSipItems.map(i => i.symbol));
+    if (stockMfItems.length) {
+      fetchPricesForSymbols(stockMfItems).then(stockMfPrices => {
+        setPrices(prev => ({ ...prev, ...stockMfPrices }));
+        clearRefreshing(stockMfItems.map(i => i.symbol));
       });
     }
 
@@ -106,7 +106,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       setPrices(prev => {
         const next = { ...prev };
         data.accounts
-          .filter(a => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
+          .filter(a => (a.type === 'stocks' || a.type === 'mutual_funds') && a.marketSymbol)
           .forEach(a => { const p = getCachedPrice(a.marketSymbol!); if (p !== null) next[a.marketSymbol!] = p; });
         data.accounts
           .filter(a => a.type === 'commodity' && a.marketSymbol)
@@ -130,19 +130,19 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
   const accountTypeOptions = [
     { id: 'bank_account', name: 'Bank Account', subtext: 'Savings or Current' },
-    { id: 'credit_card', name: 'Credit Card', subtext: 'Credit line with cycles' },
-    { id: 'debit_card', name: 'Debit Card', subtext: 'Linked to bank account' },
+    { id: 'credit_card', name: 'Credit Card', subtext: 'Credit Line with Cycles' },
+    { id: 'debit_card', name: 'Debit Card', subtext: 'Linked to Bank Account' },
     { id: 'e_wallet', name: 'E-Wallet', subtext: 'Digital Currency' },
     { id: 'epf', name: 'EPF', subtext: 'Employee Provident Fund Auto-Projection' },
     { id: 'stocks', name: 'Stocks', subtext: 'Market Investments' },
-    { id: 'sips', name: 'SIPs', subtext: 'Systematic Investment Plan' },
+    { id: 'mutual_funds', name: 'Mutual Funds', subtext: 'SIP or Lumpsum Fund Holdings' },
     { id: 'rewards', name: 'Rewards', subtext: 'Cashback & Points' },
-    { id: 'cash', name: 'Cash', subtext: 'Physical wallet' },
-    { id: 'commodity', name: 'Commodity', subtext: 'Physical gold & silver' },
+    { id: 'cash', name: 'Cash', subtext: 'Physical Wallet' },
+    { id: 'commodity', name: 'Commodity', subtext: 'Physical Gold & Silver' },
     ...(data.customAccountTypes || []).map(type => ({
       id: type,
       name: type,
-      subtext: 'Custom account type'
+      subtext: 'Custom Account Type'
     }))
   ];
 
@@ -280,13 +280,13 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     if (!newAccount.type) {
       newErrors.type = 'Account Type is required';
     }
-    if (newAccount.type !== 'sips' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && !openingBalanceInput.trim()) {
+    if (newAccount.type !== 'mutual_funds' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && !openingBalanceInput.trim()) {
       newErrors.openingBalance = 'Opening Balance is required';
     }
-    if ((newAccount.type === 'sips' || newAccount.type === 'stocks' || newAccount.type === 'commodity') && newAccount.numberOfShares === undefined) {
-      newErrors.openingUnits = newAccount.type === 'sips' ? 'Opening Units is required' : newAccount.type === 'commodity' ? 'Opening Grams is required' : 'Opening Shares is required';
+    if ((newAccount.type === 'mutual_funds' || newAccount.type === 'stocks' || newAccount.type === 'commodity') && newAccount.numberOfShares === undefined) {
+      newErrors.openingUnits = newAccount.type === 'mutual_funds' ? 'Opening Units is required' : newAccount.type === 'commodity' ? 'Opening Grams is required' : 'Opening Shares is required';
     }
-    if ((newAccount.type === 'sips' || newAccount.type === 'stocks' || newAccount.type === 'commodity') && newAccount.investedValue === undefined) {
+    if ((newAccount.type === 'mutual_funds' || newAccount.type === 'stocks' || newAccount.type === 'commodity') && newAccount.investedValue === undefined) {
       newErrors.investedValue = 'Total Invested Value is required';
     }
     if (newAccount.type === 'commodity' && !newAccount.commodityMetal) {
@@ -337,7 +337,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     let updatedRewardOpeningBalances = hasInternalRewards ? { ...(newAccount.rewardOpeningBalances || {}) } : undefined;
     let updatedRewardBalanceAdjustments = hasInternalRewards ? { ...(newAccount.rewardBalanceAdjustments || {}) } : undefined;
 
-    if (editId && newAccount.type !== 'sips' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity') {
+    if (editId && newAccount.type !== 'mutual_funds' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity') {
       const originalAcc = data.accounts.find(a => a.id === editId);
       if (originalAcc) {
         // 1. Standard Wallet Opening Balance setup/rollover folding
@@ -437,7 +437,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       }
     } else {
       // In add mode, set opening balance as input and reset adjustment for standard
-      updatedOpeningBalances[month] = (newAccount.type === 'sips' || newAccount.type === 'stocks') ? 0 : (parseFloat(openingBalanceInput) || 0);
+      updatedOpeningBalances[month] = (newAccount.type === 'mutual_funds' || newAccount.type === 'stocks') ? 0 : (parseFloat(openingBalanceInput) || 0);
       updatedBalanceAdjustments[month] = 0;
 
       if (newAccount.isNcmcEnabled && updatedTravelOpeningBalances) {
@@ -475,12 +475,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
         ? newAccount.cardDetails
         : undefined,
       statementRounding: newAccount.statementRounding || 'none',
-      numberOfShares: (newAccount.type === 'stocks' || newAccount.type === 'sips' || newAccount.type === 'commodity') ? newAccount.numberOfShares : undefined,
-      marketSymbol: (newAccount.type === 'stocks' || newAccount.type === 'sips' || newAccount.type === 'commodity') ? (newAccount.marketSymbol?.trim() || undefined) : undefined,
-      investedValue: (newAccount.type === 'stocks' || newAccount.type === 'sips' || newAccount.type === 'commodity') ? newAccount.investedValue : undefined,
+      numberOfShares: (newAccount.type === 'stocks' || newAccount.type === 'mutual_funds' || newAccount.type === 'commodity') ? newAccount.numberOfShares : undefined,
+      marketSymbol: (newAccount.type === 'stocks' || newAccount.type === 'mutual_funds' || newAccount.type === 'commodity') ? (newAccount.marketSymbol?.trim() || undefined) : undefined,
+      investedValue: (newAccount.type === 'stocks' || newAccount.type === 'mutual_funds' || newAccount.type === 'commodity') ? newAccount.investedValue : undefined,
       commodityMetal: newAccount.type === 'commodity' ? newAccount.commodityMetal : undefined,
       manualPricePerGram: newAccount.type === 'commodity' ? newAccount.manualPricePerGram : undefined,
-      avgNav: newAccount.type === 'sips' ? newAccount.avgNav : undefined,
+      avgNav: newAccount.type === 'mutual_funds' ? newAccount.avgNav : undefined,
       rewardUnit: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.rewardUnit : undefined,
       pointsConversionRate: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.pointsConversionRate : undefined,
       rewardType: (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.isCashbackEnabled ? (newAccount.rewardType || 'rupee') : undefined,
@@ -551,7 +551,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             e_wallet: 'E-Wallets',
             epf: 'Employee Provident Fund (EPF)',
             stocks: 'Stocks & Investments',
-            sips: 'SIPs',
+            mutual_funds: 'Mutual Funds',
             rewards: 'Rewards & Cashback',
             cash: 'Physical Cash',
             commodity: 'Commodities'
@@ -566,7 +566,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             'rewards',
             'epf',
             'stocks',
-            'sips',
+            'mutual_funds',
             'commodity'
           ];
 
@@ -652,19 +652,19 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
                   const isFirstAccount = index === 0 && acc.id === grouped[type][0].id;
 
-                  // SIP market data — pre-computed once for middle + bottom sections
-                  const sipTxUnits = acc.type === 'sips'
+                  // Mutual fund market data — pre-computed once for middle + bottom sections
+                  const mfTxUnits = acc.type === 'mutual_funds'
                     ? data.transactions
                         .filter(t => t.accountId === acc.id && t.numberOfShares !== undefined)
                         .reduce((sum, t) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0)
                     : 0;
-                  const sipTotalUnits = acc.type === 'sips' ? Number(acc.numberOfShares ?? 0) + sipTxUnits : 0;
-                  const sipCurrentPrice = acc.type === 'sips' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
-                  const sipCurrentValue = sipCurrentPrice !== null && sipTotalUnits > 0 ? sipCurrentPrice * sipTotalUnits : null;
-                  const sipEffectiveInvested = acc.type === 'sips'
+                  const mfTotalUnits = acc.type === 'mutual_funds' ? Number(acc.numberOfShares ?? 0) + mfTxUnits : 0;
+                  const mfCurrentPrice = acc.type === 'mutual_funds' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
+                  const mfCurrentValue = mfCurrentPrice !== null && mfTotalUnits > 0 ? mfCurrentPrice * mfTotalUnits : null;
+                  const mfEffectiveInvested = acc.type === 'mutual_funds'
                     ? acc.investedValue !== undefined
                       ? acc.investedValue + rawBal
-                      : (acc.avgNav && sipTotalUnits > 0 ? acc.avgNav * sipTotalUnits : undefined)
+                      : (acc.avgNav && mfTotalUnits > 0 ? acc.avgNav * mfTotalUnits : undefined)
                     : undefined;
 
                   // Commodity market data — pre-computed once for middle + bottom sections
@@ -734,25 +734,25 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       </div>
 
                       {/* Middle Section - Balance */}
-                      {acc.type === 'sips' ? (
+                      {acc.type === 'mutual_funds' ? (
                         <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
                           <div className="flex-col gap-1">
                             <span className="text-mono text-muted text-xs">
-                              {sipCurrentValue !== null ? 'CURRENT VALUE' : sipEffectiveInvested !== undefined ? 'INVESTED' : 'CURRENT VALUE'}
+                              {mfCurrentValue !== null ? 'CURRENT VALUE' : mfEffectiveInvested !== undefined ? 'INVESTED' : 'CURRENT VALUE'}
                             </span>
-                            <span className="text-serif" style={{ fontSize: '1.8rem', color: (sipCurrentValue !== null && sipEffectiveInvested !== undefined && sipCurrentValue < sipEffectiveInvested) ? 'var(--danger)' : 'var(--success)', lineHeight: '1.2' }}>
-                              {sipCurrentValue !== null
-                                ? formatCurrency(sipCurrentValue)
-                                : sipEffectiveInvested !== undefined
-                                  ? formatCurrency(sipEffectiveInvested)
+                            <span className="text-serif" style={{ fontSize: '1.8rem', color: (mfCurrentValue !== null && mfEffectiveInvested !== undefined && mfCurrentValue < mfEffectiveInvested) ? 'var(--danger)' : 'var(--success)', lineHeight: '1.2' }}>
+                              {mfCurrentValue !== null
+                                ? formatCurrency(mfCurrentValue)
+                                : mfEffectiveInvested !== undefined
+                                  ? formatCurrency(mfEffectiveInvested)
                                   : '—'}
                             </span>
                           </div>
-                          {sipCurrentValue !== null && sipEffectiveInvested !== undefined && (
+                          {mfCurrentValue !== null && mfEffectiveInvested !== undefined && (
                             <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
                               <span className="text-mono text-muted text-xs">INVESTED</span>
                               <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
-                                {formatCurrency(sipEffectiveInvested)}
+                                {formatCurrency(mfEffectiveInvested)}
                               </span>
                             </div>
                           )}
@@ -952,44 +952,44 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         </div>
                       )}
 
-                      {acc.type === 'sips' && (() => {
-                        const sipPnl = sipCurrentValue !== null && sipEffectiveInvested !== undefined ? sipCurrentValue - sipEffectiveInvested : null;
-                        const sipPnlPct = sipPnl !== null && sipEffectiveInvested! > 0 ? (sipPnl / sipEffectiveInvested!) * 100 : null;
-                        const sipPnlPos = sipPnl !== null && sipPnl >= 0;
+                      {acc.type === 'mutual_funds' && (() => {
+                        const mfPnl = mfCurrentValue !== null && mfEffectiveInvested !== undefined ? mfCurrentValue - mfEffectiveInvested : null;
+                        const mfPnlPct = mfPnl !== null && mfEffectiveInvested! > 0 ? (mfPnl / mfEffectiveInvested!) * 100 : null;
+                        const mfPnlPos = mfPnl !== null && mfPnl >= 0;
                         const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
                         const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
-                        const isFresh = acc.marketSymbol ? isCacheFresh(acc.marketSymbol, 'sip') : false;
+                        const isFresh = acc.marketSymbol ? isCacheFresh(acc.marketSymbol, 'mf') : false;
                         return (
                           <>
-                            {sipTotalUnits > 0 && (
+                            {mfTotalUnits > 0 && (
                               <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                                 <span className="text-mono text-muted text-xs">TOTAL UNITS</span>
-                                <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{sipTotalUnits.toLocaleString('en-IN', { maximumFractionDigits: 3 })}</span>
+                                <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{mfTotalUnits.toLocaleString('en-IN', { maximumFractionDigits: 3 })}</span>
                               </div>
                             )}
                             {acc.marketSymbol && (
                               <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                {(sipCurrentPrice !== null || isRefreshing) ? (
+                                {(mfCurrentPrice !== null || isRefreshing) ? (
                                   <>
                                     <div className="flex-col gap-0">
                                       <span className="text-mono text-muted text-xs">CURRENT NAV</span>
                                       {isRefreshing
                                         ? <span className="skeleton-bar" style={{ width: '4rem', height: '1.1rem', marginTop: '0.2rem' }} />
                                         : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                            ₹{sipCurrentPrice!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            ₹{mfCurrentPrice!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                           </span>
                                       }
                                     </div>
                                     <div className="flex align-center" style={{ gap: '0.75rem' }}>
-                                      {(sipPnl !== null && sipPnlPct !== null && !isRefreshing) && (
+                                      {(mfPnl !== null && mfPnlPct !== null && !isRefreshing) && (
                                         <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
-                                          <span className="text-mono text-muted text-xs">P&amp;L ({sipPnlPos ? '+' : ''}{sipPnlPct.toFixed(2)}%)</span>
-                                          <span style={{ color: sipPnlPos ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                            {sipPnlPos ? '+' : '-'}₹{Math.abs(sipPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                          <span className="text-mono text-muted text-xs">P&amp;L ({mfPnlPos ? '+' : ''}{mfPnlPct.toFixed(2)}%)</span>
+                                          <span style={{ color: mfPnlPos ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                            {mfPnlPos ? '+' : '-'}₹{Math.abs(mfPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                                           </span>
                                         </div>
                                       )}
-                                      {isRefreshing && sipEffectiveInvested !== undefined && (
+                                      {isRefreshing && mfEffectiveInvested !== undefined && (
                                         <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
                                           <span className="text-mono text-muted text-xs">P&amp;L</span>
                                           <span className="skeleton-bar" style={{ width: '5rem', height: '1.1rem', marginTop: '0.2rem' }} />
@@ -1306,7 +1306,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                 error={errors.type}
                 iconGetter={id => getAccountEmoji(id)}
               />
-              {newAccount.type !== 'sips' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && (
+              {newAccount.type !== 'mutual_funds' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && (
                 <div className="input-group">
                   <label>{editId ? 'Current Balance (Current Month)' : 'Opening Balance (Current Month)'}</label>
                   <input
@@ -1416,8 +1416,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       label="Contribution Basis"
                       value={newAccount.epfContributionBasis || 'statutory_ceiling'}
                       options={[
-                        { id: 'statutory_ceiling', name: 'Statutory Wage Ceiling', subtext: '12% capped at ₹15,000 basic (Default EPFO rule)' },
-                        { id: 'actual_basic', name: 'Actual Basic + DA', subtext: '12% calculated on full actual basic salary' }
+                        { id: 'statutory_ceiling', name: 'Statutory Wage Ceiling', subtext: '12% Capped at ₹15,000 Basic (Default EPFO Rule)' },
+                        { id: 'actual_basic', name: 'Actual Basic + DA', subtext: '12% Calculated on Full Actual Basic Salary' }
                       ]}
                       onChange={val => setNewAccount({ ...newAccount, epfContributionBasis: val as 'statutory_ceiling' | 'actual_basic' })}
                       iconGetter={id => id === 'statutory_ceiling' ? '📜' : '💸'}
@@ -1450,7 +1450,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                 </>
               )}
 
-              {(newAccount.type === 'stocks' || newAccount.type === 'sips') && (
+              {(newAccount.type === 'stocks' || newAccount.type === 'mutual_funds') && (
                 <>
                   <div className="input-group">
                     <label>Total Invested Value — ₹</label>
@@ -1472,7 +1472,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     }
                   </div>
                   <div className="input-group">
-                    <label>{newAccount.type === 'sips' ? 'Opening Units' : 'Opening Shares'}</label>
+                    <label>{newAccount.type === 'mutual_funds' ? 'Opening Units' : 'Opening Shares'}</label>
                     <input
                       type="number"
                       className={`input-field ${errors.openingUnits ? 'border-danger' : ''}`}
@@ -1481,14 +1481,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         setNewAccount({ ...newAccount, numberOfShares: e.target.value !== '' ? parseFloat(e.target.value) : undefined });
                         if (errors.openingUnits) setErrors(prev => ({ ...prev, openingUnits: '' }));
                       }}
-                      placeholder={newAccount.type === 'sips' ? 'e.g. 484.775' : 'e.g. 100'}
+                      placeholder={newAccount.type === 'mutual_funds' ? 'e.g. 484.775' : 'e.g. 100'}
                       step="any"
                       min="0"
                     />
                     {errors.openingUnits && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.openingUnits}</span>}
                   </div>
                   <div className="input-group">
-                    <label>{newAccount.type === 'sips' ? 'MF Scheme Code — Search by Name' : 'Market Symbol — Search by Name'}</label>
+                    <label>{newAccount.type === 'mutual_funds' ? 'MF Scheme Code — Search by Name' : 'Market Symbol — Search by Name'}</label>
                     <div style={{ position: 'relative', width: '100%' }}>
                       <input
                         type="text"
@@ -1504,7 +1504,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                             setSymbolSearching(true);
                             setSymbolDropdownOpen(false);
                             symbolTimerRef.current = setTimeout(async () => {
-                              const results = newAccount.type === 'sips'
+                              const results = newAccount.type === 'mutual_funds'
                                 ? await searchMFByName(val.trim())
                                 : await searchStockByName(val.trim());
                               setSymbolResults(results);
@@ -1517,7 +1517,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                             setSymbolDropdownOpen(false);
                           }
                         }}
-                        placeholder={newAccount.type === 'sips' ? 'Type fund name or scheme code…' : 'Type company name or symbol…'}
+                        placeholder={newAccount.type === 'mutual_funds' ? 'Type fund name or scheme code…' : 'Type company name or symbol…'}
                         autoComplete="off"
                       />
                       {symbolSearching && (
@@ -1537,7 +1537,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
                         }}>
                           {symbolResults.map((r, idx) => {
-                            const isMF = newAccount.type === 'sips';
+                            const isMF = newAccount.type === 'mutual_funds';
                             const label = isMF ? (r as MFSearchResult).schemeName : (r as StockSearchResult).name;
                             const code = isMF ? (r as MFSearchResult).schemeCode : (r as StockSearchResult).symbol;
                             const sub = isMF ? `Code: ${code}` : `${code}${(r as StockSearchResult).exchange ? ' · ' + (r as StockSearchResult).exchange : ''}`;
@@ -1565,12 +1565,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       )}
                     </div>
                     <span className="text-xs text-muted" style={{ marginTop: '0.25rem', display: 'block' }}>
-                      {newAccount.type === 'sips'
+                      {newAccount.type === 'mutual_funds'
                         ? 'Search by fund name — tap a result to auto-fill the scheme code'
                         : 'Search by company name — tap a result to auto-fill the NSE/BSE symbol'}
                     </span>
                   </div>
-                  {newAccount.type === 'sips' && (
+                  {newAccount.type === 'mutual_funds' && (
                     <div className="input-group">
                       <label>Average NAV — ₹/unit (Optional)</label>
                       <input
@@ -1594,8 +1594,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     label="Metal"
                     value={newAccount.commodityMetal || ''}
                     options={[
-                      { id: 'gold', name: 'Gold', subtext: 'Digital gold · ₹/g' },
-                      { id: 'silver', name: 'Silver', subtext: 'Digital silver · ₹/g' },
+                      { id: 'gold', name: 'Gold', subtext: 'Digital Gold · ₹/g' },
+                      { id: 'silver', name: 'Silver', subtext: 'Digital Silver · ₹/g' },
                     ]}
                     onChange={val => {
                       const ticker = val === 'gold' ? 'GC=F' : 'SI=F';
@@ -1697,10 +1697,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       label="Statement Bill Rounding"
                       value={newAccount.statementRounding || 'none'}
                       options={[
-                        { id: 'none', name: 'No Rounding', subtext: 'Keep exact decimals (e.g. 1538.92)' },
-                        { id: 'floor', name: 'Round Down (Floor)', subtext: 'Drop decimals (e.g. 1538.00)' },
-                        { id: 'round', name: 'Nearest Integer', subtext: 'Round to closest (e.g. 1539.00)' },
-                        { id: 'ceil', name: 'Round Up (Ceil)', subtext: 'Always round up (e.g. 1539.00)' }
+                        { id: 'none', name: 'No Rounding', subtext: 'Keep Exact Decimals (e.g. 1538.92)' },
+                        { id: 'floor', name: 'Round Down (Floor)', subtext: 'Drop Decimals (e.g. 1538.00)' },
+                        { id: 'round', name: 'Nearest Integer', subtext: 'Round to Closest (e.g. 1539.00)' },
+                        { id: 'ceil', name: 'Round Up (Ceil)', subtext: 'Always Round Up (e.g. 1539.00)' }
                       ]}
                       onChange={val => setNewAccount({ ...newAccount, statementRounding: val as any })}
                       iconGetter={id => {
@@ -1741,8 +1741,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       label="Reward Type"
                       value={newAccount.rewardType || 'rupee'}
                       options={[
-                        { id: 'rupee', name: 'Rupee (Statement Credit)', subtext: 'Cashback in form of Rupees credited directly to the card' },
-                        { id: 'points', name: 'Custom Reward Points', subtext: 'Cashback in custom reward unit tracked internally' }
+                        { id: 'rupee', name: 'Rupee (Statement Credit)', subtext: 'Cashback in Form of Rupees Credited Directly to Card' },
+                        { id: 'points', name: 'Custom Reward Points', subtext: 'Cashback in Custom Reward Unit Tracked Internally' }
                       ]}
                       onChange={val => setNewAccount({ 
                         ...newAccount, 
@@ -1760,8 +1760,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         label="Apply Statement Credits To"
                         value={newAccount.cashbackCreditCycle || 'next_cycle'}
                         options={[
-                          { id: 'next_cycle', name: 'Next Cycle', subtext: 'Reduces the upcoming statement (Default)' },
-                          { id: 'same_cycle', name: 'Same Cycle', subtext: 'Reduces the current statement' }
+                          { id: 'next_cycle', name: 'Next Cycle', subtext: 'Reduces the Upcoming Statement (Default)' },
+                          { id: 'same_cycle', name: 'Same Cycle', subtext: 'Reduces the Current Statement' }
                         ]}
                         onChange={val => setNewAccount({ ...newAccount, cashbackCreditCycle: val as 'same_cycle' | 'next_cycle' })}
                         iconGetter={id => id === 'next_cycle' ? '➡️' : '🔄'}

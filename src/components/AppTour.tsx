@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { useFinance } from '../FinanceContext';
-import { Sparkles, ArrowRight, ArrowLeft, X, ShieldCheck, Eye, Smartphone, Zap, Gift, TrendingUp } from 'lucide-react';
+import { Sparkles, ArrowRight, ArrowLeft, X, ShieldCheck, Eye, Smartphone, Zap, Gift, TrendingUp, MessageSquare } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import type { Tab } from '../App';
 
@@ -13,6 +13,8 @@ interface AppTourProps {
   setActiveTab: (tab: Tab) => void;
   isHubOpen: boolean;
   setIsHubOpen: (open: boolean) => void;
+  isAskVaultOpen?: boolean;
+  setIsAskVaultOpen?: (open: boolean) => void;
 }
 
 interface TourStep {
@@ -22,10 +24,10 @@ interface TourStep {
   tab?: Tab;
   actionBefore?: () => void;
   icon?: any;
-  cardPosition?: 'bottom';
+  cardPosition?: 'bottom' | 'top';
 }
 
-export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, setIsHubOpen }: AppTourProps) {
+export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, setIsHubOpen, isAskVaultOpen, setIsAskVaultOpen }: AppTourProps) {
   const { data, loadDemoData, clearDemoData, updateUser } = useFinance();
   const [currentStep, setCurrentStep] = useState(0);
   const [spotlightRect, setSpotlightRect] = useState<DOMRect | null>(null);
@@ -76,15 +78,23 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       },
       {
         title: "SpendVault Hub",
-        description: "Tap the Hub icon to access advanced features: Group Splits, Lending & Borrowing, Bills & SIPs, Rewards, and Smart Insights. Detailed tours activate automatically when you open them for the first time!",
-        selector: ".nav-header-btn",
+        description: "Tap the Hub icon to access advanced features: Group Splits, Lending & Borrowing, Bills, Rewards, Wealth, and Smart Insights. Detailed tours activate automatically when you open them for the first time!",
+        selector: ".tour-hub-btn",
         tab: "dashboard",
         icon: Zap
       },
       {
+        title: "AskVault AI Assistant",
+        description: "Talk to AskVault — your private financial AI. Ask questions about your spending, calculate budgets, or look up past transactions in plain English!",
+        selector: ".tour-askvault-btn",
+        tab: "dashboard",
+        icon: MessageSquare,
+        cardPosition: 'bottom'
+      },
+      {
         title: "Smart Features",
         description: isAndroid
-          ? "SpendVault does the busywork for you. Auto-Log SMS reads your bank's transaction texts and logs spends automatically — add a Gemini key to enable an AI filter that drops promos & OTPs. Commodity AI and Asset Logos enrich your portfolio, and Passive Logs let you keep investments or pass-through expenses out of your budget stats."
+          ? "SpendVault does the busywork for you. Auto-Log SMS reads your bank's transaction texts and logs spends automatically — add a Gemini key to enable an AI filter that drops promos & OTPs. Commodity AI and Asset Logos enrich your wealth dashboard, and Passive Logs let you keep investments or pass-through expenses out of your budget stats."
           : "Power up your vault. Add a Gemini key for AI-estimated commodity prices and real brand logos on your holdings, and use Passive Logs to flag investments or pass-through expenses so they don't distort your budget stats. (Automatic bank-SMS logging is available on the Android app.)",
         selector: ".tour-smart-features",
         tab: "settings",
@@ -154,8 +164,8 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
     ],
     bills: [
       {
-        title: "Bills & SIPs Tour",
-        description: "Welcome to Bills & SIPs! Track upcoming monthly utility payments, credit card statement bills, and mutual fund SIP schedules.",
+        title: "Bills Tour",
+        description: "Welcome to Bills! Track upcoming monthly utility payments, subscriptions and credit card statement bills — anything with a due date you don't want to miss.",
         icon: ShieldCheck
       },
       {
@@ -220,8 +230,8 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
     ],
     portfolio: [
       {
-        title: "Portfolio Tour",
-        description: "Welcome to your Portfolio! Track the live value of your stocks, mutual funds, and gold or silver holdings — all in one place.",
+        title: "Wealth Tour",
+        description: "Welcome to your Wealth dashboard! Track the live value of your stocks, mutual funds, metals, and EPF holdings — all in one place.",
         icon: TrendingUp
       },
       {
@@ -232,10 +242,10 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       },
       {
         title: "Your Holdings",
-        description: "Each holding shows what you invested, its current value, and returns. Tap any one for a detailed price chart — SpendVault even fetches real brand logos and AI-estimated metal prices automatically.",
-        selector: ".tour-portfolio-holdings",
-        icon: Sparkles,
-        cardPosition: 'bottom'
+        description: "Each holding shows what you invested, its current value, and returns. Tap any tab to filter by asset class — SpendVault even fetches real brand logos and AI-estimated metal prices automatically.",
+        selector: ".tour-portfolio-tabs, .tour-portfolio-holdings-section",
+        cardPosition: 'top',
+        icon: Sparkles
       },
       {
         title: "Track Your Wealth",
@@ -256,6 +266,22 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
     if (stepInfo.tab && activeTab !== stepInfo.tab) {
       setActiveTab(stepInfo.tab);
     }
+    if (stepInfo.title === "Smart Features") {
+      setTimeout(() => {
+        const targetEl = document.querySelector('.tour-smart-features');
+        const cardEl = document.querySelector('.tour-card');
+        const appRoot = document.querySelector('.app-root');
+        if (targetEl && appRoot) {
+          const cardBottom = cardEl ? cardEl.getBoundingClientRect().bottom : 380;
+          const targetTop = targetEl.getBoundingClientRect().top;
+          const desiredTop = cardBottom + 12;
+          const diff = targetTop - desiredTop;
+          appRoot.scrollTop += diff;
+          window.dispatchEvent(new Event('resize'));
+          setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
+        }
+      }, 150);
+    }
   }, [currentStep, tourType]);
 
   // Manage dynamic row animation classes and Hub open/close triggers
@@ -264,10 +290,12 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       document.querySelectorAll('.transaction-row').forEach(el => {
         el.classList.remove('demo-active', 'demo-active-second');
       });
-      const btn = document.querySelector('.nav-header-btn');
-      if (btn) {
-        btn.classList.remove('demo-hub-active', 'demo-hub-finger');
-      }
+      document.querySelectorAll('.nav-header-btn, .tour-hub-btn, .tour-askvault-btn').forEach(btn => {
+        btn.classList.remove('demo-hub-active', 'demo-hub-finger', 'demo-askvault-active', 'demo-askvault-finger');
+      });
+      document.querySelectorAll('.tour-portfolio-tab-btn').forEach(btn => {
+        btn.classList.remove('demo-tab-active', 'demo-tab-finger');
+      });
     };
 
     clearClasses();
@@ -280,6 +308,11 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
     let hubTimer1: number | null = null;
     let hubTimer2: number | null = null;
     let hubInterval: number | null = null;
+    let askTimer1: number | null = null;
+    let askTimer2: number | null = null;
+    let askInterval: number | null = null;
+    let portfolioTimer: number | null = null;
+    let portfolioInterval: number | null = null;
     let insightsScrollCleanup: (() => void) | null = null;
 
     if (tourType === 'onboarding' && stepInfo) {
@@ -333,7 +366,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
         runCycle();
         loopInterval = window.setInterval(runCycle, 10000);
       } else if (stepInfo.title === "SpendVault Hub") {
-        const hubBtn = document.querySelector('.nav-header-btn');
+        const hubBtn = document.querySelector('.tour-hub-btn');
         if (hubBtn) {
           // demo-hub-active stays for the full step (position anchor for ::after)
           hubBtn.classList.add('demo-hub-active');
@@ -345,7 +378,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
         // DOM node (losing manually-added classes), which would cause ::after
         // to lose its position:relative anchor and jump to the screen centre.
         const triggerHubFinger = () => {
-          const b = document.querySelector('.nav-header-btn');
+          const b = document.querySelector('.tour-hub-btn');
           if (!b) return;
           b.classList.add('demo-hub-active');   // ensure position:relative anchor
           b.classList.remove('demo-hub-finger');
@@ -373,6 +406,38 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
 
         runHubCycle();
         hubInterval = window.setInterval(runHubCycle, 6500);
+      } else if (stepInfo.title === "AskVault AI Assistant") {
+        const askBtn = document.querySelector('.tour-askvault-btn');
+        if (askBtn) {
+          askBtn.classList.add('demo-askvault-active');
+        }
+
+        const triggerAskFinger = () => {
+          const b = document.querySelector('.tour-askvault-btn');
+          if (!b) return;
+          b.classList.add('demo-askvault-active');
+          b.classList.remove('demo-askvault-finger');
+          void (b as HTMLElement).offsetWidth;
+          b.classList.add('demo-askvault-finger');
+        };
+
+        const runAskCycle = () => {
+          if (setIsAskVaultOpen) setIsAskVaultOpen(false);
+          triggerAskFinger();
+
+          // At 2000ms, open AskVault
+          askTimer1 = window.setTimeout(() => {
+            if (setIsAskVaultOpen) setIsAskVaultOpen(true);
+          }, 2000);
+
+          // At 6000ms, close AskVault
+          askTimer2 = window.setTimeout(() => {
+            if (setIsAskVaultOpen) setIsAskVaultOpen(false);
+          }, 6000);
+        };
+
+        runAskCycle();
+        askInterval = window.setInterval(runAskCycle, 6500);
       }
     }
 
@@ -424,17 +489,55 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       }
     }
 
+    if (tourType === 'portfolio' && stepInfo && stepInfo.title === "Your Holdings") {
+      let tabIdx = 0;
+      const triggerTabCycle = () => {
+        const btns = document.querySelectorAll('.tour-portfolio-tab-btn');
+        if (btns.length === 0) return;
+
+        btns.forEach(b => {
+          b.classList.remove('demo-tab-active', 'demo-tab-finger');
+        });
+
+        const currentBtn = btns[tabIdx % btns.length] as HTMLElement;
+        if (currentBtn) {
+          currentBtn.classList.add('demo-tab-active');
+          currentBtn.classList.remove('demo-tab-finger');
+          void currentBtn.offsetWidth;
+          currentBtn.classList.add('demo-tab-finger');
+          window.setTimeout(() => {
+            currentBtn.click();
+            // Force spotlight recalculation for the newly rendered tab layout
+            window.setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+            window.setTimeout(() => window.dispatchEvent(new Event('resize')), 200);
+          }, 280);
+        }
+        tabIdx++;
+      };
+
+      portfolioTimer = window.setTimeout(() => {
+        triggerTabCycle();
+        portfolioInterval = window.setInterval(triggerTabCycle, 1800);
+      }, 1000);
+    }
+
     return () => {
       clearClasses();
       setIsTourModalOpen(false);
       setIsHubTourOpenActive(false);
       setIsHubOpen(false);
+      if (setIsAskVaultOpen) setIsAskVaultOpen(false);
       if (editTimer1) clearTimeout(editTimer1);
       if (editTimer2) clearTimeout(editTimer2);
       if (loopInterval) clearInterval(loopInterval);
       if (hubTimer1) clearTimeout(hubTimer1);
       if (hubTimer2) clearTimeout(hubTimer2);
       if (hubInterval) clearInterval(hubInterval);
+      if (askTimer1) clearTimeout(askTimer1);
+      if (askTimer2) clearTimeout(askTimer2);
+      if (askInterval) clearInterval(askInterval);
+      if (portfolioTimer) clearTimeout(portfolioTimer);
+      if (portfolioInterval) clearInterval(portfolioInterval);
       if (insightsScrollCleanup) insightsScrollCleanup();
       window.dispatchEvent(new CustomEvent('tour-close-edit'));
       document.body.classList.remove('tour-debt-inside-active');
@@ -446,6 +549,9 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
     let selector = isTourModalOpen ? '.bottom-sheet' : stepInfo.selector;
     if (tourType === 'onboarding' && stepInfo && stepInfo.title === "SpendVault Hub" && isHubTourOpenActive) {
       selector = '.bottom-sheet';
+    }
+    if (tourType === 'onboarding' && stepInfo && stepInfo.title === "AskVault AI Assistant" && isAskVaultOpen) {
+      selector = '.tour-askvault-chat';
     }
 
     if (!selector) {
@@ -476,19 +582,37 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       setSpotlightRect({ top, left, width: right - left, height: bottom - top, right, bottom, x: left, y: top, toJSON: () => ({}) } as DOMRect);
     };
 
-    // .bottom-sheet has a 300ms slideUp animation — wait for it to finish before reading rect
-    const delay = selector === '.bottom-sheet' ? 400 : 150;
+    // .bottom-sheet and .tour-askvault-chat have slide-up animations — wait for them to finish before reading rect
+    const delay = (selector === '.bottom-sheet' || selector === '.tour-askvault-chat') ? 400 : 150;
     const timer = setTimeout(updateSpotlight, delay);
     // Second backup read slightly later for slow-rendering devices
-    const timer2 = selector === '.bottom-sheet' ? setTimeout(updateSpotlight, 550) : null;
+    const timer2 = (selector === '.bottom-sheet' || selector === '.tour-askvault-chat') ? setTimeout(updateSpotlight, 550) : null;
+    const timer3 = setTimeout(updateSpotlight, 1000);
+    const timer4 = setTimeout(updateSpotlight, 1800);
     window.addEventListener('resize', updateSpotlight);
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => {
+        updateSpotlight();
+      });
+      const selectors = selector.split(',').map(s => s.trim()).filter(Boolean);
+      selectors.forEach(sel => {
+        document.querySelectorAll(sel).forEach(el => {
+          resizeObserver?.observe(el);
+        });
+      });
+    }
 
     return () => {
       clearTimeout(timer);
       if (timer2) clearTimeout(timer2);
+      clearTimeout(timer3);
+      clearTimeout(timer4);
       window.removeEventListener('resize', updateSpotlight);
+      if (resizeObserver) resizeObserver.disconnect();
     };
-  }, [currentStep, activeTab, isHubOpen, tourType, isTourModalOpen, isHubTourOpenActive]);
+  }, [currentStep, activeTab, isHubOpen, tourType, isTourModalOpen, isHubTourOpenActive, isAskVaultOpen]);
 
   const handleNext = () => {
     if (currentStep < steps.length - 1) {
@@ -518,6 +642,21 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
 
   const getCardStyle = (): React.CSSProperties | undefined => {
     const cardWidth = Math.min(340, window.innerWidth - 32);
+
+    if ((stepInfo.title === "SpendVault Hub" && isHubTourOpenActive) || 
+        stepInfo.title === "Smart Features" ||
+        stepInfo.cardPosition === 'top') {
+      const left = (window.innerWidth - cardWidth) / 2;
+      return {
+        position: 'fixed',
+        top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
+        bottom: 'auto',
+        left: `${left}px`,
+        width: `${cardWidth}px`,
+        transform: 'none',
+        zIndex: 99999
+      };
+    }
 
     if (stepInfo.cardPosition === 'bottom') {
       const left = (window.innerWidth - cardWidth) / 2;
@@ -805,13 +944,13 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
           position: relative;
         }
 
-        /* Animated Touch Finger Pointer for Hub Icon */
-        .nav-header-btn.demo-hub-active {
+        /* Animated Touch Finger Pointer for Hub & AskVault Icons */
+        .tour-hub-btn.demo-hub-active, .tour-askvault-btn.demo-askvault-active {
           position: relative;
         }
         /* demo-hub-finger is removed+reflow+re-added each JS cycle so the
            browser always restarts from frame 0, immune to React re-renders. */
-        .nav-header-btn.demo-hub-finger::after {
+        .tour-hub-btn.demo-hub-finger::after, .tour-askvault-btn.demo-askvault-finger::after {
           content: '';
           position: absolute;
           width: 24px;
@@ -826,6 +965,32 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
           top: 50%;
           opacity: 0;
           animation: demoHubFinger 2s ease-in-out forwards;
+        }
+
+        .tour-portfolio-tab-btn.demo-tab-active {
+          position: relative;
+        }
+        .tour-portfolio-tab-btn.demo-tab-finger::after {
+          content: '';
+          position: absolute;
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          background: rgba(99, 102, 241, 0.55);
+          border: 2px solid rgba(255, 255, 255, 0.95);
+          box-shadow: 0 0 10px rgba(99, 102, 241, 0.9), inset 0 0 8px rgba(255, 255, 255, 0.7);
+          pointer-events: none;
+          z-index: 100;
+          left: 50%;
+          top: 50%;
+          opacity: 0;
+          animation: demoTabFinger 0.7s ease-in-out forwards;
+        }
+
+        @keyframes demoTabFinger {
+          0% { opacity: 0; transform: translate(-50%, -50%) scale(1.3); }
+          35% { opacity: 0.95; transform: translate(-50%, -50%) scale(0.85); }
+          70%, 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.2); }
         }
 
         @keyframes demoHubFinger {

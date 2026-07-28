@@ -24,7 +24,8 @@ export const getCategoryIcon = (category: string, size = 17) => {
   if (cat.includes('rent')) return <Home size={size} />;
   if (cat.includes('loan')) return <Handshake size={size} />;
   if (cat.includes('cashback')) return <Gift size={size} />;
-  if (cat.includes('sip')) return <ChartNoAxesCombined size={size} />;
+  // 'sip' kept so a custom/legacy category still spelled that way keeps its icon.
+  if (cat.includes('mutual fund') || cat.includes('sip')) return <ChartNoAxesCombined size={size} />;
   if (cat.includes('stocks')) return <ChartCandlestick size={size} />;
   if (cat.includes('commodity')) return <Gem size={size} />;
   if (cat.includes('lend') || cat.includes('borrow')) return <HandCoins size={size} />;
@@ -48,7 +49,7 @@ export const getAccountEmoji = (
     case 'e_wallet': return '🪙';
     case 'stocks':
     case 'investment': return '📈';
-    case 'sips': return '💹';
+    case 'mutual_funds': return '💹';
     case 'rewards': return '🎁';
     case 'cash': return '💵';
     case 'epf': return '🏛️';
@@ -72,7 +73,7 @@ export const getAccountTypeIcon = (type: string, size = 18) => {
       return <Gift size={size} />;
     case 'cash':
       return <WalletMinimal size={size} />;
-    case 'sips':
+    case 'mutual_funds':
       return <BarChart3 size={size} />;
     case 'stocks':
     case 'investment':

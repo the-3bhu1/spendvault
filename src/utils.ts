@@ -1,12 +1,27 @@
 import { format, parseISO, addMonths, subMonths, addDays, addWeeks, addQuarters, addYears, setDate, isAfter, isBefore, startOfDay } from 'date-fns';
 import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitEvent, SplitCycle, SplitItem, RecurringFrequency } from './types';
 
+// The canonical mutual-fund category name. It was previously "SIP" (and before that
+// "SIP / Mutual Funds") — a SIP is only one way to buy, and the account type is really a
+// mutual-fund holding, so the category is now named after the asset. Stored data is migrated on
+// load (see FinanceContext), but isMutualFundCategory() also accepts the legacy spellings so a
+// freshly-imported OLD backup and any un-migrated row still classify correctly.
+// Always compare through the helper, never a bare string.
+export const MUTUAL_FUNDS_CATEGORY = 'Mutual Funds';
+const MUTUAL_FUND_CATEGORY_ALIASES = new Set([
+  MUTUAL_FUNDS_CATEGORY.toLowerCase(),
+  'sip',
+  'sip / mutual funds',
+]);
+export const isMutualFundCategory = (category?: string) =>
+  MUTUAL_FUND_CATEGORY_ALIASES.has((category || '').toLowerCase());
+
 // Categories that never count toward Spends/Income stats: pure ledger movements (transfers, CC bill
-// payments, NCMC recharges), investments tracked separately (SIP/stocks/commodity), and lending &
-// borrowing (money lent out or borrowed isn't a real spend/income — it's expected to be returned).
+// payments, NCMC recharges), investments tracked separately (mutual funds/stocks/commodity), and
+// lending & borrowing (money lent out or borrowed isn't a real spend/income — it's expected back).
 // Single source of truth so every stats surface (Dashboard, Insights, Transactions) stays in sync.
 export const STATS_EXCLUDED_CATEGORIES = new Set([
-  'transfer', 'cc payment', 'ncmc travel recharge', 'sip', 'stocks', 'commodity', 'lending & borrowing'
+  'transfer', 'cc payment', 'ncmc travel recharge', 'mutual funds', 'sip', 'stocks', 'commodity', 'lending & borrowing'
 ]);
 export const isStatsExcludedCategory = (category: string) =>
   STATS_EXCLUDED_CATEGORIES.has((category || '').toLowerCase());

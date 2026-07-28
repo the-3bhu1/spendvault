@@ -11,8 +11,8 @@ import { getCategoryIcon, getAccountTypeIcon } from './transactionIcons';
 
 const isCountableTransaction = (tx: Transaction) => {
   const catLower = (tx.category || '').toLowerCase();
-  // Scenario 1, 2, 3: Transfer, CC Payment, SIP, NCMC Travel Recharge
-  if (['transfer', 'cc payment', 'sip', 'ncmc travel recharge'].includes(catLower)) {
+  // Scenario 1, 2, 3: Transfer, CC Payment, Mutual Funds, NCMC Travel Recharge
+  if (['transfer', 'cc payment', 'mutual funds', 'sip', 'ncmc travel recharge'].includes(catLower)) {
     return false;
   }
   // Scenario 4: Cashback auto log
@@ -336,7 +336,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                 ? 'Hide linked entry'
                 : (() => {
                     const cats = counterparts!.map(c => c.tx.category.toLowerCase());
-                    if (cats.includes('sip')) return 'SIP auto-debited from bank';
+                    if (cats.includes('mutual funds')) return 'Mutual fund auto-debited from bank';
                     if (cats.includes('stocks')) return 'Stock purchase debited from wallet';
                     if (cats.includes('commodity')) return 'Commodity purchase debited from bank';
                     if (cats.includes('transfer')) return 'Transfer entry on destination account';
@@ -377,7 +377,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
 export default function Transactions() {
   const { data, pendingTransfer, setPendingTransfer, smsQueue, removeFromSmsQueue, removeSmsByMatch, addTransaction, updateTransaction, reorderTransactions, deleteTransaction, updateTags } = useFinance();
 
-  const ACCOUNT_TYPE_ORDER = ['bank_account', 'credit_card', 'debit_card', 'cash', 'e_wallet', 'rewards', 'stocks', 'sips', 'commodity'];
+  const ACCOUNT_TYPE_ORDER = ['bank_account', 'credit_card', 'debit_card', 'cash', 'e_wallet', 'rewards', 'stocks', 'mutual_funds', 'commodity'];
   const sortByAccountType = (a: { type: string }, b: { type: string }) => {
     const ai = ACCOUNT_TYPE_ORDER.indexOf(a.type);
     const bi = ACCOUNT_TYPE_ORDER.indexOf(b.type);
@@ -504,8 +504,8 @@ export default function Transactions() {
     rewardUsed: '',
     excludedAmount: '',
     activeShare: '',
-    sipAllottedAmount: '',
-    sipCharges: '',
+    allottedAmount: '',
+    investmentCharges: '',
     numberOfShares: ''
   });
 
@@ -518,8 +518,8 @@ export default function Transactions() {
       activeShare: (tx.excludeFromStats && tx.amount !== undefined)
         ? (() => { const s = Math.max(0, (tx.amount || 0) - (tx.excludedAmount || 0)); return s === 0 ? '' : parseFloat(s.toFixed(2)).toString(); })()
         : '',
-      sipAllottedAmount: (tx.sipAllottedAmount === 0 || tx.sipAllottedAmount === undefined) ? '' : tx.sipAllottedAmount.toString(),
-      sipCharges: (tx.sipCharges === 0 || tx.sipCharges === undefined) ? '' : tx.sipCharges.toString(),
+      allottedAmount: (tx.allottedAmount === 0 || tx.allottedAmount === undefined) ? '' : tx.allottedAmount.toString(),
+      investmentCharges: (tx.investmentCharges === 0 || tx.investmentCharges === undefined) ? '' : tx.investmentCharges.toString(),
       numberOfShares: (tx.numberOfShares === undefined) ? '' : tx.numberOfShares.toString()
     });
   };
@@ -711,12 +711,12 @@ export default function Transactions() {
     const isTransfer = newTx.category?.toLowerCase() === 'transfer';
     const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
     const hidesPassiveToggleFinal = ['transfer', 'cc payment', 'ncmc travel recharge', 'lending & borrowing'].includes((newTx.category || '').toLowerCase());
-    const isSip = newTx.category?.toLowerCase() === 'sip';
+    const isMf = newTx.category?.toLowerCase() === 'mutual funds';
     const isStocks = newTx.category?.toLowerCase() === 'stocks';
     const isCommodity = newTx.category?.toLowerCase() === 'commodity';
-    const isInvestment = isSip || isStocks;
-    const allottedAmount = isInvestment ? (newTx.sipAllottedAmount !== undefined ? Number(newTx.sipAllottedAmount) : Number(newTx.amount)) : Number(newTx.amount);
-    const sipCharges = isInvestment ? (newTx.sipCharges !== undefined ? Number(newTx.sipCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined;
+    const isInvestment = isMf || isStocks;
+    const allottedAmount = isInvestment ? (newTx.allottedAmount !== undefined ? Number(newTx.allottedAmount) : Number(newTx.amount)) : Number(newTx.amount);
+    const investmentCharges = isInvestment ? (newTx.investmentCharges !== undefined ? Number(newTx.investmentCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined;
 
     // Does an investment counterpart leg already exist (i.e. we're editing, not creating)? If so,
     // we skip re-creating it here — updateTransaction() in FinanceContext keeps it in sync, and
@@ -727,7 +727,7 @@ export default function Transactions() {
       return !!lt && lt.id !== mainTxId && lt.category?.toLowerCase() === catLower;
     });
     const hasStocksLeg = hasLinkedCategoryLeg('stocks');
-    const hasSipLeg = hasLinkedCategoryLeg('sip');
+    const hasMfLeg = hasLinkedCategoryLeg('mutual funds');
     const hasCommodityLeg = hasLinkedCategoryLeg('commodity');
     const hasTransferOrCCLeg = hasLinkedCategoryLeg('transfer') || hasLinkedCategoryLeg('cc payment');
 
@@ -752,13 +752,13 @@ export default function Transactions() {
         description: newTx.description as string,
         accountId: paymentSourceAccountId,
         type: counterpartType,
-        amount: counterpartType === 'credit' ? allottedAmount : (allottedAmount + (sipCharges || 0)),
+        amount: counterpartType === 'credit' ? allottedAmount : (allottedAmount + (investmentCharges || 0)),
         category: 'Stocks',
         isRecurring: false,
         linkedTransactionIds: [mainTxId],
         numberOfShares: newTx.numberOfShares,
-        sipAllottedAmount: allottedAmount,
-        sipCharges: sipCharges
+        allottedAmount: allottedAmount,
+        investmentCharges: investmentCharges
       });
     } else if (isCommodity && paymentSourceAccountId && !hasCommodityLeg) {
       const bankCounterpartId = generateId();
@@ -776,7 +776,7 @@ export default function Transactions() {
         linkedTransactionIds: [mainTxId],
         numberOfShares: newTx.numberOfShares
       });
-    } else if (isSip && paymentSourceAccountId && !hasSipLeg) {
+    } else if (isMf && paymentSourceAccountId && !hasMfLeg) {
       const bankCounterpartId = generateId();
       currentLinkedIds.push(bankCounterpartId);
       const counterpartType = newTx.type === 'debit' ? 'credit' : 'debit';
@@ -787,12 +787,12 @@ export default function Transactions() {
         description: newTx.description as string,
         accountId: paymentSourceAccountId,
         type: counterpartType,
-        amount: counterpartType === 'credit' ? allottedAmount : (allottedAmount + (sipCharges || 0)),
-        category: 'SIP',
+        amount: counterpartType === 'credit' ? allottedAmount : (allottedAmount + (investmentCharges || 0)),
+        category: 'Mutual Funds',
         isRecurring: false,
         linkedTransactionIds: [mainTxId],
-        sipAllottedAmount: allottedAmount,
-        sipCharges: sipCharges,
+        allottedAmount: allottedAmount,
+        investmentCharges: investmentCharges,
         numberOfShares: newTx.numberOfShares
       });
     } else if ((isTransfer || isCCPayment) && paymentSourceAccountId && !hasTransferOrCCLeg) {
@@ -872,7 +872,7 @@ export default function Transactions() {
     }
 
     const mainAccountAmount = isInvestment 
-      ? (newTx.type === 'debit' ? (allottedAmount + (sipCharges || 0)) : allottedAmount) 
+      ? (newTx.type === 'debit' ? (allottedAmount + (investmentCharges || 0)) : allottedAmount) 
       : ((newTx.type === 'debit')
         ? Math.max(0, Number(newTx.amount) - rewardUsed)
         : Number(newTx.amount));
@@ -975,9 +975,9 @@ export default function Transactions() {
       excludeFromStats: hidesPassiveToggleFinal ? false : newTx.excludeFromStats,
       excludedAmount: (!hidesPassiveToggleFinal && newTx.excludeFromStats) ? newTx.excludedAmount : undefined,
       paymentSourceAccountId: paymentSourceAccountId,
-      sipAllottedAmount: isInvestment ? allottedAmount : undefined,
-      sipCharges: isInvestment ? sipCharges : undefined,
-      numberOfShares: (isStocks || isSip || isCommodity) ? newTx.numberOfShares : undefined,
+      allottedAmount: isInvestment ? allottedAmount : undefined,
+      investmentCharges: isInvestment ? investmentCharges : undefined,
+      numberOfShares: (isStocks || isMf || isCommodity) ? newTx.numberOfShares : undefined,
       tags: (newTx.tags || []).length > 0 ? newTx.tags : undefined,
       order: newTx.order
     };
@@ -1612,7 +1612,7 @@ export default function Transactions() {
                                     if (uncollapsedInGroup.length > 1) {
                                       const debitParent = uncollapsedInGroup.find(other => other.type === 'debit');
                                       const creditParent = uncollapsedInGroup.find(other => other.type === 'credit');
-                                      const creditCategories = ['sip', 'stocks', 'cc payment', 'transfer', 'ncmc travel recharge'];
+                                      const creditCategories = ['mutual funds', 'stocks', 'cc payment', 'transfer', 'ncmc travel recharge'];
                                       const isCreditParentGroup = uncollapsedInGroup.some(other => creditCategories.includes(other.category?.toLowerCase() ?? ''));
                                       const parent = isCreditParentGroup ? (creditParent || uncollapsedInGroup[0]) : (debitParent || uncollapsedInGroup[0]);
                                       const counterpartsList = uncollapsedInGroup.filter(other => other.id !== parent.id);
@@ -1706,7 +1706,7 @@ export default function Transactions() {
       {/* DUPLICATE MODAL WARNING: this inline Log/Edit Transaction form is a separate,
           independent implementation from TransactionModal.tsx (used by the Upcoming Bills
           "LOG" button and other initialData-driven quick-log entry points). They are NOT
-          the same component. Changing amount/decimal parsing, SIP/stock allotted-vs-charges
+          the same component. Changing amount/decimal parsing, mutual-fund/stock allotted-vs-charges
           logic, reward-split handling, or account-icon rendering here must be mirrored in
           TransactionModal.tsx (and vice versa), or the two log forms will silently drift
           apart again. */}
@@ -1788,19 +1788,19 @@ export default function Transactions() {
                       if (val === '' || /^\d*\.?\d*$/.test(val)) {
                         const numVal = parseFloat(val);
                         const finalAmount = isNaN(numVal) ? 0 : numVal;
-                        const isInvestment = newTx.category?.toLowerCase() === 'sip' || newTx.category?.toLowerCase() === 'stocks';
-                        const allotted = newTx.sipAllottedAmount || 0;
+                        const isInvestment = newTx.category?.toLowerCase() === 'mutual funds' || newTx.category?.toLowerCase() === 'stocks';
+                        const allotted = newTx.allottedAmount || 0;
                         const charges = isInvestment ? Math.max(0, finalAmount - allotted) : undefined;
 
                         setNewTx(prev => ({
                           ...prev,
                           amount: finalAmount,
-                          sipCharges: charges !== undefined ? parseFloat(charges.toFixed(2)) : undefined
+                          investmentCharges: charges !== undefined ? parseFloat(charges.toFixed(2)) : undefined
                         }));
                         setInputStrings(s => ({
                           ...s,
                           amount: val,
-                          sipCharges: charges !== undefined ? (parseFloat(charges.toFixed(2)) === 0 ? '' : parseFloat(charges.toFixed(2)).toString()) : s.sipCharges,
+                          investmentCharges: charges !== undefined ? (parseFloat(charges.toFixed(2)) === 0 ? '' : parseFloat(charges.toFixed(2)).toString()) : s.investmentCharges,
                           // Excluded amount is authoritative; refresh the derived active-share field
                           // so it stays consistent when the total changes.
                           activeShare: newTx.excludeFromStats
@@ -1822,8 +1822,8 @@ export default function Transactions() {
                   label="Type"
                   value={newTx.type!}
                   options={[
-                    { id: 'debit', name: 'Debit (Spend)', subtext: 'Money going out' },
-                    { id: 'credit', name: 'Credit (Receive)', subtext: 'Money coming in' }
+                    { id: 'debit', name: 'Debit (Spend)', subtext: 'Money Going Out' },
+                    { id: 'credit', name: 'Credit (Receive)', subtext: 'Money Coming In' }
                   ]}
                   onChange={val => {
                     const newType = val as TransactionType;
@@ -1861,8 +1861,8 @@ export default function Transactions() {
                       }
                     }
                     let updatedIsTravel = newTx.isTravelTransaction;
-                    const isSip = newTx.category?.toLowerCase() === 'sip';
-                    if (isSip) {
+                    const isMf = newTx.category?.toLowerCase() === 'mutual funds';
+                    if (isMf) {
                       updatedAccountId = '';
                       setPaymentSourceAccountId('');
                     }
@@ -1898,8 +1898,8 @@ export default function Transactions() {
                     if (isCCPayment) {
                       return newTx.type === 'debit' ? (acc.type === 'bank_account' || acc.type === 'e_wallet') : acc.type === 'credit_card';
                     }
-                    if (newTx.category?.toLowerCase() === 'sip') {
-                      return newTx.type === 'credit' ? acc.type === 'sips' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
+                    if (newTx.category?.toLowerCase() === 'mutual funds') {
+                      return newTx.type === 'credit' ? acc.type === 'mutual_funds' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
                     }
                     if (newTx.category?.toLowerCase() === 'stocks') {
                       return newTx.type === 'credit' ? acc.type === 'stocks' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
@@ -1917,15 +1917,15 @@ export default function Transactions() {
                 onChange={val => {
                   const selectedAcc = data.accounts.find(a => a.id === val);
                   const isNcmcRecharge = newTx.category?.toLowerCase() === 'ncmc travel recharge';
-                  const isSip = newTx.category?.toLowerCase() === 'sip';
+                  const isMf = newTx.category?.toLowerCase() === 'mutual funds';
                   const isStocksCat = newTx.category?.toLowerCase() === 'stocks';
                   const shouldAutoTravel = newTx.type === 'credit' && selectedAcc?.type === 'debit_card' && selectedAcc?.isNcmcEnabled && isNcmcRecharge;
                   const shouldAutoDebitDesc = newTx.type === 'debit' && selectedAcc?.type === 'debit_card' && selectedAcc?.isNcmcEnabled && isNcmcRecharge;
                   let finalDesc = newTx.description;
-                  if (isSip) {
+                  if (isMf) {
                     const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
-                    const sipAcc = selectedAcc?.type === 'sips' ? selectedAcc : (counterpartAcc?.type === 'sips' ? counterpartAcc : null);
-                    finalDesc = sipAcc ? sipAcc.name : 'SIP';
+                    const mfAcc = selectedAcc?.type === 'mutual_funds' ? selectedAcc : (counterpartAcc?.type === 'mutual_funds' ? counterpartAcc : null);
+                    finalDesc = mfAcc ? mfAcc.name : 'Mutual Funds';
                   } else if (isStocksCat) {
                     const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
                     const stocksAcc = selectedAcc?.type === 'stocks' ? selectedAcc : (counterpartAcc?.type === 'stocks' ? counterpartAcc : null);
@@ -1986,13 +1986,13 @@ export default function Transactions() {
                   const isNowNcmc = val.toLowerCase() === 'ncmc travel recharge';
                   const isNcmcAutoFilled = currentDesc === 'NCMC Travel Recharge';
 
-                  // SIP auto-fill / clear
-                  const wasSip = newTx.category?.toLowerCase() === 'sip';
-                  const isNowSip = val.toLowerCase() === 'sip';
-                  const mainAccForSip = data.accounts.find(a => a.id === newTx.accountId);
-                  const counterpartAccForSip = data.accounts.find(a => a.id === paymentSourceAccountId);
-                  const sipAccForSip = mainAccForSip?.type === 'sips' ? mainAccForSip : (counterpartAccForSip?.type === 'sips' ? counterpartAccForSip : null);
-                  const isSipAutoFilled = sipAccForSip && currentDesc === sipAccForSip.name;
+                  // Mutual fund auto-fill / clear
+                  const wasMf = newTx.category?.toLowerCase() === 'mutual funds';
+                  const isNowMf = val.toLowerCase() === 'mutual funds';
+                  const mainAccForMf = data.accounts.find(a => a.id === newTx.accountId);
+                  const counterpartAccForMf = data.accounts.find(a => a.id === paymentSourceAccountId);
+                  const mfAccForMf = mainAccForMf?.type === 'mutual_funds' ? mainAccForMf : (counterpartAccForMf?.type === 'mutual_funds' ? counterpartAccForMf : null);
+                  const isMfAutoFilled = mfAccForMf && currentDesc === mfAccForMf.name;
 
                   // Stocks auto-fill / clear
                   const wasStocks = newTx.category?.toLowerCase() === 'stocks';
@@ -2018,7 +2018,7 @@ export default function Transactions() {
                     updatedDesc = '';
                   } else if (wasNcmc && !isNowNcmc && (isNcmcAutoFilled || currentDesc === 'Transfer to Travel Wallet')) {
                     updatedDesc = '';
-                  } else if (wasSip && !isNowSip && isSipAutoFilled) {
+                  } else if (wasMf && !isNowMf && isMfAutoFilled) {
                     updatedDesc = '';
                   } else if (wasStocks && !isNowStocks && isStocksAutoFilled) {
                     updatedDesc = '';
@@ -2034,16 +2034,16 @@ export default function Transactions() {
                           : 'CC Bill Payment';
                       }
                     }
-                  } else if (isNowSip) {
-                    if (currentDesc === '' || isSipAutoFilled || isTransferAutoFilled || isCCAutoFilled || isNcmcAutoFilled) {
-                      updatedDesc = sipAccForSip ? sipAccForSip.name : 'SIP';
+                  } else if (isNowMf) {
+                    if (currentDesc === '' || isMfAutoFilled || isTransferAutoFilled || isCCAutoFilled || isNcmcAutoFilled) {
+                      updatedDesc = mfAccForMf ? mfAccForMf.name : 'Mutual Funds';
                     }
                   } else if (isNowStocks) {
-                    if (currentDesc === '' || isStocksAutoFilled || isTransferAutoFilled || isCCAutoFilled || isNcmcAutoFilled || isSipAutoFilled) {
+                    if (currentDesc === '' || isStocksAutoFilled || isTransferAutoFilled || isCCAutoFilled || isNcmcAutoFilled || isMfAutoFilled) {
                       updatedDesc = stocksAccForStocks ? stocksAccForStocks.name : 'Stocks';
                     }
                   } else if (isNowCommodity) {
-                    if (currentDesc === '' || isCommodityAutoFilled || isTransferAutoFilled || isCCAutoFilled || isNcmcAutoFilled || isSipAutoFilled || isStocksAutoFilled) {
+                    if (currentDesc === '' || isCommodityAutoFilled || isTransferAutoFilled || isCCAutoFilled || isNcmcAutoFilled || isMfAutoFilled || isStocksAutoFilled) {
                       updatedDesc = commodityAccForCommodity ? commodityAccForCommodity.name : 'Commodity';
                     }
                   }
@@ -2073,16 +2073,16 @@ export default function Transactions() {
                     }
                   }
 
-                  const isSip = val.toLowerCase() === 'sip';
+                  const isMf = val.toLowerCase() === 'mutual funds';
                   const isStock = val.toLowerCase() === 'stocks';
                   const isCommodity = val.toLowerCase() === 'commodity';
-                  const isInvestment = isSip || isStock;
+                  const isInvestment = isMf || isStock;
                   if (isInvestment || isCommodity) {
                     const currentAcc = data.accounts.find(a => a.id === updatedAccountId);
                     let isValid = false;
                     if (currentAcc) {
                       if (newTx.type === 'credit') {
-                        if (isSip) isValid = currentAcc.type === 'sips';
+                        if (isMf) isValid = currentAcc.type === 'mutual_funds';
                         else if (isStock) isValid = currentAcc.type === 'stocks';
                         else if (isCommodity) isValid = currentAcc.type === 'commodity';
                       } else {
@@ -2095,24 +2095,24 @@ export default function Transactions() {
                     setPaymentSourceAccountId('');
                   }
                   const hidesPassiveToggle = ['transfer', 'cc payment', 'ncmc travel recharge', 'lending & borrowing'].includes(val.toLowerCase());
-                  const nextAllotted = isInvestment ? (newTx.sipAllottedAmount || newTx.amount || 0) : undefined;
-                  const nextCharges = isInvestment ? (newTx.sipCharges || 0) : undefined;
+                  const nextAllotted = isInvestment ? (newTx.allottedAmount || newTx.amount || 0) : undefined;
+                  const nextCharges = isInvestment ? (newTx.investmentCharges || 0) : undefined;
                   setNewTx({
                     ...newTx,
                     category: val,
                     description: updatedDesc,
                     accountId: updatedAccountId,
                     isTravelTransaction: updatedIsTravel,
-                    sipAllottedAmount: nextAllotted,
-                    sipCharges: nextCharges,
+                    allottedAmount: nextAllotted,
+                    investmentCharges: nextCharges,
                     numberOfShares: isNowStocks ? newTx.numberOfShares : undefined,
                     excludeFromStats: hidesPassiveToggle ? false : newTx.excludeFromStats,
                     excludedAmount: hidesPassiveToggle ? undefined : newTx.excludedAmount
                   });
                   setInputStrings(s => ({
                     ...s,
-                    sipAllottedAmount: (nextAllotted === undefined || nextAllotted === 0) ? '' : nextAllotted.toString(),
-                    sipCharges: (nextCharges === undefined || nextCharges === 0) ? '' : nextCharges.toString()
+                    allottedAmount: (nextAllotted === undefined || nextAllotted === 0) ? '' : nextAllotted.toString(),
+                    investmentCharges: (nextCharges === undefined || nextCharges === 0) ? '' : nextCharges.toString()
                   }));
                   if (errors.category) {
                     const newErr = { ...errors };
@@ -2147,9 +2147,9 @@ export default function Transactions() {
               )}
 
               {(() => {
-                const isSip = newTx.category?.toLowerCase() === 'sip';
+                const isMf = newTx.category?.toLowerCase() === 'mutual funds';
                 const isStock = newTx.category?.toLowerCase() === 'stocks';
-                const isInvestment = isSip || isStock;
+                const isInvestment = isMf || isStock;
                 return isInvestment && (
                   <div style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', marginBottom: '1rem' }}>
                     <div className="grid grid-cols-2 gap-4">
@@ -2159,20 +2159,20 @@ export default function Transactions() {
                           type="text"
                           inputMode="decimal"
                           className="input-field"
-                          value={inputStrings.sipAllottedAmount}
+                          value={inputStrings.allottedAmount}
                           onChange={e => {
                             const val = e.target.value;
                             if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                              setInputStrings(prev => ({ ...prev, sipAllottedAmount: val }));
+                              setInputStrings(prev => ({ ...prev, allottedAmount: val }));
                               const allotted = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
                               // Charges is the complement: charges = amount − invested.
                               const totalAmount = Number(newTx.amount || 0);
                               const charges = Math.max(0, totalAmount - allotted);
-                              setInputStrings(s => ({ ...s, sipCharges: parseFloat(charges.toFixed(2)) === 0 ? '' : parseFloat(charges.toFixed(2)).toString() }));
+                              setInputStrings(s => ({ ...s, investmentCharges: parseFloat(charges.toFixed(2)) === 0 ? '' : parseFloat(charges.toFixed(2)).toString() }));
                               setNewTx(prev => ({
                                 ...prev,
-                                sipAllottedAmount: allotted,
-                                sipCharges: parseFloat(charges.toFixed(2))
+                                allottedAmount: allotted,
+                                investmentCharges: parseFloat(charges.toFixed(2))
                               }));
                             }
                           }}
@@ -2185,21 +2185,21 @@ export default function Transactions() {
                           type="text"
                           inputMode="decimal"
                           className="input-field"
-                          value={inputStrings.sipCharges}
+                          value={inputStrings.investmentCharges}
                           onChange={e => {
                             const val = e.target.value;
                             if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                              setInputStrings(prev => ({ ...prev, sipCharges: val }));
+                              setInputStrings(prev => ({ ...prev, investmentCharges: val }));
                               const charges = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
                               // Complement of invested: invested = amount − charges, so you can fill in
                               // whichever you know (invested or charges) and the other is derived.
                               const totalAmount = Number(newTx.amount || 0);
                               const invested = Math.max(0, totalAmount - charges);
-                              setInputStrings(s => ({ ...s, sipAllottedAmount: parseFloat(invested.toFixed(2)) === 0 ? '' : parseFloat(invested.toFixed(2)).toString() }));
+                              setInputStrings(s => ({ ...s, allottedAmount: parseFloat(invested.toFixed(2)) === 0 ? '' : parseFloat(invested.toFixed(2)).toString() }));
                               setNewTx(prev => ({
                                 ...prev,
-                                sipCharges: charges,
-                                sipAllottedAmount: parseFloat(invested.toFixed(2))
+                                investmentCharges: charges,
+                                allottedAmount: parseFloat(invested.toFixed(2))
                               }));
                             }
                           }}
@@ -2207,7 +2207,7 @@ export default function Transactions() {
                         />
                       </div>
                     </div>
-                    {isSip && (
+                    {isMf && (
                       <div className="input-group" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
                         <label>Units Allotted</label>
                         <input
@@ -2242,14 +2242,14 @@ export default function Transactions() {
                     ? data.accounts.find(a => a.id === newTx.accountId)?.type !== 'credit_card'
                     : data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card'
                 ))
-                || (newTx.category?.toLowerCase() === 'sip')
+                || (newTx.category?.toLowerCase() === 'mutual funds')
                 || (newTx.category?.toLowerCase() === 'stocks')
                 || (newTx.category?.toLowerCase() === 'commodity')
               ) && (
                   <CustomPicker
                     label={
-                      newTx.category?.toLowerCase() === 'sip'
-                        ? (newTx.type === 'debit' ? 'Credit To SIP Account' : 'Debit From Account')
+                      newTx.category?.toLowerCase() === 'mutual funds'
+                        ? (newTx.type === 'debit' ? 'Credit To Mutual Fund Account' : 'Debit From Account')
                         : newTx.category?.toLowerCase() === 'stocks'
                         ? (newTx.type === 'debit' ? 'Credit To Stocks Account' : 'Debit From Account')
                         : newTx.category?.toLowerCase() === 'commodity'
@@ -2269,8 +2269,8 @@ export default function Transactions() {
                         if (isCCPayment) {
                           return newTx.type === 'debit' ? a.type === 'credit_card' : a.type !== 'credit_card';
                         }
-                        if (newTx.category?.toLowerCase() === 'sip') {
-                          return newTx.type === 'debit' ? a.type === 'sips' : (a.type === 'bank_account' || a.type === 'e_wallet');
+                        if (newTx.category?.toLowerCase() === 'mutual funds') {
+                          return newTx.type === 'debit' ? a.type === 'mutual_funds' : (a.type === 'bank_account' || a.type === 'e_wallet');
                         }
                         if (newTx.category?.toLowerCase() === 'stocks') {
                           return newTx.type === 'debit' ? a.type === 'stocks' : (a.type === 'bank_account' || a.type === 'e_wallet');
@@ -2304,10 +2304,10 @@ export default function Transactions() {
                           ? (newTx.type === 'debit' ? `CC Payment: ${selectedAcc.name.trim()}` : 'CC Bill Payment')
                           : '';
                         setNewTx(prev => ({ ...prev, description: autoDesc }));
-                      } else if (newTx.category?.toLowerCase() === 'sip') {
+                      } else if (newTx.category?.toLowerCase() === 'mutual funds') {
                         const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
-                        const sipAcc = mainAcc?.type === 'sips' ? mainAcc : (selectedAcc?.type === 'sips' ? selectedAcc : null);
-                        setNewTx(prev => ({ ...prev, description: sipAcc ? sipAcc.name : 'SIP' }));
+                        const mfAcc = mainAcc?.type === 'mutual_funds' ? mainAcc : (selectedAcc?.type === 'mutual_funds' ? selectedAcc : null);
+                        setNewTx(prev => ({ ...prev, description: mfAcc ? mfAcc.name : 'Mutual Funds' }));
                       } else if (newTx.category?.toLowerCase() === 'stocks') {
                         const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
                         const stocksAcc = mainAcc?.type === 'stocks' ? mainAcc : (selectedAcc?.type === 'stocks' ? selectedAcc : null);
@@ -2418,9 +2418,9 @@ export default function Transactions() {
                 const isTransfer = newTx.category?.toLowerCase() === 'transfer';
                 const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
                 const isNcmcRecharge = newTx.category?.toLowerCase() === 'ncmc travel recharge';
-                const isSip = newTx.category?.toLowerCase() === 'sip';
+                const isMf = newTx.category?.toLowerCase() === 'mutual funds';
 
-                if (isTransfer || isCCPayment || isNcmcRecharge || isSip) return null;
+                if (isTransfer || isCCPayment || isNcmcRecharge || isMf) return null;
                 if (newTx.isTravelTransaction) return null;
 
                 if (!isCard && !showInstantUI) return null;
@@ -2664,8 +2664,8 @@ export default function Transactions() {
                       label="Apply Payment To"
                       value={ccPaymentCycleTarget}
                       options={[
-                        { id: 'previous_statement', name: 'Previous Statement', subtext: 'Reduce already billed dues' },
-                        { id: 'current_cycle', name: 'Current Open Cycle', subtext: 'Count as an early payment for the active cycle' }
+                        { id: 'previous_statement', name: 'Previous Statement', subtext: 'Reduce Already Billed Dues' },
+                        { id: 'current_cycle', name: 'Current Open Cycle', subtext: 'Count as an Early Payment for the Active Cycle' }
                       ]}
                       onChange={val => setCcPaymentCycleTarget(val as 'current_cycle' | 'previous_statement')}
                       iconGetter={id => id === 'current_cycle' ? '🟦' : '🧾'}

@@ -30,7 +30,12 @@ export const KEY_MAP: Record<string, string> = {
   appliedBillingCycleYearMonth: 'abc', recurringBillId: 'rbid',
   paymentSourceAccountId: 'psid', ccPaymentCycleTarget: 'ctar', isCCPaymentRecord: 'iscr',
   isRecurring: 'isrc', transactionId: 'txid', expectedCashback: 'exc',
-  name: 'n', balance: 'b', color: 'c', icon: 'o', isNcmcEnabled: 'z',
+  name: 'n', isNcmcEnabled: 'z',
+  // RETIRED: 'b'/'c'/'o' mapped Account.balance/color/icon, none of which exist on Account any more
+  // (balances became the per-month openingBalances map; colour/icon were never shipped). They stay
+  // mapped so an ancient backup still expands them to a named field instead of a raw 2-char key.
+  // Like 'lsa', these codes are burnt — never point them at a different field.
+  balance: 'b', color: 'c', icon: 'o',
   openingBalances: 'ob', statementDay: 'sd', dueDay: 'dd',
   defaultCashbackRate: 'dr', cashbackRates: 'cr', roundOffCashback: 'ro',
   cashbackCreditCycle: 'cc', travelOpeningBalances: 'tob', statementRounding: 'sr',
@@ -52,13 +57,20 @@ export const KEY_MAP: Record<string, string> = {
   rewardType: 'ryt', rewardUnit: 'ryu', pointsConversionRate: 'pcr',
   rewardOpeningBalances: 'rob', rewardBalanceAdjustments: 'rba',
   isRewardTransaction: 'irt', cashbackDestinationAccountId: 'cda',
-  // New fields for tours, sips, recurring splits, and debts
-  sipAllottedAmount: 'saa', sipCharges: 'sc',
+  // New fields for tours, investments, recurring splits, and debts.
+  // NOTE: 'saa'/'sc' were minted for the old field names sipAllottedAmount/sipCharges. Those fields
+  // were RENAMED (not replaced) to allottedAmount/investmentCharges, so keeping the same codes is
+  // correct and keeps every previously-exported backup decoding into the new names.
+  allottedAmount: 'saa', investmentCharges: 'sc',
   hasSeenTour: 'hst', hasSeenFeatureTours: 'hsft',
   cycles: 'cy', currentCycleId: 'cci', cycleStartDate: 'csd',
   cycleNumber: 'cnm', startDate: 'sdt', endDate: 'edt', carriedOverPeople: 'cop',
-  markedDone: 'md', linkedSipAccountId: 'lsa',
-  // Stocks / SIPs / Commodity / EPF investment fields
+  markedDone: 'md',
+  // RETIRED: 'lsa' = RecurringBill.linkedSipAccountId, from when mutual funds could be tracked as
+  // bills. The field is gone; the code stays mapped so old backups still expand it to a recognisable
+  // name that the load migration then strips. Never reassign 'lsa' to a different field.
+  linkedSipAccountId: 'lsa',
+  // Stocks / Mutual Funds / Commodity / EPF investment fields
   numberOfShares: 'ns', marketSymbol: 'ms', investedValue: 'iv', commodityMetal: 'cm',
   manualPricePerGram: 'mpg', avgNav: 'an', epfContributionBasis: 'ecb',
   joiningDate: 'jd', baseBalance: 'bb', baseBalanceDate: 'bbd',
@@ -66,6 +78,11 @@ export const KEY_MAP: Record<string, string> = {
   interestRateOverrides: 'iro', epfBalanceAdjustments: 'eba',
   basicSalary: 'bs', dearnessAllowance: 'da', employeeContributionPct: 'ecp', employerContributionPct: 'ercp',
   effectiveDate: 'efd',
+  // EPF sub-object fields that were left unmapped when EPF shipped, so they went into backups at full
+  // length. Adding them is backward-compatible: an older backup carries the long names, which pass
+  // through expandPayload untouched (the reverse lookup only fires on a known short code).
+  // 'notes' is shared by EPFSalaryRevision and EPFBalanceAdjustment — one code covers both.
+  financialYear: 'fyr', annualRate: 'anr', notes: 'nte',
   // Soft-delete flag (see Account.archived)
   archived: 'arc',
 };

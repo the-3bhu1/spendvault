@@ -11,8 +11,8 @@ import { CustomPicker } from './CustomPicker';
 
 const isCountableTransaction = (tx: Transaction) => {
   const catLower = (tx.category || '').toLowerCase();
-  // Scenario 1, 2, 3: Transfer, CC Payment, SIP, NCMC Travel Recharge
-  if (['transfer', 'cc payment', 'sip', 'ncmc travel recharge'].includes(catLower)) {
+  // Scenario 1, 2, 3: Transfer, CC Payment, Mutual Funds, NCMC Travel Recharge
+  if (['transfer', 'cc payment', 'mutual funds', 'sip', 'ncmc travel recharge'].includes(catLower)) {
     return false;
   }
   // Scenario 4: Cashback auto log
@@ -28,7 +28,7 @@ const isCountableTransaction = (tx: Transaction) => {
 
 // Categories that aren't discretionary spend, so a monthly budget makes no sense for them.
 const NON_BUDGET_CATEGORIES = new Set([
-  'transfer', 'cc payment', 'ncmc travel recharge', 'sip', 'stocks', 'commodity', 'cashback', 'income', 'salary',
+  'transfer', 'cc payment', 'ncmc travel recharge', 'mutual funds', 'sip', 'stocks', 'commodity', 'cashback', 'income', 'salary',
 ]);
 
 // Categories treated as expected/planned spend — excluded from the Top Category & Biggest

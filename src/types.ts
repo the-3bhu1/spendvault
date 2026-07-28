@@ -1,4 +1,13 @@
-export type BuiltInAccountType = 'credit_card' | 'bank_account' | 'cash' | 'debit_card' | 'e_wallet' | 'stocks' | 'sips' | 'rewards' | 'commodity' | 'epf';
+// SINGLE SOURCE OF TRUTH for the built-in account types. Anything asking "is this type native or a
+// user-created custom type?" must read this list — it used to be hand-copied into FinanceContext's
+// migration and Settings' custom-type validator, and they drifted ('epf' was missing from both, so
+// EPF accounts got mis-filed as custom types and "epf" was accepted as a new custom type name).
+// The union type is derived from the array so the two can never disagree again.
+export const BUILT_IN_ACCOUNT_TYPES = [
+  'credit_card', 'bank_account', 'cash', 'debit_card', 'e_wallet',
+  'stocks', 'mutual_funds', 'rewards', 'commodity', 'epf',
+] as const;
+export type BuiltInAccountType = typeof BUILT_IN_ACCOUNT_TYPES[number];
 export type AccountType = BuiltInAccountType | (string & {});
 export type RoundingRule = 'round' | 'floor' | 'ceil' | 'none';
 
@@ -98,7 +107,7 @@ export interface Account {
   // Optional manual price override (₹/gram). Takes precedence over the AI estimate when set.
   manualPricePerGram?: number;
 
-  // Specific to stocks / sips
+  // Specific to stocks / mutual funds
   numberOfShares?: number;
   marketSymbol?: string;
   investedValue?: number;
@@ -158,8 +167,10 @@ export interface Transaction {
   paymentSourceAccountId?: string;
   ccPaymentCycleTarget?: 'current_cycle' | 'previous_statement';
   isCCPaymentRecord?: boolean;
-  sipAllottedAmount?: number;
-  sipCharges?: number;
+  // Investment legs (Mutual Funds / Stocks): the amount actually invested vs. the broker/AMC
+  // charges on top of it. Total debited = allottedAmount + investmentCharges.
+  allottedAmount?: number;
+  investmentCharges?: number;
   numberOfShares?: number;
   tags?: string[];
 }
@@ -269,7 +280,6 @@ export interface RecurringBill {
   customDays?: number; // Used when frequency is 'custom'
   nextDueDate: string; // ISO format 'YYYY-MM-DD'
   accountId?: string; // Preferred account to pay from
-  linkedSipAccountId?: string; // SIP account to credit when logging (only for SIP category)
   type: TransactionType;
   isActive: boolean;
   lastPaidDate?: string; // ISO format 'YYYY-MM-DD'

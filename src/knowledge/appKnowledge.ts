@@ -26,7 +26,7 @@ Rupees (₹). The app is also packaged for Android/iOS via Capacitor.
 # Navigation
 - Bottom nav (4 icons): Home (Dashboard), Wallet (Accounts), Receipts (Transactions), Profile (Settings).
 - Top bar: "Ask Vault" (this assistant) and the Hub (grid) button.
-- The Hub opens: Group Splits, Lending & Borrowing, Bills & SIPs, Rewards & Offers (cashback),
+- The Hub opens: Group Splits, Lending & Borrowing, Bills, Rewards & Offers (cashback),
   Portfolio, and Smart Insights.
 - Feature tours: the first time you open each Hub feature (and at first launch) a one-time guided tour
   runs using temporary sample data, which is then cleared. Tours can't currently be replayed.
@@ -35,7 +35,12 @@ Rupees (₹). The app is also packaged for Android/iOS via Capacitor.
 An account is any place money sits or is owed. Built-in types:
 - bank_account, cash, debit_card, e_wallet — normal balances (a credit adds, a debit subtracts).
 - credit_card — a debit (spend) INCREASES the outstanding balance; a credit (payment) reduces it.
-- stocks / sips — investments; track invested value and units/shares and current value.
+- stocks / mutual_funds — investments; track invested value and units/shares and current value.
+  These are the internal keys; in the Account Type picker the user SEES "Stocks" and "Mutual Funds",
+  and the Accounts tab groups them under "Stocks & Investments" and "Mutual Funds". Always answer
+  using those visible labels, not the internal keys. The mutual_funds type was previously labelled
+  "SIPs" — it covers any mutual-fund holding, bought via SIP or lumpsum. If a user still calls it a
+  "SIP account", they mean a Mutual Funds account.
 - commodity — gold or silver, valued at a ₹/gram price (AI-estimated or a manual override).
 - epf — Employee Provident Fund; tracks running EPF balance, monthly employer/employee credit breakdown, monthly accrued interest for current FY (credited on March 31st), and 1-year projections. Options include Statutory Wage Ceiling (₹15,000 cap) vs Actual Basic + DA.
 - rewards — a reward-points wallet (points, not rupees), with a reward unit and conversion rate.
@@ -85,9 +90,10 @@ deleting one keeps the legs in sync / removes them together. By category:
   billing cycle (current or previous statement).
   - With a reward split: if reward points are used toward the payment, a THIRD leg debits the rewards
     account for the points used; the bank leg covers the rest.
-- SIP: logging a SIP/mutual-fund investment. Credits the SIP account with the allotted amount and
-  debits the paying bank account for (allotted amount + any charges). If a SIP is linked to a
-  recurring bill, logging the bill creates this automatically.
+- Mutual Funds: logging a mutual-fund investment (a SIP instalment or a lumpsum purchase). Credits
+  the mutual fund account with the allotted amount and debits the paying bank account for (allotted
+  amount + any charges). This category was previously named "SIP"; existing transactions are migrated
+  automatically.
 - Stocks: credits the stock account with the shares and debits the paying account for the cost
   (+ charges).
 - Commodity: credits the commodity account with the grams and debits the paying account for the
@@ -105,7 +111,7 @@ row by its handle to reorder; "Other/Misc" always stays last). Set or change a m
 category in the Insights screen (not Settings), which shows actual-vs-budget progress. Deleting a
 category leaves existing transactions with their old category text.
 System categories (internal bookkeeping, EXCLUDED from spend totals so transfers/payments/investments
-don't look like spending): Transfer, CC Payment, NCMC Travel Recharge, SIP, Stocks, Commodity, and
+don't look like spending): Transfer, CC Payment, NCMC Travel Recharge, Mutual Funds, Stocks, Commodity, and
 Lending & Borrowing. Lending & Borrowing is auto-excluded from both Spends and Income everywhere
 (Dashboard, Insights, Ask Vault) because money lent out or borrowed is expected to be returned — it's
 not a real spend or income. The "Cashback" category is a credit (income into a rewards/account), not spend.
@@ -154,14 +160,20 @@ offers "Settle Now", which adds a closing Final Settlement entry. Entries logged
 "Lending & Borrowing" category, so they never count toward Spends or Income (see Categories & Budgets) —
 only the account balance moves.
 
-# Bills & SIPs
-Recurring obligations (rent, subscriptions, SIPs) with an amount, frequency (daily/weekly/monthly/
-quarterly/yearly/custom), and a next due date. Each bill offers LOG (create a new transaction and
-advance the due date), LINK (attach an existing transaction instead), or PAID (mark paid). A SIP bill
-can be linked to a SIP account so logging it auto-credits that account.
+# Bills
+Recurring bills — rent, utilities, subscriptions, credit card statements — with an amount, frequency
+(daily/weekly/monthly/quarterly/yearly/custom), and a next due date. Each bill offers LOG (create a
+new transaction and advance the due date), LINK (attach an existing transaction instead), or PAID
+(mark paid). Credit card statement dues appear here automatically from each card's due day.
+Any category can be picked for a bill, INCLUDING Mutual Funds — so a fund instalment can still be
+tracked here purely as a due-date reminder. What no longer exists is the dedicated SIP wiring: a bill
+can NOT be linked to a mutual fund account, and logging it does NOT auto-credit that account. A
+Mutual Funds bill behaves like any other bill; its LOG button opens the normal investment form where
+the user chooses the funding account and the fund account themselves. Holdings and returns are
+tracked in Portfolio, not here.
 
 # Portfolio
-Aggregates stocks, SIP/mutual-fund accounts, commodity holdings, and EPF (Employee Provident Fund): invested value vs. current
+Aggregates stocks, mutual fund accounts, commodity holdings, and EPF (Employee Provident Fund): invested value vs. current
 value, with gain/loss. Prices: stocks/funds are fetched online; gold/silver are AI-estimated via the
 optional Gemini integration or set manually (₹/gram). EPF accounts project running balance, monthly credit breakdown (12% employee + 3.67% employer EPF + 8.33% EPS pension), monthly accrued interest (credited March 31st), and 1-year projected balance. Refresh all prices from the Portfolio screen, or
 an individual holding from its account card. You can switch view modes, expand/collapse each asset

@@ -65,7 +65,7 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
   // gating), so every transaction on this accountId is a real posting on the card — no
   // category should be excluded from the due calculation. Matches calculateCycleBalanceForCycle
   // (utils.ts), which Accounts.tsx's "Total Balance" uses and which has no category filter either.
-  // A prior version excluded 'transfer'/'ncmc travel recharge'/'sip' (borrowed from a
+  // A prior version excluded 'transfer'/'ncmc travel recharge'/'mutual funds' (borrowed from a
   // spend-analytics pattern meant for dashboards), which silently dropped real balance-affecting
   // transactions like a bank-reversed CC payment logged as a Transfer.
   const relevantAccountTransactions = transactions.filter(t => t.accountId === acc.id);

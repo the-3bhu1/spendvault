@@ -28,11 +28,11 @@ propagation logic. In the UI the child is rendered collapsed under the parent
 
 The forward propagation loop in `updateTransaction()` is written assuming the edited tx
 is the **parent**: it reads parent-only fields (`rewardEarned`, `rewardUsed`,
-`sipAllottedAmount`, `sipCharges`, `numberOfShares`, `paymentSourceAccountId`) and writes
+`allottedAmount`, `investmentCharges`, `numberOfShares`, `paymentSourceAccountId`) and writes
 the derived values onto the linked children.
 
 For **child → parent** edits, two mechanisms keep things in sync:
-1. **Leg children** (Transfer / CC Payment / NCMC / SIP / Stocks / Commodity) carry the
+1. **Leg children** (Transfer / CC Payment / NCMC / Mutual Funds / Stocks / Commodity) carry the
    same category + investment fields, and `openEditModal()` reconstructs
    `paymentSourceAccountId` from the counterpart, so the same forward loop produces a
    correct write back to the parent.
@@ -59,7 +59,7 @@ reconstruct `paymentSourceAccountId` — they reciprocate via the reverse cashba
 | **Reward Split** (CC-Payment, 3-leg) | ✅ (card = anchor; bank leg absorbs) | ✅ **Option B** — edit reward or bank leg; card credit stays fixed, the other funding leg rebalances | ✅ delete **reward leg** → payment kept, un-split to fully bank-funded (bank = card total, split cleared). Delete **bank leg** or **card** → whole payment removed |
 | **Transfer** | ✅ | ✅ 1:1 amount + date + account + description | ✅ deletes both legs |
 | **CC Payment** | ✅ (incl. reward-split bank portion) | ✅ | ✅ deletes both legs |
-| **SIP** | ✅ | ✅ allotted/charges/shares/amount/description | ✅ deletes both legs |
+| **Mutual Funds** | ✅ | ✅ allotted/charges/shares/amount/description | ✅ deletes both legs |
 | **Stocks** | ✅ | ✅ allotted/charges/shares/amount/description | ✅ deletes both legs |
 | **Commodity** | ✅ | ✅ 1:1 amount + shares + description | ✅ deletes both legs |
 | **Debt ↔ Ledger** | n/a | ⚠️ **date only — by design** (amount is intentionally NOT synced) | ✅ deletes linked ledger / debt entry |
@@ -114,7 +114,7 @@ reconstruct `paymentSourceAccountId` — they reciprocate via the reverse cashba
 - **Reward-split child:** a linked parent `P` exists with
   `P.rewardUsedAccountId === child.accountId`. This works even when the child's category
   collides with a leg (e.g. the reward leg of a CC Payment is itself `'CC Payment'`).
-- **Leg child (Transfer/CC/NCMC/SIP/Stocks/Commodity):** category matches one of those,
+- **Leg child (Transfer/CC/NCMC/Mutual Funds/Stocks/Commodity):** category matches one of those,
   and it is not a reward/cashback child.
 
 ---
