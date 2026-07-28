@@ -5,7 +5,7 @@ const CACHE_KEY = 'market_prices_cache';
 const HISTORY_CACHE_KEY = 'market_history_cache';
 const PREV_CACHE_KEY = 'market_prev_prices_cache';
 const STOCK_TTL = 5 * 60 * 1000;
-const SIP_TTL = 8 * 60 * 60 * 1000;
+const MF_TTL = 8 * 60 * 60 * 1000;
 const HISTORY_TTL = 24 * 60 * 60 * 1000;
 // Commodity prices come from Gemini grounding (an approximate, lagging source). Cache for 1h
 // and ALWAYS respect it (no force path) — both auto and manual refreshes serve cache when it's
@@ -100,7 +100,7 @@ export async function fetchStockPrice(symbol: string): Promise<number | null> {
 }
 
 export async function fetchMFNav(schemeCode: string): Promise<number | null> {
-  if (mem[schemeCode] && fresh(mem[schemeCode], SIP_TTL)) return mem[schemeCode].price;
+  if (mem[schemeCode] && fresh(mem[schemeCode], MF_TTL)) return mem[schemeCode].price;
   try {
     const res = await fetch(`https://api.mfapi.in/mf/${encodeURIComponent(schemeCode)}/latest`);
     const json = await res.json();
@@ -134,14 +134,14 @@ export function getLatestFetchedAt(symbols: string[]): number | null {
   return times.length ? Math.max(...times) : null;
 }
 
-export function isCacheFresh(symbol: string, kind: 'stock' | 'sip'): boolean {
+export function isCacheFresh(symbol: string, kind: 'stock' | 'mf'): boolean {
   const entry = mem[symbol];
   if (!entry) return false;
-  return fresh(entry, kind === 'sip' ? SIP_TTL : STOCK_TTL);
+  return fresh(entry, kind === 'mf' ? MF_TTL : STOCK_TTL);
 }
 
 export async function fetchPricesForSymbols(
-  items: Array<{ symbol: string; kind: 'stock' | 'sip' }>
+  items: Array<{ symbol: string; kind: 'stock' | 'mf' }>
 ): Promise<Record<string, number>> {
   const results: Record<string, number> = {};
   await Promise.all(
@@ -219,7 +219,7 @@ export async function fetchMFNavHistory(
   const cacheKey = `mf_${schemeCode}`;
   const cached = historyMem[cacheKey];
 
-  if (cached && Date.now() - cached.fetchedAt < SIP_TTL) {
+  if (cached && Date.now() - cached.fetchedAt < MF_TTL) {
     return cached.data;
   }
 
@@ -419,7 +419,7 @@ export async function fetchMFPrevNav(schemeCode: string): Promise<number | null>
 }
 
 export async function fetchPrevClosesForSymbols(
-  items: Array<{ symbol: string; kind: 'stock' | 'sip' }>
+  items: Array<{ symbol: string; kind: 'stock' | 'mf' }>
 ): Promise<Record<string, number>> {
   const results: Record<string, number> = {};
   await Promise.all(

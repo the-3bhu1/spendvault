@@ -866,7 +866,7 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
     const currentMonth = getCurrentMonthStr();
     const TYPE_ORDER = ['bank_account', 'credit_card', 'debit_card', 'cash', 'e_wallet'];
     return accounts
-      .filter(acc => !acc.archived && !['stocks', 'sips', 'rewards', 'commodity'].includes(acc.type))
+      .filter(acc => !acc.archived && !['stocks', 'mutual_funds', 'rewards', 'commodity'].includes(acc.type))
       .sort((a, b) => {
         const ai = TYPE_ORDER.indexOf(a.type);
         const bi = TYPE_ORDER.indexOf(b.type);
@@ -1163,7 +1163,7 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
     const currentMonth = getCurrentMonthStr();
     const TYPE_ORDER = ['bank_account', 'credit_card', 'debit_card', 'cash', 'e_wallet'];
     return accounts
-      .filter(acc => !acc.archived && !['stocks', 'sips', 'rewards', 'commodity'].includes(acc.type))
+      .filter(acc => !acc.archived && !['stocks', 'mutual_funds', 'rewards', 'commodity'].includes(acc.type))
       .sort((a, b) => {
         const ai = TYPE_ORDER.indexOf(a.type);
         const bi = TYPE_ORDER.indexOf(b.type);

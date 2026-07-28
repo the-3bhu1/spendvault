@@ -12,7 +12,7 @@ import { getBillingCycleForDate } from '../utils';
 // log/edit-transaction form from the one inlined in Transactions.tsx (the main Ledger's
 // "Log Transaction" modal). They are NOT the same component — this one is used by the
 // Upcoming Bills "LOG" button (and any other initialData-driven quick-log entry points).
-// Changing amount/decimal parsing, SIP/stock allotted-vs-charges logic, reward-split
+// Changing amount/decimal parsing, mutual-fund/stock allotted-vs-charges logic, reward-split
 // handling, or account-icon rendering here must be mirrored in Transactions.tsx (and vice
 // versa), or the two log forms will silently drift apart again.
 interface TransactionModalProps {
@@ -55,15 +55,15 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const toInputStr = (n?: number) => (n === 0 || n === undefined) ? '' : n.toString();
   const syncInputStrings = (tx: Partial<Transaction>) => setInputStrings({
     amount: toInputStr(tx.amount),
-    sipAllottedAmount: toInputStr(tx.sipAllottedAmount),
-    sipCharges: toInputStr(tx.sipCharges),
+    allottedAmount: toInputStr(tx.allottedAmount),
+    investmentCharges: toInputStr(tx.investmentCharges),
     rewardUsed: toInputStr(tx.rewardUsed),
     numberOfShares: toInputStr(tx.numberOfShares)
   });
   const [inputStrings, setInputStrings] = useState({
     amount: toInputStr(newTx.amount),
-    sipAllottedAmount: toInputStr(newTx.sipAllottedAmount),
-    sipCharges: toInputStr(newTx.sipCharges),
+    allottedAmount: toInputStr(newTx.allottedAmount),
+    investmentCharges: toInputStr(newTx.investmentCharges),
     rewardUsed: toInputStr(newTx.rewardUsed),
     numberOfShares: toInputStr(newTx.numberOfShares)
   });
@@ -171,11 +171,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         })()
       : undefined;
 
-    const isSip = newTx.category?.toLowerCase() === 'sip';
+    const isMf = newTx.category?.toLowerCase() === 'mutual funds';
     const isStock = newTx.category?.toLowerCase() === 'stocks';
-    const isInvestment = isSip || isStock;
-    const allottedAmount = isInvestment ? (newTx.sipAllottedAmount !== undefined ? Number(newTx.sipAllottedAmount) : Number(newTx.amount)) : Number(newTx.amount);
-    const sipCharges = isInvestment ? (newTx.sipCharges !== undefined ? Number(newTx.sipCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined;
+    const isInvestment = isMf || isStock;
+    const allottedAmount = isInvestment ? (newTx.allottedAmount !== undefined ? Number(newTx.allottedAmount) : Number(newTx.amount)) : Number(newTx.amount);
+    const investmentCharges = isInvestment ? (newTx.investmentCharges !== undefined ? Number(newTx.investmentCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined;
 
     const secondaryTxId = paymentSourceAccountId ? crypto.randomUUID() : undefined;
     const currentLinkedIds: string[] = [];
@@ -187,14 +187,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     const txData: Transaction = {
       ...newTx,
       id: txId,
-      amount: isInvestment ? (newTx.type === 'debit' ? (allottedAmount + (sipCharges || 0)) : allottedAmount) : Number(newTx.amount),
+      amount: isInvestment ? (newTx.type === 'debit' ? (allottedAmount + (investmentCharges || 0)) : allottedAmount) : Number(newTx.amount),
       date: newTx.date!,
       description: newTx.description!,
       type: newTx.type!,
       accountId: newTx.accountId!,
       category: newTx.category!,
-      sipAllottedAmount: isInvestment ? allottedAmount : undefined,
-      sipCharges: isInvestment ? sipCharges : undefined,
+      allottedAmount: isInvestment ? allottedAmount : undefined,
+      investmentCharges: isInvestment ? investmentCharges : undefined,
       rewardEarnedType: newTx.rewardEarnedType || (selectedCashbackLevelId ? 'delayed' : 'none'),
       cashbackLevelId: selectedCashbackLevelId || undefined,
       paymentSourceAccountId: paymentSourceAccountId || undefined,
@@ -243,14 +243,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           description: isCCPayment
             ? (counterpartType === 'credit' ? 'CC Bill Payment' : `CC Payment: ${data.accounts.find(a => a.id === txData.accountId)?.name}`)
             : (isInvestment ? txData.description : `Transfer to ${data.accounts.find(a => a.id === txData.accountId)?.name}`),
-          amount: isInvestment ? (counterpartType === 'credit' ? allottedAmount : (allottedAmount + (sipCharges || 0))) : txData.amount,
+          amount: isInvestment ? (counterpartType === 'credit' ? allottedAmount : (allottedAmount + (investmentCharges || 0))) : txData.amount,
           type: counterpartType,
           accountId: paymentSourceAccountId,
           category: txData.category,
           isCCPaymentRecord: isCCPayment,
           isRecurring: false,
-          sipAllottedAmount: isInvestment ? allottedAmount : undefined,
-          sipCharges: isInvestment ? sipCharges : undefined,
+          allottedAmount: isInvestment ? allottedAmount : undefined,
+          investmentCharges: isInvestment ? investmentCharges : undefined,
           numberOfShares: isInvestment ? newTx.numberOfShares : undefined,
           appliedBillingCycleYearMonth: isCCPayment && counterpartType === 'credit' && destAccount?.type === 'credit_card'
             ? (() => {
@@ -366,14 +366,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     setInputStrings(prev => ({ ...prev, amount: val }));
                     const totalAmount = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
                     setNewTx(prev => {
-                      const isInvestment = prev.category?.toLowerCase() === 'sip' || prev.category?.toLowerCase() === 'stocks';
+                      const isInvestment = prev.category?.toLowerCase() === 'mutual funds' || prev.category?.toLowerCase() === 'stocks';
                       if (!isInvestment) return { ...prev, amount: totalAmount };
                       // Keep invested fixed; charges absorb the change (amount = invested + charges).
                       // Read invested from prev (current state), not a stale render closure.
-                      const invested = prev.sipAllottedAmount || 0;
+                      const invested = prev.allottedAmount || 0;
                       const charges = Math.max(0, totalAmount - invested);
-                      setInputStrings(s => ({ ...s, sipCharges: toInputStr(parseFloat(charges.toFixed(2))) }));
-                      return { ...prev, amount: totalAmount, sipCharges: parseFloat(charges.toFixed(2)) };
+                      setInputStrings(s => ({ ...s, investmentCharges: toInputStr(parseFloat(charges.toFixed(2))) }));
+                      return { ...prev, amount: totalAmount, investmentCharges: parseFloat(charges.toFixed(2)) };
                     });
                     if (errors.amount) setErrors(prev => ({ ...prev, amount: '' }));
                   }
@@ -382,8 +382,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               />
               {errors.amount && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.amount}</span>}
             </div>
-            <CustomPicker label="Type" value={newTx.type!} options={[{ id: 'debit', name: 'Debit (Spend)', subtext: 'Money going out' }, { id: 'credit', name: 'Credit (Receive)', subtext: 'Money coming in' }]} onChange={val => {
-              const isInvestment = newTx.category?.toLowerCase() === 'sip' || newTx.category?.toLowerCase() === 'stocks';
+            <CustomPicker label="Type" value={newTx.type!} options={[{ id: 'debit', name: 'Debit (Spend)', subtext: 'Money Going Out' }, { id: 'credit', name: 'Credit (Receive)', subtext: 'Money Coming In' }]} onChange={val => {
+              const isInvestment = newTx.category?.toLowerCase() === 'mutual funds' || newTx.category?.toLowerCase() === 'stocks';
               setNewTx(prev => {
                 const nextType = val as TransactionType;
                 let nextAccountId = prev.accountId;
@@ -413,8 +413,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 if (newTx.category?.toLowerCase() === 'cc payment') {
                   return newTx.type === 'debit' ? (acc.type === 'bank_account' || acc.type === 'e_wallet') : acc.type === 'credit_card';
                 }
-                if (newTx.category?.toLowerCase() === 'sip') {
-                  return newTx.type === 'credit' ? acc.type === 'sips' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
+                if (newTx.category?.toLowerCase() === 'mutual funds') {
+                  return newTx.type === 'credit' ? acc.type === 'mutual_funds' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
                 }
                 if (newTx.category?.toLowerCase() === 'stocks') {
                   return newTx.type === 'credit' ? acc.type === 'stocks' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
@@ -428,14 +428,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               .map(acc => ({ id: acc.id, name: acc.archived ? `${acc.name} (deleted)` : acc.name, subtext: acc.type.replace('_', ' ') }))
             }
             onChange={val => {
-              const isSip = newTx.category?.toLowerCase() === 'sip';
+              const isMf = newTx.category?.toLowerCase() === 'mutual funds';
               const isStock = newTx.category?.toLowerCase() === 'stocks';
               const selectedAcc = data.accounts.find(a => a.id === val);
               let updatedDesc = newTx.description;
-              if (isSip) {
+              if (isMf) {
                 const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
-                const sipAcc = selectedAcc?.type === 'sips' ? selectedAcc : (counterpartAcc?.type === 'sips' ? counterpartAcc : null);
-                updatedDesc = sipAcc ? sipAcc.name : 'SIP';
+                const mfAcc = selectedAcc?.type === 'mutual_funds' ? selectedAcc : (counterpartAcc?.type === 'mutual_funds' ? counterpartAcc : null);
+                updatedDesc = mfAcc ? mfAcc.name : 'Mutual Funds';
               } else if (isStock) {
                 const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
                 const stockAcc = selectedAcc?.type === 'stocks' ? selectedAcc : (counterpartAcc?.type === 'stocks' ? counterpartAcc : null);
@@ -455,10 +455,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             if (!isAOther && isBOther) return -1;
             return 0;
           }).map(c => ({ id: c, name: c })), ...(newTx.category && !(data.categories || []).includes(newTx.category) ? [{ id: newTx.category, name: newTx.category }] : [])]} onChange={val => {
-            const isSip = val.toLowerCase() === 'sip';
+            const isMf = val.toLowerCase() === 'mutual funds';
             const isStock = val.toLowerCase() === 'stocks';
             const isCommodity = val.toLowerCase() === 'commodity';
-            const isInvestment = isSip || isStock;
+            const isInvestment = isMf || isStock;
             setNewTx(prev => {
               let nextAccountId = prev.accountId;
               if (isInvestment || isCommodity) {
@@ -466,7 +466,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 let isValid = false;
                 if (currentAcc) {
                   if (prev.type === 'credit') {
-                    if (isSip) isValid = currentAcc.type === 'sips';
+                    if (isMf) isValid = currentAcc.type === 'mutual_funds';
                     else if (isStock) isValid = currentAcc.type === 'stocks';
                     else if (isCommodity) isValid = currentAcc.type === 'commodity';
                   } else {
@@ -481,20 +481,20 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               const mainAcc = data.accounts.find(a => a.id === nextAccountId);
               
               let newDesc = prev.description;
-              if (isSip) {
-                 const sipAcc = mainAcc?.type === 'sips' ? mainAcc : null;
-                 newDesc = sipAcc ? sipAcc.name : 'SIP';
+              if (isMf) {
+                 const mfAcc = mainAcc?.type === 'mutual_funds' ? mainAcc : null;
+                 newDesc = mfAcc ? mfAcc.name : 'Mutual Funds';
               } else if (isStock) {
                  const stockAcc = mainAcc?.type === 'stocks' ? mainAcc : null;
                  newDesc = stockAcc ? stockAcc.name : 'Stock Trade';
               }
-              const nextAllotted = isInvestment ? (prev.sipAllottedAmount || prev.amount || 0) : undefined;
-              const nextCharges = isInvestment ? (prev.sipCharges || 0) : undefined;
-              const nextShares = isSip ? prev.numberOfShares : undefined;
+              const nextAllotted = isInvestment ? (prev.allottedAmount || prev.amount || 0) : undefined;
+              const nextCharges = isInvestment ? (prev.investmentCharges || 0) : undefined;
+              const nextShares = isMf ? prev.numberOfShares : undefined;
               setInputStrings(s => ({
                 ...s,
-                sipAllottedAmount: (nextAllotted === undefined || nextAllotted === 0) ? '' : nextAllotted.toString(),
-                sipCharges: (nextCharges === undefined || nextCharges === 0) ? '' : nextCharges.toString(),
+                allottedAmount: (nextAllotted === undefined || nextAllotted === 0) ? '' : nextAllotted.toString(),
+                investmentCharges: (nextCharges === undefined || nextCharges === 0) ? '' : nextCharges.toString(),
                 numberOfShares: toInputStr(nextShares)
               }));
               return {
@@ -502,8 +502,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 category: val,
                 accountId: nextAccountId,
                 description: newDesc,
-                sipAllottedAmount: nextAllotted,
-                sipCharges: nextCharges,
+                allottedAmount: nextAllotted,
+                investmentCharges: nextCharges,
                 numberOfShares: nextShares
               };
             });
@@ -511,9 +511,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           }} iconGetter={c => getCategoryIcon(c)} error={errors.category} />
 
           {(() => {
-            const isSip = newTx.category?.toLowerCase() === 'sip';
+            const isMf = newTx.category?.toLowerCase() === 'mutual funds';
             const isStock = newTx.category?.toLowerCase() === 'stocks';
-            const isInvestment = isSip || isStock;
+            const isInvestment = isMf || isStock;
             return isInvestment && (
               <div style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', marginBottom: '1rem' }}>
               <div className="grid grid-cols-2 gap-4">
@@ -523,18 +523,18 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     type="text" 
                     inputMode="decimal"
                     className="input-field"
-                    value={inputStrings.sipAllottedAmount}
+                    value={inputStrings.allottedAmount}
                     onChange={e => {
                       const val = e.target.value;
                       if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                        setInputStrings(prev => ({ ...prev, sipAllottedAmount: val }));
+                        setInputStrings(prev => ({ ...prev, allottedAmount: val }));
                         const allotted = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
                         setNewTx(prev => {
                           // Charges is the complement: charges = amount − invested.
                           const totalAmount = Number(prev.amount || 0);
                           const charges = Math.max(0, totalAmount - allotted);
-                          setInputStrings(s => ({ ...s, sipCharges: toInputStr(parseFloat(charges.toFixed(2))) }));
-                          return { ...prev, sipAllottedAmount: allotted, sipCharges: parseFloat(charges.toFixed(2)) };
+                          setInputStrings(s => ({ ...s, investmentCharges: toInputStr(parseFloat(charges.toFixed(2))) }));
+                          return { ...prev, allottedAmount: allotted, investmentCharges: parseFloat(charges.toFixed(2)) };
                         });
                       }
                     }}
@@ -547,19 +547,19 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     type="text"
                     inputMode="decimal"
                     className="input-field"
-                    value={inputStrings.sipCharges}
+                    value={inputStrings.investmentCharges}
                     onChange={e => {
                       const val = e.target.value;
                       if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                        setInputStrings(prev => ({ ...prev, sipCharges: val }));
+                        setInputStrings(prev => ({ ...prev, investmentCharges: val }));
                         const charges = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
                         setNewTx(prev => {
                           // Complement of invested: invested = amount − charges, so you can fill in
                           // whichever you know (invested or charges) and the other is derived.
                           const totalAmount = Number(prev.amount || 0);
                           const invested = Math.max(0, totalAmount - charges);
-                          setInputStrings(s => ({ ...s, sipAllottedAmount: toInputStr(parseFloat(invested.toFixed(2))) }));
-                          return { ...prev, sipCharges: charges, sipAllottedAmount: parseFloat(invested.toFixed(2)) };
+                          setInputStrings(s => ({ ...s, allottedAmount: toInputStr(parseFloat(invested.toFixed(2))) }));
+                          return { ...prev, investmentCharges: charges, allottedAmount: parseFloat(invested.toFixed(2)) };
                         });
                       }
                     }}
@@ -567,7 +567,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   />
                 </div>
               </div>
-              {isSip && (
+              {isMf && (
                 <div className="input-group" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
                   <label>Units Allotted</label>
                   <input
@@ -590,13 +590,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             );
           })()}
 
-          {!editId && ((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') || isCCPayment || (newTx.category?.toLowerCase() === 'sip' || newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity')) && (
-            <CustomPicker label={(newTx.category?.toLowerCase() === 'sip' || newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity') ? (newTx.type === 'debit' ? 'Credit To Investment Account' : 'Debit From Account') : (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' ? 'Debit From Account (Auto-Debit)' : 'Pay To Card (Auto-Credit)')} value={paymentSourceAccountId} placeholder="None (Manual Log)" options={[{ id: '', name: 'None (Manual Log)' }, ...data.accounts.filter(a => {
+          {!editId && ((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') || isCCPayment || (newTx.category?.toLowerCase() === 'mutual funds' || newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity')) && (
+            <CustomPicker label={(newTx.category?.toLowerCase() === 'mutual funds' || newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity') ? (newTx.type === 'debit' ? 'Credit To Investment Account' : 'Debit From Account') : (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' ? 'Debit From Account (Auto-Debit)' : 'Pay To Card (Auto-Credit)')} value={paymentSourceAccountId} placeholder="None (Manual Log)" options={[{ id: '', name: 'None (Manual Log)' }, ...data.accounts.filter(a => {
               if (a.id === newTx.accountId) return false;
               if (a.archived) return false; // this picker only shows for new transactions
 
-              if (newTx.category?.toLowerCase() === 'sip') {
-                return newTx.type === 'debit' ? a.type === 'sips' : (a.type === 'bank_account' || a.type === 'e_wallet');
+              if (newTx.category?.toLowerCase() === 'mutual funds') {
+                return newTx.type === 'debit' ? a.type === 'mutual_funds' : (a.type === 'bank_account' || a.type === 'e_wallet');
               }
               if (newTx.category?.toLowerCase() === 'stocks') {
                 return newTx.type === 'debit' ? a.type === 'stocks' : (a.type === 'bank_account' || a.type === 'e_wallet');
@@ -607,13 +607,13 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               return true;
             }).map(acc => ({ id: acc.id, name: acc.name, subtext: acc.type.replace('_', ' ') }))]} onChange={val => {
               setPaymentSourceAccountId(val);
-              const isSip = newTx.category?.toLowerCase() === 'sip';
+              const isMf = newTx.category?.toLowerCase() === 'mutual funds';
               const isStock = newTx.category?.toLowerCase() === 'stocks';
-              if (isSip) {
+              if (isMf) {
                 const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
                 const counterpartAcc = data.accounts.find(a => a.id === val);
-                const sipAcc = mainAcc?.type === 'sips' ? mainAcc : (counterpartAcc?.type === 'sips' ? counterpartAcc : null);
-                setNewTx(prev => ({ ...prev, description: sipAcc ? sipAcc.name : 'SIP' }));
+                const mfAcc = mainAcc?.type === 'mutual_funds' ? mainAcc : (counterpartAcc?.type === 'mutual_funds' ? counterpartAcc : null);
+                setNewTx(prev => ({ ...prev, description: mfAcc ? mfAcc.name : 'Mutual Funds' }));
               } else if (isStock) {
                 const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
                 const counterpartAcc = data.accounts.find(a => a.id === val);
@@ -694,7 +694,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           {((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') ||
             (newTx.type === 'debit' && isCCPayment && paymentSourceAccountId && data.accounts.find(a => a.id === paymentSourceAccountId)?.type === 'credit_card')) && (
             <div style={{ marginTop: '0.5rem' }}>
-              <CustomPicker label="Apply Payment To" value={ccPaymentCycleTarget} options={[{ id: 'previous_statement', name: 'Previous Statement', subtext: 'Reduce already billed dues' }, { id: 'current_cycle', name: 'Current Open Cycle', subtext: 'Count as an early payment for the active cycle' }]} onChange={val => setCcPaymentCycleTarget(val as 'current_cycle' | 'previous_statement')} iconGetter={id => id === 'current_cycle' ? '🟦' : '🧾'} />
+              <CustomPicker label="Apply Payment To" value={ccPaymentCycleTarget} options={[{ id: 'previous_statement', name: 'Previous Statement', subtext: 'Reduce Already Billed Dues' }, { id: 'current_cycle', name: 'Current Open Cycle', subtext: 'Count as an Early Payment for the Active Cycle' }]} onChange={val => setCcPaymentCycleTarget(val as 'current_cycle' | 'previous_statement')} iconGetter={id => id === 'current_cycle' ? '🟦' : '🧾'} />
             </div>
           )}
         </div>

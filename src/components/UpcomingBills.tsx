@@ -4,7 +4,6 @@ import {
   Repeat,
   Link,
   ArrowUpRight,
-  PieChart,
   CreditCard,
   Clock,
   Trash2,
@@ -13,8 +12,7 @@ import {
   Calendar,
   AlertCircle,
   Check,
-  CheckCircle2,
-  ChevronDown
+  CheckCircle2
 } from 'lucide-react';
 import { useFinance } from '../FinanceContext';
 import type { RecurringBill, RecurringFrequency } from '../types';
@@ -44,8 +42,12 @@ export default function UpcomingBills() {
   const [selectedBill, setSelectedBill] = useState<RecurringBill | null>(null);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [editingBillId, setEditingBillId] = useState<string | null>(null);
-  const [billsOpen, setBillsOpen] = useState(true);
-  const [sipsOpen, setSipsOpen] = useState(true);
+
+  // The category picker offers EVERY category, Mutual Funds included — a fund instalment is a
+  // legitimate thing to want a due-date reminder for. What was removed is the special MF wiring:
+  // there is no "link to a mutual fund account" field and no auto-credit of that account on LOG.
+  // A Mutual Funds bill is just a plain bill; LOG opens the normal investment form in the Ledger
+  // modal, where the user picks the funding and fund accounts themselves.
 
   const handleLinkTransaction = (transaction: any) => {
     if (!selectedBill) return;
@@ -88,8 +90,7 @@ export default function UpcomingBills() {
     frequency: 'monthly',
     nextDueDate: format(new Date(), 'yyyy-MM-dd'),
     isActive: true,
-    type: 'debit',
-    linkedSipAccountId: undefined
+    type: 'debit'
   });
 
   const getDaysRemaining = (dateStr: string) => {
@@ -116,8 +117,7 @@ export default function UpcomingBills() {
       frequency: 'monthly',
       nextDueDate: format(new Date(), 'yyyy-MM-dd'),
       isActive: true,
-      type: 'debit',
-      linkedSipAccountId: undefined
+      type: 'debit'
     });
     setEditingBillId(null);
   };
@@ -152,22 +152,6 @@ export default function UpcomingBills() {
           const isSameMonth = tDate.getMonth() === today.getMonth() && tDate.getFullYear() === today.getFullYear();
           if (bill.frequency === 'monthly') return isSameMonth;
           return true; // For non-monthly, any recent link counts
-        }
-
-        // Bills with a linked SIP account skip the name-based fuzzy match below (SIP fund
-        // names can overlap/collide) and instead fuzzy-match on the account itself: any
-        // transaction leg credited into this bill's specific SIP account — e.g. one logged
-        // through the main Ledger's "+ Log Transaction" modal, which has no recurringBillId —
-        // counts as paying this bill. Keep this in sync with the plain fuzzy match below if
-        // that logic changes; see the DUPLICATE MODAL WARNING comments in TransactionModal.tsx
-        // / Transactions.tsx for why two independent log forms can log a matching SIP entry.
-        if (bill.linkedSipAccountId) {
-          const tDate = new Date(t.date);
-          const isSameMonth = tDate.getMonth() === today.getMonth() && tDate.getFullYear() === today.getFullYear();
-          const isSipAccountMatch = t.category?.toLowerCase() === 'sip' && t.type === 'credit' && t.accountId === bill.linkedSipAccountId;
-          if (bill.frequency === 'monthly') return isSameMonth && isSipAccountMatch;
-          const diffDays = Math.abs((tDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-          return diffDays < 10 && isSipAccountMatch;
         }
 
         // Fallback to fuzzy match
@@ -247,40 +231,19 @@ export default function UpcomingBills() {
             </button>
           </div>
 
-          {(() => {
-            const sipItems = allUpcoming.filter(b => !('isCC' in b) && (b as RecurringBill).category === 'SIP');
-            const billItems = allUpcoming.filter(b => ('isCC' in b) || (b as RecurringBill).category !== 'SIP');
-
-            if (allUpcoming.length === 0) return (
-              <div className="card flex-col align-center justify-center gap-4 text-center" style={{ padding: '3rem 1rem', opacity: 0.6 }}>
-                <div className="flex-center" style={{ width: '60px', height: '60px', borderRadius: '50%', background: 'var(--bg-hover)' }}>
-                  <Calendar size={32} />
-                </div>
-                <div className="flex-col gap-1">
-                  <p className="font-bold">All caught up!</p>
-                  <p className="text-xs">No upcoming bills or SIPs tracked.</p>
-                </div>
+          {allUpcoming.length === 0 ? (
+            <div className="card flex-col align-center justify-center gap-4 text-center" style={{ padding: '3rem 1rem', opacity: 0.6 }}>
+              <div className="flex-center" style={{ width: '60px', height: '60px', borderRadius: '50%', background: 'var(--bg-hover)' }}>
+                <Calendar size={32} />
               </div>
-            );
-
-            const SectionHeader = ({ label, count, open, onToggle }: { label: string; count: number; open: boolean; onToggle: () => void }) => (
-              <button
-                onClick={onToggle}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginBottom: '0.25rem' }}
-              >
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{label}</span>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem', fontWeight: 700, color: 'var(--text-muted)', opacity: 0.6 }}>{count}</span>
-                <div style={{ flex: 1, height: '1px', background: 'var(--border-color)' }} />
-                <ChevronDown size={14} style={{ color: 'var(--text-muted)', flexShrink: 0, transition: 'transform 0.2s ease', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }} />
-              </button>
-            );
-
-            return (
-              <div className="flex-col gap-6">
-                {billItems.length > 0 && (
-                  <div className="flex-col gap-4">
-                    <SectionHeader label="Bills" count={billItems.length} open={billsOpen} onToggle={() => setBillsOpen(o => !o)} />
-                    {billsOpen && billItems.map(bill => {
+              <div className="flex-col gap-1">
+                <p className="font-bold">All caught up!</p>
+                <p className="text-xs">No upcoming bills tracked.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-col gap-4">
+              {allUpcoming.map(bill => {
                 const daysLeft = getDaysRemaining(bill.nextDueDate);
                 const isOverdue = daysLeft < 0;
                 const isUrgent = daysLeft <= 3;
@@ -429,90 +392,9 @@ export default function UpcomingBills() {
                     )}
                   </div>
                 );
-                    })}
-                  </div>
-                )}
-                {sipItems.length > 0 && (
-                  <div className="flex-col gap-4">
-                    <SectionHeader label="SIPs" count={sipItems.length} open={sipsOpen} onToggle={() => setSipsOpen(o => !o)} />
-                    {sipsOpen && sipItems.map(bill => {
-                      const daysLeft = getDaysRemaining(bill.nextDueDate);
-                      const isOverdue = daysLeft < 0;
-                      const isUrgent = daysLeft <= 3;
-                      const isPaidCC = ('isPaid' in bill && bill.isPaid);
-                      return (
-                        <div key={bill.id} className="card flex-col gap-5" style={{
-                          opacity: isPaidCC ? 0.7 : 1,
-                          border: '2px solid var(--border-color)',
-                          boxShadow: '4px 4px 0 var(--border-color)',
-                          transition: 'transform 0.2s ease'
-                        }}>
-                          <div className="flex justify-between align-start gap-3">
-                            <div className="flex align-center gap-3" style={{ flex: 1, minWidth: 0 }}>
-                              <div className="flex-center" style={{
-                                width: '44px', height: '44px', flexShrink: 0, borderRadius: '12px',
-                                background: isPaidCC ? 'rgba(16, 185, 129, 0.1)' : isOverdue ? 'rgba(255, 59, 48, 0.1)' : 'var(--bg-hover)',
-                                color: isPaidCC ? 'var(--success-color, #10b981)' : isOverdue ? 'var(--negative-color)' : 'var(--text-color)',
-                                border: '1px solid var(--border-color)'
-                              }}>
-                                {isPaidCC ? <CheckCircle2 size={22} /> : getCategoryIcon((bill as RecurringBill).category as string, 22)}
-                              </div>
-                              <div className="flex-col gap-1" style={{ minWidth: 0 }}>
-                                <span className="font-bold" style={{ fontSize: '1rem', lineHeight: 1.3 }}>{bill.name}</span>
-                                <span className="text-muted text-xs font-medium uppercase tracking-wider">
-                                  {(bill as RecurringBill).frequency === 'custom' ? `Every ${(bill as RecurringBill).customDays} Days` : FREQUENCY_LABELS[(bill as RecurringBill).frequency as RecurringFrequency]}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex gap-3" style={{ flexShrink: 0 }}>
-                              <button className="btn btn-secondary" style={{ width: '36px', height: '36px', minHeight: 'auto', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
-                                onClick={() => { setNewBill({ ...bill }); setEditingBillId(bill.id); setActiveView('add'); }}>
-                                <Pencil size={15} />
-                              </button>
-                              <button className="btn btn-secondary" style={{ width: '36px', height: '36px', minHeight: 'auto', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }}
-                                onClick={() => deleteRecurringBill(bill.id)}>
-                                <Trash2 size={15} />
-                              </button>
-                            </div>
-                          </div>
-                          <div className="flex justify-end align-center gap-3">
-                            <span className={`text-xl font-bold ${isOverdue && !isPaidCC ? 'text-negative' : ''}`} style={{ fontFamily: 'var(--font-mono)' }}>
-                              {bill.amount > 0 ? `₹${bill.amount.toLocaleString()}` : '--'}
-                            </span>
-                            <div className="flex align-center gap-1 text-xs font-bold px-2 py-1" style={{
-                              borderRadius: '6px',
-                              background: isPaidCC ? 'rgba(16, 185, 129, 0.1)' : isOverdue ? 'var(--negative-color)' : isUrgent ? 'rgba(255, 159, 10, 0.1)' : 'var(--bg-hover)',
-                              color: isPaidCC ? 'var(--success-color, #10b981)' : isOverdue ? 'white' : isUrgent ? 'var(--warning-color, #ff9f0a)' : 'var(--text-muted)',
-                              textTransform: 'uppercase', whiteSpace: 'nowrap'
-                            }}>
-                              {isPaidCC ? <Check size={12} /> : isOverdue ? <AlertCircle size={12} /> : <Clock size={12} />}
-                              {isPaidCC ? 'No Dues' : formatDays(daysLeft)}
-                            </div>
-                          </div>
-                          {!isPaidCC && (
-                            <div className="flex gap-2" style={{ width: '100%', marginTop: '0.5rem' }}>
-                              <button className="btn flex-center gap-1" style={{ height: '40px', padding: '0 4px', fontSize: '0.75rem', fontWeight: 800, border: '2px solid var(--border-color)', boxShadow: '3px 3px 0 var(--border-color)', background: 'var(--bg-hover)', color: 'var(--text-primary)', boxSizing: 'border-box', flex: 1 }}
-                                onClick={() => { setSelectedBill(bill as RecurringBill); setIsLogModalOpen(true); }}>
-                                <ArrowUpRight size={14} strokeWidth={3} /> LOG
-                              </button>
-                              <button className="btn flex-center gap-1" style={{ height: '40px', padding: '0 4px', fontSize: '0.75rem', fontWeight: 800, border: '2px solid var(--border-color)', boxShadow: '3px 3px 0 var(--border-color)', background: 'var(--bg-hover)', color: 'var(--text-primary)', boxSizing: 'border-box', flex: 1 }}
-                                onClick={() => { setSelectedBill(bill as RecurringBill); setIsLinkModalOpen(true); }}>
-                                <Link size={14} strokeWidth={2.5} /> LINK
-                              </button>
-                              <button className="btn flex-center gap-1" style={{ height: '40px', padding: '0 4px', fontSize: '0.75rem', fontWeight: 800, border: '2px solid var(--border-color)', boxShadow: '3px 3px 0 var(--border-color)', background: 'var(--bg-hover)', color: 'var(--success-color, #10b981)', boxSizing: 'border-box', flex: 1 }}
-                                onClick={() => handleMarkAsPaid(bill as RecurringBill)}>
-                                <Check size={14} strokeWidth={3} /> PAID
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
+              })}
+            </div>
+          )}
         </>
       )}
 
@@ -538,7 +420,7 @@ export default function UpcomingBills() {
               <input
                 type="text"
                 className="input-field"
-                placeholder="e.g. Rent, Netflix, SIP"
+                placeholder="e.g. Rent, Netflix, Electricity"
                 value={newBill.name}
                 onChange={e => setNewBill({ ...newBill, name: e.target.value })}
               />
@@ -597,7 +479,7 @@ export default function UpcomingBills() {
             </div>
             </div>
 
-            <CustomDatePicker 
+            <CustomDatePicker
               isOpen={isDatePickerOpen}
               onClose={() => setIsDatePickerOpen(false)}
               value={newBill.nextDueDate || ''}
@@ -612,35 +494,10 @@ export default function UpcomingBills() {
                 hideLabel={true}
                 value={newBill.category || 'Bills'}
                 options={data.categories.map(cat => ({ id: cat, name: cat }))}
-                onChange={val => setNewBill({ ...newBill, category: val, linkedSipAccountId: val !== 'SIP' ? undefined : newBill.linkedSipAccountId })}
+                onChange={val => setNewBill({ ...newBill, category: val })}
                 iconGetter={(id) => getCategoryIcon(id)}
               />
             </div>
-
-            {newBill.category === 'SIP' && (
-              <div className="input-group animate-in">
-                <label>Link to SIP Account</label>
-                <CustomPicker
-                  label="SIP Account"
-                  hideLabel={true}
-                  value={newBill.linkedSipAccountId || ''}
-                  options={[
-                    { id: '', name: 'None (Manual Log)' },
-                    ...data.accounts.filter(a => a.type === 'sips' && !a.archived).map(a => ({ id: a.id, name: a.name }))
-                  ]}
-                  onChange={val => {
-                    const sipAcc = val ? data.accounts.find(a => a.id === val) : undefined;
-                    setNewBill({
-                      ...newBill,
-                      linkedSipAccountId: val || undefined,
-                      name: sipAcc ? sipAcc.name : newBill.name
-                    });
-                  }}
-                  iconGetter={() => <PieChart size={18} />}
-                />
-                <p className="text-xs text-muted" style={{ marginTop: '0.5rem' }}>When logging this SIP, the investment amount will automatically be credited to the linked account.</p>
-              </div>
-            )}
           </div>
         </SubviewWrapper>
       )}
@@ -651,25 +508,14 @@ export default function UpcomingBills() {
           setIsLogModalOpen(false);
           setSelectedBill(null);
         }}
-        initialData={selectedBill ? (() => {
-          const isSip = !('isCC' in selectedBill) && selectedBill.category === 'SIP';
-          const sipAccount = isSip && selectedBill.linkedSipAccountId
-            ? data.accounts.find(a => a.id === selectedBill.linkedSipAccountId)
-            : undefined;
-          return {
-            description: 'isCC' in selectedBill ? 'CC Bill Payment' : selectedBill.name,
-            amount: selectedBill.amount,
-            category: 'isCC' in selectedBill ? 'CC Payment' : (selectedBill.category || 'Bills'),
-            accountId: selectedBill.accountId || data.accounts.find(a => !a.archived)?.id || '',
-            type: 'isCC' in selectedBill ? 'credit' : (selectedBill.type || 'debit'),
-            recurringBillId: selectedBill.id,
-            ...(isSip && sipAccount ? {
-              paymentSourceAccountId: sipAccount.id,
-              sipAllottedAmount: selectedBill.amount,
-              sipCharges: 0
-            } : {})
-          };
-        })() : undefined}
+        initialData={selectedBill ? {
+          description: 'isCC' in selectedBill ? 'CC Bill Payment' : selectedBill.name,
+          amount: selectedBill.amount,
+          category: 'isCC' in selectedBill ? 'CC Payment' : (selectedBill.category || 'Bills'),
+          accountId: selectedBill.accountId || data.accounts.find(a => !a.archived)?.id || '',
+          type: 'isCC' in selectedBill ? 'credit' : (selectedBill.type || 'debit'),
+          recurringBillId: selectedBill.id
+        } : undefined}
       />
 
       <TransactionSelector

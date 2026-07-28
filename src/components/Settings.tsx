@@ -18,6 +18,7 @@ import { getGeminiUsageToday, testGeminiKey } from '../services/GeminiService';
 import { invalidateCommodityCache } from '../services/MarketDataService';
 import { minifyPayload, expandPayload } from '../services/backupCodec';
 import { APP_VERSION } from '../utils';
+import { BUILT_IN_ACCOUNT_TYPES } from '../types';
 
 const GridButton = ({ icon: Icon, label, onClick }: { icon: React.ElementType, label: string, onClick?: () => void }) => (
   <div className="card flex-col align-center justify-center" style={{ padding: '1.25rem 0.5rem', gap: '0.75rem', cursor: 'pointer', height: '100%' }} onClick={onClick}>
@@ -543,7 +544,10 @@ export default function Settings() {
 
   const handleAddAccountType = () => {
     const trimmed = newAccountType.trim();
-    const existingTypes = ['bank_account', 'credit_card', 'debit_card', 'e_wallet', 'stocks', 'sips', 'cash', ...(data.customAccountTypes || [])];
+    // Reads the shared built-in list so a new custom type can't collide with a native one. This list
+    // used to be hand-written here and was missing 'commodity' and 'epf', which let a user create a
+    // custom type that shadowed a built-in.
+    const existingTypes: string[] = [...BUILT_IN_ACCOUNT_TYPES, ...(data.customAccountTypes || [])];
     if (trimmed && !existingTypes.some(type => type.toLowerCase() === trimmed.toLowerCase())) {
       updateCustomAccountTypes([...(data.customAccountTypes || []), trimmed]);
       setNewAccountType('');
@@ -733,7 +737,7 @@ export default function Settings() {
   // The commodity AI square only matters when the user actually holds commodities.
   const hasCommodity = (data.accounts || []).some(a => a.type === 'commodity');
   // The asset-logos square only matters when the user holds stocks or mutual funds.
-  const hasInvestments = (data.accounts || []).some(a => a.type === 'stocks' || a.type === 'sips');
+  const hasInvestments = (data.accounts || []).some(a => a.type === 'stocks' || a.type === 'mutual_funds');
 
   const [logoTokenInput, setLogoTokenInput] = useState('');
   const [logoTokenSaved, setLogoTokenSaved] = useState(() => hasLogoDevToken());
@@ -777,11 +781,9 @@ export default function Settings() {
 
   // Commodity view: save the vendor (price reference) only.
   const handleSaveVendor = () => {
-    const vendorChanged = geminiVendorInput.trim() !== getCommodityVendor();
-    setCommodityVendor(geminiVendorInput);
-    // A vendor switch should fetch from the new source now, not serve the old vendor's price for
-    // up to an hour — invalidate the metal cache so the next read does a fresh grounded call
-    // (while keeping the last price as a fallback, so the portfolio doesn't flash ₹0).
+    const formattedVendor = geminiVendorInput.toUpperCase().trim();
+    const vendorChanged = formattedVendor !== getCommodityVendor();
+    setCommodityVendor(formattedVendor);
     if (vendorChanged) invalidateCommodityCache();
     showAlert('Vendor updated.', 'Commodity Prices');
   };
@@ -1009,7 +1011,6 @@ export default function Settings() {
       const min = minifyPayload(b);
       if (min.i) min.i = getTinyId(min.i);
       if (min.x) min.x = getTinyId(min.x);
-      if (min.lsa) min.lsa = getTinyId(min.lsa);
       return min;
     });
 
@@ -1118,7 +1119,9 @@ export default function Settings() {
             expanded.recurringBills = (expanded.recurringBills || []).map((b: any) => {
               if (b.id) b.id = expandId(b.id);
               if (b.accountId) b.accountId = expandId(b.accountId);
-              if (b.linkedSipAccountId) b.linkedSipAccountId = expandId(b.linkedSipAccountId);
+              // linkedSipAccountId is retired (mutual funds are no longer trackable as bills). Old
+              // backups may still carry it; leave the tiny id un-expanded — the load migration in
+              // FinanceContext drops the field (and the whole bill) anyway.
               return b;
             });
             expanded.splitEvents = (expanded.splitEvents || []).map((se: any) => {
@@ -2115,8 +2118,9 @@ export default function Settings() {
               <input
                 className="input-field"
                 value={geminiVendorInput}
-                onChange={e => setGeminiVendorInput(e.target.value)}
+                onChange={e => setGeminiVendorInput(e.target.value.toUpperCase())}
                 placeholder="MMTC-PAMP"
+                style={{ textTransform: 'uppercase' }}
                 autoCorrect="off"
                 spellCheck={false}
               />

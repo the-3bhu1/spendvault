@@ -137,8 +137,8 @@ export default function ContractNoteReview({ trades, skippedSellRows, reconcilia
         isRecurring: false,
         linkedTransactionIds: [mainTxId],
         numberOfShares: quantity,
-        sipAllottedAmount: invested,
-        sipCharges: charges,
+        allottedAmount: invested,
+        investmentCharges: charges,
       });
       addTransaction({
         id: mainTxId,
@@ -152,8 +152,8 @@ export default function ContractNoteReview({ trades, skippedSellRows, reconcilia
         linkedTransactionIds: [counterpartId],
         paymentSourceAccountId: fundingAccountId,
         numberOfShares: quantity,
-        sipAllottedAmount: invested,
-        sipCharges: charges,
+        allottedAmount: invested,
+        investmentCharges: charges,
       });
       totalLogged += invested + charges;
       // Per-stock recap line — rendered by AskVault's markdown renderer (bold + bullet list),

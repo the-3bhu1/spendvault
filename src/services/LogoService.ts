@@ -299,9 +299,9 @@ export function getMFLogoUrl(accountName: string): string | null {
 /** Best-known logo URL for an investment account right now, or null for the initials fallback.
  *  Order: static registry → AI-resolved domain → (stocks) logo.dev ticker guess. */
 export function getAssetLogoUrl(account: AccountLike): string | null {
-  if (account.type !== 'sips' && account.type !== 'stocks') return null;
+  if (account.type !== 'mutual_funds' && account.type !== 'stocks') return null;
 
-  const registry = account.type === 'sips' ? getMFLogoUrl(account.name) : stockRegistryUrl(account.marketSymbol);
+  const registry = account.type === 'mutual_funds' ? getMFLogoUrl(account.name) : stockRegistryUrl(account.marketSymbol);
   if (registry) return registry;
 
   const aiDomain = domainCache[aiCacheKey(account)];
@@ -313,9 +313,9 @@ export function getAssetLogoUrl(account: AccountLike): string | null {
 /** Fire-and-forget: for a holding the static registry can't resolve, ask Gemini for its domain
  *  once, cache it, and emit LOGOS_UPDATED_EVENT so listeners re-render with the real logo. */
 export async function ensureAssetLogo(account: AccountLike): Promise<void> {
-  if (account.type !== 'sips' && account.type !== 'stocks') return;
+  if (account.type !== 'mutual_funds' && account.type !== 'stocks') return;
 
-  const registry = account.type === 'sips' ? resolveAmcDomain(account.name) : (account.marketSymbol ? STOCK_REGISTRY[baseTicker(account.marketSymbol)] : null);
+  const registry = account.type === 'mutual_funds' ? resolveAmcDomain(account.name) : (account.marketSymbol ? STOCK_REGISTRY[baseTicker(account.marketSymbol)] : null);
   if (registry) return; // already covered deterministically
 
   const key = aiCacheKey(account);
@@ -324,7 +324,7 @@ export async function ensureAssetLogo(account: AccountLike): Promise<void> {
   inFlight.add(key);
   try {
     if (!(await hasGeminiKey())) return; // no key → skip without caching, so a future key retries
-    const query = account.type === 'sips'
+    const query = account.type === 'mutual_funds'
       ? `${account.name} (Indian mutual fund house / AMC)`
       : `${account.name}${account.marketSymbol ? ` (NSE/BSE ticker ${baseTicker(account.marketSymbol)})` : ''} (Indian listed company)`;
     const domain = await resolveBrandDomain(query);

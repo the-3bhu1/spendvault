@@ -22,16 +22,25 @@ import AccountStatement from './components/AccountStatement';
 import AppTour from './components/AppTour';
 import BillAlertBanner from './components/BillAlertBanner';
 import type { Account } from './types';
-import SmsReader, { startSmsListener } from './services/SmsService';
+import SmsReader from './services/SmsService';
 import { Capacitor } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app';
 
 export type Tab = 'dashboard' | 'accounts' | 'transactions' | 'cashback' | 'insights' | 'settings' | 'splits' | 'bills' | 'debts' | 'portfolio';
-
-import { App as CapApp } from '@capacitor/app';
 
 function App() {
   const { data, pendingTransfer, addToSmsQueue, isAuthenticated, setAuthenticated } = useFinance();
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [showSplash, setShowSplash] = useState(true);
+  const [selectedAccountForStatement, setSelectedAccountForStatement] = useState<Account | null>(null);
+  const [isHubOpen, setIsHubOpen] = useState(false);
+  const [isAskVaultOpen, setIsAskVaultOpen] = useState(false);
+  const mainTabs: Tab[] = ['dashboard', 'accounts', 'transactions', 'settings'];
+  const activeIndex = mainTabs.indexOf(activeTab);
+
+  const appRootRef = useRef<HTMLDivElement>(null);
+  const shouldLockOnReturnRef = useRef(false);
+  const lastBackgroundTimeRef = useRef<number>(0);
   const scrollPositions = useRef<Record<string, number>>({});
   const addToSmsQueueRef = useRef(addToSmsQueue);
   addToSmsQueueRef.current = addToSmsQueue;
@@ -65,52 +74,6 @@ function App() {
     appRoot.addEventListener('scroll', handleScroll, { passive: true });
     return () => appRoot.removeEventListener('scroll', handleScroll);
   }, [activeTab]);
-
-  useEffect(() => {
-    // Force initialize the plugin — Android only (SMS not available on iOS)
-    if (Capacitor.getPlatform() === 'android') {
-      SmsReader.ping().catch(() => {});
-    }
-  }, []);
-
-  useEffect(() => {
-    // SmsReader plugin only exists on Android
-    if (Capacitor.getPlatform() !== 'android') return;
-    SmsReader.setEnabled({ enabled: !!data.user?.autoLogSms }).catch((e) => {
-      console.error("Failed to sync SMS auto-log setting to native:", e);
-    });
-  }, [data.user?.autoLogSms]);
-
-  useEffect(() => {
-    // SMS listener is Android-only — iOS has no SMS access API
-    if (Capacitor.getPlatform() !== 'android') return;
-    if (!data.user?.autoLogSms) return;
-
-    console.log("Auto-Log SMS enabled. Registering SMS listener.");
-
-    const listener = startSmsListener((tx) => {
-      console.log("App received SMS transaction from plugin:", tx);
-      setTimeout(() => {
-        console.log("Adding SMS transaction to in-app queue.");
-        addToSmsQueueRef.current(tx);
-      }, 100);
-    });
-    return () => {
-      listener.then((l: any) => l.remove());
-    };
-  }, [data.user?.autoLogSms]);
-
-  const [showSplash, setShowSplash] = useState(true);
-  const [selectedAccountForStatement, setSelectedAccountForStatement] = useState<Account | null>(null);
-  const [isHubOpen, setIsHubOpen] = useState(false);
-  const [isAskVaultOpen, setIsAskVaultOpen] = useState(false);
-
-  const mainTabs: Tab[] = ['dashboard', 'accounts', 'transactions', 'settings'];
-  const activeIndex = mainTabs.indexOf(activeTab);
-
-  const appRootRef = useRef<HTMLDivElement>(null);
-  const shouldLockOnReturnRef = useRef(false);
-  const lastBackgroundTimeRef = useRef<number>(0);
 
   useEffect(() => {
     const checkAndOpenPending = async () => {
@@ -336,14 +299,14 @@ function App() {
         </div>
         <div className="flex align-center gap-4">
           <button
-            className={`nav-header-btn ${isAskVaultOpen ? 'active' : ''}`}
+            className={`nav-header-btn tour-askvault-btn ${isAskVaultOpen ? 'active' : ''}`}
             onClick={() => setIsAskVaultOpen(true)}
             title="Ask Vault"
           >
             <MessageSquare size={22} />
           </button>
           <button
-            className={`nav-header-btn ${isHubOpen ? 'active' : ''}`}
+            className={`nav-header-btn tour-hub-btn ${isHubOpen ? 'active' : ''}`}
             onClick={() => setIsHubOpen(true)}
             title="More Menu"
           >
@@ -375,7 +338,7 @@ function App() {
                 </div>
                 <div className="flex-col flex-1">
                   <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Group Splits</span>
-                  <span className="text-xs text-muted">Shared expenses & trips</span>
+                  <span className="text-xs text-muted">Shared Expenses & Trips</span>
                 </div>
                 <ChevronRight size={18} className="text-muted" />
               </div>
@@ -390,7 +353,7 @@ function App() {
                 </div>
                 <div className="flex-col flex-1">
                   <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Lending & Borrowing</span>
-                  <span className="text-xs text-muted">Track owe & owed</span>
+                  <span className="text-xs text-muted">Track Owe & Owed</span>
                 </div>
                 <ChevronRight size={18} className="text-muted" />
               </div>
@@ -404,8 +367,8 @@ function App() {
                   <Calendar size={22} />
                 </div>
                 <div className="flex-col flex-1">
-                  <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Bills & SIPs</span>
-                  <span className="text-xs text-muted">Upcoming obligations</span>
+                  <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Bills</span>
+                  <span className="text-xs text-muted">Upcoming Obligations</span>
                 </div>
                 <ChevronRight size={18} className="text-muted" />
               </div>
@@ -424,13 +387,13 @@ function App() {
                   </div>
                   <div className="flex-col flex-1">
                     <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Rewards & Offers</span>
-                    <span className="text-xs text-muted">Cashback & credit card perks</span>
+                    <span className="text-xs text-muted">Cashback & Credit Card Perks</span>
                   </div>
                   <ChevronRight size={18} className="text-muted" />
                 </div>
               )}
 
-              {data.accounts.some(acc => acc.type === 'sips' || acc.type === 'stocks') && (
+              {data.accounts.some(acc => acc.type === 'mutual_funds' || acc.type === 'stocks' || acc.type === 'commodity' || acc.type === 'epf') && (
                 <div
                   className="card flex align-center gap-4 clickable"
                   onClick={() => { setActiveTab('portfolio'); setIsHubOpen(false); }}
@@ -440,8 +403,8 @@ function App() {
                     <TrendingUpDown size={22} />
                   </div>
                   <div className="flex-col flex-1">
-                    <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Portfolio</span>
-                    <span className="text-xs text-muted">Stocks & mutual funds</span>
+                    <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Wealth</span>
+                    <span className="text-xs text-muted">Stocks, Mutual Funds, Metals & EPF</span>
                   </div>
                   <ChevronRight size={18} className="text-muted" />
                 </div>
@@ -457,7 +420,7 @@ function App() {
                 </div>
                 <div className="flex-col flex-1">
                   <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Smart Insights</span>
-                  <span className="text-xs text-muted">Spend analysis & trends</span>
+                  <span className="text-xs text-muted">Spend Analysis & Trends</span>
                 </div>
                 <ChevronRight size={18} className="text-muted" />
               </div>
@@ -483,36 +446,29 @@ function App() {
           </div>
         )}
 
-        {activeTab === 'settings' && (
-          <div className="fade-in">
-            <Settings />
-          </div>
-        )}
-
-        {/* Other Dynamic Tabs */}
         {activeTab === 'cashback' && <div className="fade-in"><Cashback /></div>}
-        {activeTab === 'portfolio' && <div className="fade-in"><Portfolio /></div>}
+        {activeTab === 'portfolio' && <div className="fade-in" style={{ height: '100%' }}><Portfolio /></div>}
         {activeTab === 'insights' && <div className="fade-in"><Insights /></div>}
+        {activeTab === 'settings' && <div className="fade-in"><Settings /></div>}
         {activeTab === 'splits' && <div className="fade-in"><Splits /></div>}
         {activeTab === 'bills' && <div className="fade-in"><UpcomingBills /></div>}
         {activeTab === 'debts' && <div className="fade-in"><Debts /></div>}
       </main>
 
       {selectedAccountForStatement && (
-        <AccountStatement
-          account={selectedAccountForStatement}
-          transactions={data.transactions}
-          onClose={() => setSelectedAccountForStatement(null)}
-        />
+        <AccountStatement account={selectedAccountForStatement} transactions={data.transactions} onClose={() => setSelectedAccountForStatement(null)} />
       )}
 
       {isAskVaultOpen && (
         <AskVault
+          isOpen={isAskVaultOpen}
           onClose={() => setIsAskVaultOpen(false)}
           onOpenSettings={() => { setIsAskVaultOpen(false); setActiveTab('settings'); }}
+          isDemo={!!activeTour}
         />
       )}
 
+      {/* Bottom Navigation */}
       <div className="nav-scrim" aria-hidden="true" />
       <div className="nav-links">
         {activeIndex !== -1 && (
@@ -548,6 +504,7 @@ function App() {
           <ProfileAvatar size={30} />
         </button>
       </div>
+
       {showExitToast && (
         <div 
           style={{
@@ -576,6 +533,7 @@ function App() {
           </span>
         </div>
       )}
+
       {activeTour && isAuthenticated && (
         <AppTour 
           tourType={activeTour}
@@ -583,6 +541,8 @@ function App() {
           setActiveTab={setActiveTab} 
           isHubOpen={isHubOpen} 
           setIsHubOpen={setIsHubOpen} 
+          isAskVaultOpen={isAskVaultOpen}
+          setIsAskVaultOpen={setIsAskVaultOpen}
         />
       )}
     </div>

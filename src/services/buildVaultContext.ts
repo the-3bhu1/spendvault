@@ -96,7 +96,7 @@ function buildSummary(data: FinanceData): string {
     const bal = calculateBalance(a, data.transactions, currentMonth, false, isReward, data.cashbackStatements);
     let line = `  - ${a.name} [${a.type}]: ${isReward ? `${bal} ${a.rewardUnit || 'pts'}` : formatCurrency(bal)}`;
     if (a.type === 'commodity' && a.commodityMetal) line += ` (${a.commodityMetal})`;
-    if (a.type === 'stocks' || a.type === 'sips') {
+    if (a.type === 'stocks' || a.type === 'mutual_funds') {
       if (a.investedValue != null) line += ` (invested ${formatCurrency(a.investedValue)})`;
     }
     if (a.type === 'epf') {
@@ -185,11 +185,11 @@ function buildSummary(data: FinanceData): string {
     });
   }
 
-  // Upcoming bills / SIPs.
+  // Upcoming bills. Bills only — investment schedules are not trackable here (see UpcomingBills).
   const bills = (data.recurringBills || []).filter(b => b.isActive)
     .sort((a, b) => a.nextDueDate.localeCompare(b.nextDueDate)).slice(0, 8);
   if (bills.length) {
-    out.push('\n## Upcoming bills & SIPs');
+    out.push('\n## Upcoming bills');
     bills.forEach(b => {
       out.push(`  - ${b.name}: ${formatCurrency(b.amount)} (${b.frequency}), next due ${b.nextDueDate}`);
     });

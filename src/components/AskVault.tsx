@@ -112,13 +112,25 @@ function renderMarkdown(text: string) {
   return blocks;
 }
 
-export default function AskVault({ onClose, onOpenSettings }: { onClose: () => void; onOpenSettings: () => void }) {
+interface AskVaultProps {
+  isOpen?: boolean;
+  onClose: () => void;
+  onOpenSettings?: () => void;
+  isDemo?: boolean;
+}
+
+export default function AskVault({ isOpen: _isOpen, onClose, onOpenSettings, isDemo }: AskVaultProps) {
   const { data, updateUser } = useFinance();
-  // Open on a fresh chat every time. The previous conversation isn't lost — it's saved to history
-  // (the clock icon) and can be reloaded from there.
   const [sessions, setSessions] = useState<ChatSession[]>(() => getSessions());
   const [sessionId, setSessionId] = useState<string>(() => newSessionId());
-  const [messages, setMessages] = useState<Msg[]>([]);
+  const [messages, setMessages] = useState<Msg[]>(() => 
+    isDemo ? [
+      { role: 'user' as const, text: "How much did I spend on dining out this month?" },
+      { role: 'model' as const, text: "You've spent **₹4,850** across 6 dining transactions this month. That's **12% lower** than your average monthly dining budget!" },
+      { role: 'user' as const, text: "Can you check my active credit card statement dues?" },
+      { role: 'model' as const, text: "You have 1 active statement due: **Indigo Premium Card** with **₹799** due on the 5th." }
+    ] : []
+  );
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [keyReady, setKeyReady] = useState<boolean | null>(null);
@@ -138,17 +150,18 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
   const uploadCountRef = useRef(0); // fallback numbering ("Image 2") when a file has no usable name
 
   const consented = !!data.user?.aiAssistant;
-  const blocked = keyReady === false || !consented;
+  const blocked = isDemo ? false : (keyReady === false || !consented);
 
   useEffect(() => { hasGeminiKey().then(setKeyReady); }, []);
 
   // Persist the active conversation after every turn. Error bubbles aren't saved — only the real
   // exchange — and a chat with no real messages yet never creates an empty session.
   useEffect(() => {
+    if (isDemo) return;
     const clean = messages.filter(m => !m.error).map(({ role, text }) => ({ role, text }));
     if (!clean.length) return;
     setSessions(upsertSession(sessionId, clean));
-  }, [messages, sessionId]);
+  }, [messages, sessionId, isDemo]);
 
   // Pin the overlay to the visual viewport (the area above the keyboard) instead of
   // the layout viewport. Without this, opening the on-screen keyboard hides the input
@@ -158,10 +171,10 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
     const vv = window.visualViewport;
     if (!vv) return;
     const apply = () => {
-      const el = overlayRef.current;
-      if (!el) return;
-      el.style.height = `${vv.height}px`;
-      el.style.transform = `translateY(${vv.offsetTop}px)`;
+      if (overlayRef.current) {
+        overlayRef.current.style.height = `${vv.height}px`;
+        overlayRef.current.style.top = `${vv.offsetTop}px`;
+      }
     };
     apply();
     vv.addEventListener('resize', apply);
@@ -174,26 +187,29 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages, loading]);
+  }, [messages, pendingReview, loading]);
 
-  const send = async (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed || loading) return;
+  const send = async (rawText?: string) => {
+    const text = (rawText ?? input).trim();
+    if (!text || loading || blocked) return;
+
     setInput('');
-    // Drop any prior failed turn so retries don't pile up.
-    const base = messages.filter(m => !m.error);
-    const history: Msg[] = [...base, { role: 'user', text: trimmed }];
-    setMessages(history);
+    const newMsgs: Msg[] = [...messages, { role: 'user', text }];
+    setMessages(newMsgs);
     setLoading(true);
+
     try {
-      const reply = await askVault(history, data);
-      setMessages([...history, { role: 'model', text: reply }]);
-    } catch {
-      setMessages([...history, {
-        role: 'model',
-        text: "Sorry — I couldn't reach the assistant just now. Check your connection and try again.",
-        error: true,
-      }]);
+      const resp = await askVault(newMsgs.map(m => ({ role: m.role, text: m.text })), data);
+      setMessages([...newMsgs, { role: 'model', text: resp }]);
+    } catch (err: any) {
+      setMessages([
+        ...newMsgs,
+        {
+          role: 'model',
+          text: err?.message || 'Failed to get a response. Please check your Gemini API key under Settings → AI Features.',
+          error: true,
+        },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -210,8 +226,6 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || loading) return;
-    // Show a lightweight placeholder for the upload (filename, or a numbered "Image N"/"PDF N"
-    // fallback) — we never store the actual image, only this label, so history stays tiny.
     const isImage = file.type.startsWith('image/');
     const n = ++uploadCountRef.current;
     const fileLabel = (file.name && file.name.trim()) ? file.name.trim() : (isImage ? `Image ${n}` : `PDF ${n}`);
@@ -230,8 +244,7 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
       setPendingReview({
         status: 'error',
         fileLabel,
-        message: "Couldn't fully parse that contract note — please check the details below, or log it manually.",
-        rawText: err?.rawText,
+        message: err?.message || "Couldn't process that file. Make sure it's a valid Zerodha/Groww contract note PDF or screenshot.",
       });
     }
   };
@@ -242,8 +255,6 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
   };
 
   const handleReviewConfirm = (summary: string) => {
-    // Persist the exchange as a real conversation turn: the upload placeholder (user) then the
-    // logged-trades summary (model). Only text is stored — the image itself is never saved.
     const label = pendingReview?.fileLabel;
     clearPendingReview();
     setMessages(prev => [
@@ -255,9 +266,6 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
 
   const handleReviewDismiss = () => clearPendingReview();
 
-  // Closing is an intentional exit — drop any in-progress review so re-opening the assistant
-  // (which remounts fresh) starts a clean chat rather than resurrecting the last card. The
-  // sessionStorage cache still survives an accidental app RELOAD (which never calls this).
   const handleClose = () => {
     clearPendingReview();
     onClose();
@@ -340,7 +348,7 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
 
       {/* Body */}
       <div className="askvault-body no-scrollbar" ref={scrollRef} style={showHistory ? { display: 'none' } : undefined}>
-        {keyReady === false && (
+        {!isDemo && keyReady === false && (
           <div className="card flex-col gap-3" style={{ padding: '1.25rem' }}>
             <span className="font-bold">Set up Ask Vault</span>
             <span className="text-xs text-muted">
@@ -353,7 +361,7 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
           </div>
         )}
 
-        {keyReady === true && !consented && (
+        {!isDemo && keyReady === true && !consented && (
           <div className="card flex-col gap-3" style={{ padding: '1.25rem' }}>
             <span className="font-bold">Enable Ask Vault</span>
             <span className="text-xs text-muted">
@@ -368,7 +376,7 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
           </div>
         )}
 
-        {!blocked && messages.length === 0 && !pendingReview && (
+        {!blocked && messages.length === 0 && !isDemo && !pendingReview && (
           <div className="flex-col gap-4" style={{ marginTop: '2rem' }}>
             <div className="flex-col align-center gap-2 text-center" style={{ marginBottom: '0.5rem' }}>
               <div className="askvault-badge" style={{ width: 56, height: 56 }}><Sparkles size={28} /></div>
@@ -385,16 +393,20 @@ export default function AskVault({ onClose, onOpenSettings }: { onClose: () => v
           </div>
         )}
 
-        {messages.map((m, i) => (
-          <div key={i} className={`askvault-row ${m.role === 'user' ? 'user' : 'model'}`}>
-            <div className={`askvault-bubble ${m.role} ${m.error ? 'error' : ''}`}>
-              {m.role === 'model' && !m.error ? renderMarkdown(m.text) : m.text}
-              {m.error && (
-                <button className="askvault-retry" onClick={retry}>Retry</button>
-              )}
-            </div>
+        {!blocked && (
+          <div className="tour-askvault-chat flex-col gap-3">
+            {messages.map((m, i) => (
+              <div key={i} className={`askvault-row ${m.role === 'user' ? 'user' : 'model'}`}>
+                <div className={`askvault-bubble ${m.role} ${m.error ? 'error' : ''}`}>
+                  {m.role === 'model' && !m.error ? renderMarkdown(m.text) : m.text}
+                  {m.error && (
+                    <button className="askvault-retry" onClick={retry}>Retry</button>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
 
         {pendingReview && (
           <div className="askvault-row user">

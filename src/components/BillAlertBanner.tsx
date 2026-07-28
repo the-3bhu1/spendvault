@@ -39,7 +39,6 @@ export default function BillAlertBanner({ onNavigateToBills }: BillAlertBannerPr
         const sameMonth = tDate.getMonth() === now.getMonth() && tDate.getFullYear() === now.getFullYear();
         return bill.frequency === 'monthly' ? sameMonth : true;
       }
-      if (bill.linkedSipAccountId) return false;
       const tDate = new Date(t.date);
       const sameMonth = tDate.getMonth() === now.getMonth() && tDate.getFullYear() === now.getFullYear();
       const nameMatch = t.description.toLowerCase().includes(bill.name.toLowerCase()) || bill.name.toLowerCase().includes(t.description.toLowerCase());

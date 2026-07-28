@@ -59,7 +59,7 @@ export function Portfolio() {
   const [prices, setPrices] = useState<Record<string, number>>(() => {
     const cached: Record<string, number> = {};
     (data?.accounts || [])
-      .filter((a: Account) => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
+      .filter((a: Account) => (a.type === 'stocks' || a.type === 'mutual_funds') && a.marketSymbol)
       .forEach((a: Account) => { const p = getCachedPrice(a.marketSymbol!); if (p !== null) cached[a.marketSymbol!] = p; });
     (data?.accounts || [])
       .filter((a: Account) => a.type === 'commodity' && a.marketSymbol)
@@ -70,7 +70,7 @@ export function Portfolio() {
   const [prevPrices, setPrevPrices] = useState<Record<string, number>>(() => {
     const cached: Record<string, number> = {};
     (data?.accounts || [])
-      .filter((a: Account) => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
+      .filter((a: Account) => (a.type === 'stocks' || a.type === 'mutual_funds') && a.marketSymbol)
       .forEach((a: Account) => { const p = getCachedPrevPrice(a.marketSymbol!); if (p !== null) cached[a.marketSymbol!] = p; });
     (data?.accounts || [])
       .filter((a: Account) => a.type === 'commodity' && a.marketSymbol)
@@ -93,7 +93,7 @@ export function Portfolio() {
     try {
       if (localStorage.getItem(PORTFOLIO_REFRESH_DAY_KEY) !== currentDayStr()) return null;
       const syms = (data?.accounts || [])
-        .filter((a: Account) => (a.type === 'stocks' || a.type === 'sips') && a.marketSymbol)
+        .filter((a: Account) => (a.type === 'stocks' || a.type === 'mutual_funds') && a.marketSymbol)
         .map((a: Account) => a.marketSymbol!);
       const metalTickers = (data?.accounts || [])
         .filter((a: Account) => a.type === 'commodity' && a.marketSymbol && a.manualPricePerGram === undefined)
@@ -129,37 +129,49 @@ export function Portfolio() {
 
   // Archived (soft-deleted) accounts are excluded from the portfolio — they shouldn't count toward
   // invested/current totals or appear in the holdings lists.
-  const sipAccounts = useMemo(() => {
+  const isDemoActive = useMemo(() => {
+    return (data?.accounts || []).some((a: Account) => a.id.startsWith('demo_'));
+  }, [data?.accounts]);
+
+  const activeAccounts = useMemo(() => {
+    const raw = data?.accounts || [];
+    if (isDemoActive) {
+      return raw.filter((a: Account) => a.id.startsWith('demo_'));
+    }
+    return raw;
+  }, [data?.accounts, isDemoActive]);
+
+  const mfAccounts = useMemo(() => {
     try {
-      return (data?.accounts || []).filter((a: Account) => a.type === 'sips' && !a.archived);
+      return activeAccounts.filter((a: Account) => a.type === 'mutual_funds' && !a.archived);
     } catch {
       return [];
     }
-  }, [data?.accounts]);
+  }, [activeAccounts]);
 
   const stockAccounts = useMemo(() => {
     try {
-      return (data?.accounts || []).filter((a: Account) => a.type === 'stocks' && !a.archived);
+      return activeAccounts.filter((a: Account) => a.type === 'stocks' && !a.archived);
     } catch {
       return [];
     }
-  }, [data?.accounts]);
+  }, [activeAccounts]);
 
   const commodityAccounts = useMemo(() => {
     try {
-      return (data?.accounts || []).filter((a: Account) => a.type === 'commodity' && !a.archived);
+      return activeAccounts.filter((a: Account) => a.type === 'commodity' && !a.archived);
     } catch {
       return [];
     }
-  }, [data?.accounts]);
+  }, [activeAccounts]);
 
   const epfAccounts = useMemo(() => {
     try {
-      return (data?.accounts || []).filter((a: Account) => a.type === 'epf' && !a.archived);
+      return activeAccounts.filter((a: Account) => a.type === 'epf' && !a.archived);
     } catch {
       return [];
     }
-  }, [data?.accounts]);
+  }, [activeAccounts]);
 
   const handleRefresh = async () => {
     try {
@@ -167,7 +179,7 @@ export function Portfolio() {
       setError(null);
 
       const items = [
-        ...sipAccounts.map((a: Account) => ({ symbol: a.marketSymbol || '', kind: 'sip' as const })),
+        ...mfAccounts.map((a: Account) => ({ symbol: a.marketSymbol || '', kind: 'mf' as const })),
         ...stockAccounts.map((a: Account) => ({ symbol: a.marketSymbol || '', kind: 'stock' as const }))
       ].filter(i => i.symbol);
 
@@ -220,16 +232,16 @@ export function Portfolio() {
 
   useEffect(() => {
     handleRefresh();
-  }, [sipAccounts, stockAccounts, commodityAccounts]);
+  }, [mfAccounts, stockAccounts, commodityAccounts]);
 
   // Resolve real logos for any stock/MF the static registry misses (one cached Gemini lookup
   // each), and re-render when one lands.
   useEffect(() => {
     const onLogosUpdated = () => setLogoTick(t => t + 1);
     window.addEventListener(LOGOS_UPDATED_EVENT, onLogosUpdated);
-    [...sipAccounts, ...stockAccounts].forEach(acc => { ensureAssetLogo(acc); });
+    [...mfAccounts, ...stockAccounts].forEach(acc => { ensureAssetLogo(acc); });
     return () => window.removeEventListener(LOGOS_UPDATED_EVENT, onLogosUpdated);
-  }, [sipAccounts, stockAccounts]);
+  }, [mfAccounts, stockAccounts]);
 
   useEffect(() => {
     if (!selectedAsset) {
@@ -244,7 +256,7 @@ export function Portfolio() {
 
       if (selectedAsset.type === 'stocks') {
         history = await fetchStockHistory(symbol, stockRange);
-      } else if (selectedAsset.type === 'sips') {
+      } else if (selectedAsset.type === 'mutual_funds') {
         const fullHistory = await fetchMFNavHistory(symbol);
         const range = mfRange === 'all' ? 'all' : mfRange;
         history = sliceHistoryByRange(fullHistory, range);
@@ -268,7 +280,7 @@ export function Portfolio() {
       const proj = calculateEPFProjection(account);
       return {
         totalUnits: 1,
-        totalInvested: proj.balance,
+        totalInvested: 0,
         currentValue: proj.balance,
         totalReturn: 0,
         totalReturnPct: 0,
@@ -325,17 +337,26 @@ export function Portfolio() {
     return { invested, current, pnl, pnlPct };
   };
 
-  const portfolioStats = useMemo(() => ({
-    all: buildStats([...sipAccounts, ...stockAccounts, ...commodityAccounts, ...epfAccounts]),
-    mf: buildStats(sipAccounts),
-    stocks: buildStats(stockAccounts),
-    commodity: buildStats(commodityAccounts),
-    epf: buildStats(epfAccounts),
-  }), [sipAccounts, stockAccounts, commodityAccounts, epfAccounts, prices, data.transactions]);
+  const portfolioStats = useMemo(() => {
+    const nonEpfStats = buildStats([...mfAccounts, ...stockAccounts, ...commodityAccounts]);
+    const epfStats = buildStats(epfAccounts);
+    return {
+      all: {
+        invested: nonEpfStats.invested,
+        current: nonEpfStats.current + epfStats.current,
+        pnl: nonEpfStats.pnl,
+        pnlPct: nonEpfStats.pnlPct,
+      },
+      mf: buildStats(mfAccounts),
+      stocks: buildStats(stockAccounts),
+      commodity: buildStats(commodityAccounts),
+      epf: epfStats,
+    };
+  }, [mfAccounts, stockAccounts, commodityAccounts, epfAccounts, prices, data.transactions]);
 
   const portfolioOneDayReturn = useMemo(() => {
-    const accounts = portfolioView === 'all' ? [...sipAccounts, ...stockAccounts, ...commodityAccounts]
-      : portfolioView === 'mf' ? sipAccounts
+    const accounts = portfolioView === 'all' ? [...mfAccounts, ...stockAccounts, ...commodityAccounts]
+      : portfolioView === 'mf' ? mfAccounts
       : portfolioView === 'stocks' ? stockAccounts
       : commodityAccounts;
     let amount = 0;
@@ -351,16 +372,12 @@ export function Portfolio() {
     }
     if (prevTotal === 0) return null;
     return { amount, pct: (amount / prevTotal) * 100 };
-  }, [portfolioView, sipAccounts, stockAccounts, commodityAccounts, prices, prevPrices, data.transactions]);
+  }, [portfolioView, mfAccounts, stockAccounts, commodityAccounts, prices, prevPrices, data.transactions]);
 
-  // The displayed "Last refresh at" is scoped to the active tab: each asset class has its own
-  // TTL (stocks 5m, MFs 8h, metals 1h), so a refresh only re-fetches what's stale. Showing the
-  // global max on the MF tab would surface the recent stock fetch time and mislead — so when a
-  // class is selected, show that class's own latest fetch. "All" keeps the overall max.
   const displayRefreshedAt = useMemo(() => {
     if (!lastRefreshed) return null;
     const onlyStr = (arr: (string | undefined)[]) => arr.filter((s): s is string => !!s);
-    const mfSyms = onlyStr(sipAccounts.map((a: Account) => a.marketSymbol));
+    const mfSyms = onlyStr(mfAccounts.map((a: Account) => a.marketSymbol));
     const stockSyms = onlyStr(stockAccounts.map((a: Account) => a.marketSymbol));
     const metalTickers = onlyStr(
       commodityAccounts
@@ -376,7 +393,7 @@ export function Portfolio() {
       getLatestCommodityFetchedAt(metalTickers) ?? 0
     ) || null;
     return ts && ts > 0 ? new Date(ts) : lastRefreshed;
-  }, [portfolioView, lastRefreshed, sipAccounts, stockAccounts, commodityAccounts]);
+  }, [portfolioView, lastRefreshed, mfAccounts, stockAccounts, commodityAccounts]);
 
   const formatCurrency = (value: number) =>
     `₹${Math.round(value).toLocaleString('en-IN')}`;
@@ -387,13 +404,13 @@ export function Portfolio() {
     return `${hours}:${minutes}`;
   };
 
-  const hasInvestments = sipAccounts.length > 0 || stockAccounts.length > 0 || commodityAccounts.length > 0 || epfAccounts.length > 0;
+  const hasInvestments = mfAccounts.length > 0 || stockAccounts.length > 0 || commodityAccounts.length > 0 || epfAccounts.length > 0;
 
   // The 1-day return excludes commodities (no previous-day price). When commodities are part of
   // the "All" view, spell out which classes the figure actually covers so it's not mistaken for
   // the whole portfolio. Empty when there's nothing to clarify.
   const todayScope = [
-    sipAccounts.length > 0 ? 'MF' : null,
+    mfAccounts.length > 0 ? 'MF' : null,
     stockAccounts.length > 0 ? 'Stocks' : null,
   ].filter(Boolean).join(' + ');
 
@@ -435,17 +452,19 @@ export function Portfolio() {
           <div style={{
             fontSize: '0.95rem',
             fontWeight: 700,
-            color: positive ? '#22c55e' : '#ef4444'
+            color: account.type === 'epf' ? 'var(--text-primary)' : (positive ? '#22c55e' : '#ef4444')
           }}>
             {formatCurrency(stats.currentValue)}
           </div>
-          <div style={{
-            fontSize: '0.8rem',
-            color: 'var(--text-secondary)',
-            marginTop: '0.15rem'
-          }}>
-            {formatCurrency(stats.totalInvested)}
-          </div>
+          {account.type !== 'epf' && (
+            <div style={{
+              fontSize: '0.8rem',
+              color: 'var(--text-secondary)',
+              marginTop: '0.15rem'
+            }}>
+              {formatCurrency(stats.totalInvested)}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -479,7 +498,7 @@ export function Portfolio() {
         </div>
 
         <div className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '2px', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
-          {userName}'s Portfolio
+          {userName}'s Wealth
         </div>
 
         <div className="text-serif" style={{ fontSize: '2.75rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
@@ -495,7 +514,7 @@ export function Portfolio() {
               Today{portfolioView === 'all' && commodityAccounts.length > 0 && todayScope ? ` (${todayScope})` : ''}
             </div>
           </div>
-        ) : (portfolioView !== 'commodity' && portfolioView !== 'epf') && (sipAccounts.length > 0 || stockAccounts.length > 0) ? (
+        ) : (portfolioView !== 'commodity' && portfolioView !== 'epf') && (mfAccounts.length > 0 || stockAccounts.length > 0) ? (
           <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.75rem', letterSpacing: '0.5px' }}>— today</div>
         ) : null}
 
@@ -534,7 +553,7 @@ export function Portfolio() {
 
         {(() => {
           const presentTabs = [
-            sipAccounts.length > 0 ? { v: 'mf' as const, label: 'MF' } : null,
+            mfAccounts.length > 0 ? { v: 'mf' as const, label: 'MF' } : null,
             stockAccounts.length > 0 ? { v: 'stocks' as const, label: 'Stocks' } : null,
             commodityAccounts.length > 0 ? { v: 'commodity' as const, label: 'Metals' } : null,
             epfAccounts.length > 0 ? { v: 'epf' as const, label: 'EPF' } : null,
@@ -545,7 +564,7 @@ export function Portfolio() {
           const activeIdx = tabs.findIndex(t => t.v === portfolioView);
           const PAD = 4;
           return (
-            <div style={{
+            <div className="tour-portfolio-tabs" style={{
               position: 'relative',
               display: 'flex',
               marginTop: (portfolioView === 'epf' || !displayRefreshedAt) ? '2.2rem' : '1.5rem',
@@ -574,6 +593,8 @@ export function Portfolio() {
                   <button
                     key={v}
                     onClick={() => setPortfolioView(v)}
+                    className="tour-portfolio-tab-btn"
+                    data-view={v}
                     style={{
                       flex: 1,
                       position: 'relative',
@@ -602,191 +623,208 @@ export function Portfolio() {
         })()}
       </div>
 
-      <div style={{
-        margin: '0 1.5rem',
-        padding: '1.25rem 0',
-        borderTop: '1px solid var(--border-color)',
-        borderBottom: '1px solid var(--border-color)',
-        display: 'flex',
-        justifyContent: 'space-between',
-        gap: '0.5rem'
-      }}>
-        {(() => {
-          if (portfolioView === 'epf') {
-            const totalEpfBalance = epfAccounts.reduce((sum, a) => sum + calculateEPFProjection(a).balance, 0);
-            const totalAccruedInterest = epfAccounts.reduce((sum, a) => sum + calculateEPFProjection(a).accruedInterest, 0);
+      <div className="tour-portfolio-holdings-section">
+        <div className="tour-portfolio-holdings-container">
+        <div style={{
+          margin: '0 1.5rem',
+          padding: '1.25rem 0',
+          borderTop: '1px solid var(--border-color)',
+          borderBottom: '1px solid var(--border-color)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: '0.5rem'
+        }}>
+          {(() => {
+            if (portfolioView === 'epf') {
+              const totalEpfBalance = epfAccounts.reduce((sum, a) => sum + calculateEPFProjection(a).balance, 0);
+              const totalAccruedInterest = epfAccounts.reduce((sum, a) => sum + calculateEPFProjection(a).accruedInterest, 0);
+              return (<>
+                <div style={{ flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                  <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Current</div>
+                  <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>{formatCurrency(totalEpfBalance)}</div>
+                </div>
+                <div style={{ width: '1px', background: 'var(--border-color)' }} />
+                <div style={{ flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                  <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem', lineHeight: 1.3 }}>
+                    Interest Earned<br />(Current FY)
+                  </div>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--success)' }}>
+                    {formatCurrency(totalAccruedInterest)}
+                  </div>
+                </div>
+              </>);
+            }
+
+            const s = portfolioStats[portfolioView];
             return (<>
-              <div style={{ flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Current Value</div>
-                <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>{formatCurrency(totalEpfBalance)}</div>
+              <div style={{ flex: 1, textAlign: 'center' }}>
+                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Invested</div>
+                <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>{formatCurrency(s.invested)}</div>
               </div>
               <div style={{ width: '1px', background: 'var(--border-color)' }} />
-              <div style={{ flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem', lineHeight: 1.3 }}>
-                  Interest Earned<br />(Current FY)
-                </div>
-                <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--success)' }}>
-                  {formatCurrency(totalAccruedInterest)}
+              <div style={{ flex: 1, textAlign: 'center' }}>
+                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Current</div>
+                <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>{formatCurrency(s.invested + s.pnl)}</div>
+              </div>
+              <div style={{ width: '1px', background: 'var(--border-color)' }} />
+              <div style={{ flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Returns</div>
+                <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div style={{ position: 'relative', fontSize: '0.88rem', fontWeight: 700, color: s.pnl >= 0 ? '#22c55e' : '#ef4444', lineHeight: 1.2 }}>
+                    <span style={{ position: 'absolute', right: '100%', marginRight: '2px', fontWeight: 700 }}>
+                      {s.pnl >= 0 ? '↑' : '↓'}
+                    </span>
+                    ₹{Math.abs(s.pnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div style={{ fontSize: '0.70rem', fontWeight: 600, color: s.pnl >= 0 ? '#22c55e' : '#ef4444', opacity: 0.9, marginTop: '0.15rem' }}>
+                    ({Math.abs(s.pnlPct).toFixed(2)}%)
+                  </div>
                 </div>
               </div>
             </>);
-          }
+          })()}
+        </div>
 
-          const s = portfolioStats[portfolioView];
-          return (<>
-            <div style={{ flex: 1, textAlign: 'center' }}>
-              <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Invested</div>
-              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>{formatCurrency(s.invested)}</div>
-            </div>
-            <div style={{ width: '1px', background: 'var(--border-color)' }} />
-            <div style={{ flex: 1, textAlign: 'center' }}>
-              <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Returns</div>
-              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: s.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
-                {s.pnl >= 0 ? '↑' : '↓'} ₹{Math.abs(s.pnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(s.pnlPct).toFixed(2)}%)
+        {error && (
+          <div style={{
+            padding: '1rem 1.5rem',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            color: '#f87171',
+            fontSize: '0.9rem',
+            margin: '1rem'
+          }}>
+            {error}
+          </div>
+        )}
+
+        {!hasInvestments ? (
+          <div style={{
+            padding: '3rem 1.5rem',
+            textAlign: 'center',
+            color: 'var(--text-secondary)'
+          }}>
+            <TrendingUp size={48} style={{ opacity: 0.5, margin: '0 auto 1rem' }} />
+            <div style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.5rem' }}>No investments yet</div>
+            <div style={{ fontSize: '0.9rem' }}>Add stocks or mutual funds from the Accounts tab</div>
+          </div>
+        ) : (
+          <>
+            {mfAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'mf') && (() => {
+              const single = portfolioView !== 'all';
+              const isCollapsed = single ? false : collapsedSections.has('mf');
+              return (
+              <div className="tour-portfolio-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+                <div
+                  className="flex align-center gap-3"
+                  style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
+                  onClick={single ? undefined : () => toggleSection('mf')}
+                >
+                  <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
+                    Mutual Funds
+                  </span>
+                  <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
+                    {mfAccounts.length}
+                  </span>
+                  <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
+                  {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
+                </div>
+                {!isCollapsed && (
+                  <div>
+                    {mfAccounts.map((account: Account) => renderAssetRow(account))}
+                  </div>
+                )}
               </div>
-            </div>
-          </>);
-        })()}
+              );
+            })()}
+
+            {stockAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'stocks') && (() => {
+              const single = portfolioView !== 'all';
+              const isCollapsed = single ? false : collapsedSections.has('stocks');
+              return (
+              <div className="tour-portfolio-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+                <div
+                  className="flex align-center gap-3"
+                  style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
+                  onClick={single ? undefined : () => toggleSection('stocks')}
+                >
+                  <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
+                    Stocks
+                  </span>
+                  <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
+                    {stockAccounts.length}
+                  </span>
+                  <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
+                  {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
+                </div>
+                {!isCollapsed && (
+                  <div>
+                    {stockAccounts.map((account: Account) => renderAssetRow(account))}
+                  </div>
+                )}
+              </div>
+              );
+            })()}
+
+            {commodityAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'commodity') && (() => {
+              const single = portfolioView !== 'all';
+              const isCollapsed = single ? false : collapsedSections.has('commodity');
+              return (
+              <div className="tour-portfolio-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+                <div
+                  className="flex align-center gap-3"
+                  style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
+                  onClick={single ? undefined : () => toggleSection('commodity')}
+                >
+                  <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
+                    Commodities
+                  </span>
+                  <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
+                    {commodityAccounts.length}
+                  </span>
+                  <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
+                  {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
+                </div>
+                {!isCollapsed && (
+                  <div>
+                    {commodityAccounts.map((account: Account) => renderAssetRow(account))}
+                  </div>
+                )}
+              </div>
+              );
+            })()}
+
+            {epfAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'epf') && (() => {
+              const single = portfolioView !== 'all';
+              const isCollapsed = single ? false : collapsedSections.has('epf');
+              return (
+              <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+                <div
+                  className="flex align-center gap-3"
+                  style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
+                  onClick={single ? undefined : () => toggleSection('epf')}
+                >
+                  <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
+                    Employee Provident Fund (EPF)
+                  </span>
+                  <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
+                    {epfAccounts.length}
+                  </span>
+                  <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
+                  {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
+                </div>
+                {!isCollapsed && (
+                  <div>
+                    {epfAccounts.map((account: Account) => renderAssetRow(account))}
+                  </div>
+                )}
+              </div>
+              );
+            })()}
+          </>
+        )}
       </div>
-
-      {error && (
-        <div style={{
-          padding: '1rem 1.5rem',
-          background: 'rgba(239, 68, 68, 0.1)',
-          border: '1px solid rgba(239, 68, 68, 0.3)',
-          color: '#f87171',
-          fontSize: '0.9rem',
-          margin: '1rem'
-        }}>
-          {error}
-        </div>
-      )}
-
-      {!hasInvestments ? (
-        <div style={{
-          padding: '3rem 1.5rem',
-          textAlign: 'center',
-          color: 'var(--text-secondary)'
-        }}>
-          <TrendingUp size={48} style={{ opacity: 0.5, margin: '0 auto 1rem' }} />
-          <div style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.5rem' }}>No investments yet</div>
-          <div style={{ fontSize: '0.9rem' }}>Add stocks or SIPs from the Accounts tab</div>
-        </div>
-      ) : (
-        <>
-          {sipAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'mf') && (() => {
-            const single = portfolioView !== 'all';
-            const isCollapsed = single ? false : collapsedSections.has('mf');
-            return (
-            <div className="tour-portfolio-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
-              <div
-                className="flex align-center gap-3"
-                style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
-                onClick={single ? undefined : () => toggleSection('mf')}
-              >
-                <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
-                  Mutual Funds
-                </span>
-                <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
-                  {sipAccounts.length}
-                </span>
-                <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
-                {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
-              </div>
-              {!isCollapsed && (
-                <div>
-                  {sipAccounts.map((account: Account) => renderAssetRow(account))}
-                </div>
-              )}
-            </div>
-            );
-          })()}
-
-          {stockAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'stocks') && (() => {
-            const single = portfolioView !== 'all';
-            const isCollapsed = single ? false : collapsedSections.has('stocks');
-            return (
-            <div className="tour-portfolio-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
-              <div
-                className="flex align-center gap-3"
-                style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
-                onClick={single ? undefined : () => toggleSection('stocks')}
-              >
-                <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
-                  Stocks
-                </span>
-                <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
-                  {stockAccounts.length}
-                </span>
-                <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
-                {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
-              </div>
-              {!isCollapsed && (
-                <div>
-                  {stockAccounts.map((account: Account) => renderAssetRow(account))}
-                </div>
-              )}
-            </div>
-            );
-          })()}
-
-          {commodityAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'commodity') && (() => {
-            const single = portfolioView !== 'all';
-            const isCollapsed = single ? false : collapsedSections.has('commodity');
-            return (
-            <div className="tour-portfolio-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
-              <div
-                className="flex align-center gap-3"
-                style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
-                onClick={single ? undefined : () => toggleSection('commodity')}
-              >
-                <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
-                  Commodities
-                </span>
-                <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
-                  {commodityAccounts.length}
-                </span>
-                <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
-                {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
-              </div>
-              {!isCollapsed && (
-                <div>
-                  {commodityAccounts.map((account: Account) => renderAssetRow(account))}
-                </div>
-              )}
-            </div>
-            );
-          })()}
-
-          {epfAccounts.length > 0 && (portfolioView === 'all' || portfolioView === 'epf') && (() => {
-            const single = portfolioView !== 'all';
-            const isCollapsed = single ? false : collapsedSections.has('epf');
-            return (
-            <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
-              <div
-                className="flex align-center gap-3"
-                style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
-                onClick={single ? undefined : () => toggleSection('epf')}
-              >
-                <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
-                  Employee Provident Fund (EPF)
-                </span>
-                <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
-                  {epfAccounts.length}
-                </span>
-                <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
-                {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
-              </div>
-              {!isCollapsed && (
-                <div>
-                  {epfAccounts.map((account: Account) => renderAssetRow(account))}
-                </div>
-              )}
-            </div>
-            );
-          })()}
-        </>
-      )}
+      </div>
       </>
       )}
 
@@ -828,7 +866,7 @@ export function Portfolio() {
                 {selectedAsset.name}
               </div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
-                {selectedAsset.type === 'epf' ? 'Employee Provident Fund' : selectedAsset.type === 'sips' ? 'Mutual Fund' : selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'Silver' : 'Gold') : 'Stock'}
+                {selectedAsset.type === 'epf' ? 'Employee Provident Fund' : selectedAsset.type === 'mutual_funds' ? 'Mutual Fund' : selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'Silver' : 'Gold') : 'Stock'}
               </div>
 
               <div className="text-serif" style={{
