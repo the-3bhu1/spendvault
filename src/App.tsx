@@ -12,7 +12,7 @@ import TransparentLogo from './components/TransparentLogo';
 import ProfileAvatar from './components/ProfileAvatar';
 import UpcomingBills from './components/UpcomingBills';
 import Debts from './components/Debts';
-import { Portfolio } from './components/Portfolio';
+import { Wealth } from './components/Wealth';
 import AskVault from './components/AskVault';
 
 import { useFinance } from './FinanceContext';
@@ -447,7 +447,7 @@ function App() {
         )}
 
         {activeTab === 'cashback' && <div className="fade-in"><Cashback /></div>}
-        {activeTab === 'portfolio' && <div className="fade-in" style={{ height: '100%' }}><Portfolio /></div>}
+        {activeTab === 'portfolio' && <div className="fade-in" style={{ height: '100%' }}><Wealth /></div>}
         {activeTab === 'insights' && <div className="fade-in"><Insights /></div>}
         {activeTab === 'settings' && <div className="fade-in"><Settings /></div>}
         {activeTab === 'splits' && <div className="fade-in"><Splits /></div>}

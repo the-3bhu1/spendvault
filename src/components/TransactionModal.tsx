@@ -136,6 +136,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     if (!newTx.amount || newTx.amount <= 0) newErrors.amount = 'Amount must be greater than 0';
     if (!newTx.accountId) newErrors.accountId = 'Account is required';
     if (!newTx.category) newErrors.category = 'Category is required';
+    if (showRewardSplit && (Number(newTx.rewardUsed) || 0) > 0 && !newTx.rewardUsedAccountId) {
+      newErrors.rewardUsedAccountId = 'Reward account is required';
+    }
+    if (showRewardSplit && newTx.rewardUsedAccountId && (Number(newTx.rewardUsed) || 0) <= 0) {
+      newErrors.rewardUsed = 'Reward amount is required when reward account is selected';
+    }
 
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) {
@@ -643,19 +649,43 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 <input 
                   type="text" 
                   inputMode="decimal"
-                  className="input-field"
+                  className={`input-field ${errors.rewardUsed ? 'border-danger' : ''}`}
                   value={inputStrings.rewardUsed}
                   onChange={e => {
                     const val = e.target.value;
                     if (val === '' || /^\d*\.?\d*$/.test(val)) {
                       setInputStrings(prev => ({ ...prev, rewardUsed: val }));
-                      setNewTx({ ...newTx, rewardUsed: val === '' ? 0 : (val === '.' ? 0 : parseFloat(val)) });
+                      const numVal = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
+                      setNewTx({ ...newTx, rewardUsed: numVal });
+                      if (errors.rewardUsed && numVal > 0) {
+                        setErrors(prev => ({ ...prev, rewardUsed: '' }));
+                      }
                     }
                   }}
                   placeholder="0.00" 
                 />
+                {errors.rewardUsed && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.rewardUsed}</span>}
               </div>
-              <CustomPicker label="From Rewards" value={newTx.rewardUsedAccountId || ''} placeholder="Select Reward Account" options={data.accounts.filter(a => (!a.archived || a.id === newTx.rewardUsedAccountId) && (a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points'))).map(acc => ({ id: acc.id, name: acc.archived ? `${acc.name} (deleted)` : acc.name }))} onChange={val => setNewTx({ ...newTx, rewardUsedAccountId: val })} iconGetter={id => getAccountIcon(id, data.accounts)} />
+              <CustomPicker
+                label="From Rewards"
+                value={newTx.rewardUsedAccountId || ''}
+                placeholder="Select Reward Account"
+                options={[
+                  { id: '', name: 'None (Select Account)' },
+                  ...data.accounts.filter(a => (!a.archived || a.id === newTx.rewardUsedAccountId) && (a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points'))).map(acc => ({ id: acc.id, name: acc.archived ? `${acc.name} (deleted)` : acc.name }))
+                ]}
+                onChange={val => {
+                  setNewTx({
+                    ...newTx,
+                    rewardUsedAccountId: val,
+                    ...(!val && (Number(newTx.rewardUsed) || 0) <= 0 ? { rewardUsed: 0 } : {})
+                  });
+                  if (errors.rewardUsedAccountId) setErrors(prev => ({ ...prev, rewardUsedAccountId: '' }));
+                  if (errors.rewardUsed) setErrors(prev => ({ ...prev, rewardUsed: '' }));
+                }}
+                iconGetter={id => getAccountIcon(id, data.accounts)}
+                error={errors.rewardUsedAccountId}
+              />
             </div>
           )}
 

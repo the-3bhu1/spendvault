@@ -56,7 +56,15 @@ for data it genuinely can't see, an honest "I can't find that") instead of a rea
 - Fix any real gaps, run `npx tsc -b`, and include the doc/context updates in the release commit
   (step 3). If the doc already covers everything, say so briefly — don't pad it with redundant entries.
 
-## 3. Push and merge to `build-ver-2.1`
+## 3. Audit and update App Tour and Feature Tours for recent changes
+
+Check whether recent user-facing UI changes, feature renames, tab additions, or workflow updates require updates to the in-app guided tours (in `src/components/AppTour.tsx` or feature tour definitions):
+
+- Review recent changes (`git log`/`git diff` since the last release build) for renamed tabs, updated button labels, new Hub features, or modified UI layouts.
+- Check `src/components/AppTour.tsx` to verify that step titles, descriptions, target CSS selectors, sample mock data, and feature tour titles (e.g. Wealth/Portfolio, Mutual Funds, EPF, Hub cards) accurately match the current UI.
+- Fix any stale tour text, target selectors, or broken tour steps, and verify with `npx tsc --noEmit`.
+
+## 4. Push and merge to `build-ver-2.1`
 
 Unless told otherwise for this run, `build-ver-2.1` is always the target branch for a release:
 
@@ -67,7 +75,7 @@ Unless told otherwise for this run, `build-ver-2.1` is always the target branch 
 - Pushing affects the shared remote — confirm with the user before pushing unless they've
   already told you to push as part of this request.
 
-## 4. Build the release APK
+## 5. Build the release APK
 
 - `npm run build` (runs `tsc -b && vite build`) to produce `dist/`.
 - `npx cap sync android` to copy the web build into the native Android project.

@@ -53,7 +53,7 @@ const currentDayStr = () => {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 };
 
-export function Portfolio() {
+export function Wealth() {
   const { data } = useFinance();
 
   const [prices, setPrices] = useState<Record<string, number>>(() => {

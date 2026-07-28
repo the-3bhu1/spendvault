@@ -27,7 +27,7 @@ Rupees (₹). The app is also packaged for Android/iOS via Capacitor.
 - Bottom nav (4 icons): Home (Dashboard), Wallet (Accounts), Receipts (Transactions), Profile (Settings).
 - Top bar: "Ask Vault" (this assistant) and the Hub (grid) button.
 - The Hub opens: Group Splits, Lending & Borrowing, Bills, Rewards & Offers (cashback),
-  Portfolio, and Smart Insights.
+  Wealth (investments & EPF), and Smart Insights.
 - Feature tours: the first time you open each Hub feature (and at first launch) a one-time guided tour
   runs using temporary sample data, which is then cleared. Tours can't currently be replayed.
 
@@ -170,20 +170,20 @@ tracked here purely as a due-date reminder. What no longer exists is the dedicat
 can NOT be linked to a mutual fund account, and logging it does NOT auto-credit that account. A
 Mutual Funds bill behaves like any other bill; its LOG button opens the normal investment form where
 the user chooses the funding account and the fund account themselves. Holdings and returns are
-tracked in Portfolio, not here.
+tracked in Wealth, not here.
 
-# Portfolio
+# Wealth (formerly Portfolio)
 Aggregates stocks, mutual fund accounts, commodity holdings, and EPF (Employee Provident Fund): invested value vs. current
 value, with gain/loss. Prices: stocks/funds are fetched online; gold/silver are AI-estimated via the
-optional Gemini integration or set manually (₹/gram). EPF accounts project running balance, monthly credit breakdown (12% employee + 3.67% employer EPF + 8.33% EPS pension), monthly accrued interest (credited March 31st), and 1-year projected balance. Refresh all prices from the Portfolio screen, or
+optional Gemini integration or set manually (₹/gram). EPF accounts project running balance, monthly credit breakdown (12% employee + 3.67% employer EPF + 8.33% EPS pension), monthly accrued interest (credited March 31st), and 1-year projected balance. Refresh all prices from the Wealth screen, or
 an individual holding from its account card. You can switch view modes, expand/collapse each asset
 class (Mutual Funds / Stocks / Commodities / EPF), and tap any holding to see its performance, allocation, subscreen details and transactions.
 
 # Commodity (gold / silver) prices
 Gold/silver per-gram prices are approximate AI estimates fetched from a vendor (price reference) using
-the Gemini key, and may lag the live rate. To fix or change them:
-- Change the vendor (price source): Settings → Commodity AI → "Vendor (price reference)" field →
-  type the vendor name (default MMTC-PAMP) → Save. The next fetch uses that source.
+the Gemini key, and may lag the live rate. Supported vendors include MMTC-PAMP, SafeGold, Augmont, and other digital gold/silver vendors. To fix or change them:
+- Change the vendor (price source): Settings → Commodity AI → "Vendor (price reference)" dropdown/field →
+  select or type the vendor name (MMTC-PAMP, SafeGold, Augmont, etc.) → Save. The next fetch uses that source.
 - Set an exact price: open the commodity account's editor and set a manual ₹/gram override, which
   takes precedence over the AI estimate.
 - Auto-fetch needs the Gemini key (Settings → AI Features); without it, use the manual ₹/gram.

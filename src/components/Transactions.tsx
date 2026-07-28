@@ -649,6 +649,18 @@ export default function Transactions() {
     if (newTx.excludeFromStats && (newTx.excludedAmount || 0) > (newTx.amount || 0)) {
       newErrors.excludedAmount = 'Cannot exclude more than total amount';
     }
+    if (newTx.rewardEarnedType === 'instant' && (Number(newTx.rewardEarned) || 0) > 0 && !newTx.rewardEarnedAccountId) {
+      newErrors.rewardEarnedAccountId = 'Deposit account is required for instant cashback';
+    }
+    if (newTx.rewardEarnedAccountId && (Number(newTx.rewardEarned) || 0) <= 0) {
+      newErrors.rewardEarned = 'Cashback amount is required when deposit account is selected';
+    }
+    if (showRewardSplit && (Number(newTx.rewardUsed) || 0) > 0 && !newTx.rewardUsedAccountId) {
+      newErrors.rewardUsedAccountId = 'Reward account is required';
+    }
+    if (showRewardSplit && newTx.rewardUsedAccountId && (Number(newTx.rewardUsed) || 0) <= 0) {
+      newErrors.rewardUsed = 'Reward amount is required when reward account is selected';
+    }
 
     if (newTx.accountId && newTx.type === 'debit' && !newTx.isTravelTransaction && newTx.category?.toLowerCase() === 'ncmc travel recharge') {
       const account = data.accounts.find(a => a.id === newTx.accountId);
@@ -2514,12 +2526,13 @@ export default function Transactions() {
                             <input
                               type="text"
                               inputMode="decimal"
-                              className="input-field"
+                              className={`input-field ${errors.rewardEarned ? 'border-danger' : ''}`}
                               value={cashbackPercentStr}
                               onChange={e => {
                                 const val = e.target.value;
                                 if (val === '' || /^\d*\.?\d*$/.test(val)) {
                                   setCashbackPercentStr(val);
+                                  if (errors.rewardEarned) setErrors(prev => ({ ...prev, rewardEarned: '' }));
                                 }
                               }}
                               placeholder="1.6"
@@ -2530,27 +2543,34 @@ export default function Transactions() {
                           <span className="text-xs text-muted text-mono" style={{ opacity: 0.8 }}>
                             = {formatCurrency(Number(newTx.rewardEarned) || 0)}
                           </span>
+                          {errors.rewardEarned && <span className="text-xs text-danger" style={{ marginTop: '0.1rem' }}>{errors.rewardEarned}</span>}
                         </div>
                       ) : (
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          className="input-field"
-                          value={inputStrings.rewardEarned}
-                          onChange={e => {
-                            const val = e.target.value;
-                            if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                              setInputStrings(prev => ({ ...prev, rewardEarned: val }));
-                              const numVal = parseFloat(val);
-                              setNewTx({
-                                ...newTx,
-                                rewardEarned: isNaN(numVal) ? 0 : numVal,
-                                rewardEarnedType: 'instant'
-                              });
-                            }
-                          }}
-                          placeholder="0.00"
-                        />
+                        <div className="flex-col gap-1">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className={`input-field ${errors.rewardEarned ? 'border-danger' : ''}`}
+                            value={inputStrings.rewardEarned}
+                            onChange={e => {
+                              const val = e.target.value;
+                              if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                                setInputStrings(prev => ({ ...prev, rewardEarned: val }));
+                                const numVal = parseFloat(val);
+                                setNewTx({
+                                  ...newTx,
+                                  rewardEarned: isNaN(numVal) ? 0 : numVal,
+                                  rewardEarnedType: 'instant'
+                                });
+                                if (errors.rewardEarned && !isNaN(numVal) && numVal > 0) {
+                                  setErrors(prev => ({ ...prev, rewardEarned: '' }));
+                                }
+                              }
+                            }}
+                            placeholder="0.00"
+                          />
+                          {errors.rewardEarned && <span className="text-xs text-danger" style={{ marginTop: '0.1rem' }}>{errors.rewardEarned}</span>}
+                        </div>
                       )}
 
                       {showInstantUI && (
@@ -2558,13 +2578,26 @@ export default function Transactions() {
                           label="Deposit To"
                           value={newTx.rewardEarnedAccountId || ''}
                           placeholder="Select Account"
-                          options={[...data.accounts].sort(sortByAccountType).filter(a => (!a.archived || a.id === newTx.rewardEarnedAccountId) && (a.type === 'rewards' || a.type === 'e_wallet')).map(acc => ({
-                            id: acc.id,
-                            name: acc.archived ? `${acc.name} (deleted)` : acc.name,
-                            subtext: acc.type.replace('_', ' ')
-                          }))}
-                          onChange={val => setNewTx({ ...newTx, rewardEarnedAccountId: val, rewardEarnedType: 'instant' })}
+                          options={[
+                            { id: '', name: 'None (No Deposit Account)' },
+                            ...[...data.accounts].sort(sortByAccountType).filter(a => (!a.archived || a.id === newTx.rewardEarnedAccountId) && (a.type === 'rewards' || a.type === 'e_wallet')).map(acc => ({
+                              id: acc.id,
+                              name: acc.archived ? `${acc.name} (deleted)` : acc.name,
+                              subtext: acc.type.replace('_', ' ')
+                            }))
+                          ]}
+                          onChange={val => {
+                            setNewTx({
+                              ...newTx,
+                              rewardEarnedAccountId: val,
+                              rewardEarnedType: val ? 'instant' : 'none',
+                              ...(!val && (Number(newTx.rewardEarned) || 0) <= 0 ? { rewardEarned: 0 } : {})
+                            });
+                            if (errors.rewardEarnedAccountId) setErrors(prev => ({ ...prev, rewardEarnedAccountId: '' }));
+                            if (errors.rewardEarned) setErrors(prev => ({ ...prev, rewardEarned: '' }));
+                          }}
                           iconGetter={id => getAccountIcon(id)}
+                          error={errors.rewardEarnedAccountId}
                         />
                       )}
                       {isCard && (
@@ -2613,6 +2646,8 @@ export default function Transactions() {
                         onClick={() => {
                           setShowRewardSplit(false);
                           setNewTx({ ...newTx, rewardUsed: 0, rewardUsedAccountId: '' });
+                          if (errors.rewardUsedAccountId) setErrors(prev => ({ ...prev, rewardUsedAccountId: '' }));
+                          if (errors.rewardUsed) setErrors(prev => ({ ...prev, rewardUsed: '' }));
                         }}
                       >
                         ✕ Remove Split
@@ -2624,7 +2659,7 @@ export default function Transactions() {
                     <input
                       type="text"
                       inputMode="decimal"
-                      className="input-field"
+                      className={`input-field ${errors.rewardUsed ? 'border-danger' : ''}`}
                       value={inputStrings.rewardUsed}
                       onChange={e => {
                         const val = e.target.value;
@@ -2632,24 +2667,43 @@ export default function Transactions() {
                           setInputStrings(prev => ({ ...prev, rewardUsed: val }));
                           const numVal = parseFloat(val);
                           setNewTx({ ...newTx, rewardUsed: isNaN(numVal) ? 0 : numVal });
+                          if (errors.rewardUsed && !isNaN(numVal) && numVal > 0) {
+                            setErrors(prev => ({ ...prev, rewardUsed: '' }));
+                          }
+                          if (errors.rewardUsedAccountId && (isNaN(numVal) || numVal <= 0)) {
+                            setErrors(prev => ({ ...prev, rewardUsedAccountId: '' }));
+                          }
                         }
                       }}
                       placeholder="0.00"
                     />
+                    {errors.rewardUsed && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.rewardUsed}</span>}
                   </div>
                   <CustomPicker
                     label="From Rewards"
                     value={newTx.rewardUsedAccountId || ''}
                     placeholder="Select Reward Account"
-                    options={[...data.accounts].sort(sortByAccountType).filter(a => (!a.archived || a.id === newTx.rewardUsedAccountId) && (a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points'))).map(acc => ({
-                      id: acc.id,
-                      name: acc.archived ? `${acc.name} (deleted)` : acc.name,
-                      subtext: acc.rewardType === 'points'
-                        ? `${calculateBalance(acc, data.transactions, getCurrentMonthStr(), false, true, data.cashbackStatements)} ${acc.rewardUnit || ''}`
-                        : formatCurrency(calculateBalance(acc, data.transactions, getCurrentMonthStr(), false, false, data.cashbackStatements))
-                    }))}
-                    onChange={val => setNewTx({ ...newTx, rewardUsedAccountId: val })}
+                    options={[
+                      { id: '', name: 'None (Select Account)' },
+                      ...[...data.accounts].sort(sortByAccountType).filter(a => (!a.archived || a.id === newTx.rewardUsedAccountId) && (a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points'))).map(acc => ({
+                        id: acc.id,
+                        name: acc.archived ? `${acc.name} (deleted)` : acc.name,
+                        subtext: acc.rewardType === 'points'
+                          ? `${calculateBalance(acc, data.transactions, getCurrentMonthStr(), false, true, data.cashbackStatements)} ${acc.rewardUnit || ''}`
+                          : formatCurrency(calculateBalance(acc, data.transactions, getCurrentMonthStr(), false, false, data.cashbackStatements))
+                      }))
+                    ]}
+                    onChange={val => {
+                      setNewTx({
+                        ...newTx,
+                        rewardUsedAccountId: val,
+                        ...(!val && (Number(newTx.rewardUsed) || 0) <= 0 ? { rewardUsed: 0 } : {})
+                      });
+                      if (errors.rewardUsedAccountId) setErrors(prev => ({ ...prev, rewardUsedAccountId: '' }));
+                      if (errors.rewardUsed) setErrors(prev => ({ ...prev, rewardUsed: '' }));
+                    }}
                     iconGetter={id => getAccountIcon(id)}
+                    error={errors.rewardUsedAccountId}
                   />
                   <div className="col-span-2 text-xs text-muted" style={{ opacity: 0.7 }}>
                     Primary Account Debit: <strong>{formatCurrency(Math.max(0, Number(newTx.amount || 0) - Number(newTx.rewardUsed || 0)))}</strong>

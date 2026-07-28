@@ -332,7 +332,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     let updatedTravelOpeningBalances = newAccount.isNcmcEnabled ? { ...(newAccount.travelOpeningBalances || {}) } : undefined;
     let updatedTravelBalanceAdjustments = newAccount.isNcmcEnabled ? { ...(newAccount.travelBalanceAdjustments || {}) } : undefined;
     let updatedBalanceEditHistory = [...(newAccount.balanceEditHistory || [])];
-    
+
     const hasInternalRewards = (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.isCashbackEnabled && newAccount.rewardType === 'points';
     let updatedRewardOpeningBalances = hasInternalRewards ? { ...(newAccount.rewardOpeningBalances || {}) } : undefined;
     let updatedRewardBalanceAdjustments = hasInternalRewards ? { ...(newAccount.rewardBalanceAdjustments || {}) } : undefined;
@@ -455,7 +455,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
     const accountData: Account = {
       id: editId || generateId(),
-      name: newAccount.name || '',
+      name: (newAccount.name || '').trim(),
       type: newAccount.type as AccountType,
       openingBalances: updatedOpeningBalances,
       balanceAdjustments: updatedBalanceAdjustments,
@@ -471,8 +471,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       isNcmcEnabled: newAccount.isNcmcEnabled,
       travelOpeningBalances: updatedTravelOpeningBalances,
       travelBalanceAdjustments: updatedTravelBalanceAdjustments,
-      cardDetails: (newAccount.type === 'credit_card' || newAccount.type === 'debit_card')
-        ? newAccount.cardDetails
+      cardDetails: ((newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.cardDetails)
+        ? {
+            ...newAccount.cardDetails,
+            cardholderName: newAccount.cardDetails.cardholderName ? newAccount.cardDetails.cardholderName.trim() : undefined
+          }
         : undefined,
       statementRounding: newAccount.statementRounding || 'none',
       numberOfShares: (newAccount.type === 'stocks' || newAccount.type === 'mutual_funds' || newAccount.type === 'commodity') ? newAccount.numberOfShares : undefined,
@@ -549,7 +552,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             credit_card: 'Credit Cards',
             debit_card: 'Debit Cards',
             e_wallet: 'E-Wallets',
-            epf: 'Employee Provident Fund (EPF)',
+            epf: 'EPF (Provident Fund)',
             stocks: 'Stocks & Investments',
             mutual_funds: 'Mutual Funds',
             rewards: 'Rewards & Cashback',
@@ -591,438 +594,437 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
               </div>
             );
           }
-
           return sortedTypes.map((type, index) => {
             const isCollapsed = collapsedTypes.has(type);
             return (
-            <div key={type} className="flex-col gap-4" style={{ marginTop: index === 0 ? '0' : '2.5rem' }}>
-              <div
-                className="flex align-center gap-3"
-                style={{ padding: '0 0.5rem', marginBottom: isCollapsed ? '0' : '0.5rem', cursor: 'pointer', userSelect: 'none' }}
-                onClick={() => toggleCollapse(type)}
-              >
-                <span className="text-mono" style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--accent)', opacity: 0.8 }}>
-                  {TYPE_LABELS[type] || type.replace('_', ' ')}
-                </span>
-                {isCollapsed && (
-                  <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
-                    {grouped[type].length} {grouped[type].length === 1 ? 'account' : 'accounts'}
+              <div key={type} className="flex-col gap-4" style={{ marginTop: index === 0 ? '0' : '2.5rem' }}>
+                <div
+                  className="flex align-center gap-3"
+                  style={{ padding: '0 0.5rem', marginBottom: isCollapsed ? '0' : '0.5rem', cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => toggleCollapse(type)}
+                >
+                  <span className="text-mono" style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--accent)', opacity: 0.8, flexShrink: 0 }}>
+                    {TYPE_LABELS[type] || type.replace('_', ' ')}
                   </span>
-                )}
-                <div style={{ flex: 1, height: '1px', background: 'linear-gradient(to right, var(--accent), transparent)', opacity: 0.2 }}></div>
-                <ChevronDown size={14} style={{ color: 'var(--accent)', opacity: 0.6, flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
-              </div>
+                  <div style={{ flex: 1, height: '1px', background: 'linear-gradient(to right, var(--accent), transparent)', opacity: 0.2, minWidth: '0.5rem' }}></div>
+                  {isCollapsed && (
+                    <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                      {grouped[type].length} {grouped[type].length === 1 ? 'account' : 'accounts'}
+                    </span>
+                  )}
+                  <ChevronDown size={14} style={{ color: 'var(--accent)', opacity: 0.6, flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
+                </div>
 
-              {!isCollapsed && <div className="flex-col gap-6">
-                {grouped[type].map(acc => {
-                  const todayStr = format(new Date(), 'yyyy-MM-dd');
-                  const rawBal = acc.type === 'credit_card'
-                    ? calculateCycleBalance(acc, data.transactions, todayStr)
-                    : calculateBalance(acc, data.transactions, currentMonth);
-                  let bal = rawBal;
-                  if (acc.type === 'credit_card') {
-                    const rounding = acc.statementRounding || 'none';
-                    if (rounding === 'round') bal = Math.round(rawBal);
-                    else if (rounding === 'floor') bal = Math.floor(rawBal);
-                    else if (rounding === 'ceil') bal = Math.ceil(rawBal);
-                  }
+                {!isCollapsed && <div className="flex-col gap-6">
+                  {grouped[type].map(acc => {
+                    const todayStr = format(new Date(), 'yyyy-MM-dd');
+                    const rawBal = acc.type === 'credit_card'
+                      ? calculateCycleBalance(acc, data.transactions, todayStr)
+                      : calculateBalance(acc, data.transactions, currentMonth);
+                    let bal = rawBal;
+                    if (acc.type === 'credit_card') {
+                      const rounding = acc.statementRounding || 'none';
+                      if (rounding === 'round') bal = Math.round(rawBal);
+                      else if (rounding === 'floor') bal = Math.floor(rawBal);
+                      else if (rounding === 'ceil') bal = Math.ceil(rawBal);
+                    }
 
-                  const roundedBal = Math.round(bal * 100) / 100;
+                    const roundedBal = Math.round(bal * 100) / 100;
 
-                  let openingBal = acc.openingBalances[currentMonth];
-                  if (openingBal === undefined) {
-                    const prevMonthDate = new Date();
-                    prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
-                    const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
-                    openingBal = calculateBalance(acc, data.transactions, prevMonthStr);
-                  }
+                    let openingBal = acc.openingBalances[currentMonth];
+                    if (openingBal === undefined) {
+                      const prevMonthDate = new Date();
+                      prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+                      const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
+                      openingBal = calculateBalance(acc, data.transactions, prevMonthStr);
+                    }
 
-                  const prevCycleDue = (() => {
-                    if (acc.type !== 'credit_card') return null;
-                    const statementDay = acc.statementDay || 1;
-                    const currentCycle = getBillingCycleForDate(todayStr, statementDay);
-                    const prevCycle = format(addMonths(parseISO(`${currentCycle}-01`), -1), 'yyyy-MM');
-                    const due = calculateCycleBalanceForCycle(acc, data.transactions, prevCycle);
-                    const rounding = acc.statementRounding || 'none';
-                    if (rounding === 'round') return Math.round(due);
-                    if (rounding === 'floor') return Math.floor(due);
-                    if (rounding === 'ceil') return Math.ceil(due);
-                    return due;
-                  })();
+                    const prevCycleDue = (() => {
+                      if (acc.type !== 'credit_card') return null;
+                      const statementDay = acc.statementDay || 1;
+                      const currentCycle = getBillingCycleForDate(todayStr, statementDay);
+                      const prevCycle = format(addMonths(parseISO(`${currentCycle}-01`), -1), 'yyyy-MM');
+                      const due = calculateCycleBalanceForCycle(acc, data.transactions, prevCycle);
+                      const rounding = acc.statementRounding || 'none';
+                      if (rounding === 'round') return Math.round(due);
+                      if (rounding === 'floor') return Math.floor(due);
+                      if (rounding === 'ceil') return Math.ceil(due);
+                      return due;
+                    })();
 
-                  const isFirstAccount = index === 0 && acc.id === grouped[type][0].id;
+                    const isFirstAccount = index === 0 && acc.id === grouped[type][0].id;
 
-                  // Mutual fund market data — pre-computed once for middle + bottom sections
-                  const mfTxUnits = acc.type === 'mutual_funds'
-                    ? data.transactions
+                    // Mutual fund market data — pre-computed once for middle + bottom sections
+                    const mfTxUnits = acc.type === 'mutual_funds'
+                      ? data.transactions
                         .filter(t => t.accountId === acc.id && t.numberOfShares !== undefined)
                         .reduce((sum, t) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0)
-                    : 0;
-                  const mfTotalUnits = acc.type === 'mutual_funds' ? Number(acc.numberOfShares ?? 0) + mfTxUnits : 0;
-                  const mfCurrentPrice = acc.type === 'mutual_funds' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
-                  const mfCurrentValue = mfCurrentPrice !== null && mfTotalUnits > 0 ? mfCurrentPrice * mfTotalUnits : null;
-                  const mfEffectiveInvested = acc.type === 'mutual_funds'
-                    ? acc.investedValue !== undefined
-                      ? acc.investedValue + rawBal
-                      : (acc.avgNav && mfTotalUnits > 0 ? acc.avgNav * mfTotalUnits : undefined)
-                    : undefined;
+                      : 0;
+                    const mfTotalUnits = acc.type === 'mutual_funds' ? Number(acc.numberOfShares ?? 0) + mfTxUnits : 0;
+                    const mfCurrentPrice = acc.type === 'mutual_funds' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
+                    const mfCurrentValue = mfCurrentPrice !== null && mfTotalUnits > 0 ? mfCurrentPrice * mfTotalUnits : null;
+                    const mfEffectiveInvested = acc.type === 'mutual_funds'
+                      ? acc.investedValue !== undefined
+                        ? acc.investedValue + rawBal
+                        : (acc.avgNav && mfTotalUnits > 0 ? acc.avgNav * mfTotalUnits : undefined)
+                      : undefined;
 
-                  // Commodity market data — pre-computed once for middle + bottom sections
-                  const commodityTxGrams = acc.type === 'commodity'
-                    ? data.transactions
+                    // Commodity market data — pre-computed once for middle + bottom sections
+                    const commodityTxGrams = acc.type === 'commodity'
+                      ? data.transactions
                         .filter(t => t.accountId === acc.id && t.numberOfShares !== undefined)
                         .reduce((sum, t) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0)
-                    : 0;
-                  const commodityTotalGrams = acc.type === 'commodity' ? Number(acc.numberOfShares ?? 0) + commodityTxGrams : 0;
-                  // Manual override wins over the AI estimate; track which source we're showing.
-                  const commodityFetchedPrice = acc.type === 'commodity' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
-                  const commodityPricePerGram = acc.type === 'commodity'
-                    ? (acc.manualPricePerGram ?? commodityFetchedPrice)
-                    : null;
-                  const commodityPriceSource: 'manual' | 'estimate' | null =
-                    acc.type !== 'commodity' || commodityPricePerGram === null ? null
-                    : acc.manualPricePerGram !== undefined ? 'manual' : 'estimate';
-                  // An estimate where Gemini couldn't identify the configured vendor → it's a generic
-                  // market price, not the vendor's. Warn so a typo/fake vendor isn't shown as real.
-                  const commodityVendorMissing = commodityPriceSource === 'estimate' && !!acc.marketSymbol
-                    && getCommodityVendorFound(acc.marketSymbol) === false;
-                  const commodityVendorName = commodityVendorMissing ? getCommodityVendor() : '';
-                  const commodityCurrentValue = commodityPricePerGram !== null && commodityTotalGrams > 0 ? commodityPricePerGram * commodityTotalGrams : null;
-                  const commodityEffectiveInvested = acc.type === 'commodity'
-                    ? (acc.investedValue !== undefined ? acc.investedValue + rawBal : undefined)
-                    : undefined;
+                      : 0;
+                    const commodityTotalGrams = acc.type === 'commodity' ? Number(acc.numberOfShares ?? 0) + commodityTxGrams : 0;
+                    // Manual override wins over the AI estimate; track which source we're showing.
+                    const commodityFetchedPrice = acc.type === 'commodity' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
+                    const commodityPricePerGram = acc.type === 'commodity'
+                      ? (acc.manualPricePerGram ?? commodityFetchedPrice)
+                      : null;
+                    const commodityPriceSource: 'manual' | 'estimate' | null =
+                      acc.type !== 'commodity' || commodityPricePerGram === null ? null
+                        : acc.manualPricePerGram !== undefined ? 'manual' : 'estimate';
+                    // An estimate where Gemini couldn't identify the configured vendor → it's a generic
+                    // market price, not the vendor's. Warn so a typo/fake vendor isn't shown as real.
+                    const commodityVendorMissing = commodityPriceSource === 'estimate' && !!acc.marketSymbol
+                      && getCommodityVendorFound(acc.marketSymbol) === false;
+                    const commodityVendorName = commodityVendorMissing ? getCommodityVendor() : '';
+                    const commodityCurrentValue = commodityPricePerGram !== null && commodityTotalGrams > 0 ? commodityPricePerGram * commodityTotalGrams : null;
+                    const commodityEffectiveInvested = acc.type === 'commodity'
+                      ? (acc.investedValue !== undefined ? acc.investedValue + rawBal : undefined)
+                      : undefined;
 
-                  // Stocks market data — pre-computed once for middle + bottom sections
-                  const stockTxShares = acc.type === 'stocks'
-                    ? data.transactions
+                    // Stocks market data — pre-computed once for middle + bottom sections
+                    const stockTxShares = acc.type === 'stocks'
+                      ? data.transactions
                         .filter(t => t.accountId === acc.id && t.numberOfShares !== undefined)
                         .reduce((sum, t) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0)
-                    : 0;
-                  const stockTotalShares = acc.type === 'stocks' ? Number(acc.numberOfShares ?? 0) + stockTxShares : 0;
-                  const stockCurrentPrice = acc.type === 'stocks' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
-                  const stockCurrentValue = stockCurrentPrice !== null && stockTotalShares > 0 ? stockCurrentPrice * stockTotalShares : null;
-                  const stockEffectiveInvested = acc.type === 'stocks'
-                    ? (acc.investedValue !== undefined ? acc.investedValue + rawBal : undefined)
-                    : undefined;
+                      : 0;
+                    const stockTotalShares = acc.type === 'stocks' ? Number(acc.numberOfShares ?? 0) + stockTxShares : 0;
+                    const stockCurrentPrice = acc.type === 'stocks' && acc.marketSymbol ? (prices[acc.marketSymbol] ?? null) : null;
+                    const stockCurrentValue = stockCurrentPrice !== null && stockTotalShares > 0 ? stockCurrentPrice * stockTotalShares : null;
+                    const stockEffectiveInvested = acc.type === 'stocks'
+                      ? (acc.investedValue !== undefined ? acc.investedValue + rawBal : undefined)
+                      : undefined;
 
-                  return (
-                    <div key={acc.id} className={`card flex-col ${isFirstAccount ? 'tour-first-account' : ''}`} style={{ padding: '0' }}>
-                      {/* Top Section - Hardware / Branding */}
-                      <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                        <div className="flex-col gap-1">
-                          <span className="text-mono text-muted">{getAccountIcon(acc)} {acc.type.replace('_', ' ')}</span>
-                          <span className="text-serif" style={{ fontSize: '1.15rem', color: 'var(--text-primary)' }}>{acc.name}</span>
-                        </div>
-                        <div className="flex gap-3">
-                          <button
-                            className="btn btn-secondary"
-                            style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
-                            onClick={() => openEditModal(acc)}
-                            title="Edit"
-                          >
-                            <Pencil size={16} />
-                          </button>
-                          <button
-                            className="btn btn-secondary"
-                            style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }}
-                            onClick={() => setDeleteConfirmId(acc.id)}
-                            title="Delete"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Middle Section - Balance */}
-                      {acc.type === 'mutual_funds' ? (
-                        <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
+                    return (
+                      <div key={acc.id} className={`card flex-col ${isFirstAccount ? 'tour-first-account' : ''}`} style={{ padding: '0' }}>
+                        {/* Top Section - Hardware / Branding */}
+                        <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                           <div className="flex-col gap-1">
-                            <span className="text-mono text-muted text-xs">
-                              {mfCurrentValue !== null ? 'CURRENT VALUE' : mfEffectiveInvested !== undefined ? 'INVESTED' : 'CURRENT VALUE'}
-                            </span>
-                            <span className="text-serif" style={{ fontSize: '1.8rem', color: (mfCurrentValue !== null && mfEffectiveInvested !== undefined && mfCurrentValue < mfEffectiveInvested) ? 'var(--danger)' : 'var(--success)', lineHeight: '1.2' }}>
-                              {mfCurrentValue !== null
-                                ? formatCurrency(mfCurrentValue)
-                                : mfEffectiveInvested !== undefined
-                                  ? formatCurrency(mfEffectiveInvested)
-                                  : '—'}
-                            </span>
+                            <span className="text-mono text-muted">{getAccountIcon(acc)} {acc.type.replace('_', ' ')}</span>
+                            <span className="text-serif" style={{ fontSize: '1.15rem', color: 'var(--text-primary)' }}>{acc.name}</span>
                           </div>
-                          {mfCurrentValue !== null && mfEffectiveInvested !== undefined && (
-                            <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
-                              <span className="text-mono text-muted text-xs">INVESTED</span>
-                              <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
-                                {formatCurrency(mfEffectiveInvested)}
+                          <div className="flex gap-3">
+                            <button
+                              className="btn btn-secondary"
+                              style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
+                              onClick={() => openEditModal(acc)}
+                              title="Edit"
+                            >
+                              <Pencil size={16} />
+                            </button>
+                            <button
+                              className="btn btn-secondary"
+                              style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }}
+                              onClick={() => setDeleteConfirmId(acc.id)}
+                              title="Delete"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Middle Section - Balance */}
+                        {acc.type === 'mutual_funds' ? (
+                          <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
+                            <div className="flex-col gap-1">
+                              <span className="text-mono text-muted text-xs">
+                                {mfCurrentValue !== null ? 'CURRENT VALUE' : mfEffectiveInvested !== undefined ? 'INVESTED' : 'CURRENT VALUE'}
+                              </span>
+                              <span className="text-serif" style={{ fontSize: '1.8rem', color: (mfCurrentValue !== null && mfEffectiveInvested !== undefined && mfCurrentValue < mfEffectiveInvested) ? 'var(--danger)' : 'var(--success)', lineHeight: '1.2' }}>
+                                {mfCurrentValue !== null
+                                  ? formatCurrency(mfCurrentValue)
+                                  : mfEffectiveInvested !== undefined
+                                    ? formatCurrency(mfEffectiveInvested)
+                                    : '—'}
                               </span>
                             </div>
-                          )}
-                        </div>
-                      ) : acc.type === 'commodity' ? (
-                        <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
-                          <div className="flex-col gap-1">
-                            <span className="text-mono text-muted text-xs">
-                              {commodityCurrentValue !== null ? 'CURRENT VALUE' : commodityEffectiveInvested !== undefined ? 'INVESTED' : 'CURRENT VALUE'}
-                            </span>
-                            <span className="text-serif" style={{ fontSize: '1.8rem', color: (commodityCurrentValue !== null && commodityEffectiveInvested !== undefined && commodityCurrentValue < commodityEffectiveInvested) ? 'var(--danger)' : 'var(--success)', lineHeight: '1.2' }}>
-                              {commodityCurrentValue !== null
-                                ? formatCurrency(commodityCurrentValue)
-                                : commodityEffectiveInvested !== undefined
-                                  ? formatCurrency(commodityEffectiveInvested)
-                                  : '—'}
-                            </span>
-                          </div>
-                          {commodityCurrentValue !== null && commodityEffectiveInvested !== undefined && (
-                            <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
-                              <span className="text-mono text-muted text-xs">INVESTED</span>
-                              <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
-                                {formatCurrency(commodityEffectiveInvested)}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      ) : acc.type === 'stocks' ? (
-                        <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
-                          <div className="flex-col gap-1">
-                            <span className="text-mono text-muted text-xs">
-                              {stockCurrentValue !== null ? 'CURRENT VALUE' : stockEffectiveInvested !== undefined ? 'INVESTED' : 'CURRENT VALUE'}
-                            </span>
-                            <span className="text-serif" style={{ fontSize: '1.8rem', color: (stockCurrentValue !== null && stockEffectiveInvested !== undefined && stockCurrentValue < stockEffectiveInvested) ? 'var(--danger)' : 'var(--success)', lineHeight: '1.2' }}>
-                              {stockCurrentValue !== null
-                                ? formatCurrency(stockCurrentValue)
-                                : stockEffectiveInvested !== undefined
-                                  ? formatCurrency(stockEffectiveInvested)
-                                  : '—'}
-                            </span>
-                          </div>
-                          {stockCurrentValue !== null && stockEffectiveInvested !== undefined && (
-                            <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
-                              <span className="text-mono text-muted text-xs">INVESTED</span>
-                              <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
-                                {formatCurrency(stockEffectiveInvested)}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
-                          <div className="flex-col gap-1">
-                            <span className="text-mono text-muted text-xs">
-                              {acc.isNcmcEnabled ? 'PAYMENTS BALANCE' : 'TOTAL BALANCE'}
-                            </span>
-                            <span className="text-serif" style={{
-                              fontSize: '1.8rem',
-                              color: acc.type === 'credit_card'
-                                ? (roundedBal > 0 ? 'var(--danger)' : 'var(--success)')
-                                : (roundedBal >= 0 ? 'var(--success)' : 'var(--danger)'),
-                              lineHeight: '1.2'
-                            }}>
-                              {acc.type === 'rewards' && acc.rewardUnit ? (
-                                <span className="flex-col" style={{ alignItems: 'flex-start', gap: '6px', lineHeight: '1' }}>
-                                  <span>{bal}</span>
-                                  <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 800, opacity: 0.7 }}>{acc.rewardUnit}</span>
-                                </span>
-                              ) : (
-                                formatCurrency(bal)
-                              )}
-                            </span>
-                            {(acc.type === 'credit_card' || acc.type === 'debit_card') && acc.defaultCashbackRate ? (
-                              <span className="text-muted text-xs" style={{ marginTop: '4px' }}>Base Reward Rate: {acc.defaultCashbackRate}%</span>
-                            ) : null}
-                          </div>
-
-                          <div className="flex gap-4 align-end">
-                            {(acc.type === 'rewards' || acc.type === 'e_wallet') && (
-                              <button
-                                className="btn btn-secondary flex align-center gap-2"
-                                style={{ fontSize: '0.8rem', padding: '0.5rem 1rem' }}
-                                onClick={() => handleLiquidate(acc)}
-                              >
-                                <span>Send to Bank</span>
-                              </button>
-                            )}
-                            {prevCycleDue !== null ? (
+                            {mfCurrentValue !== null && mfEffectiveInvested !== undefined && (
                               <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
-                                <span className="text-mono text-muted text-xs">PREV DUE</span>
-                                <span className="text-serif" style={{ fontSize: '1.4rem', color: prevCycleDue > 0 ? 'var(--danger)' : 'var(--success)', marginTop: '0.1rem' }}>
-                                  {formatCurrency(Math.abs(prevCycleDue))}
-                                </span>
-                              </div>
-                            ) : (
-                              <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
-                                <span className="text-mono text-muted text-xs">OPENING BAL</span>
+                                <span className="text-mono text-muted text-xs">INVESTED</span>
                                 <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
-                                  {acc.type === 'rewards' && acc.rewardUnit ? (
-                                    <span className="flex-col" style={{ alignItems: 'flex-end', gap: '6px', lineHeight: '1' }}>
-                                      <span>{openingBal}</span>
-                                      <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 800, opacity: 0.7 }}>{acc.rewardUnit}</span>
-                                    </span>
-                                  ) : (
-                                    formatCurrency(openingBal)
-                                  )}
+                                  {formatCurrency(mfEffectiveInvested)}
                                 </span>
                               </div>
                             )}
                           </div>
-                        </div>
-                      )}
+                        ) : acc.type === 'commodity' ? (
+                          <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
+                            <div className="flex-col gap-1">
+                              <span className="text-mono text-muted text-xs">
+                                {commodityCurrentValue !== null ? 'CURRENT VALUE' : commodityEffectiveInvested !== undefined ? 'INVESTED' : 'CURRENT VALUE'}
+                              </span>
+                              <span className="text-serif" style={{ fontSize: '1.8rem', color: (commodityCurrentValue !== null && commodityEffectiveInvested !== undefined && commodityCurrentValue < commodityEffectiveInvested) ? 'var(--danger)' : 'var(--success)', lineHeight: '1.2' }}>
+                                {commodityCurrentValue !== null
+                                  ? formatCurrency(commodityCurrentValue)
+                                  : commodityEffectiveInvested !== undefined
+                                    ? formatCurrency(commodityEffectiveInvested)
+                                    : '—'}
+                              </span>
+                            </div>
+                            {commodityCurrentValue !== null && commodityEffectiveInvested !== undefined && (
+                              <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
+                                <span className="text-mono text-muted text-xs">INVESTED</span>
+                                <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
+                                  {formatCurrency(commodityEffectiveInvested)}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        ) : acc.type === 'stocks' ? (
+                          <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
+                            <div className="flex-col gap-1">
+                              <span className="text-mono text-muted text-xs">
+                                {stockCurrentValue !== null ? 'CURRENT VALUE' : stockEffectiveInvested !== undefined ? 'INVESTED' : 'CURRENT VALUE'}
+                              </span>
+                              <span className="text-serif" style={{ fontSize: '1.8rem', color: (stockCurrentValue !== null && stockEffectiveInvested !== undefined && stockCurrentValue < stockEffectiveInvested) ? 'var(--danger)' : 'var(--success)', lineHeight: '1.2' }}>
+                                {stockCurrentValue !== null
+                                  ? formatCurrency(stockCurrentValue)
+                                  : stockEffectiveInvested !== undefined
+                                    ? formatCurrency(stockEffectiveInvested)
+                                    : '—'}
+                              </span>
+                            </div>
+                            {stockCurrentValue !== null && stockEffectiveInvested !== undefined && (
+                              <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
+                                <span className="text-mono text-muted text-xs">INVESTED</span>
+                                <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
+                                  {formatCurrency(stockEffectiveInvested)}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
+                            <div className="flex-col gap-1">
+                              <span className="text-mono text-muted text-xs">
+                                {acc.isNcmcEnabled ? 'PAYMENTS BALANCE' : 'TOTAL BALANCE'}
+                              </span>
+                              <span className="text-serif" style={{
+                                fontSize: '1.8rem',
+                                color: acc.type === 'credit_card'
+                                  ? (roundedBal > 0 ? 'var(--danger)' : 'var(--success)')
+                                  : (roundedBal >= 0 ? 'var(--success)' : 'var(--danger)'),
+                                lineHeight: '1.2'
+                              }}>
+                                {acc.type === 'rewards' && acc.rewardUnit ? (
+                                  <span className="flex-col" style={{ alignItems: 'flex-start', gap: '6px', lineHeight: '1' }}>
+                                    <span>{bal}</span>
+                                    <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 800, opacity: 0.7 }}>{acc.rewardUnit}</span>
+                                  </span>
+                                ) : (
+                                  formatCurrency(bal)
+                                )}
+                              </span>
+                              {(acc.type === 'credit_card' || acc.type === 'debit_card') && acc.defaultCashbackRate ? (
+                                <span className="text-muted text-xs" style={{ marginTop: '4px' }}>Base Reward Rate: {acc.defaultCashbackRate}%</span>
+                              ) : null}
+                            </div>
 
-
-
-                      {/* Bottom Section - Auxiliary Details */}
-                      {acc.isNcmcEnabled && (
-                        <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                          <span className="text-mono text-muted text-xs">TRAVEL WALLET</span>
-                          <div className="flex align-center gap-3">
-                            <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>
-                              {formatCurrency(calculateBalance(acc, data.transactions, currentMonth, true))}
-                            </span>
-                            {acc.cardDetails?.cardNumber && (
-                              <>
-                                <div style={{ width: '1px', height: '18px', background: 'var(--border-color)', margin: '0 4px', opacity: 0.5 }} />
+                            <div className="flex gap-4 align-end">
+                              {(acc.type === 'rewards' || acc.type === 'e_wallet') && (
                                 <button
                                   className="btn btn-secondary flex align-center gap-2"
-                                  style={{ fontSize: '0.7rem', padding: '0.35rem 0.75rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, color: 'var(--accent)' }}
+                                  style={{ fontSize: '0.8rem', padding: '0.5rem 1rem' }}
+                                  onClick={() => handleLiquidate(acc)}
+                                >
+                                  <span>Send to Bank</span>
+                                </button>
+                              )}
+                              {prevCycleDue !== null ? (
+                                <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
+                                  <span className="text-mono text-muted text-xs">PREV DUE</span>
+                                  <span className="text-serif" style={{ fontSize: '1.4rem', color: prevCycleDue > 0 ? 'var(--danger)' : 'var(--success)', marginTop: '0.1rem' }}>
+                                    {formatCurrency(Math.abs(prevCycleDue))}
+                                  </span>
+                                </div>
+                              ) : (
+                                <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
+                                  <span className="text-mono text-muted text-xs">OPENING BAL</span>
+                                  <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
+                                    {acc.type === 'rewards' && acc.rewardUnit ? (
+                                      <span className="flex-col" style={{ alignItems: 'flex-end', gap: '6px', lineHeight: '1' }}>
+                                        <span>{openingBal}</span>
+                                        <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 800, opacity: 0.7 }}>{acc.rewardUnit}</span>
+                                      </span>
+                                    ) : (
+                                      formatCurrency(openingBal)
+                                    )}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+
+
+                        {/* Bottom Section - Auxiliary Details */}
+                        {acc.isNcmcEnabled && (
+                          <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                            <span className="text-mono text-muted text-xs">TRAVEL WALLET</span>
+                            <div className="flex align-center gap-3">
+                              <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>
+                                {formatCurrency(calculateBalance(acc, data.transactions, currentMonth, true))}
+                              </span>
+                              {acc.cardDetails?.cardNumber && (
+                                <>
+                                  <div style={{ width: '1px', height: '18px', background: 'var(--border-color)', margin: '0 4px', opacity: 0.5 }} />
+                                  <button
+                                    className="btn btn-secondary flex align-center gap-2"
+                                    style={{ fontSize: '0.7rem', padding: '0.35rem 0.75rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, color: 'var(--accent)' }}
+                                    onClick={() => setViewingCard(acc)}
+                                  >
+                                    <CreditCard size={14} />
+                                    <span>Card</span>
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {acc.type === 'credit_card' && (
+                          <div className="flex justify-between align-center gap-4" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)' }}>
+                            <div className="flex-col gap-1">
+                              <span className="text-mono text-muted" style={{ fontSize: '10px' }}>STATEMENT CYCLE</span>
+                              <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{acc.statementDay ? getOrdinalSuffix(acc.statementDay) : 'N/A'}</span>
+                            </div>
+                            <div className="flex-col gap-1">
+                              <span className="text-mono text-muted" style={{ fontSize: '10px' }}>PAY DUE BY</span>
+                              <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{acc.dueDay ? getOrdinalSuffix(acc.dueDay) : 'N/A'}</span>
+                            </div>
+
+                            <div className="flex gap-3" style={{ marginLeft: 'auto' }}>
+                              <button
+                                className="btn btn-secondary flex align-center gap-2"
+                                style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700 }}
+                                onClick={() => onViewStatement(acc)}
+                              >
+                                <FileText size={14} />
+                                <span>Statement</span>
+                              </button>
+
+                              {acc.cardDetails?.cardNumber && (
+                                <button
+                                  className="btn btn-secondary flex align-center gap-2"
+                                  style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, color: 'var(--accent)' }}
                                   onClick={() => setViewingCard(acc)}
                                 >
                                   <CreditCard size={14} />
                                   <span>Card</span>
                                 </button>
-                              </>
-                            )}
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
 
-                      {acc.type === 'credit_card' && (
-                        <div className="flex justify-between align-center gap-4" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)' }}>
-                          <div className="flex-col gap-1">
-                            <span className="text-mono text-muted" style={{ fontSize: '10px' }}>STATEMENT CYCLE</span>
-                            <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{acc.statementDay ? getOrdinalSuffix(acc.statementDay) : 'N/A'}</span>
-                          </div>
-                          <div className="flex-col gap-1">
-                            <span className="text-mono text-muted" style={{ fontSize: '10px' }}>PAY DUE BY</span>
-                            <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{acc.dueDay ? getOrdinalSuffix(acc.dueDay) : 'N/A'}</span>
-                          </div>
+                        {/* EPF Account has clean card layout with Opening & Total Balance */}
 
-                          <div className="flex gap-3" style={{ marginLeft: 'auto' }}>
+                        {acc.type === 'debit_card' && !acc.isNcmcEnabled && acc.cardDetails?.cardNumber && (
+                          <div className="flex justify-end align-center gap-4" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)' }}>
                             <button
                               className="btn btn-secondary flex align-center gap-2"
-                              style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700 }}
-                              onClick={() => onViewStatement(acc)}
+                              style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, color: 'var(--accent)' }}
+                              onClick={() => setViewingCard(acc)}
                             >
-                              <FileText size={14} />
-                              <span>Statement</span>
+                              <CreditCard size={14} />
+                              <span>Card</span>
                             </button>
-
-                            {acc.cardDetails?.cardNumber && (
-                              <button
-                                className="btn btn-secondary flex align-center gap-2"
-                                style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, color: 'var(--accent)' }}
-                                onClick={() => setViewingCard(acc)}
-                              >
-                                <CreditCard size={14} />
-                                <span>Card</span>
-                              </button>
-                            )}
                           </div>
-                        </div>
-                      )}
+                        )}
 
-                      {/* EPF Account has clean card layout with Opening & Total Balance */}
+                        {acc.isCashbackEnabled && acc.rewardType === 'points' && acc.rewardUnit && (
+                          <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                            <span className="text-mono text-muted text-xs" style={{ textTransform: 'uppercase', fontWeight: 800 }}>{acc.rewardUnit}</span>
+                            <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.2rem', fontWeight: 700 }}>
+                              {calculateBalance(acc, data.transactions, currentMonth, false, true, data.cashbackStatements)}
+                            </span>
+                          </div>
+                        )}
 
-                      {acc.type === 'debit_card' && !acc.isNcmcEnabled && acc.cardDetails?.cardNumber && (
-                        <div className="flex justify-end align-center gap-4" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)' }}>
-                           <button
-                             className="btn btn-secondary flex align-center gap-2"
-                             style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, color: 'var(--accent)' }}
-                             onClick={() => setViewingCard(acc)}
-                           >
-                             <CreditCard size={14} />
-                             <span>Card</span>
-                           </button>
-                        </div>
-                      )}
-
-                      {acc.isCashbackEnabled && acc.rewardType === 'points' && acc.rewardUnit && (
-                        <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                          <span className="text-mono text-muted text-xs" style={{ textTransform: 'uppercase', fontWeight: 800 }}>{acc.rewardUnit}</span>
-                          <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.2rem', fontWeight: 700 }}>
-                            {calculateBalance(acc, data.transactions, currentMonth, false, true, data.cashbackStatements)}
-                          </span>
-                        </div>
-                      )}
-
-                      {acc.type === 'mutual_funds' && (() => {
-                        const mfPnl = mfCurrentValue !== null && mfEffectiveInvested !== undefined ? mfCurrentValue - mfEffectiveInvested : null;
-                        const mfPnlPct = mfPnl !== null && mfEffectiveInvested! > 0 ? (mfPnl / mfEffectiveInvested!) * 100 : null;
-                        const mfPnlPos = mfPnl !== null && mfPnl >= 0;
-                        const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
-                        const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
-                        const isFresh = acc.marketSymbol ? isCacheFresh(acc.marketSymbol, 'mf') : false;
-                        return (
-                          <>
-                            {mfTotalUnits > 0 && (
-                              <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                <span className="text-mono text-muted text-xs">TOTAL UNITS</span>
-                                <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{mfTotalUnits.toLocaleString('en-IN', { maximumFractionDigits: 3 })}</span>
-                              </div>
-                            )}
-                            {acc.marketSymbol && (
-                              <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                {(mfCurrentPrice !== null || isRefreshing) ? (
-                                  <>
-                                    <div className="flex-col gap-0">
-                                      <span className="text-mono text-muted text-xs">CURRENT NAV</span>
-                                      {isRefreshing
-                                        ? <span className="skeleton-bar" style={{ width: '4rem', height: '1.1rem', marginTop: '0.2rem' }} />
-                                        : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
+                        {acc.type === 'mutual_funds' && (() => {
+                          const mfPnl = mfCurrentValue !== null && mfEffectiveInvested !== undefined ? mfCurrentValue - mfEffectiveInvested : null;
+                          const mfPnlPct = mfPnl !== null && mfEffectiveInvested! > 0 ? (mfPnl / mfEffectiveInvested!) * 100 : null;
+                          const mfPnlPos = mfPnl !== null && mfPnl >= 0;
+                          const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
+                          const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
+                          const isFresh = acc.marketSymbol ? isCacheFresh(acc.marketSymbol, 'mf') : false;
+                          return (
+                            <>
+                              {mfTotalUnits > 0 && (
+                                <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                                  <span className="text-mono text-muted text-xs">TOTAL UNITS</span>
+                                  <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{mfTotalUnits.toLocaleString('en-IN', { maximumFractionDigits: 3 })}</span>
+                                </div>
+                              )}
+                              {acc.marketSymbol && (
+                                <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                                  {(mfCurrentPrice !== null || isRefreshing) ? (
+                                    <>
+                                      <div className="flex-col gap-0">
+                                        <span className="text-mono text-muted text-xs">CURRENT NAV</span>
+                                        {isRefreshing
+                                          ? <span className="skeleton-bar" style={{ width: '4rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                          : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
                                             ₹{mfCurrentPrice!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                           </span>
-                                      }
-                                    </div>
-                                    <div className="flex align-center" style={{ gap: '0.75rem' }}>
-                                      {(mfPnl !== null && mfPnlPct !== null && !isRefreshing) && (
-                                        <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
-                                          <span className="text-mono text-muted text-xs">P&amp;L ({mfPnlPos ? '+' : ''}{mfPnlPct.toFixed(2)}%)</span>
-                                          <span style={{ color: mfPnlPos ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                            {mfPnlPos ? '+' : '-'}₹{Math.abs(mfPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                                          </span>
-                                        </div>
-                                      )}
-                                      {isRefreshing && mfEffectiveInvested !== undefined && (
-                                        <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
-                                          <span className="text-mono text-muted text-xs">P&amp;L</span>
-                                          <span className="skeleton-bar" style={{ width: '5rem', height: '1.1rem', marginTop: '0.2rem' }} />
-                                        </div>
-                                      )}
-                                      {isFailed && !isRefreshing && (
-                                        <span style={{ fontSize: '0.65rem', color: 'var(--danger)', textAlign: 'right' }}>fetch<br/>failed</span>
-                                      )}
-                                      {(!isFresh || isRefreshing) && (
-                                        <button
-                                          className="btn btn-secondary"
-                                          style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : !isFresh ? 'var(--success)' : undefined, color: !isFresh && !isRefreshing ? 'var(--success)' : undefined }}
-                                          title="Refresh NAV"
-                                          disabled={isRefreshing}
-                                          onClick={async () => {
-                                            const sym = acc.marketSymbol!;
-                                            setSymbolRefreshing(sym, true);
-                                            const price = await fetchMFNav(sym);
-                                            if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
-                                            setSymbolRefreshing(sym, false);
-                                          }}
-                                        >
-                                          <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
-                                        </button>
-                                      )}
-                                    </div>
-                                  </>
-                                ) : (
-                                  <>
-                                    <span className="text-mono text-muted text-xs">CURRENT NAV</span>
-                                    {isFailed && !isRefreshing
-                                      ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Symbol not found · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const price = await fetchMFNav(sym); if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
-                                      : <button
+                                        }
+                                      </div>
+                                      <div className="flex align-center" style={{ gap: '0.75rem' }}>
+                                        {(mfPnl !== null && mfPnlPct !== null && !isRefreshing) && (
+                                          <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
+                                            <span className="text-mono text-muted text-xs">P&amp;L ({mfPnlPos ? '+' : ''}{mfPnlPct.toFixed(2)}%)</span>
+                                            <span style={{ color: mfPnlPos ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                              {mfPnlPos ? '+' : '-'}₹{Math.abs(mfPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                            </span>
+                                          </div>
+                                        )}
+                                        {isRefreshing && mfEffectiveInvested !== undefined && (
+                                          <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
+                                            <span className="text-mono text-muted text-xs">P&amp;L</span>
+                                            <span className="skeleton-bar" style={{ width: '5rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                          </div>
+                                        )}
+                                        {isFailed && !isRefreshing && (
+                                          <span style={{ fontSize: '0.65rem', color: 'var(--danger)', textAlign: 'right' }}>fetch<br />failed</span>
+                                        )}
+                                        {(!isFresh || isRefreshing) && (
+                                          <button
+                                            className="btn btn-secondary"
+                                            style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : !isFresh ? 'var(--success)' : undefined, color: !isFresh && !isRefreshing ? 'var(--success)' : undefined }}
+                                            title="Refresh NAV"
+                                            disabled={isRefreshing}
+                                            onClick={async () => {
+                                              const sym = acc.marketSymbol!;
+                                              setSymbolRefreshing(sym, true);
+                                              const price = await fetchMFNav(sym);
+                                              if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
+                                              setSymbolRefreshing(sym, false);
+                                            }}
+                                          >
+                                            <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="text-mono text-muted text-xs">CURRENT NAV</span>
+                                      {isFailed && !isRefreshing
+                                        ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Symbol not found · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const price = await fetchMFNav(sym); if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
+                                        : <button
                                           className="btn btn-secondary"
                                           style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
                                           onClick={async () => {
@@ -1035,92 +1037,92 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                         >
                                           Fetch NAV
                                         </button>
-                                    }
-                                  </>
-                                )}
-                              </div>
-                            )}
-                          </>
-                        );
-                      })()}
+                                      }
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
 
-                      {acc.type === 'stocks' && (() => {
-                        const totalShares = stockTotalShares;
-                        const hasShares = acc.numberOfShares !== undefined || stockTxShares !== 0;
-                        const currentPrice = stockCurrentPrice;
-                        const effectiveInvested = stockEffectiveInvested;
-                        const hasPnLSetup = !!acc.marketSymbol && effectiveInvested !== undefined && totalShares > 0;
-                        const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
-                        const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
-                        const isFresh = acc.marketSymbol ? isCacheFresh(acc.marketSymbol, 'stock') : false;
+                        {acc.type === 'stocks' && (() => {
+                          const totalShares = stockTotalShares;
+                          const hasShares = acc.numberOfShares !== undefined || stockTxShares !== 0;
+                          const currentPrice = stockCurrentPrice;
+                          const effectiveInvested = stockEffectiveInvested;
+                          const hasPnLSetup = !!acc.marketSymbol && effectiveInvested !== undefined && totalShares > 0;
+                          const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
+                          const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
+                          const isFresh = acc.marketSymbol ? isCacheFresh(acc.marketSymbol, 'stock') : false;
 
-                        if (!hasShares && !hasPnLSetup) return null;
+                          if (!hasShares && !hasPnLSetup) return null;
 
-                        const currentValue = stockCurrentValue;
-                        const pnl = currentValue !== null && effectiveInvested !== undefined ? currentValue - effectiveInvested : null;
-                        const pnlPct = pnl !== null && effectiveInvested! > 0 ? (pnl / effectiveInvested!) * 100 : null;
-                        const pnlPos = pnl !== null && pnl >= 0;
+                          const currentValue = stockCurrentValue;
+                          const pnl = currentValue !== null && effectiveInvested !== undefined ? currentValue - effectiveInvested : null;
+                          const pnlPct = pnl !== null && effectiveInvested! > 0 ? (pnl / effectiveInvested!) * 100 : null;
+                          const pnlPos = pnl !== null && pnl >= 0;
 
-                        return (
-                          <>
-                            {hasShares && (
-                              <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                <span className="text-mono text-muted text-xs">TOTAL SHARES</span>
-                                <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{totalShares.toLocaleString('en-IN', { maximumFractionDigits: 3 })}</span>
-                              </div>
-                            )}
-                            {hasPnLSetup && (
-                              (currentPrice !== null || isRefreshing) ? (
+                          return (
+                            <>
+                              {hasShares && (
                                 <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                  <div className="flex-col gap-0">
-                                    <span className="text-mono text-muted text-xs">LTP</span>
-                                    {isRefreshing
-                                      ? <span className="skeleton-bar" style={{ width: '4.5rem', height: '1.1rem', marginTop: '0.2rem' }} />
-                                      : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                  <span className="text-mono text-muted text-xs">TOTAL SHARES</span>
+                                  <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{totalShares.toLocaleString('en-IN', { maximumFractionDigits: 3 })}</span>
+                                </div>
+                              )}
+                              {hasPnLSetup && (
+                                (currentPrice !== null || isRefreshing) ? (
+                                  <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                                    <div className="flex-col gap-0">
+                                      <span className="text-mono text-muted text-xs">LTP</span>
+                                      {isRefreshing
+                                        ? <span className="skeleton-bar" style={{ width: '4.5rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                        : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
                                           ₹{currentPrice!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </span>
-                                    }
+                                      }
+                                    </div>
+                                    <div className="flex align-center" style={{ gap: '0.75rem' }}>
+                                      {(pnl !== null && pnlPct !== null && !isRefreshing) && (
+                                        <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
+                                          <span className="text-mono text-muted text-xs">P&amp;L ({pnlPos ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
+                                          <span style={{ color: pnlPos ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                            {pnlPos ? '+' : '-'}₹{Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {isRefreshing && (
+                                        <span className="skeleton-bar" style={{ width: '5.5rem', height: '1.1rem' }} />
+                                      )}
+                                      {isFailed && !isRefreshing && (
+                                        <span style={{ fontSize: '0.65rem', color: 'var(--danger)', textAlign: 'right' }}>fetch<br />failed</span>
+                                      )}
+                                      {(!isFresh || isRefreshing) && (
+                                        <button
+                                          className="btn btn-secondary"
+                                          style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : !isFresh ? 'var(--success)' : undefined, color: !isFresh && !isRefreshing ? 'var(--success)' : undefined }}
+                                          title="Refresh price"
+                                          disabled={isRefreshing}
+                                          onClick={async () => {
+                                            const sym = acc.marketSymbol!;
+                                            setSymbolRefreshing(sym, true);
+                                            const price = await fetchStockPrice(sym);
+                                            if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
+                                            setSymbolRefreshing(sym, false);
+                                          }}
+                                        >
+                                          <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
+                                        </button>
+                                      )}
+                                    </div>
                                   </div>
-                                  <div className="flex align-center" style={{ gap: '0.75rem' }}>
-                                    {(pnl !== null && pnlPct !== null && !isRefreshing) && (
-                                      <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
-                                        <span className="text-mono text-muted text-xs">P&amp;L ({pnlPos ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
-                                        <span style={{ color: pnlPos ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                          {pnlPos ? '+' : '-'}₹{Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                                        </span>
-                                      </div>
-                                    )}
-                                    {isRefreshing && (
-                                      <span className="skeleton-bar" style={{ width: '5.5rem', height: '1.1rem' }} />
-                                    )}
-                                    {isFailed && !isRefreshing && (
-                                      <span style={{ fontSize: '0.65rem', color: 'var(--danger)', textAlign: 'right' }}>fetch<br/>failed</span>
-                                    )}
-                                    {(!isFresh || isRefreshing) && (
-                                    <button
-                                      className="btn btn-secondary"
-                                      style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : !isFresh ? 'var(--success)' : undefined, color: !isFresh && !isRefreshing ? 'var(--success)' : undefined }}
-                                      title="Refresh price"
-                                      disabled={isRefreshing}
-                                      onClick={async () => {
-                                        const sym = acc.marketSymbol!;
-                                        setSymbolRefreshing(sym, true);
-                                        const price = await fetchStockPrice(sym);
-                                        if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
-                                        setSymbolRefreshing(sym, false);
-                                      }}
-                                    >
-                                      <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
-                                    </button>
-                                    )}
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                  <span className="text-mono text-muted text-xs">LIVE P&amp;L</span>
-                                  {isFailed && !isRefreshing
-                                    ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Symbol not found · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const price = await fetchStockPrice(sym); if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
-                                    : <button
+                                ) : (
+                                  <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                                    <span className="text-mono text-muted text-xs">LIVE P&amp;L</span>
+                                    {isFailed && !isRefreshing
+                                      ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Symbol not found · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const price = await fetchStockPrice(sym); if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
+                                      : <button
                                         className="btn btn-secondary"
                                         style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
                                         onClick={async () => {
@@ -1133,100 +1135,100 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                       >
                                         Fetch
                                       </button>
-                                  }
-                                </div>
-                              )
-                            )}
-                          </>
-                        );
-                      })()}
+                                    }
+                                  </div>
+                                )
+                              )}
+                            </>
+                          );
+                        })()}
 
-                      {acc.type === 'commodity' && (() => {
-                        const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
-                        const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
-                        const isFresh = acc.marketSymbol ? isCommodityCacheFresh(acc.marketSymbol) : false;
-                        return (
-                          <>
-                            {commodityTotalGrams > 0 && (
-                              <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                <span className="text-mono text-muted text-xs">TOTAL GRAMS</span>
-                                <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{commodityTotalGrams.toLocaleString('en-IN', { maximumFractionDigits: 3 })} g</span>
-                              </div>
-                            )}
-                            {acc.marketSymbol && (
-                              <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                {(commodityPricePerGram !== null || isRefreshing) ? (
-                                  <>
-                                    <div className="flex-col gap-0">
-                                      <span className="text-mono text-muted text-xs">₹ / GRAM</span>
-                                      {isRefreshing
-                                        ? <span className="skeleton-bar" style={{ width: '4rem', height: '1.1rem', marginTop: '0.2rem' }} />
-                                        : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
+                        {acc.type === 'commodity' && (() => {
+                          const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
+                          const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
+                          const isFresh = acc.marketSymbol ? isCommodityCacheFresh(acc.marketSymbol) : false;
+                          return (
+                            <>
+                              {commodityTotalGrams > 0 && (
+                                <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                                  <span className="text-mono text-muted text-xs">TOTAL GRAMS</span>
+                                  <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{commodityTotalGrams.toLocaleString('en-IN', { maximumFractionDigits: 3 })} g</span>
+                                </div>
+                              )}
+                              {acc.marketSymbol && (
+                                <div className="flex justify-between align-start" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)', flexWrap: 'nowrap', gap: '0.5rem' }}>
+                                  {(commodityPricePerGram !== null || isRefreshing) ? (
+                                    <>
+                                      <div className="flex-col gap-0" style={{ minWidth: 0, flexShrink: 1 }}>
+                                        <span className="text-mono text-muted text-xs">₹ / GRAM</span>
+                                        {isRefreshing
+                                          ? <span className="skeleton-bar" style={{ width: '4rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                          : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
                                             {commodityPriceSource === 'estimate' ? '≈ ' : ''}₹{commodityPricePerGram!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                           </span>
+                                        }
+                                        {!isRefreshing && commodityPriceSource && (
+                                          <span className="text-mono text-muted" style={{ fontSize: '0.6rem', marginTop: '0.1rem', fontStyle: 'italic', wordBreak: 'break-word', ...(commodityVendorMissing ? { color: 'var(--warning)' } : {}) }}>
+                                            {commodityPriceSource === 'manual'
+                                              ? 'manual price'
+                                              : commodityVendorMissing
+                                                ? `couldn't find “${commodityVendorName}” · market estimate`
+                                                : 'approx · AI estimate'}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex align-center" style={{ gap: '0.75rem', flexShrink: 0 }}>
+                                        {(commodityCurrentValue !== null && commodityEffectiveInvested !== undefined && !isRefreshing) && (() => {
+                                          const pnl = commodityCurrentValue - commodityEffectiveInvested;
+                                          const pnlPct = commodityEffectiveInvested > 0 ? (pnl / commodityEffectiveInvested) * 100 : 0;
+                                          return (
+                                            <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
+                                              <span className="text-mono text-muted text-xs">P&amp;L ({pnl >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
+                                              <span style={{ color: pnl >= 0 ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
+                                                {pnl >= 0 ? '+' : '-'}₹{Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                                              </span>
+                                            </div>
+                                          );
+                                        })()}
+                                        {commodityPriceSource === 'estimate' && (!isFresh || isRefreshing) && (
+                                          <button
+                                            className="btn btn-secondary"
+                                            style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : !isFresh ? 'var(--success)' : undefined, color: !isFresh && !isRefreshing ? 'var(--success)' : undefined }}
+                                            title="Refresh estimate"
+                                            disabled={isRefreshing}
+                                            onClick={async () => {
+                                              const sym = acc.marketSymbol!;
+                                              setSymbolRefreshing(sym, true);
+                                              const p = await fetchCommodityPriceINR(sym);
+                                              if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym);
+                                              setSymbolRefreshing(sym, false);
+                                            }}
+                                          >
+                                            <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="text-mono text-muted text-xs">₹ / GRAM</span>
+                                      {isFailed && !isRefreshing
+                                        ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Fetch failed · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
+                                        : <button className="btn btn-secondary" style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Fetch</button>
                                       }
-                                      {!isRefreshing && commodityPriceSource && (
-                                        <span className="text-mono text-muted" style={{ fontSize: '0.6rem', marginTop: '0.1rem', fontStyle: 'italic', ...(commodityVendorMissing ? { color: 'var(--warning)' } : {}) }}>
-                                          {commodityPriceSource === 'manual'
-                                            ? 'manual price'
-                                            : commodityVendorMissing
-                                              ? `couldn't find “${commodityVendorName}” · market estimate`
-                                              : 'approx · AI estimate'}
-                                        </span>
-                                      )}
-                                    </div>
-                                    <div className="flex align-center" style={{ gap: '0.75rem' }}>
-                                      {(commodityCurrentValue !== null && commodityEffectiveInvested !== undefined && !isRefreshing) && (() => {
-                                        const pnl = commodityCurrentValue - commodityEffectiveInvested;
-                                        const pnlPct = commodityEffectiveInvested > 0 ? (pnl / commodityEffectiveInvested) * 100 : 0;
-                                        return (
-                                          <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
-                                            <span className="text-mono text-muted text-xs">P&amp;L ({pnl >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
-                                            <span style={{ color: pnl >= 0 ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                              {pnl >= 0 ? '+' : '-'}₹{Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                                            </span>
-                                          </div>
-                                        );
-                                      })()}
-                                      {commodityPriceSource === 'estimate' && (!isFresh || isRefreshing) && (
-                                        <button
-                                          className="btn btn-secondary"
-                                          style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : !isFresh ? 'var(--success)' : undefined, color: !isFresh && !isRefreshing ? 'var(--success)' : undefined }}
-                                          title="Refresh estimate"
-                                          disabled={isRefreshing}
-                                          onClick={async () => {
-                                            const sym = acc.marketSymbol!;
-                                            setSymbolRefreshing(sym, true);
-                                            const p = await fetchCommodityPriceINR(sym);
-                                            if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym);
-                                            setSymbolRefreshing(sym, false);
-                                          }}
-                                        >
-                                          <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
-                                        </button>
-                                      )}
-                                    </div>
-                                  </>
-                                ) : (
-                                  <>
-                                    <span className="text-mono text-muted text-xs">₹ / GRAM</span>
-                                    {isFailed && !isRefreshing
-                                      ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Fetch failed · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
-                                      : <button className="btn btn-secondary" style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Fetch</button>
-                                    }
-                                  </>
-                                )}
-                              </div>
-                            )}
-                          </>
-                        );
-                      })()}
-                    </div>
-                  );
-                })}
-              </div>}
-            </div>
-          );
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    );
+                  })}
+                </div>}
+              </div>
+            );
           });
         })()}
 
@@ -1239,15 +1241,15 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
               style={{ padding: '0 0.5rem', marginBottom: archivedCollapsed ? '0' : '0.5rem', cursor: 'pointer', userSelect: 'none' }}
               onClick={() => setArchivedCollapsed(prev => !prev)}
             >
-              <span className="text-mono" style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--text-muted)', opacity: 0.8 }}>
+              <span className="text-mono" style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--text-muted)', opacity: 0.8, flexShrink: 0 }}>
                 Archived
               </span>
+              <div style={{ flex: 1, height: '1px', background: 'linear-gradient(to right, var(--text-muted), transparent)', opacity: 0.2, minWidth: '0.5rem' }}></div>
               {archivedCollapsed && (
-                <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
+                <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6, whiteSpace: 'nowrap', flexShrink: 0 }}>
                   {data.accounts.filter(a => a.archived).length} {data.accounts.filter(a => a.archived).length === 1 ? 'account' : 'accounts'}
                 </span>
               )}
-              <div style={{ flex: 1, height: '1px', background: 'linear-gradient(to right, var(--text-muted), transparent)', opacity: 0.2 }}></div>
               <ChevronDown size={14} style={{ color: 'var(--text-muted)', opacity: 0.6, flexShrink: 0, transition: 'transform 0.2s ease', transform: archivedCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
             </div>
             {!archivedCollapsed && <div className="flex-col gap-3">
@@ -1376,7 +1378,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   </div>
                 </>
               )}
- 
+
               {newAccount.type === 'rewards' && (
                 <>
                   <div className="input-group">
@@ -1744,8 +1746,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         { id: 'rupee', name: 'Rupee (Statement Credit)', subtext: 'Cashback in Form of Rupees Credited Directly to Card' },
                         { id: 'points', name: 'Custom Reward Points', subtext: 'Cashback in Custom Reward Unit Tracked Internally' }
                       ]}
-                      onChange={val => setNewAccount({ 
-                        ...newAccount, 
+                      onChange={val => setNewAccount({
+                        ...newAccount,
                         rewardType: val as 'rupee' | 'points',
                         rewardUnit: val === 'rupee' ? undefined : newAccount.rewardUnit,
                         pointsConversionRate: val === 'rupee' ? undefined : newAccount.pointsConversionRate
@@ -2280,10 +2282,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             datePickerTarget.type === 'joining'
               ? (newAccount.joiningDate || newAccount.baseBalanceDate || format(new Date(), 'yyyy-MM-dd'))
               : (() => {
-                  const rev = newAccount.salaryRevisions?.[datePickerTarget.index || 0];
-                  if (!rev || !rev.effectiveDate) return format(new Date(), 'yyyy-MM-dd');
-                  return rev.effectiveDate.length === 7 ? `${rev.effectiveDate}-01` : rev.effectiveDate;
-                })()
+                const rev = newAccount.salaryRevisions?.[datePickerTarget.index || 0];
+                if (!rev || !rev.effectiveDate) return format(new Date(), 'yyyy-MM-dd');
+                return rev.effectiveDate.length === 7 ? `${rev.effectiveDate}-01` : rev.effectiveDate;
+              })()
           }
           onChange={selectedDate => {
             if (datePickerTarget.type === 'joining') {

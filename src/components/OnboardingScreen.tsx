@@ -264,15 +264,15 @@ export default function OnboardingScreen() {
                   <span className="font-bold">{importPreview.sizeKb} KB</span>
                 </div>
               </div>
-              <button className="btn btn-primary flex-center gap-2" style={{ padding: '1rem', width: '100%' }} onClick={handleConfirmImport}>
+              <button className="btn btn-primary flex-center gap-2" style={{ padding: '0.9rem', width: '100%' }} onClick={handleConfirmImport}>
                 <Check size={18} /> Restore & Continue
               </button>
-              <button className="btn btn-secondary flex-center gap-2" style={{ padding: '0.75rem', width: '100%' }} onClick={() => { setImportPreview(null); importFileRef.current?.click(); }}>
+              <button className="btn btn-secondary flex-center gap-2" style={{ padding: '0.9rem', width: '100%' }} onClick={() => { setImportPreview(null); importFileRef.current?.click(); }}>
                 Choose a different file
               </button>
             </div>
           ) : (
-            <button className="btn btn-primary flex-center gap-2" style={{ padding: '1rem', width: '100%' }} onClick={() => importFileRef.current?.click()}>
+            <button className="btn btn-primary flex-center gap-2" style={{ padding: '0.9rem', width: '100%' }} onClick={() => importFileRef.current?.click()}>
               <Upload size={18} /> Select Backup File
             </button>
           )}
@@ -351,7 +351,7 @@ export default function OnboardingScreen() {
               />
               {nameError && <span className="text-xs text-danger text-center">Please enter a valid profile name</span>}
             </div>
-            <button className="btn btn-primary flex-center gap-2" style={{ padding: '1rem', width: '100%', marginTop: '1rem' }} onClick={handleNextStep1}>
+            <button className="btn btn-primary flex-center gap-2" style={{ padding: '0.9rem', width: '100%', marginTop: '1rem' }} onClick={handleNextStep1}>
               Continue <ArrowRight size={18} />
             </button>
             <button
@@ -490,7 +490,7 @@ export default function OnboardingScreen() {
 
             <button
               className="btn btn-primary flex-center gap-2"
-              style={{ padding: '1rem', width: '100%' }}
+              style={{ padding: '0.9rem', width: '100%' }}
               disabled={!hasSavedKey}
               onClick={handleCompleteSetup}
             >

@@ -136,13 +136,24 @@ export async function fetchVendorCommodityPrices(): Promise<VendorPrices> {
 
   const vendor = getCommodityVendor();
   const model = getGeminiModel();
+
+  let vendorHint = '';
+  const vUpper = vendor.toUpperCase();
+  if (vUpper.includes('SAFEGOLD') || vUpper.includes('SAFE GOLD')) {
+    vendorHint = ' (such as SafeGold published rates or SafeGold live rates on Paytm, PhonePe, Cred, Moneycontrol, safegold.com)';
+  } else if (vUpper.includes('AUGMONT')) {
+    vendorHint = ' (such as Augmont / Augmont Goldtech live rates on augmont.com)';
+  } else if (vUpper.includes('MMTC')) {
+    vendorHint = ' (such as MMTC-PAMP live rates on mmtcpamp.com/digital-gold)';
+  }
+
   const prompt =
-`Using Google Search, get ${vendor}'s CURRENT live BUY prices per GRAM in INR (INCLUDING ~3% GST), as shown for Digital Gold and Digital Silver on https://www.mmtcpamp.com/digital-gold.
-Prefer ${vendor}'s own published "Live Buy Price" figures. If a metal's exact GST-inclusive figure isn't found, return your best grounded estimate of that metal's current Indian digital-${''}metal per-gram price including ~3% GST.
+`Using Google Search, get ${vendor}'s CURRENT live BUY prices per GRAM in INR (INCLUDING ~3% GST) for Digital Gold and Digital Silver${vendorHint}.
+Prefer ${vendor}'s own published or official partner platform "Live Buy Price" figures in India. If a metal's exact GST-inclusive figure isn't found, return your best grounded estimate of that metal's current Indian digital-metal per-gram price including ~3% GST.
 Respond with ONLY this strict minified JSON and NOTHING else — no prose, no markdown:
 {"gold_inr_per_gram":<number>,"silver_inr_per_gram":<number>,"vendor_found":<true|false>}
 Numbers only (no commas or symbols), per GRAM (if a source quotes per 10g, divide by 10). Both values MUST be > 0.
-Set "vendor_found" to true ONLY if you actually found ${vendor}'s own published prices; set it to false if you could not identify that vendor and returned a generic Indian market estimate instead.`;
+Set "vendor_found" to true if you identified live or published digital gold & silver buy prices for vendor ${vendor} (such as SafeGold, Augmont, MMTC-PAMP, or other digital gold brokers in India); set it to false only if ${vendor} is completely unrecognized or fake and you fell back to a generic market estimate instead.`;
 
   const body = { contents: [{ parts: [{ text: prompt }] }], tools: [{ google_search: {} }] };
   let j: any = null;

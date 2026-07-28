@@ -16,6 +16,8 @@ const MODEL_LS = 'gemini_model';
 const DEFAULT_VENDOR = 'MMTC-PAMP';
 const DEFAULT_MODEL = 'gemini-2.5-flash';
 
+export const POPULAR_COMMODITY_VENDORS = ['MMTC-PAMP', 'SAFEGOLD', 'AUGMONT'];
+
 const isNative = Capacitor.isNativePlatform();
 
 export async function setGeminiKey(key: string): Promise<void> {

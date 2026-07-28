@@ -11,7 +11,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import SmsReader from '../services/SmsService';
 import {
-  getCommodityVendor, setCommodityVendor,
+  getCommodityVendor, setCommodityVendor, POPULAR_COMMODITY_VENDORS,
   setGeminiKey, clearGeminiKey, hasGeminiKey,
 } from '../services/GeminiConfig';
 import { getGeminiUsageToday, testGeminiKey } from '../services/GeminiService';
@@ -30,25 +30,25 @@ const GridButton = ({ icon: Icon, label, onClick }: { icon: React.ElementType, l
 );
 
 const GridToggleButton = ({ icon: Icon, label, active, onClick }: { icon: React.ElementType, label: string, active: boolean, onClick: () => void }) => (
-  <div 
-    className="card flex-col align-center justify-center" 
-    style={{ 
-      padding: '1.25rem 0.5rem', 
-      gap: '0.75rem', 
-      cursor: 'pointer', 
+  <div
+    className="card flex-col align-center justify-center"
+    style={{
+      padding: '1.25rem 0.5rem',
+      gap: '0.75rem',
+      cursor: 'pointer',
       height: '100%',
       background: active ? 'rgba(16, 185, 129, 0.08)' : 'var(--bg-card)',
       borderColor: active ? 'var(--success)' : 'var(--border-color)',
       transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
       transform: active ? 'translate(-2px, -2px)' : 'none',
       boxShadow: active ? '4px 4px 0 rgba(0, 255, 204, 0.2)' : 'var(--shadow)'
-    }} 
+    }}
     onClick={onClick}
   >
-    <div style={{ 
-      background: active ? 'var(--success)' : 'var(--bg-hover)', 
-      padding: '0.6rem', 
-      borderRadius: '8px', 
+    <div style={{
+      background: active ? 'var(--success)' : 'var(--bg-hover)',
+      padding: '0.6rem',
+      borderRadius: '8px',
       border: '1px solid',
       borderColor: active ? 'var(--success)' : 'var(--border-color)',
       color: active ? '#000' : 'var(--primary-color)',
@@ -130,7 +130,7 @@ export default function Settings() {
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
-    
+
     const appRoot = document.querySelector('.app-root');
     if (draggedIdx !== null) {
       document.body.classList.add('no-scroll');
@@ -197,7 +197,7 @@ export default function Settings() {
   const [isActionSheetOpen, setIsActionSheetOpen] = useState(false);
   const [isViewModeOpen, setIsViewModeOpen] = useState(false);
   const [imgIsLandscape, setImgIsLandscape] = useState(false);
-  
+
   const [confirmConfig, setConfirmConfig] = useState<{
     title: string;
     message: string;
@@ -217,7 +217,7 @@ export default function Settings() {
       onConfirm: () => setConfirmConfig(null)
     });
   };
-  
+
   // Reset security state when navigating away from profile
   useEffect(() => {
     if (activeView !== 'profile') {
@@ -236,7 +236,7 @@ export default function Settings() {
       biometricsEnabled: data.user?.biometricsEnabled || false
     }));
   }, [data.user?.name, data.user?.biometricsEnabled]);
-  
+
   const touchStart = useRef({ x: 0, y: 0 });
 
 
@@ -382,7 +382,7 @@ export default function Settings() {
     setSetupStep('form');
     setGeneratedKey('');
     setProfileForm(prev => ({ ...prev, oldPin: '', pin: '', confirmPin: '' }));
-    
+
     setConfirmConfig({
       title: "Success",
       message: "Security setup complete! Please unlock with your new PIN.",
@@ -644,7 +644,7 @@ export default function Settings() {
     const newCategories = [...data.categories];
     const [moved] = newCategories.splice(draggedIdx, 1);
     newCategories.splice(targetIdx, 0, moved);
-    
+
     // NOTE for future AI models: Ensure 'Other/Misc' is always at the end
     const miscIndex = newCategories.findIndex(c => c.toLowerCase() === 'other/misc');
     if (miscIndex !== -1 && miscIndex !== newCategories.length - 1) {
@@ -727,6 +727,9 @@ export default function Settings() {
   // saved status and the fetch progress bar are current.
   useEffect(() => {
     if (activeView !== 'commodity' && activeView !== 'aiFeatures') return;
+    if (activeView === 'commodity') {
+      setGeminiVendorInput(getCommodityVendor());
+    }
     (async () => {
       setGeminiKeySaved(await hasGeminiKey());
       setGeminiUsage(getGeminiUsageToday());
@@ -781,11 +784,14 @@ export default function Settings() {
 
   // Commodity view: save the vendor (price reference) only.
   const handleSaveVendor = () => {
-    const formattedVendor = geminiVendorInput.toUpperCase().trim();
-    const vendorChanged = formattedVendor !== getCommodityVendor();
+    const trimmed = geminiVendorInput.trim().toUpperCase();
+    const formattedVendor = trimmed || 'MMTC-PAMP';
+    const currentVendor = getCommodityVendor();
+    const vendorChanged = formattedVendor !== currentVendor;
     setCommodityVendor(formattedVendor);
+    setGeminiVendorInput(formattedVendor);
     if (vendorChanged) invalidateCommodityCache();
-    showAlert('Vendor updated.', 'Commodity Prices');
+    showAlert(`Vendor updated to ${formattedVendor}.`, 'Commodity Prices');
   };
 
   const BACKUP_VERSION = 1;
@@ -840,12 +846,12 @@ export default function Settings() {
       if (Capacitor.isNativePlatform()) {
         // Request storage permissions explicitly
         const perm = await Filesystem.requestPermissions();
-        
+
         if (perm.publicStorage === 'denied') {
           showAlert('Storage permission is permanently denied. Please enable it in App Settings to save files.', 'Permission Required');
           return;
         }
-        
+
         if (!isSharing) {
           // Direct Save attempt (Documents folder)
           try {
@@ -950,11 +956,11 @@ export default function Settings() {
   // Aggressive compression for clipboard fallback
   const handleCopyBackup = () => {
     const payload = buildExportPayload();
-    
+
     // 1. First pass: Collect all unique IDs to map them to tiny tokens
     const idMap: Record<string, string> = {};
     let idCounter = 0;
-    
+
     const getTinyId = (original: any) => {
       if (typeof original !== 'string' || original.length < 8) return original;
       if (!idMap[original]) {
@@ -981,7 +987,7 @@ export default function Settings() {
       return min;
     });
 
-     // 3. Process accounts
+    // 3. Process accounts
     const minifiedAccs = payload.accounts.map(a => {
       const min = minifyPayload(a);
       if (min.i) min.i = getTinyId(min.i);
@@ -1040,10 +1046,10 @@ export default function Settings() {
 
     const json = JSON.stringify(finalMinified);
     const base64Data = btoa(unescape(encodeURIComponent(json)));
-    
+
     // Format: SV_ULTRA_[BASE64]_END
     const finalCode = `SV_ULTRA_${base64Data}_END`;
-    
+
     navigator.clipboard.writeText(finalCode).then(() => {
       showAlert(`Ultra-compressed backup code copied (${(finalCode.length / 1024).toFixed(1)} KB).`, 'Success');
     }).catch(() => {
@@ -1075,7 +1081,7 @@ export default function Settings() {
             }
             const json = decodeURIComponent(escape(atob(base64)));
             const ultra = JSON.parse(json);
-            
+
             // Reconstruction pass
             const revMap = Object.fromEntries(Object.entries(ultra._m || {}).map(([k, v]) => [v, k]));
             const expandId = (tiny: any) => (typeof tiny === 'string' && revMap[tiny]) ? revMap[tiny] : tiny;
@@ -1085,7 +1091,7 @@ export default function Settings() {
               }
               return d;
             };
-            
+
             const expanded = expandPayload(ultra);
             expanded.transactions = (expanded.transactions || []).map((t: any) => {
               if (t.id) t.id = expandId(t.id);
@@ -1179,8 +1185,8 @@ export default function Settings() {
   const isPinFormComplete =
     (!isEditingPin) ||
     ((isOldPinVerified || profileForm.oldPin.length === 4) &&
-     profileForm.pin.length === 4 &&
-     profileForm.confirmPin.length === 4);
+      profileForm.pin.length === 4 &&
+      profileForm.confirmPin.length === 4);
 
   const hasProfileChanges =
     isPinFormComplete && (
@@ -1222,7 +1228,7 @@ export default function Settings() {
                 }}
               >
                 <div className="flex align-center gap-3" style={{ flex: 1 }}>
-                  <div 
+                  <div
                     style={{ padding: '0.5rem', margin: '-0.5rem', cursor: 'grab', display: 'flex', alignItems: 'center' }}
                     onTouchStart={e => handleTouchStart(idx, e)}
                     onTouchMove={e => handleTouchMove(idx, e)}
@@ -1459,7 +1465,7 @@ export default function Settings() {
               </div>
             ) : (
               <div className="flex-col gap-3">
-                <button className="btn btn-primary flex align-center justify-center" style={{ padding: '1rem' }} onClick={() => exportBackup(false)}>
+                <button className="btn btn-primary flex align-center justify-center" style={{ padding: '0.9rem' }} onClick={() => exportBackup(false)}>
                   <Download size={20} style={backupActionIconStyle} /> Save to Downloads
                 </button>
                 <button className="btn btn-secondary flex align-center justify-center" style={{ padding: '0.9rem' }} onClick={() => exportBackup(true)}>
@@ -1490,7 +1496,7 @@ export default function Settings() {
             {showAdvanced && (
               <div className="flex-col gap-2">
                 <p className="text-xs text-muted">Legacy option: copies a Base64 backup code to clipboard. Use only if file export is unavailable.</p>
-                <button className="btn btn-secondary flex align-center justify-center" style={{ padding: '0.8rem' }} onClick={handleCopyBackup}>
+                <button className="btn btn-secondary flex align-center justify-center" style={{ padding: '0.9rem' }} onClick={handleCopyBackup}>
                   <Clipboard size={16} style={backupActionIconStyle} /> Copy to Clipboard
                 </button>
               </div>
@@ -1545,15 +1551,15 @@ export default function Settings() {
                     </div>
                   </div>
                 </div>
-                <button className="btn btn-primary flex align-center justify-center" style={{ padding: '1rem', background: 'var(--success)' }} onClick={confirmImport}>
+                <button className="btn btn-primary flex align-center justify-center" style={{ padding: '0.9rem', background: 'var(--success)' }} onClick={confirmImport}>
                   <Check size={20} style={backupActionIconStyle} /> Restore This Backup
                 </button>
-                <button className="btn btn-secondary" style={{ padding: '0.8rem' }} onClick={() => { setImportPreview(null); setImportError(null); }}>
+                <button className="btn btn-secondary" style={{ padding: '0.9rem' }} onClick={() => { setImportPreview(null); setImportError(null); }}>
                   Choose Different File
                 </button>
               </div>
             ) : (
-              <button className="btn btn-primary flex align-center justify-center" style={{ padding: '1rem' }} onClick={() => importFileRef.current?.click()}>
+              <button className="btn btn-primary flex align-center justify-center" style={{ padding: '0.9rem' }} onClick={() => importFileRef.current?.click()}>
                 <Upload size={20} style={backupActionIconStyle} /> Choose Backup File
               </button>
             )}
@@ -1581,7 +1587,7 @@ export default function Settings() {
                 />
                 <button
                   className="btn btn-secondary"
-                  style={{ padding: '0.8rem' }}
+                  style={{ padding: '0.9rem' }}
                   onClick={() => handleClipboardImport(clipboardText)}
                   disabled={!clipboardText.trim()}
                 >
@@ -2099,7 +2105,9 @@ export default function Settings() {
     );
   } else if (activeView === 'commodity') {
     // Vendor (price reference) only — the Gemini key and its daily usage live under AI Features.
-    const vendorDirty = geminiVendorInput.trim() !== getCommodityVendor();
+    const storedVendor = getCommodityVendor();
+    const effectiveInputVendor = geminiVendorInput.trim().toUpperCase() || 'MMTC-PAMP';
+    const vendorDirty = effectiveInputVendor !== storedVendor;
     viewContent = (
       <SubviewWrapper title="Commodity Prices" onBack={() => setActiveView('main')}>
         <div className="flex-col gap-4">
@@ -2124,6 +2132,34 @@ export default function Settings() {
                 autoCorrect="off"
                 spellCheck={false}
               />
+              <div className="flex align-center flex-wrap" style={{ marginTop: '0.75rem', gap: '0.85rem', paddingBottom: '0.25rem' }}>
+                <span className="text-xs text-muted" style={{ fontSize: '0.72rem', fontWeight: 600 }}>Popular:</span>
+                {POPULAR_COMMODITY_VENDORS.map(v => {
+                  const isSelected = effectiveInputVendor === v && geminiVendorInput.trim() !== '';
+                  return (
+                    <button
+                      key={v}
+                      type="button"
+                      className="btn btn-secondary text-xs"
+                      style={{
+                        padding: '0.35rem 0.75rem',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                        fontFamily: 'var(--font-mono)',
+                        borderRadius: '4px',
+                        boxShadow: '3px 3px 0 #000',
+                        border: isSelected ? '1px solid var(--accent)' : '1px solid var(--border-color)',
+                        backgroundColor: isSelected ? 'var(--accent)' : 'var(--bg-hover)',
+                        color: isSelected ? '#ffffff' : 'var(--text-primary)',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => setGeminiVendorInput(v)}
+                    >
+                      {v}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <span className="text-xs text-muted">
               Prices are approximate AI estimates (may lag the live rate). Set a manual ₹/g on any commodity account for exact valuation.
@@ -2232,57 +2268,57 @@ export default function Settings() {
                   }}
                 />
                 {Capacitor.getPlatform() === 'android' && (
-                <GridToggleButton
-                  icon={Sparkles}
-                  label="Auto-Log SMS"
-                  active={!!data.user?.autoLogSms} 
-                  onClick={async () => {
-                    // Turning OFF — just disable, no prompts.
-                    if (data.user?.autoLogSms) {
-                      updateUser({ ...data.user!, autoLogSms: false });
-                      return;
-                    }
-
-                    // Local "background alerts" rationale dialog → requests the notification permission.
-                    // Shared by the first-run grant flow and the re-enable path below.
-                    const offerNotificationAlerts = () => {
-                      setConfirmConfig({
-                        title: "Notification Alerts",
-                        message: "Would you also like to receive push-style local alerts when new transactions are auto-detected in the background?",
-                        confirmLabel: "Enable Alerts",
-                        cancelLabel: "Skip",
-                        onConfirm: async () => {
-                          try {
-                            if (Capacitor.isNativePlatform()) {
-                              await SmsReader.requestPermissions({ permissions: ['notifications'] });
-                            }
-                          } catch (e) {
-                            console.error("Notification permission skipped/failed:", e);
-                          }
-                          setConfirmConfig(null);
-                        }
-                      });
-                    };
-
-                    // Turning ON. If SMS permission was already granted in a prior session (e.g. the
-                    // user toggled this off and is now re-enabling), the OS won't re-prompt — so skip
-                    // the SMS rationale dialog and just re-enable silently. Still re-offer notification
-                    // alerts when that permission isn't granted yet, so a first-run "Skip" isn't permanent.
-                    try {
-                      if (Capacitor.isNativePlatform()) {
-                        const status = await SmsReader.checkPermissions();
-                        if (status.sms === 'granted') {
-                          updateUser({ ...data.user!, autoLogSms: true });
-                          if (status.notifications !== 'granted') offerNotificationAlerts();
-                          return;
-                        }
+                  <GridToggleButton
+                    icon={Sparkles}
+                    label="Auto-Log SMS"
+                    active={!!data.user?.autoLogSms}
+                    onClick={async () => {
+                      // Turning OFF — just disable, no prompts.
+                      if (data.user?.autoLogSms) {
+                        updateUser({ ...data.user!, autoLogSms: false });
+                        return;
                       }
-                    } catch (e) {
-                      console.error("SMS permission check failed:", e);
-                    }
 
-                    setConfirmConfig({
-                      title: "SMS Permissions",
+                      // Local "background alerts" rationale dialog → requests the notification permission.
+                      // Shared by the first-run grant flow and the re-enable path below.
+                      const offerNotificationAlerts = () => {
+                        setConfirmConfig({
+                          title: "Notification Alerts",
+                          message: "Would you also like to receive push-style local alerts when new transactions are auto-detected in the background?",
+                          confirmLabel: "Enable Alerts",
+                          cancelLabel: "Skip",
+                          onConfirm: async () => {
+                            try {
+                              if (Capacitor.isNativePlatform()) {
+                                await SmsReader.requestPermissions({ permissions: ['notifications'] });
+                              }
+                            } catch (e) {
+                              console.error("Notification permission skipped/failed:", e);
+                            }
+                            setConfirmConfig(null);
+                          }
+                        });
+                      };
+
+                      // Turning ON. If SMS permission was already granted in a prior session (e.g. the
+                      // user toggled this off and is now re-enabling), the OS won't re-prompt — so skip
+                      // the SMS rationale dialog and just re-enable silently. Still re-offer notification
+                      // alerts when that permission isn't granted yet, so a first-run "Skip" isn't permanent.
+                      try {
+                        if (Capacitor.isNativePlatform()) {
+                          const status = await SmsReader.checkPermissions();
+                          if (status.sms === 'granted') {
+                            updateUser({ ...data.user!, autoLogSms: true });
+                            if (status.notifications !== 'granted') offerNotificationAlerts();
+                            return;
+                          }
+                        }
+                      } catch (e) {
+                        console.error("SMS permission check failed:", e);
+                      }
+
+                      setConfirmConfig({
+                        title: "SMS Permissions",
                         message: "SpendVault only reads financial SMS from banks to help you log spends automatically. No personal messages are ever accessed or uploaded. Grant SMS permission?",
                         confirmLabel: "Grant Permission",
                         onConfirm: async () => {
@@ -2293,7 +2329,7 @@ export default function Settings() {
                               setConfirmConfig(null);
                               return;
                             }
-                            
+
                             // 1. Request SMS permission first
                             const result = await SmsReader.requestPermissions();
                             if (result.sms === 'granted') {
@@ -2313,8 +2349,8 @@ export default function Settings() {
                           }
                         }
                       });
-                  }}
-                />
+                    }}
+                  />
                 )}
                 <GridToggleButton
                   icon={geminiKeySaved ? Bot : BotOff}

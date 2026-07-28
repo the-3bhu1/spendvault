@@ -93,6 +93,7 @@ const REVERSE_MAP: Record<string, string> = Object.fromEntries(
 
 // Recursively rename keys to their short codes (unmapped keys keep their full name).
 export const minifyPayload = (obj: any): any => {
+  if (typeof obj === 'string') return obj.trim();
   if (Array.isArray(obj)) return obj.map(minifyPayload);
   if (obj !== null && typeof obj === 'object') {
     const minified: any = {};
@@ -107,6 +108,7 @@ export const minifyPayload = (obj: any): any => {
 
 // Recursively restore short codes back to their full key names (unknown codes pass through).
 export const expandPayload = (obj: any): any => {
+  if (typeof obj === 'string') return obj.trim();
   if (Array.isArray(obj)) return obj.map(expandPayload);
   if (obj !== null && typeof obj === 'object') {
     const expanded: any = {};

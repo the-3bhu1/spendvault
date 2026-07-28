@@ -297,7 +297,7 @@ export default function Splits() {
           title="Create Split Event" 
           onBack={() => setActiveView('main')}
           footer={
-            <button className="btn btn-primary w-100" style={{ padding: '1rem' }} onClick={handleCreateEvent}>
+            <button className="btn btn-primary w-100" style={{ padding: '0.9rem' }} onClick={handleCreateEvent}>
               Create Event
             </button>
           }
