@@ -44,14 +44,19 @@ function StatRow({ label, value, color }: { label: string; value: string; color?
   );
 }
 
-// We hide the 1-day return only on the day's FIRST Portfolio load (when the cached figure is
-// either yesterday's — stale — or not yet fully fetched). We track that by persisting the day
-// of the last successful refresh; same-day reopens skip the hide and show the cached value.
-const PORTFOLIO_REFRESH_DAY_KEY = 'portfolio_last_refresh_day';
-const currentDayStr = () => {
+// We hide the 1-day return only on the day's FIRST Wealth load (when the cached figure is
+// shown), because the market didn't move — we just re-rendered the baseline. Once the user
+// taps "Refresh", we calculate the actual change from the API response and display it.
+const WEALTH_REFRESH_DAY_KEY = 'wealth_last_refresh_day';
+
+function currentDayStr(): string {
   const d = new Date();
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-};
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function hasRefreshedToday(): boolean {
+  try { return localStorage.getItem(WEALTH_REFRESH_DAY_KEY) === currentDayStr(); } catch { return false; }
+}
 
 export function Wealth() {
   const { data } = useFinance();
