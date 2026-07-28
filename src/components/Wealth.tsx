@@ -89,14 +89,14 @@ export function Wealth() {
   // persisted day), the cached value is current + complete, so seed this true and show it
   // immediately on remount/reopen — and keep it on screen through later manual refreshes.
   const [hasRefreshed, setHasRefreshed] = useState(() => {
-    try { return localStorage.getItem(PORTFOLIO_REFRESH_DAY_KEY) === currentDayStr(); } catch { return false; }
+    try { return localStorage.getItem(WEALTH_REFRESH_DAY_KEY) === currentDayStr(); } catch { return false; }
   });
   // Seed from the cached fetch time so "Last refresh at" shows immediately (no blink) — but only
   // when we've already refreshed today. On the day's first load the cached fetchedAt is
   // yesterday's, which would show a misleading HH:MM, so stay hidden until the fresh refresh.
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(() => {
     try {
-      if (localStorage.getItem(PORTFOLIO_REFRESH_DAY_KEY) !== currentDayStr()) return null;
+      if (localStorage.getItem(WEALTH_REFRESH_DAY_KEY) !== currentDayStr()) return null;
       const syms = (data?.accounts || [])
         .filter((a: Account) => (a.type === 'stocks' || a.type === 'mutual_funds') && a.marketSymbol)
         .map((a: Account) => a.marketSymbol!);
@@ -225,7 +225,7 @@ export function Wealth() {
       setPrevPrices(prev => ({ ...prev, ...newPrevPrices }));
       // Mark that we've done a full refresh today, so the next same-day load shows the cached
       // 1-day return immediately instead of hiding it.
-      try { localStorage.setItem(PORTFOLIO_REFRESH_DAY_KEY, currentDayStr()); } catch {}
+      try { localStorage.setItem(WEALTH_REFRESH_DAY_KEY, currentDayStr()); } catch {}
     } catch (e: any) {
       console.error('Failed to refresh prices:', e);
       setError(`Price refresh failed: ${e?.message || 'Unknown error'}`);
