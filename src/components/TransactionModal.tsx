@@ -5,7 +5,7 @@ import CustomDatePicker from './CustomDatePicker';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account } from '../types';
 import { CustomPicker } from './CustomPicker';
-import { getCategoryIcon, getAccountTypeIcon } from './transactionIcons';
+import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, sortByAccountType } from './transactionIcons';
 import { getBillingCycleForDate } from '../utils';
 
 // DUPLICATE MODAL WARNING: this is a separate, independent implementation of the
@@ -411,6 +411,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             label="Account" 
             value={newTx.accountId || ''} 
             placeholder="Select an account" 
+            defaultCollapsed={true}
             options={data.accounts
               .filter(acc => {
                 // Hide archived (deleted) accounts from selection, but keep the one already on this
@@ -430,8 +431,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 }
                 return true;
               })
-              .sort((a, b) => (a.archived ? 1 : 0) - (b.archived ? 1 : 0))
-              .map(acc => ({ id: acc.id, name: acc.archived ? `${acc.name} (deleted)` : acc.name, subtext: acc.type.replace('_', ' ') }))
+              .sort(sortByAccountType)
+              .map(acc => ({ id: acc.id, name: acc.archived ? `${acc.name} (deleted)` : acc.name, subtext: acc.type.replace('_', ' '), group: getAccountGroupLabel(acc.type, acc.archived) }))
             }
             onChange={val => {
               const isMf = newTx.category?.toLowerCase() === 'mutual funds';
@@ -597,7 +598,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           })()}
 
           {!editId && ((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') || isCCPayment || (newTx.category?.toLowerCase() === 'mutual funds' || newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity')) && (
-            <CustomPicker label={(newTx.category?.toLowerCase() === 'mutual funds' || newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity') ? (newTx.type === 'debit' ? 'Credit To Investment Account' : 'Debit From Account') : (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' ? 'Debit From Account (Auto-Debit)' : 'Pay To Card (Auto-Credit)')} value={paymentSourceAccountId} placeholder="None (Manual Log)" options={[{ id: '', name: 'None (Manual Log)' }, ...data.accounts.filter(a => {
+            <CustomPicker label={(newTx.category?.toLowerCase() === 'mutual funds' || newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity') ? (newTx.type === 'debit' ? 'Credit To Investment Account' : 'Debit From Account') : (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' ? 'Debit From Account (Auto-Debit)' : 'Pay To Card (Auto-Credit)')} value={paymentSourceAccountId} placeholder="None (Manual Log)" defaultCollapsed={true} options={[{ id: '', name: 'None (Manual Log)' }, ...[...data.accounts].sort(sortByAccountType).filter(a => {
               if (a.id === newTx.accountId) return false;
               if (a.archived) return false; // this picker only shows for new transactions
 
@@ -611,7 +612,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 return newTx.type === 'debit' ? a.type === 'commodity' : (a.type === 'bank_account' || a.type === 'e_wallet');
               }
               return true;
-            }).map(acc => ({ id: acc.id, name: acc.name, subtext: acc.type.replace('_', ' ') }))]} onChange={val => {
+            }).map(acc => ({ id: acc.id, name: acc.name, subtext: acc.type.replace('_', ' '), group: getAccountGroupLabel(acc.type, acc.archived) }))]} onChange={val => {
               setPaymentSourceAccountId(val);
               const isMf = newTx.category?.toLowerCase() === 'mutual funds';
               const isStock = newTx.category?.toLowerCase() === 'stocks';

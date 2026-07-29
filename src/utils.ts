@@ -1,27 +1,31 @@
 import { format, parseISO, addMonths, subMonths, addDays, addWeeks, addQuarters, addYears, setDate, isAfter, isBefore, startOfDay } from 'date-fns';
 import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitEvent, SplitCycle, SplitItem, RecurringFrequency } from './types';
 
-// The canonical mutual-fund category name. It was previously "SIP" (and before that
-// "SIP / Mutual Funds") — a SIP is only one way to buy, and the account type is really a
-// mutual-fund holding, so the category is now named after the asset. Stored data is migrated on
-// load (see FinanceContext), but isMutualFundCategory() also accepts the legacy spellings so a
-// freshly-imported OLD backup and any un-migrated row still classify correctly.
-// Always compare through the helper, never a bare string.
-export const MUTUAL_FUNDS_CATEGORY = 'Mutual Funds';
-const MUTUAL_FUND_CATEGORY_ALIASES = new Set([
-  MUTUAL_FUNDS_CATEGORY.toLowerCase(),
+// The canonical investment category name. Investment transactions (mutual funds, stocks,
+// commodities, SIPs) are consolidated under "Investments". Stored data is migrated on load
+// (see FinanceContext), but isInvestmentCategory() also accepts legacy category spellings.
+export const INVESTMENT_CATEGORY = 'Investments';
+export const MUTUAL_FUNDS_CATEGORY = INVESTMENT_CATEGORY; // Legacy alias
+
+const INVESTMENT_CATEGORY_ALIASES = new Set([
+  INVESTMENT_CATEGORY.toLowerCase(),
+  'investment',
+  'mutual funds',
+  'stocks',
+  'commodity',
   'sip',
   'sip / mutual funds',
 ]);
-export const isMutualFundCategory = (category?: string) =>
-  MUTUAL_FUND_CATEGORY_ALIASES.has((category || '').toLowerCase());
+export const isInvestmentCategory = (category?: string) =>
+  INVESTMENT_CATEGORY_ALIASES.has((category || '').toLowerCase());
+export const isMutualFundCategory = isInvestmentCategory; // Legacy alias
 
 // Categories that never count toward Spends/Income stats: pure ledger movements (transfers, CC bill
-// payments, NCMC recharges), investments tracked separately (mutual funds/stocks/commodity), and
+// payments, NCMC recharges), investments tracked separately (investments, mutual funds/stocks/commodity), and
 // lending & borrowing (money lent out or borrowed isn't a real spend/income — it's expected back).
 // Single source of truth so every stats surface (Dashboard, Insights, Transactions) stays in sync.
 export const STATS_EXCLUDED_CATEGORIES = new Set([
-  'transfer', 'cc payment', 'ncmc travel recharge', 'mutual funds', 'sip', 'stocks', 'commodity', 'lending & borrowing'
+  'transfer', 'cc payment', 'ncmc travel recharge', 'investments', 'investment', 'mutual funds', 'sip', 'stocks', 'commodity', 'lending & borrowing'
 ]);
 export const isStatsExcludedCategory = (category: string) =>
   STATS_EXCLUDED_CATEGORIES.has((category || '').toLowerCase());
@@ -432,3 +436,67 @@ export const migrateEventToCycles = (event: SplitEvent): SplitEvent => {
     currentCycleId: cycle1.id,
   };
 };
+
+export const CATEGORY_PALETTE = [
+  '#38bdf8', // Sky Blue
+  '#f59e0b', // Amber Gold
+  '#10b981', // Emerald Green
+  '#ef4444', // Crimson Red
+  '#a855f7', // Vivid Purple
+  '#eab308', // Electric Yellow
+  '#ec4899', // Hot Pink
+  '#84cc16', // Lime Green
+  '#6366f1', // Deep Indigo
+  '#f97316', // Flame Orange
+  '#d946ef', // Bright Fuchsia
+  '#94a3b8', // Cool Slate
+];
+
+export const ACCOUNT_PALETTE = [
+  '#a855f7', // Vivid Purple
+  '#f59e0b', // Amber Gold
+  '#38bdf8', // Sky Blue
+  '#ec4899', // Hot Pink
+  '#10b981', // Emerald Green
+  '#ef4444', // Crimson Red
+  '#eab308', // Electric Yellow
+  '#6366f1', // Deep Indigo
+  '#f97316', // Flame Orange
+  '#84cc16', // Lime Green
+  '#d946ef', // Bright Fuchsia
+  '#94a3b8', // Cool Slate
+];
+
+/**
+ * Returns an array of `count` colors from `palette` guaranteed to be completely unique
+ * when count <= palette.length, or without adjacent/wrap-around collisions when count > palette.length.
+ */
+export function getDistinctChartColors(count: number, palette: string[]): string[] {
+  if (count <= 0) return [];
+  const P = palette.length;
+
+  if (count <= P) {
+    return palette.slice(0, count);
+  }
+
+  const result: string[] = [];
+  for (let i = 0; i < count; i++) {
+    let idx = i % P;
+
+    // Check wrap-around collision with element 0 when i is the last slice
+    if (i === count - 1 && idx === 0) {
+      idx = (idx + 1) % P;
+    }
+
+    // Check adjacent collision with element (i - 1)
+    if (i > 0 && result[i - 1] === palette[idx]) {
+      idx = (idx + 1) % P;
+      if (i === count - 1 && palette[idx] === result[0]) {
+        idx = (idx + 1) % P;
+      }
+    }
+
+    result.push(palette[idx]);
+  }
+  return result;
+}

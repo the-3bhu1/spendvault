@@ -22,6 +22,7 @@ interface CustomPickerProps {
   isMulti?: boolean;
   noSelectionLabel?: string;
   style?: React.CSSProperties;
+  defaultCollapsed?: boolean;
 }
 
 export function CustomPicker({
@@ -36,7 +37,8 @@ export function CustomPicker({
   allowTextWrap = false,
   isMulti = false,
   noSelectionLabel = 'All',
-  style = {}
+  style = {},
+  defaultCollapsed = false
 }: CustomPickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const valueArray = isMulti ? (Array.isArray(value) ? value : (value ? [value] : [])) : [value];
@@ -47,12 +49,35 @@ export function CustomPicker({
   const firstGroup = uniqueGroups[0] || '';
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
+  useEffect(() => {
+    if (!isOpen) {
+      setCollapsedGroups({});
+    }
+  }, [isOpen]);
+
+  const flatListThreshold = 7;
+  const groupCollapseThreshold = 4;
+
+  // If total options (excluding 'all' or empty placeholders) is <= 7, render as a flat list
+  const isFlatList = options.filter(o => o.id !== 'all' && o.id !== '').length <= flatListThreshold;
+
   const isGroupExpanded = (g?: string) => {
-    if (!g) return true;
+    if (!g || isFlatList) return true;
     if (collapsedGroups[g] !== undefined) {
       return !collapsedGroups[g];
     }
-    return g === firstGroup || selectedOption?.group === g;
+    // Archived Accounts section should always be collapsed by default unless containing active selection
+    if (g === 'Archived Accounts') {
+      return selectedOption?.group === g;
+    }
+    // Count items in group g
+    const itemsInGroup = options.filter(o => o.group === g).length;
+    // If group has fewer than 4 items, start expanded
+    if (itemsInGroup < groupCollapseThreshold) {
+      return true;
+    }
+    // For groups with >= 4 items, expand if it contains the selected option
+    return selectedOption?.group === g;
   };
 
   useEffect(() => {
@@ -62,6 +87,13 @@ export function CustomPicker({
     if (isOpen) window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen]);
+
+  // Guarantee Archived Accounts options are always placed at the end after all active options
+  const sortedPickerOptions = React.useMemo(() => {
+    const activeOpts = options.filter(o => o.group !== 'Archived Accounts');
+    const archivedOpts = options.filter(o => o.group === 'Archived Accounts');
+    return [...activeOpts, ...archivedOpts];
+  }, [options]);
 
   const pickerContent = isOpen ? (
     <div className="bottom-sheet-overlay" onClick={() => setIsOpen(false)}>
@@ -80,8 +112,8 @@ export function CustomPicker({
         }}>
           {(() => {
             let lastGroup = '';
-            return options.map(opt => {
-              const showHeader = opt.group && opt.group !== lastGroup;
+            return sortedPickerOptions.map(opt => {
+              const showHeader = !isFlatList && opt.group && opt.group !== lastGroup;
               if (opt.group) {
                 lastGroup = opt.group;
               }

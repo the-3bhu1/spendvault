@@ -7,7 +7,7 @@ import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, Spar
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
-import { getCategoryIcon, getAccountTypeIcon } from './transactionIcons';
+import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, sortByAccountType } from './transactionIcons';
 
 const isCountableTransaction = (tx: Transaction) => {
   const catLower = (tx.category || '').toLowerCase();
@@ -1276,7 +1276,7 @@ export default function Transactions() {
             </button>
             {isFilterActive && (
               <button
-                className="btn btn-primary"
+                className="btn btn-secondary"
                 onClick={clearFilters}
                 style={{ fontWeight: 800, letterSpacing: '1px' }}
               >
@@ -1459,13 +1459,19 @@ export default function Transactions() {
                 hideLabel={true}
                 value={filterAccountId}
                 isMulti={true}
+                defaultCollapsed={true}
                 options={[
                   { id: 'all', name: 'All Accounts' },
                   // Keep archived accounts here so their history is still filterable, just labelled
                   // and pushed to the end of the list.
-                  ...[...data.accounts]
-                    .sort((a, b) => (a.archived ? 1 : 0) - (b.archived ? 1 : 0) || sortByAccountType(a, b))
-                    .map(a => ({ id: a.id, name: a.archived ? `${a.name} (deleted)` : a.name }))
+                  ...data.accounts
+                    .filter(a => !a.archived)
+                    .sort((a, b) => sortByAccountType(a, b))
+                    .map(a => ({ id: a.id, name: a.name, group: getAccountGroupLabel(a.type, false) })),
+                  ...data.accounts
+                    .filter(a => a.archived)
+                    .sort((a, b) => sortByAccountType(a, b))
+                    .map(a => ({ id: a.id, name: `${a.name} (deleted)`, group: 'Archived Accounts' }))
                 ]}
                 onChange={setFilterAccountId}
                 iconGetter={(id) => id === 'all' ? <Wallet size={18} /> : getAccountIcon(id)}
@@ -1901,8 +1907,9 @@ export default function Transactions() {
                 label="Account"
                 value={newTx.accountId || ''}
                 placeholder="Select an account"
+                defaultCollapsed={true}
                 options={[...data.accounts]
-                  .sort((a, b) => (a.archived ? 1 : 0) - (b.archived ? 1 : 0) || sortByAccountType(a, b))
+                  .sort(sortByAccountType)
                   .filter(acc => {
                     // Hide archived (deleted) accounts, but keep the one already on this transaction
                     // so editing historical data doesn't blank the field (sorted to the end).
@@ -1924,7 +1931,8 @@ export default function Transactions() {
                   .map(acc => ({
                     id: acc.id,
                     name: acc.archived ? `${acc.name} (deleted)` : acc.name,
-                    subtext: acc.type.replace('_', ' ')
+                    subtext: acc.type.replace('_', ' '),
+                    group: getAccountGroupLabel(acc.type, acc.archived)
                   }))}
                 onChange={val => {
                   const selectedAcc = data.accounts.find(a => a.id === val);
@@ -2272,6 +2280,7 @@ export default function Transactions() {
                     }
                     value={paymentSourceAccountId}
                     placeholder="None (Manual Log)"
+                    defaultCollapsed={true}
                     options={[
                       { id: '', name: 'None (Manual Log)' },
                       ...[...data.accounts].sort(sortByAccountType).filter(a => {
@@ -2293,8 +2302,9 @@ export default function Transactions() {
                         return true;
                       }).map(acc => ({
                         id: acc.id,
-                        name: acc.name,
-                        subtext: acc.type.replace('_', ' ')
+                        name: acc.archived ? `${acc.name} (deleted)` : acc.name,
+                        subtext: acc.type.replace('_', ' '),
+                        group: getAccountGroupLabel(acc.type, acc.archived)
                       }))
                     ]}
                     onChange={(val) => {

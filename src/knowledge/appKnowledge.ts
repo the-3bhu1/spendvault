@@ -90,14 +90,9 @@ deleting one keeps the legs in sync / removes them together. By category:
   billing cycle (current or previous statement).
   - With a reward split: if reward points are used toward the payment, a THIRD leg debits the rewards
     account for the points used; the bank leg covers the rest.
-- Mutual Funds: logging a mutual-fund investment (a SIP instalment or a lumpsum purchase). Credits
-  the mutual fund account with the allotted amount and debits the paying bank account for (allotted
-  amount + any charges). This category was previously named "SIP"; existing transactions are migrated
-  automatically.
-- Stocks: credits the stock account with the shares and debits the paying account for the cost
-  (+ charges).
-- Commodity: credits the commodity account with the grams and debits the paying account for the
-  rupee amount.
+- Investments: logging an investment purchase (mutual funds SIP / lumpsum, stocks, or commodities). Credits
+  the investment account with the holdings/units/grams and debits the paying bank account for the cost
+  (+ charges). Legacy categories ("Mutual Funds", "Stocks", "Commodity", "SIP") are consolidated under "Investments".
 - Cashback (instant): on a debit with instant cashback, an extra credit posts to the chosen rewards
   account (category "Cashback").
 - Cashback (delayed): see Rewards & Offers — confirming realized cashback posts a "Cashback" credit
@@ -111,7 +106,7 @@ row by its handle to reorder; "Other/Misc" always stays last). Set or change a m
 category in the Insights screen (not Settings), which shows actual-vs-budget progress. Deleting a
 category leaves existing transactions with their old category text.
 System categories (internal bookkeeping, EXCLUDED from spend totals so transfers/payments/investments
-don't look like spending): Transfer, CC Payment, NCMC Travel Recharge, Mutual Funds, Stocks, Commodity, and
+don't look like spending): Transfer, CC Payment, NCMC Travel Recharge, Investments, and
 Lending & Borrowing. Lending & Borrowing is auto-excluded from both Spends and Income everywhere
 (Dashboard, Insights, Ask Vault) because money lent out or borrowed is expected to be returned — it's
 not a real spend or income. The "Cashback" category is a credit (income into a rewards/account), not spend.

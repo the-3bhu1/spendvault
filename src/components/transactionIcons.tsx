@@ -24,10 +24,7 @@ export const getCategoryIcon = (category: string, size = 17) => {
   if (cat.includes('rent')) return <Home size={size} />;
   if (cat.includes('loan')) return <Handshake size={size} />;
   if (cat.includes('cashback')) return <Gift size={size} />;
-  // 'sip' kept so a custom/legacy category still spelled that way keeps its icon.
-  if (cat.includes('mutual fund') || cat.includes('sip')) return <ChartNoAxesCombined size={size} />;
-  if (cat.includes('stocks')) return <ChartCandlestick size={size} />;
-  if (cat.includes('commodity')) return <Gem size={size} />;
+  if (cat.includes('invest') || cat.includes('mutual fund') || cat.includes('sip') || cat.includes('stock') || cat.includes('commodity')) return <TrendingUp size={size} />;
   if (cat.includes('lend') || cat.includes('borrow')) return <HandCoins size={size} />;
   if (cat.includes('miscellaneous') || cat.includes('other')) return <MoreHorizontal size={size} />;
   return <Coins size={size} />;
@@ -78,9 +75,48 @@ export const getAccountTypeIcon = (type: string, size = 18) => {
     case 'stocks':
     case 'investment':
       return <TrendingUp size={size} />;
-    case 'commodity':
-      return <Medal size={size} />;
     default:
       return <Wallet size={size} />;
   }
 };
+
+export const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+  bank_account: 'Bank Accounts',
+  credit_card: 'Credit Cards',
+  debit_card: 'Debit Cards',
+  cash: 'Physical Cash',
+  e_wallet: 'E-Wallets',
+  rewards: 'Rewards & Cashback',
+  epf: 'EPF (Provident Fund)',
+  stocks: 'Stocks & Investments',
+  mutual_funds: 'Mutual Funds',
+  commodity: 'Commodities'
+};
+
+export const ACCOUNT_TYPE_ORDER: Record<string, number> = {
+  bank_account: 0,
+  credit_card: 1,
+  debit_card: 2,
+  cash: 3,
+  e_wallet: 4,
+  rewards: 5,
+  epf: 6,
+  stocks: 7,
+  mutual_funds: 8,
+  commodity: 9
+};
+
+export const getAccountGroupLabel = (type: string, archived?: boolean): string => {
+  if (archived) return 'Archived Accounts';
+  return ACCOUNT_TYPE_LABELS[type] || type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+};
+
+export const sortByAccountType = (a: { type: string; archived?: boolean }, b: { type: string; archived?: boolean }) => {
+  const isArchivedA = !!a.archived;
+  const isArchivedB = !!b.archived;
+  if (isArchivedA !== isArchivedB) return isArchivedA ? 1 : -1;
+  const orderA = ACCOUNT_TYPE_ORDER[a.type] ?? 99;
+  const orderB = ACCOUNT_TYPE_ORDER[b.type] ?? 99;
+  return orderA - orderB;
+};
+

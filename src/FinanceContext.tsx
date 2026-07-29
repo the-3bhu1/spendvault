@@ -3,7 +3,7 @@ import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitE
 import { BUILT_IN_ACCOUNT_TYPES } from './types';
 import { classifySmsIsTransaction } from './services/GeminiService';
 import { clearChatHistory } from './services/ChatHistoryService';
-import { MUTUAL_FUNDS_CATEGORY } from './utils';
+import { INVESTMENT_CATEGORY, isInvestmentCategory } from './utils';
 
 export interface PendingTransfer {
   fromAccountId: string;
@@ -129,7 +129,7 @@ function normalizeTransactionOrders(transactions: Transaction[]): Transaction[] 
   });
   return changed ? result : transactions;
 }
-const DEFAULT_CATEGORIES = ['Food', 'Shopping', 'Income', 'Salary', 'Rent', 'Travel', 'Bills', 'Entertainment', 'CC Payment', 'Loans', 'Lending & Borrowing', 'NCMC Travel Recharge', 'Cashback', 'Mutual Funds', 'Stocks', 'Commodity', 'Other/Miscellaneous'];
+const DEFAULT_CATEGORIES = ['Food', 'Shopping', 'Income', 'Salary', 'Rent', 'Travel', 'Bills', 'Entertainment', 'CC Payment', 'Loans', 'Lending & Borrowing', 'NCMC Travel Recharge', 'Cashback', 'Investments', 'Other/Miscellaneous'];
 const DEFAULT_CUSTOM_ACCOUNT_TYPES: string[] = [];
 const DEFAULT_TAGS: string[] = [];
 
@@ -350,27 +350,35 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           }
         });
 
-        // Migration: the mutual-fund category has been renamed twice — 'SIP / Mutual Funds' -> 'SIP'
-        // -> 'Mutual Funds'. Rename IN PLACE so the user's category ordering survives, then de-dupe
-        // in case a vault somehow carries both spellings.
+        // Migration: Consolidate legacy investment categories ('Mutual Funds', 'Stocks', 'Commodity', 'SIP', 'SIP / Mutual Funds')
+        // into a single canonical 'Investments' category.
+        if (parsed.transactions) {
+          parsed.transactions = parsed.transactions.map((tx: any) => {
+            if (isInvestmentCategory(tx.category)) {
+              return { ...tx, category: INVESTMENT_CATEGORY };
+            }
+            return tx;
+          });
+        }
+
         if (parsed.categories) {
           parsed.categories = Array.from(new Set(
             parsed.categories.map((c: string) =>
-              (c === 'SIP / Mutual Funds' || c === 'SIP') ? MUTUAL_FUNDS_CATEGORY : c
+              isInvestmentCategory(c) ? INVESTMENT_CATEGORY : c
             )
           ));
         }
 
-        // Category budgets are keyed by category NAME, so they must be re-keyed alongside the rename
-        // or the user's mutual-fund budget would silently detach.
         if (parsed.categoryBudgets) {
-          for (const legacy of ['SIP', 'SIP / Mutual Funds']) {
+          let mergedBudget = parsed.categoryBudgets[INVESTMENT_CATEGORY] || 0;
+          for (const legacy of ['Mutual Funds', 'Stocks', 'Commodity', 'SIP', 'SIP / Mutual Funds']) {
             if (parsed.categoryBudgets[legacy] !== undefined) {
-              if (parsed.categoryBudgets[MUTUAL_FUNDS_CATEGORY] === undefined) {
-                parsed.categoryBudgets[MUTUAL_FUNDS_CATEGORY] = parsed.categoryBudgets[legacy];
-              }
+              mergedBudget = Math.max(mergedBudget, parsed.categoryBudgets[legacy]);
               delete parsed.categoryBudgets[legacy];
             }
+          }
+          if (mergedBudget > 0) {
+            parsed.categoryBudgets[INVESTMENT_CATEGORY] = mergedBudget;
           }
         }
 
@@ -387,15 +395,12 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           if (!parsed.categories.includes('Lending & Borrowing')) {
             parsed.categories.push('Lending & Borrowing');
           }
-          if (!parsed.categories.includes('Mutual Funds')) {
-            parsed.categories.push('Mutual Funds');
+          if (!parsed.categories.includes(INVESTMENT_CATEGORY)) {
+            parsed.categories.push(INVESTMENT_CATEGORY);
           }
-          if (!parsed.categories.includes('Stocks')) {
-            parsed.categories.push('Stocks');
-          }
-          if (!parsed.categories.includes('Commodity')) {
-            parsed.categories.push('Commodity');
-          }
+
+          // Clean up legacy categories if any remain in categories array
+          parsed.categories = parsed.categories.filter((c: string) => c !== 'Mutual Funds' && c !== 'Stocks' && c !== 'Commodity' && c !== 'SIP' && c !== 'SIP / Mutual Funds');
 
           // NOTE for future AI models: Ensure 'Other/Misc' is always at the end
           const miscIndex = parsed.categories.findIndex((c: string) => c.toLowerCase() === 'other/misc' || c.toLowerCase() === 'other/miscellaneous');

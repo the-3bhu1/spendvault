@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useFinance } from '../FinanceContext';
-import { formatCurrency, formatDateString, STATS_EXCLUDED_CATEGORIES } from '../utils';
+import { formatCurrency, formatDateString, STATS_EXCLUDED_CATEGORIES, CATEGORY_PALETTE, ACCOUNT_PALETTE, getDistinctChartColors } from '../utils';
 import { TrendingUp, TrendingDown, Star, Trophy, Calendar, ArrowUpRight, ArrowDownRight, Zap, Activity, Hash, Target, Pencil, Trash2, Check, X } from 'lucide-react';
 
 
@@ -11,8 +11,8 @@ import { CustomPicker } from './CustomPicker';
 
 const isCountableTransaction = (tx: Transaction) => {
   const catLower = (tx.category || '').toLowerCase();
-  // Scenario 1, 2, 3: Transfer, CC Payment, Mutual Funds, NCMC Travel Recharge
-  if (['transfer', 'cc payment', 'mutual funds', 'sip', 'ncmc travel recharge'].includes(catLower)) {
+  // Scenario 1, 2, 3: Transfer, CC Payment, Investments, NCMC Travel Recharge
+  if (['transfer', 'cc payment', 'investments', 'investment', 'mutual funds', 'sip', 'stocks', 'commodity', 'ncmc travel recharge'].includes(catLower)) {
     return false;
   }
   // Scenario 4: Cashback auto log
@@ -28,7 +28,7 @@ const isCountableTransaction = (tx: Transaction) => {
 
 // Categories that aren't discretionary spend, so a monthly budget makes no sense for them.
 const NON_BUDGET_CATEGORIES = new Set([
-  'transfer', 'cc payment', 'ncmc travel recharge', 'mutual funds', 'sip', 'stocks', 'commodity', 'cashback', 'income', 'salary',
+  'transfer', 'cc payment', 'ncmc travel recharge', 'investments', 'investment', 'mutual funds', 'sip', 'stocks', 'commodity', 'cashback', 'income', 'salary',
 ]);
 
 // Categories treated as expected/planned spend — excluded from the Top Category & Biggest
@@ -165,12 +165,14 @@ export default function Insights() {
 
         if (t.type === 'debit' && !isSystemType) {
           spend += effectiveAmount;
-          cat[t.category] = (cat[t.category] || 0) + effectiveAmount;
-          const account = data.accounts.find(a => a.id === t.accountId);
-          acc[account?.name || 'Unknown'] = (acc[account?.name || 'Unknown'] || 0) + effectiveAmount;
-          if (!HIGHLIGHT_EXCLUDED_CATEGORIES.has(t.category.toLowerCase())) {
-            catHighlight[t.category] = (catHighlight[t.category] || 0) + effectiveAmount;
-            if (!biggest || effectiveAmount > (biggest.amount - (biggest.excludedAmount || (biggest.excludeFromStats ? biggest.amount : 0)))) biggest = t;
+          if (effectiveAmount > 0) {
+            cat[t.category] = (cat[t.category] || 0) + effectiveAmount;
+            const account = data.accounts.find(a => a.id === t.accountId);
+            acc[account?.name || 'Unknown'] = (acc[account?.name || 'Unknown'] || 0) + effectiveAmount;
+            if (!HIGHLIGHT_EXCLUDED_CATEGORIES.has(t.category.toLowerCase())) {
+              catHighlight[t.category] = (catHighlight[t.category] || 0) + effectiveAmount;
+              if (!biggest || effectiveAmount > (biggest.amount - (biggest.excludedAmount || (biggest.excludeFromStats ? biggest.amount : 0)))) biggest = t;
+            }
           }
         } else if (t.type === 'credit') {
           income += effectiveAmount;
@@ -343,11 +345,11 @@ export default function Insights() {
   }, [selectedMonth]);
 
 
-  const catPieData = insights ? Object.entries(insights.catSpend).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value) : [];
-  const accPieData = insights ? Object.entries(insights.accSpend).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value) : [];
+  const catPieData = insights ? Object.entries(insights.catSpend).filter(([_, value]) => value > 0).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value) : [];
+  const accPieData = insights ? Object.entries(insights.accSpend).filter(([_, value]) => value > 0).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value) : [];
 
-  const COLORS = ['#38bdf8', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
-  const ACC_COLORS = ['#8b5cf6', '#ec4899', '#f59e0b', '#38bdf8', '#10b981', '#ef4444'];
+  const catColors = useMemo(() => getDistinctChartColors(catPieData.length, CATEGORY_PALETTE), [catPieData.length]);
+  const accColors = useMemo(() => getDistinctChartColors(accPieData.length, ACCOUNT_PALETTE), [accPieData.length]);
 
   return (
     <div className="flex-col gap-6 insights-tab-root">
@@ -776,7 +778,7 @@ export default function Insights() {
                       {catPieData.map((_, index) => (
                         <Cell 
                           key={`cell-${index}`} 
-                          fill={COLORS[index % COLORS.length]} 
+                          fill={catColors[index]} 
                           style={{ 
                             filter: activeCatIndex === index ? 'drop-shadow(0 0 8px rgba(0,0,0,0.2))' : 'none',
                             cursor: 'pointer',
@@ -813,7 +815,7 @@ export default function Insights() {
                 {catPieData.map((entry, index) => {
                   const txCount = insights.monthTxs.filter((t: Transaction) => t.category === entry.name).length;
                   const percentage = ((entry.value / (insights.totalSpend || 1)) * 100).toFixed(1);
-                  const color = COLORS[index % COLORS.length];
+                  const color = catColors[index];
 
                   return (
                     <div 
@@ -872,7 +874,7 @@ export default function Insights() {
                       {accPieData.map((_, index) => (
                         <Cell 
                           key={`acc-cell-${index}`} 
-                          fill={ACC_COLORS[index % ACC_COLORS.length]}
+                          fill={accColors[index]}
                           style={{ 
                             filter: activeAccIndex === index ? 'drop-shadow(0 0 8px rgba(0,0,0,0.2))' : 'none',
                             opacity: activeAccIndex === null || activeAccIndex === index ? 1 : 0.6,
@@ -911,7 +913,7 @@ export default function Insights() {
                   return (account?.name || 'Unknown') === entry.name && t.type === 'debit';
                 }).length;
                 const percentage = ((entry.value / (insights.totalSpend || 1)) * 100).toFixed(1);
-                const color = ACC_COLORS[index % ACC_COLORS.length];
+                const color = accColors[index];
 
                 return (
                   <div 

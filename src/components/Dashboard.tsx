@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useFinance } from '../FinanceContext';
-import { getCurrentMonthStr, formatCurrency, getOrdinalSuffix, getBillingCycleForDate, getLatestBilledCycle, isStatsExcludedCategory } from '../utils';
+import { getCurrentMonthStr, formatCurrency, getOrdinalSuffix, getBillingCycleForDate, getLatestBilledCycle, isStatsExcludedCategory, CATEGORY_PALETTE, ACCOUNT_PALETTE, getDistinctChartColors } from '../utils';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import RollingNumber from './RollingNumber';
 import type { Account } from '../types';
@@ -84,10 +84,11 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
   }, [data, currentMonth]);
 
 
-  const pieData = Object.entries(spendByCategory).map(([name, value]) => ({ name, value }));
-  const accPieData = Object.entries(spendByAccount).map(([name, value]) => ({ name, value }));
-  const COLORS = ['#38bdf8', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
-  const ACC_COLORS = ['#8b5cf6', '#ec4899', '#f59e0b', '#38bdf8', '#10b981', '#ef4444'];
+  const pieData = useMemo(() => Object.entries(spendByCategory).filter(([_, value]) => value > 0).map(([name, value]) => ({ name, value })), [spendByCategory]);
+  const accPieData = useMemo(() => Object.entries(spendByAccount).filter(([_, value]) => value > 0).map(([name, value]) => ({ name, value })), [spendByAccount]);
+
+  const catColors = useMemo(() => getDistinctChartColors(pieData.length, CATEGORY_PALETTE), [pieData.length]);
+  const accColors = useMemo(() => getDistinctChartColors(accPieData.length, ACCOUNT_PALETTE), [accPieData.length]);
 
   return (
     <div className="flex-col gap-6">
@@ -191,7 +192,7 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
                       {pieData.map((_, index) => (
                         <Cell 
                           key={`cell-${index}`} 
-                          fill={COLORS[index % COLORS.length]}
+                          fill={catColors[index]}
                           style={{
                             filter: activeCatIdx === index ? 'drop-shadow(0 0 8px rgba(0,0,0,0.2))' : 'none',
                             opacity: activeCatIdx === null || activeCatIdx === index ? 1 : 0.6,
@@ -250,7 +251,7 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
                       {accPieData.map((_, index) => (
                         <Cell 
                           key={`acc-cell-${index}`} 
-                          fill={ACC_COLORS[index % ACC_COLORS.length]}
+                          fill={accColors[index]}
                           style={{
                             filter: activeAccIdx === index ? 'drop-shadow(0 0 8px rgba(0,0,0,0.2))' : 'none',
                             opacity: activeAccIdx === null || activeAccIdx === index ? 1 : 0.6,

@@ -1,26 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { format } from 'date-fns';
-import { Plus, Users, ChevronRight, Trash2, ReceiptIndianRupee, Check, Search, ChevronDown, Calendar, Edit2, Repeat, ChevronLeft, AlertTriangle, Copy, ArrowRight, ImageDown } from 'lucide-react';
+import { Plus, Users, ChevronRight, Trash2, Check, Search, ChevronDown, Calendar, Edit2, ChevronLeft, ArrowRight, ImageDown } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import ConfirmDialog from './ConfirmDialog';
 import { useFinance } from '../FinanceContext';
-import type { SplitEvent, SplitItem, SplitCycle, RecurringFrequency } from '../types';
-import { generateId, formatDateString, isCycleDue, buildNewCycle, migrateEventToCycles, computeSplitNetBalances, simplifyDebts, splitDisplayName } from '../utils';
+import type { SplitEvent, SplitItem } from '../types';
+import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName } from '../utils';
 import { buildSplitShareImages, blobToBase64 } from '../services/splitImage';
 import { SubviewWrapper } from './SubviewWrapper.tsx';
-import { CustomPicker } from './CustomPicker';
-
-const FREQUENCY_LABELS: Record<RecurringFrequency, string> = {
-  daily: 'Daily',
-  weekly: 'Weekly',
-  monthly: 'Monthly',
-  quarterly: 'Quarterly',
-  yearly: 'Yearly',
-  custom: 'Custom Days'
-};
-
 
 export default function Splits() {
   const { data, addSplitEvent, updateSplitEvent, deleteSplitEvent } = useFinance();
@@ -29,7 +18,7 @@ export default function Splits() {
   // Guards against a double-tap / synthetic touch+click firing the image share twice.
   const sharingImageRef = useRef(false);
 
-  const [newEvent, setNewEvent] = useState({ name: '', people: [] as string[], isRecurring: false, frequency: 'monthly' as RecurringFrequency, customDays: 1, cycleStartDate: format(new Date(), 'yyyy-MM-dd') });
+  const [newEvent, setNewEvent] = useState({ name: '', people: [] as string[] });
   const [newPerson, setNewPerson] = useState('');
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
@@ -65,48 +54,23 @@ export default function Splits() {
   const handleCreateEvent = () => {
     if (!newEvent.name || newEvent.people.length === 0) return;
 
-    // For recurring events, immediately create Cycle 1
-    let cycles: SplitCycle[] | undefined = undefined;
-    let currentCycleId: string | undefined = undefined;
-    if (newEvent.isRecurring) {
-      const cycle1 = buildNewCycle({
-        id: '', name: newEvent.name, people: newEvent.people, items: [],
-        createdAt: Date.now(), isRecurring: true,
-        frequency: newEvent.frequency,
-        customDays: newEvent.frequency === 'custom' ? newEvent.customDays : undefined,
-        cycleStartDate: newEvent.cycleStartDate,
-      });
-      cycles = [cycle1];
-      currentCycleId = cycle1.id;
-    }
-
     const event: SplitEvent = {
       id: generateId(),
       name: newEvent.name,
       people: newEvent.people,
       items: [],
       createdAt: Date.now(),
-      isRecurring: newEvent.isRecurring,
-      frequency: newEvent.isRecurring ? newEvent.frequency : undefined,
-      customDays: (newEvent.isRecurring && newEvent.frequency === 'custom') ? newEvent.customDays : undefined,
-      cycleStartDate: newEvent.isRecurring ? newEvent.cycleStartDate : undefined,
-      cycles,
-      currentCycleId,
     };
     addSplitEvent(event);
-    setNewEvent({ name: '', people: [], isRecurring: false, frequency: 'monthly', customDays: 1, cycleStartDate: format(new Date(), 'yyyy-MM-dd') });
+    setNewEvent({ name: '', people: [] });
     setActiveView('main');
   };
 
-  // Shared by both the text and image share paths. Recurring events keep expenses per cycle;
-  // non-recurring keep them on the event.
   const getShareData = (event: SplitEvent) => {
-    const currentCycle = event.isRecurring ? event.cycles?.find(c => c.id === event.currentCycleId) : undefined;
-    const shareItems = event.isRecurring ? (currentCycle?.items ?? []) : event.items;
+    const shareItems = event.items || [];
     const settlements = simplifyDebts(computeSplitNetBalances(shareItems));
     const totalSpent = shareItems.reduce((s, it) => s + it.amount, 0);
-    const subtitle = event.isRecurring && currentCycle ? `Cycle ${currentCycle.cycleNumber}` : undefined;
-    return { shareItems, settlements, totalSpent, subtitle };
+    return { shareItems, settlements, totalSpent, subtitle: undefined };
   };
 
   const buildSummaryMessage = (event: SplitEvent) => {
@@ -240,10 +204,7 @@ export default function Splits() {
                 if (a.status !== b.status) return a.status === 'settled' ? 1 : -1;
                 return b.createdAt - a.createdAt;
               }).map(event => {
-                const overdue = isCycleDue(event);
-                const currentCycle = event.cycles?.find(c => c.id === event.currentCycleId);
-                const itemsCount = event.isRecurring ? (currentCycle?.items.length ?? 0) : event.items.length;
-                const cycleNum = currentCycle?.cycleNumber;
+                const itemsCount = (event.items || []).length;
 
                 return (
                   <div key={event.id} className="card flex-col gap-4 clickable tour-split-event-card" onClick={() => {
@@ -264,17 +225,6 @@ export default function Splits() {
                         <div className="flex-col">
                           <div className="flex align-center gap-2">
                             <span className="font-bold" style={{ opacity: event.status === 'settled' ? 0.6 : 1 }}>{event.name}</span>
-                            {event.isRecurring && (
-                              <span className="flex align-center gap-1 text-mono font-bold uppercase" style={{ fontSize: '8px', padding: '1px 5px', background: 'rgba(99, 102, 241, 0.1)', color: 'var(--primary-color)', borderRadius: '4px', border: '1px solid rgba(99, 102, 241, 0.2)', letterSpacing: '0.5px' }}>
-                                <Repeat size={10} /> {event.frequency === 'custom' && event.customDays ? `Every ${event.customDays} Days` : (event.frequency ? FREQUENCY_LABELS[event.frequency] : '')}
-                                {cycleNum && <span style={{ marginLeft: '2px', opacity: 0.8 }}>• C{cycleNum}</span>}
-                              </span>
-                            )}
-                            {event.isRecurring && overdue && (
-                              <span className="flex align-center gap-1 text-mono font-bold uppercase" style={{ fontSize: '8px', padding: '1px 5px', background: 'rgba(251,191,36,0.1)', color: 'var(--warning)', borderRadius: '4px', border: '1px solid rgba(251,191,36,0.2)', letterSpacing: '0.5px' }}>
-                                Cycle Due
-                              </span>
-                            )}
                             {event.status === 'settled' && (
                               <span className="text-mono font-bold uppercase" style={{ fontSize: '8px', padding: '1px 5px', background: 'var(--bg-hover)', color: 'var(--text-muted)', borderRadius: '4px', border: '1px solid var(--border-color)', letterSpacing: '0.5px' }}>Settled</span>
                             )}
@@ -313,79 +263,6 @@ export default function Splits() {
                 onChange={e => setNewEvent({ ...newEvent, name: e.target.value })}
               />
             </div>
-
-            <div className="flex justify-between align-center card" style={{ background: 'var(--bg-hover)', border: 'none', padding: '1rem' }}>
-              <div className="flex-col gap-1">
-                <span className="font-bold text-sm">Make this Split Recurring</span>
-                <span className="text-xs text-muted">Repeat this split expense cycle</span>
-              </div>
-              <div 
-                className="clickable flex align-center" 
-                onClick={() => setNewEvent(prev => ({ ...prev, isRecurring: !prev.isRecurring }))}
-                style={{
-                  width: '46px',
-                  height: '24px',
-                  borderRadius: '12px',
-                  background: newEvent.isRecurring ? 'var(--primary-color)' : 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid var(--border-color)',
-                  position: 'relative',
-                  transition: 'background-color 0.2s'
-                }}
-              >
-                <div style={{
-                  width: '18px',
-                  height: '18px',
-                  borderRadius: '50%',
-                  background: 'white',
-                  position: 'absolute',
-                  left: newEvent.isRecurring ? '24px' : '4px',
-                  top: '2px',
-                  transition: 'left 0.2s'
-                }} />
-              </div>
-            </div>
-
-            {newEvent.isRecurring && (
-              <div className="input-group fade-in" style={{ marginBottom: 0 }}>
-                <label>Recurrence Frequency</label>
-                <CustomPicker
-                  label="Recurrence Frequency"
-                  hideLabel={true}
-                  value={newEvent.frequency}
-                  options={Object.entries(FREQUENCY_LABELS).map(([id, name]) => ({ id, name }))}
-                  onChange={val => setNewEvent(prev => ({ ...prev, frequency: val as RecurringFrequency }))}
-                  iconGetter={() => <Repeat size={18} />}
-                  allowTextWrap={true}
-                />
-              </div>
-            )}
-
-            {newEvent.isRecurring && newEvent.frequency === 'custom' && (
-              <div className="input-group fade-in" style={{ marginBottom: 0 }}>
-                <label>Days Interval</label>
-                <input
-                  type="number"
-                  className="input-field"
-                  placeholder="e.g. 28, 56, 84"
-                  value={newEvent.customDays || ''}
-                  onChange={e => setNewEvent(prev => ({ ...prev, customDays: parseInt(e.target.value) || 1 }))}
-                />
-                <p className="text-xs text-muted" style={{ marginTop: '0.5rem' }}>Repeat this split expense cycle by this many days.</p>
-              </div>
-            )}
-
-            {newEvent.isRecurring && (
-              <div className="input-group fade-in" style={{ marginBottom: 0 }}>
-                <label>Cycle Start Date</label>
-                <input
-                  type="date"
-                  className="input-field"
-                  value={newEvent.cycleStartDate}
-                  onChange={e => setNewEvent(prev => ({ ...prev, cycleStartDate: e.target.value }))}
-                />
-                <p className="text-xs text-muted" style={{ marginTop: '0.5rem' }}>Cycle 1 begins on this date. Each subsequent cycle starts when the previous one ends.</p>
-              </div>
-            )}
 
 
             <div className="input-group" style={{ marginBottom: 0 }}>
@@ -480,38 +357,8 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
   const [editEventName, setEditEventName] = useState(event.name);
   const [editEventPeople, setEditEventPeople] = useState<string[]>(event.people);
   const [editNewPerson, setEditNewPerson] = useState('');
-  const [editIsRecurring, setEditIsRecurring] = useState(event.isRecurring || false);
-  const [editFrequency, setEditFrequency] = useState(event.frequency || 'monthly');
-  const [editCustomDays, setEditCustomDays] = useState(event.customDays || 1);
-  const [editCycleStartDate, setEditCycleStartDate] = useState(event.cycleStartDate || format(new Date(), 'yyyy-MM-dd'));
 
-  // ── Cycle state ──────────────────────────────────────────────
-  const [viewingCycleId, setViewingCycleId] = useState<string | null>(null);
-  const [showNewCycleDialog, setShowNewCycleDialog] = useState(false);
-  const [copyItemsOnNewCycle, setCopyItemsOnNewCycle] = useState(false);
-
-  // Migrate legacy recurring events to cycle model on first open
-  useEffect(() => {
-    if (event.isRecurring && (!event.cycles || event.cycles.length === 0)) {
-      const migrated = migrateEventToCycles(event);
-      onUpdate(migrated);
-    }
-  }, [event.id]);
-
-  // Initialise viewingCycleId to current cycle
-  useEffect(() => {
-    setViewingCycleId(event.currentCycleId ?? null);
-  }, [event.currentCycleId]);
-
-  // Derive the cycle being viewed (or fall back to current)
-  const allCycles = event.cycles ?? [];
-  const currentCycle = allCycles.find(c => c.id === event.currentCycleId) ?? null;
-  const viewingCycle: SplitCycle | null = allCycles.find(c => c.id === viewingCycleId) ?? currentCycle;
-  const isViewingCurrentCycle = viewingCycle?.id === event.currentCycleId;
-  const cycleOverdue = isViewingCurrentCycle && isCycleDue(event);
-
-  // For non-recurring events, effective items/paidPeople come from top-level fields
-  const effectiveItems = event.isRecurring ? (viewingCycle?.items ?? []) : event.items;
+  const effectiveItems = event.items || [];
 
   const [selectorSearch, setSelectorSearch] = useState('');
   const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>({
@@ -537,7 +384,6 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
     setSplitType('equal');
     setCustomShares({});
   };
-
 
   const selectedTx = selectedTxId === 'custom'
     ? { id: 'custom', description: customDescription, amount: parseFloat(customAmount) || 0 }
@@ -572,13 +418,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
       return [...currentItems, newItem];
     };
 
-    if (event.isRecurring && viewingCycle) {
-      const updatedCycle: SplitCycle = { ...viewingCycle, items: buildUpdatedItems(viewingCycle.items) };
-      onUpdate({ ...event, cycles: (event.cycles ?? []).map(c => c.id === updatedCycle.id ? updatedCycle : c) });
-    } else {
-      onUpdate({ ...event, items: buildUpdatedItems(event.items) });
-    }
-
+    onUpdate({ ...event, items: buildUpdatedItems(event.items || []) });
     setIsItemModalOpen(false);
     resetForm();
   };
@@ -638,21 +478,12 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
   const handleSaveEvent = () => {
     if (!editEventName.trim() || editEventPeople.length === 0) return;
     const removedPeople = event.people.filter(p => !editEventPeople.includes(p));
-    const updatedItems = event.items.map(item => ({
+    const updatedItems = (event.items || []).map(item => ({
       ...item,
       involvedPeople: item.involvedPeople.filter(p => !removedPeople.includes(p))
     }));
     
     const updatedPaid = (event.paidPeople || []).filter(p => editEventPeople.includes(p));
-    // Also update people references inside cycles
-    const updatedCycles = (event.cycles ?? []).map(c => ({
-      ...c,
-      items: c.items.map(item => ({
-        ...item,
-        involvedPeople: item.involvedPeople.filter(p => !removedPeople.includes(p))
-      })),
-      paidPeople: c.paidPeople.filter(p => editEventPeople.includes(p))
-    }));
     
     onUpdate({
       ...event,
@@ -660,56 +491,22 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
       people: editEventPeople,
       paidPeople: updatedPaid,
       items: updatedItems,
-      isRecurring: editIsRecurring,
-      frequency: editIsRecurring ? editFrequency : undefined,
-      customDays: (editIsRecurring && editFrequency === 'custom') ? editCustomDays : undefined,
-      cycleStartDate: editIsRecurring ? editCycleStartDate : undefined,
-      cycles: updatedCycles.length > 0 ? updatedCycles : undefined,
     });
     setEditingEvent(false);
   };
 
   const handleTogglePaid = (person: string) => {
-    if (event.isRecurring && viewingCycle) {
-      // Cycle-aware toggle
-      if (!isViewingCurrentCycle) return; // read-only for past cycles
-      const currentPaid = viewingCycle.paidPeople;
-      const isPaid = currentPaid.includes(person);
-      const newPaid = isPaid ? currentPaid.filter(p => p !== person) : [...currentPaid, person];
-      const allPaid = event.people.every(p => newPaid.includes(p));
-      const updatedCycle: SplitCycle = { ...viewingCycle, paidPeople: newPaid, status: allPaid ? 'settled' : 'active' };
-      onUpdate({ ...event, cycles: (event.cycles ?? []).map(c => c.id === updatedCycle.id ? updatedCycle : c) });
-    } else {
-      // Non-recurring legacy toggle
-      const isActuallySettled = event.status === 'settled' && (event.paidPeople || []).length === 0;
-      if (isActuallySettled) return;
-      const currentPaid = event.paidPeople || [];
-      const isPaid = currentPaid.includes(person);
-      const newPaid = isPaid ? currentPaid.filter(p => p !== person) : [...currentPaid, person];
-      const allPaid = event.people.every(p => newPaid.includes(p));
-      onUpdate({ ...event, paidPeople: newPaid, status: allPaid ? 'settled' : 'active' });
-    }
-  };
-
-  const handleStartNewCycle = (copyItems: boolean) => {
-    if (!currentCycle) return;
-    // Freeze current cycle: mark people still unpaid as carriedOver
-    const unpaid = event.people.filter(p => !currentCycle.paidPeople.includes(p));
-    const frozenCycle: SplitCycle = { ...currentCycle, status: 'settled', carriedOverPeople: unpaid.length > 0 ? unpaid : undefined };
-    const newCycle = buildNewCycle(event, frozenCycle, copyItems);
-    const updatedCycles = [...(event.cycles ?? []).map(c => c.id === frozenCycle.id ? frozenCycle : c), newCycle];
-    onUpdate({ ...event, cycles: updatedCycles, currentCycleId: newCycle.id, status: 'active' });
-    setViewingCycleId(newCycle.id);
-    setShowNewCycleDialog(false);
+    const isActuallySettled = event.status === 'settled' && (event.paidPeople || []).length === 0;
+    if (isActuallySettled) return;
+    const currentPaid = event.paidPeople || [];
+    const isPaid = currentPaid.includes(person);
+    const newPaid = isPaid ? currentPaid.filter(p => p !== person) : [...currentPaid, person];
+    const allPaid = event.people.every(p => newPaid.includes(p));
+    onUpdate({ ...event, paidPeople: newPaid, status: allPaid ? 'settled' : 'active' });
   };
 
   const handleDeleteItem = (itemId: string) => {
-    if (event.isRecurring && viewingCycle) {
-      const updatedCycle: SplitCycle = { ...viewingCycle, items: viewingCycle.items.filter(i => i.id !== itemId) };
-      onUpdate({ ...event, cycles: (event.cycles ?? []).map(c => c.id === updatedCycle.id ? updatedCycle : c) });
-    } else {
-      onUpdate({ ...event, items: event.items.filter(i => i.id !== itemId) });
-    }
+    onUpdate({ ...event, items: (event.items || []).filter(i => i.id !== itemId) });
   };
 
   return (
@@ -723,85 +520,11 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
     >
       <div className="flex-col gap-6">
 
-        {/* ── Cycle selector (recurring events only) ── */}
-        {event.isRecurring && allCycles.length > 0 && (
-          <div className="card flex-col gap-2" style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.2)', padding: '0.75rem 1rem' }}>
-            <div className="flex justify-between align-center">
-              <button
-                className="btn btn-secondary"
-                style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                disabled={!viewingCycle || viewingCycle.cycleNumber <= 1}
-                onClick={() => {
-                  const idx = allCycles.findIndex(c => c.id === viewingCycleId);
-                  if (idx > 0) setViewingCycleId(allCycles[idx - 1].id);
-                }}
-              ><ChevronLeft size={16} /></button>
-
-              <div className="flex-col align-center gap-1">
-                <span className="text-mono font-bold" style={{ fontSize: '0.8rem', color: 'var(--accent)' }}>
-                  Cycle {viewingCycle?.cycleNumber ?? '—'} of {allCycles.length}
-                </span>
-                {viewingCycle && (
-                  <span className="text-xs text-muted">
-                    {formatDateString(viewingCycle.startDate)} → {formatDateString(viewingCycle.endDate)}
-                  </span>
-                )}
-                {!isViewingCurrentCycle && (
-                  <span className="text-mono font-bold uppercase" style={{ fontSize: '8px', padding: '1px 5px', background: 'var(--bg-hover)', color: 'var(--text-muted)', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
-                    Past — Read Only
-                  </span>
-                )}
-              </div>
-
-              <button
-                className="btn btn-secondary"
-                style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                disabled={!viewingCycle || viewingCycle.id === event.currentCycleId}
-                onClick={() => {
-                  const idx = allCycles.findIndex(c => c.id === viewingCycleId);
-                  if (idx < allCycles.length - 1) setViewingCycleId(allCycles[idx + 1].id);
-                }}
-              ><ChevronRight size={16} /></button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Carry-over warning ── */}
-        {event.isRecurring && viewingCycle && (viewingCycle.carriedOverPeople?.length ?? 0) > 0 && (
-          <div className="card flex align-center gap-3" style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', padding: '0.75rem 1rem' }}>
-            <AlertTriangle size={16} style={{ color: 'var(--warning)', flexShrink: 0 }} />
-            <div className="flex-col gap-1">
-              <span className="font-bold text-xs" style={{ color: 'var(--warning)' }}>Carried over from previous cycle</span>
-              <span className="text-xs text-muted">{viewingCycle.carriedOverPeople!.join(', ')} hadn't paid when the last cycle ended.</span>
-            </div>
-          </div>
-        )}
-
-        {/* ── New Cycle Due banner ── */}
-        {cycleOverdue && (
-          <div className="card flex justify-between align-center gap-3" style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', padding: '0.75rem 1rem' }}>
-            <div className="flex align-center gap-3">
-              <Repeat size={16} style={{ color: 'var(--warning)', flexShrink: 0 }} />
-              <div className="flex-col gap-1">
-                <span className="font-bold text-xs" style={{ color: 'var(--warning)' }}>New cycle is due</span>
-                <span className="text-xs text-muted">The current cycle ended on {formatDateString(currentCycle!.endDate)}.</span>
-              </div>
-            </div>
-            <button
-              className="btn btn-primary text-xs"
-              style={{ padding: '0.4rem 0.75rem', flexShrink: 0 }}
-              onClick={() => { setCopyItemsOnNewCycle(false); setShowNewCycleDialog(true); }}
-            >Start New</button>
-          </div>
-        )}
-
         <div className="flex justify-between align-center tour-split-detail-header">
           <div className="flex-col">
             <div className="flex align-center gap-2">
-              <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>
-                {event.isRecurring ? `Cycle ${viewingCycle?.cycleNumber ?? ''} Summary` : 'Consolidated Summary'}
-              </span>
-              {(isViewingCurrentCycle ? viewingCycle?.status : 'settled') === 'settled' && (
+              <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>Consolidated Summary</span>
+              {event.status === 'settled' && (
                 <span className="text-mono font-bold uppercase" style={{ fontSize: '8px', padding: '1px 5px', background: 'var(--success-soft)', color: 'var(--success)', borderRadius: '4px', border: '1px solid var(--success)', letterSpacing: '0.5px' }}>Settled</span>
               )}
             </div>
@@ -815,10 +538,6 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
                 setEditEventName(event.name);
                 setEditEventPeople(event.people);
                 setEditNewPerson('');
-                setEditIsRecurring(event.isRecurring || false);
-                setEditFrequency(event.frequency || 'monthly');
-                setEditCustomDays(event.customDays || 1);
-                setEditCycleStartDate(event.cycleStartDate || format(new Date(), 'yyyy-MM-dd'));
                 setEditingEvent(true);
               }}
               title="Edit Event"
@@ -967,7 +686,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
         <div className="flex-col gap-4">
           <div className="flex justify-between align-center">
             <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>Expenses ({effectiveItems.length})</span>
-            {event.status !== 'settled' && isViewingCurrentCycle && (
+            {event.status !== 'settled' && (
               <button
                 className="btn btn-primary flex align-center gap-2"
                 onClick={() => {
@@ -995,7 +714,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
                       }}>{item.description}</span>
                       <span className="text-xs text-muted">₹{item.amount.toFixed(2)} • {item.involvedPeople.length + (item.includeMe ? 1 : 0)} people • Paid by: {item.paidBy === 'me' || !item.paidBy ? 'Me' : item.paidBy}</span>
                     </div>
-                    {event.status !== 'settled' && isViewingCurrentCycle && (
+                    {event.status !== 'settled' && (
                       <div className="flex gap-3" style={{ flexShrink: 0, marginLeft: '0.5rem' }}>
                         <button
                           className="btn btn-secondary"
@@ -1574,66 +1293,6 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
                 />
               </div>
 
-              <div className="flex justify-between align-center card" style={{ background: 'var(--bg-hover)', border: 'none', padding: '1rem' }}>
-                <div className="flex-col gap-1">
-                  <span className="font-bold text-sm">Make this Split Recurring</span>
-                  <span className="text-xs text-muted">Repeat this split expense cycle</span>
-                </div>
-                <div 
-                  className="clickable flex align-center" 
-                  onClick={() => setEditIsRecurring(prev => !prev)}
-                  style={{
-                    width: '46px',
-                    height: '24px',
-                    borderRadius: '12px',
-                    background: editIsRecurring ? 'var(--primary-color)' : 'rgba(255, 255, 255, 0.05)',
-                    border: '1px solid var(--border-color)',
-                    position: 'relative',
-                    transition: 'background-color 0.2s'
-                  }}
-                >
-                  <div style={{
-                    width: '18px',
-                    height: '18px',
-                    borderRadius: '50%',
-                    background: 'white',
-                    position: 'absolute',
-                    left: editIsRecurring ? '24px' : '4px',
-                    top: '2px',
-                    transition: 'left 0.2s'
-                  }} />
-                </div>
-              </div>
-
-              {editIsRecurring && (
-                <div className="input-group fade-in" style={{ marginBottom: 0 }}>
-                  <label>Recurrence Frequency</label>
-                  <CustomPicker
-                    label="Recurrence Frequency"
-                    hideLabel={true}
-                    value={editFrequency}
-                    options={Object.entries(FREQUENCY_LABELS).map(([id, name]) => ({ id, name }))}
-                    onChange={val => setEditFrequency(val as RecurringFrequency)}
-                    iconGetter={() => <Repeat size={18} />}
-                    allowTextWrap={true}
-                  />
-                </div>
-              )}
-
-              {editIsRecurring && editFrequency === 'custom' && (
-                <div className="input-group fade-in" style={{ marginBottom: 0 }}>
-                  <label>Days Interval</label>
-                  <input
-                    type="number"
-                    className="input-field"
-                    placeholder="e.g. 28, 56, 84"
-                    value={editCustomDays || ''}
-                    onChange={e => setEditCustomDays(parseInt(e.target.value) || 1)}
-                  />
-                  <p className="text-xs text-muted" style={{ marginTop: '0.5rem' }}>Repeat this split expense cycle by this many days.</p>
-                </div>
-              )}
-
               <div className="input-group" style={{ marginBottom: 0 }}>
                 <label>People Involved</label>
                 <div className="flex gap-2" style={{ marginBottom: '0.75rem' }}>
@@ -1682,46 +1341,6 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
             </div>
           </div>
         </div>
-        )}
-
-        {showNewCycleDialog && (
-          <div className="modal-overlay flex-center" style={{ zIndex: 2500 }}>
-            <div className="modal-content animate-in flex-col" onClick={e => e.stopPropagation()} style={{ padding: '1.5rem', width: '90%', maxWidth: '400px' }}>
-              <div className="flex justify-between align-center" style={{ marginBottom: '1rem' }}>
-                <h3 style={{ margin: 0 }}>Start New Cycle</h3>
-                <button onClick={() => setShowNewCycleDialog(false)} style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
-              </div>
-              
-              <div className="flex-col gap-4">
-                <p className="text-sm text-muted">
-                  This will freeze the current cycle and start a fresh one from today. Any people who haven't paid yet will be carried over.
-                </p>
-
-                <div className="card flex align-center justify-between clickable" onClick={() => setCopyItemsOnNewCycle(!copyItemsOnNewCycle)} style={{ padding: '1rem' }}>
-                  <div className="flex align-center gap-3">
-                    <Copy size={18} className="text-primary" />
-                    <div className="flex-col">
-                      <span className="font-bold text-sm">Copy previous expenses</span>
-                      <span className="text-xs text-muted">Carry forward last cycle's items as a template</span>
-                    </div>
-                  </div>
-                  <div style={{
-                    width: '24px', height: '24px', borderRadius: '6px',
-                    border: `2px solid ${copyItemsOnNewCycle ? 'var(--primary-color)' : 'var(--border-color)'}`,
-                    background: copyItemsOnNewCycle ? 'var(--primary-color)' : 'transparent',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center'
-                  }}>
-                    {copyItemsOnNewCycle && <Check size={14} color="white" strokeWidth={4} />}
-                  </div>
-                </div>
-
-                <div className="flex gap-3" style={{ marginTop: '0.5rem' }}>
-                  <button className="btn btn-secondary flex-1" onClick={() => setShowNewCycleDialog(false)}>Cancel</button>
-                  <button className="btn btn-primary flex-1" onClick={() => handleStartNewCycle(copyItemsOnNewCycle)}>Start Cycle</button>
-                </div>
-              </div>
-            </div>
-          </div>
         )}
 
       </div>

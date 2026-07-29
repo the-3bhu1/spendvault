@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
-import { getAccountTypeIcon } from './transactionIcons';
+import { getAccountTypeIcon, getAccountGroupLabel, sortByAccountType } from './transactionIcons';
 import { generateId, formatCurrency, calculateBalance, getCurrentMonthStr } from '../utils';
 import type { Debt, DebtTransaction, Account } from '../types';
 import { CustomPicker } from './CustomPicker';
@@ -864,18 +864,14 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
   const { data } = useFinance();
   const accountOptions = useMemo(() => {
     const currentMonth = getCurrentMonthStr();
-    const TYPE_ORDER = ['bank_account', 'credit_card', 'debit_card', 'cash', 'e_wallet'];
     return accounts
       .filter(acc => !acc.archived && !['stocks', 'mutual_funds', 'rewards', 'commodity'].includes(acc.type))
-      .sort((a, b) => {
-        const ai = TYPE_ORDER.indexOf(a.type);
-        const bi = TYPE_ORDER.indexOf(b.type);
-        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-      })
+      .sort(sortByAccountType)
       .map(acc => ({
         id: acc.id,
         name: acc.name,
-        subtext: formatCurrency(calculateBalance(acc, data.transactions, currentMonth))
+        subtext: formatCurrency(calculateBalance(acc, data.transactions, currentMonth)),
+        group: getAccountGroupLabel(acc.type)
       }));
   }, [accounts, data.transactions]);
 
@@ -1071,6 +1067,7 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
               options={accountOptions}
               onChange={setAccountId}
               iconGetter={getAccountIcon}
+              defaultCollapsed={true}
             />
           )}
 
