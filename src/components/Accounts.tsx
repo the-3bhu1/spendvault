@@ -966,7 +966,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               {mfTotalUnits > 0 && (
                                 <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                                   <span className="text-mono text-muted text-xs">TOTAL UNITS</span>
-                                  <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{mfTotalUnits.toLocaleString('en-IN', { maximumFractionDigits: 3 })}</span>
+                                  <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{mfTotalUnits.toLocaleString('en-IN', { maximumFractionDigits: 4 })}</span>
                                 </div>
                               )}
                               {acc.marketSymbol && (
@@ -1068,7 +1068,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               {hasShares && (
                                 <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                                   <span className="text-mono text-muted text-xs">TOTAL SHARES</span>
-                                  <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{totalShares.toLocaleString('en-IN', { maximumFractionDigits: 3 })}</span>
+                                  <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{totalShares.toLocaleString('en-IN', { maximumFractionDigits: 4 })}</span>
                                 </div>
                               )}
                               {hasPnLSetup && (
@@ -1152,7 +1152,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               {commodityTotalGrams > 0 && (
                                 <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                                   <span className="text-mono text-muted text-xs">TOTAL GRAMS</span>
-                                  <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{commodityTotalGrams.toLocaleString('en-IN', { maximumFractionDigits: 3 })} g</span>
+                                  <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{commodityTotalGrams.toLocaleString('en-IN', { maximumFractionDigits: 4 })} g</span>
                                 </div>
                               )}
                               {acc.marketSymbol && (

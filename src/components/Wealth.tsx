@@ -1670,7 +1670,7 @@ export function Wealth() {
                 <div style={{ padding: '0.5rem 1.25rem 1.5rem', boxSizing: 'border-box' }}>
                   <StatRow
                     label={selectedAsset.type === 'stocks' ? 'Shares' : selectedAsset.type === 'commodity' ? 'Grams' : 'Units'}
-                    value={`${stats.totalUnits.toLocaleString('en-IN', { maximumFractionDigits: 3 })}${selectedAsset.type === 'commodity' ? ' g' : ''}`}
+                    value={`${stats.totalUnits.toLocaleString('en-IN', { maximumFractionDigits: 4 })}${selectedAsset.type === 'commodity' ? ' g' : ''}`}
                   />
                   <StatRow
                     label="Total Returns"

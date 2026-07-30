@@ -37,6 +37,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
   blockLen: number,
   counterparts?: { tx: Transaction; acc: Account | undefined }[]
 }) {
+  const { data } = useFinance();
   const [isCounterpartExpanded, setIsCounterpartExpanded] = useState(false);
   const isDemoAnimatingRow = tx.id === 'demo_tx_2' || tx.id === 'demo_tx_3';
   const [swipeX, setSwipeX] = useState(0);
@@ -234,7 +235,10 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
       >
         <div className="flex align-center" style={{ gap: '1rem', flex: 1, minWidth: 0, position: 'relative', zIndex: 2 }}>
           <div className="badge-scalloped">
-            {getCategoryIcon(tx.category)}
+            {(() => {
+              const invKind = getInvestmentKind(tx, data.accounts);
+              return invKind ? getInvestmentKindIcon(invKind) : getCategoryIcon(tx.category);
+            })()}
           </div>
           <div className="flex-col min-width-0">
             <div className="flex align-center gap-2">
