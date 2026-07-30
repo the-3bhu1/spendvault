@@ -132,6 +132,13 @@ html.fonts-loaded #root {
   --relief-line: rgba(255, 255, 255, 0.20);
   --relief-edge: rgba(255, 255, 255, 0.34);
   --relief-shadow: rgba(0, 0, 0, 0.65);
+  /* The frosted segmented control on the Wealth category screens (see renderFilterPills in
+     Wealth.tsx). Tokenised for the same reason as the relief set above: the "glass" is a light
+     tint on the dark theme but has to become a dark tint on the light theme, or the track, the
+     sliding thumb and the inactive labels all wash out to near-invisible white-on-white. */
+  --pill-track-bg: rgba(255, 255, 255, 0.025);
+  --pill-track-border: rgba(255, 255, 255, 0.07);
+  --pill-thumb-bg: rgba(255, 255, 255, 0.08);
   color-scheme: dark;
 }
 
@@ -157,6 +164,9 @@ html.fonts-loaded #root {
   --relief-line: rgba(15, 23, 42, 0.16);
   --relief-edge: rgba(255, 255, 255, 0.9);
   --relief-shadow: rgba(15, 23, 42, 0.22);
+  --pill-track-bg: rgba(15, 23, 42, 0.025);
+  --pill-track-border: rgba(15, 23, 42, 0.07);
+  --pill-thumb-bg: rgba(15, 23, 42, 0.05);
   color-scheme: light;
 }
 

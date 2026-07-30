@@ -7,7 +7,7 @@ import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, Spar
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
-import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, sortByAccountType, getInvestmentKindIcon } from './transactionIcons';
+import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, getInvestmentKindIcon } from './transactionIcons';
 
 const isCountableTransaction = (tx: Transaction) => {
   const catLower = (tx.category || '').toLowerCase();

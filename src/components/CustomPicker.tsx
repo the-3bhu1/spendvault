@@ -60,8 +60,6 @@ export function CustomPicker({
     return sameGroup ? selectedOptions[0] : catchAllOption;
   })();
 
-  const uniqueGroups = Array.from(new Set(options.map(o => o.group).filter(Boolean))) as string[];
-  const firstGroup = uniqueGroups[0] || '';
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -81,8 +79,9 @@ export function CustomPicker({
     if (collapsedGroups[g] !== undefined) {
       return !collapsedGroups[g];
     }
-    // Archived Accounts section should always be collapsed by default unless containing active selection
-    if (g === 'Archived Accounts') {
+    // Archived Accounts stays collapsed regardless of size, like a `defaultCollapsed` picker —
+    // surfacing deleted accounts by default would bury the active ones it's meant to sit behind.
+    if (g === 'Archived Accounts' || defaultCollapsed) {
       return selectedOption?.group === g;
     }
     // Count items in group g
