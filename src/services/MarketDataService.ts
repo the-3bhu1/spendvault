@@ -318,7 +318,7 @@ function metalFromTicker(metalTicker: string): 'gold' | 'silver' | null {
 }
 
 // One in-flight Gemini request shared across callers, so fetching gold + silver together
-// (as the Accounts/Portfolio views do) costs a SINGLE grounded call, not two.
+// (as the Accounts and Wealth → Portfolio views do) costs a SINGLE grounded call, not two.
 let commodityInFlight: Promise<VendorPrices> | null = null;
 
 function fetchBothMetals(): Promise<VendorPrices> {
@@ -380,7 +380,7 @@ export function isCommodityCacheFresh(metalTicker: string): boolean {
 //
 // We invalidate rather than DELETE: the last-known price is kept so getCachedCommodityPriceINR can
 // still serve it as a fallback while the fresh call is in flight (or if it fails). Deleting it made
-// the portfolio flash ₹0 during the post-vendor-change refresh instead of showing cached data.
+// Portfolio flash ₹0 during the post-vendor-change refresh instead of showing cached data.
 // Also drops any in-flight request so a fetch already running for the old vendor isn't reused.
 export function invalidateCommodityCache(): void {
   for (const key of ['cINR_GC=F', 'cINR_SI=F'] as const) {

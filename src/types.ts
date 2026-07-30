@@ -78,7 +78,7 @@ export interface Account {
   name: string;
   type: AccountType;
   // Soft-delete flag. An archived account is hidden from the accounts list, selection pickers and
-  // balance/portfolio totals, but is KEPT in data so its past transactions still resolve its name
+  // balance/wealth totals, but is KEPT in data so its past transactions still resolve its name
   // (shown with a "deleted" badge) instead of orphaning to "Unknown". Restorable from Settings.
   archived?: boolean;
   openingBalances: Record<string, number>; // key: 'YYYY-MM', value: number

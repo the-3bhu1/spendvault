@@ -99,7 +99,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
   // This tab stays mounted for the whole session (App renders it with display:none), so its
   // mount-time fetch above runs only once. Re-sync from the shared price cache whenever any
-  // screen refreshes prices (e.g. the Portfolio "Refresh prices" button) so we don't show a
+  // screen refreshes prices (e.g. Wealth → Portfolio's "Refresh prices" button) so we don't show a
   // stale estimate relative to other views.
   useEffect(() => {
     const resync = () => {

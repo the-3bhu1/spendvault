@@ -1,17 +1,28 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { useFinance } from '../FinanceContext';
 import type { Account } from '../types';
+import { BUILT_IN_ACCOUNT_TYPES } from '../types';
 import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHistoryByRange, getLatestFetchedAt, getLatestCommodityFetchedAt, getCacheFetchedAt, fetchCommodityPriceINR, getCachedPrice, getCachedCommodityPriceINR, fetchPrevClosesForSymbols, getCachedPrevPrice, getCachedPrevCommodityPriceINR } from '../services/MarketDataService';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { TrendingUp, RotateCcw, ChevronLeft, ChevronDown } from 'lucide-react';
+import { TrendingUp, RotateCcw, ChevronLeft, ChevronRight, ChevronDown, Landmark, ShieldCheck } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
 import { LogoAvatar } from './LogoAvatar';
 import { getAssetLogoUrl, ensureAssetLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
 import { calculateEPFProjection } from '../utils/epfEngine';
+import { calculateBalance, getCurrentMonthStr } from '../utils';
 
 type HistoryDataPoint = { date: number; close: number };
 type StockHistoryRange = '1d' | '5d' | '1mo' | '3mo' | '1y' | '5y';
 type MFHistoryRange = '1m' | '6m' | '1y' | 'all';
+
+// The three top-level Wealth categories. `null` = the category tree (main screen).
+type WealthCategory = 'portfolio' | 'assets' | 'retirement';
+// Portfolio holds market investments only; EPF has its own category now.
+type PortfolioFilter = 'all' | 'mf' | 'stocks' | 'commodity';
+// "other" catches debit cards, rewards wallets and user-created custom account types — every
+// liquid type that isn't a bank account, cash or an e-wallet.
+type AssetsFilter = 'all' | 'bank' | 'cash' | 'ewallet' | 'other';
 
 function StatRow({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
@@ -109,15 +120,19 @@ export function Wealth() {
   const [error, setError] = useState<string | null>(null);
 
   const [selectedAsset, setSelectedAsset] = useState<Account | null>(null);
-  // Remembers the list's scroll position while a detail view is open, so returning lands back
-  // where the user was instead of at the top.
-  const listScrollRef = useRef(0);
+  // Which top-level category is open; null = the category tree.
+  const [category, setCategory] = useState<WealthCategory | null>(null);
+  // Scroll position per navigation level, so backing out of a sub-view (or a holding detail)
+  // lands where the user was instead of at the top. Keyed by level, not a single scalar, because
+  // the stack is now two deep: tree → sub-view → holding detail.
+  const scrollRef = useRef<{ tree: number; category: number }>({ tree: 0, category: 0 });
   const [historyData, setHistoryData] = useState<HistoryDataPoint[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [stockRange, setStockRange] = useState<StockHistoryRange>('1mo');
   const [mfRange, setMFRange] = useState<MFHistoryRange>('1y');
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
-  const [wealthView, setWealthView] = useState<'all' | 'mf' | 'stocks' | 'commodity' | 'epf'>('all');
+  const [portfolioFilter, setPortfolioFilter] = useState<PortfolioFilter>('all');
+  const [assetsFilter, setAssetsFilter] = useState<AssetsFilter>('all');
   // Bumped when a background AI logo lookup resolves, so resolved logos appear without a reload.
   const [, setLogoTick] = useState(0);
 
@@ -128,8 +143,8 @@ export function Wealth() {
       return next;
     });
 
-  // Archived (soft-deleted) accounts are excluded from the portfolio — they shouldn't count toward
-  // invested/current totals or appear in the holdings lists.
+  // Archived (soft-deleted) accounts are excluded from Wealth — they shouldn't count toward
+  // any category total or appear in the lists.
   const isDemoActive = useMemo(() => {
     return (data?.accounts || []).some((a: Account) => a.id.startsWith('demo_'));
   }, [data?.accounts]);
@@ -173,6 +188,57 @@ export function Wealth() {
       return [];
     }
   }, [activeAccounts]);
+
+  // ── Assets (liquid) ───────────────────────────────────────────────────────────────────────────
+  // Every non-investment account that holds spendable money. `credit_card` is deliberately absent:
+  // it's a liability, and Wealth doesn't net debt (see the Debts screen for that).
+  const currentMonth = getCurrentMonthStr();
+
+  const liquidGroups = useMemo(() => {
+    const live = activeAccounts.filter((a: Account) => !a.archived);
+    const isCustomType = (t: string) => !(BUILT_IN_ACCOUNT_TYPES as readonly string[]).includes(t);
+    return {
+      bank: live.filter((a: Account) => a.type === 'bank_account'),
+      cash: live.filter((a: Account) => a.type === 'cash'),
+      ewallet: live.filter((a: Account) => a.type === 'e_wallet'),
+      // Debit cards, rewards wallets, and anything the user defined themselves. Grouped rather
+      // than dropped so the Assets total matches the money the user actually holds.
+      other: live.filter((a: Account) =>
+        a.type === 'debit_card' || a.type === 'rewards' || isCustomType(a.type)
+      ),
+    };
+  }, [activeAccounts]);
+
+  const liquidAccounts = useMemo(
+    () => [...liquidGroups.bank, ...liquidGroups.cash, ...liquidGroups.ewallet, ...liquidGroups.other],
+    [liquidGroups]
+  );
+
+  // A rewards account with a `rewardUnit` is denominated in points/miles, not rupees — adding it
+  // to a ₹ total would be meaningless, so it contributes 0 (the row still shows its point balance).
+  const isPointsDenominated = (a: Account) => a.type === 'rewards' && !!a.rewardUnit;
+
+  const getLiquidBalance = (account: Account) => {
+    if (isPointsDenominated(account)) return 0;
+    let bal = calculateBalance(account, data.transactions, currentMonth);
+    // An NCMC-enabled debit card carries a second, separate travel-wallet balance. It's real
+    // money on the card, so it counts toward the account's contribution.
+    if (account.isNcmcEnabled) {
+      bal += calculateBalance(account, data.transactions, currentMonth, true);
+    }
+    return bal;
+  };
+
+  const liquidTotals = useMemo(() => {
+    const sum = (accts: Account[]) => accts.reduce((s, a) => s + getLiquidBalance(a), 0);
+    return {
+      all: sum(liquidAccounts),
+      bank: sum(liquidGroups.bank),
+      cash: sum(liquidGroups.cash),
+      ewallet: sum(liquidGroups.ewallet),
+      other: sum(liquidGroups.other),
+    };
+  }, [liquidGroups, liquidAccounts, data.transactions, currentMonth]);
 
   const handleRefresh = async () => {
     try {
@@ -338,28 +404,41 @@ export function Wealth() {
     return { invested, current, pnl, pnlPct };
   };
 
-  const wealthStats = useMemo(() => {
-    const nonEpfStats = buildStats([...mfAccounts, ...stockAccounts, ...commodityAccounts]);
-    const epfStats = buildStats(epfAccounts);
-    return {
-      all: {
-        invested: nonEpfStats.invested,
-        current: nonEpfStats.current + epfStats.current,
-        pnl: nonEpfStats.pnl,
-        pnlPct: nonEpfStats.pnlPct,
-      },
-      mf: buildStats(mfAccounts),
-      stocks: buildStats(stockAccounts),
-      commodity: buildStats(commodityAccounts),
-      epf: epfStats,
-    };
-  }, [mfAccounts, stockAccounts, commodityAccounts, epfAccounts, prices, data.transactions]);
+  // Market investments only — Portfolio's own numbers. EPF and liquid cash are tracked separately
+  // because neither has an "invested vs. current" story.
+  const marketAccounts = useMemo(
+    () => [...mfAccounts, ...stockAccounts, ...commodityAccounts],
+    [mfAccounts, stockAccounts, commodityAccounts]
+  );
 
-  const wealthOneDayReturn = useMemo(() => {
-    const accounts = wealthView === 'all' ? [...mfAccounts, ...stockAccounts, ...commodityAccounts]
-      : wealthView === 'mf' ? mfAccounts
-      : wealthView === 'stocks' ? stockAccounts
-      : commodityAccounts;
+  const portfolioStats = useMemo(() => ({
+    all: buildStats(marketAccounts),
+    mf: buildStats(mfAccounts),
+    stocks: buildStats(stockAccounts),
+    commodity: buildStats(commodityAccounts),
+  }), [marketAccounts, mfAccounts, stockAccounts, commodityAccounts, prices, data.transactions]);
+
+  const retirementTotals = useMemo(() => {
+    const projections = epfAccounts.map((a: Account) => calculateEPFProjection(a));
+    return {
+      balance: projections.reduce((s, p) => s + p.balance, 0),
+      accruedInterest: projections.reduce((s, p) => s + p.accruedInterest, 0),
+      projectedOneYearBalance: projections.reduce((s, p) => s + p.projectedOneYearBalance, 0),
+      monthlyCredit: projections.reduce(
+        (s, p) => s + p.employeeContribution + p.employerEPFContribution + p.employerEPSContribution,
+        0
+      ),
+      employeeContribution: projections.reduce((s, p) => s + p.employeeContribution, 0),
+      employerEPFContribution: projections.reduce((s, p) => s + p.employerEPFContribution, 0),
+      employerEPSContribution: projections.reduce((s, p) => s + p.employerEPSContribution, 0),
+    };
+  }, [epfAccounts]);
+
+  // The headline figure: every category summed. Liquid cash is included, so this is gross wealth —
+  // credit-card outstanding and tracked debts are NOT subtracted.
+  const totalWealth = portfolioStats.all.current + liquidTotals.all + retirementTotals.balance;
+
+  const oneDayReturnFor = (accounts: Account[]) => {
     let amount = 0;
     let prevTotal = 0;
     for (const acc of accounts) {
@@ -373,7 +452,23 @@ export function Wealth() {
     }
     if (prevTotal === 0) return null;
     return { amount, pct: (amount / prevTotal) * 100 };
-  }, [wealthView, mfAccounts, stockAccounts, commodityAccounts, prices, prevPrices, data.transactions]);
+  };
+
+  // On the tree the 1-day figure always covers the whole Portfolio; inside the Portfolio sub-view
+  // it follows the active filter pill.
+  const wealthOneDayReturn = useMemo(
+    () => oneDayReturnFor(marketAccounts),
+    [marketAccounts, prices, prevPrices, data.transactions]
+  );
+
+  const filteredPortfolioOneDayReturn = useMemo(() => {
+    const byFilter = {
+      all: marketAccounts, mf: mfAccounts, stocks: stockAccounts, commodity: commodityAccounts,
+    }[portfolioFilter];
+    // An empty class means the filter is stale (that class was archived) — the whole-Portfolio
+    // figure is the honest fallback, matching the sub-view's own filter guard.
+    return oneDayReturnFor(byFilter.length > 0 ? byFilter : marketAccounts);
+  }, [portfolioFilter, marketAccounts, mfAccounts, stockAccounts, commodityAccounts, prices, prevPrices, data.transactions]);
 
   const displayRefreshedAt = useMemo(() => {
     if (!lastRefreshed) return null;
@@ -386,15 +481,15 @@ export function Wealth() {
         .map((a: Account) => a.marketSymbol)
     );
     let ts: number | null;
-    if (wealthView === 'mf') ts = getLatestFetchedAt(mfSyms);
-    else if (wealthView === 'stocks') ts = getLatestFetchedAt(stockSyms);
-    else if (wealthView === 'commodity') ts = getLatestCommodityFetchedAt(metalTickers);
+    if (portfolioFilter === 'mf') ts = getLatestFetchedAt(mfSyms);
+    else if (portfolioFilter === 'stocks') ts = getLatestFetchedAt(stockSyms);
+    else if (portfolioFilter === 'commodity') ts = getLatestCommodityFetchedAt(metalTickers);
     else ts = Math.max(
       getLatestFetchedAt([...mfSyms, ...stockSyms]) ?? 0,
       getLatestCommodityFetchedAt(metalTickers) ?? 0
     ) || null;
     return ts && ts > 0 ? new Date(ts) : lastRefreshed;
-  }, [wealthView, lastRefreshed, mfAccounts, stockAccounts, commodityAccounts]);
+  }, [portfolioFilter, lastRefreshed, mfAccounts, stockAccounts, commodityAccounts]);
 
   const formatCurrency = (value: number) =>
     `₹${Math.round(value).toLocaleString('en-IN')}`;
@@ -405,7 +500,12 @@ export function Wealth() {
     return `${hours}:${minutes}`;
   };
 
-  const hasInvestments = mfAccounts.length > 0 || stockAccounts.length > 0 || commodityAccounts.length > 0 || epfAccounts.length > 0;
+  // Which categories the user actually has. A category with no accounts gets no card on the tree
+  // and no sub-view — a ₹0 chevron that opens an empty screen is a dead end, not information.
+  const hasPortfolio = marketAccounts.length > 0;
+  const hasAssets = liquidAccounts.length > 0;
+  const hasRetirement = epfAccounts.length > 0;
+  const hasAnyWealth = hasPortfolio || hasAssets || hasRetirement;
 
   // The 1-day return excludes commodities (no previous-day price). When commodities are part of
   // the "All" view, spell out which classes the figure actually covers so it's not mistaken for
@@ -417,7 +517,18 @@ export function Wealth() {
 
   const userName = data.user?.name?.split(' ')[0] || 'Your';
 
-  const renderAssetRow = (account: Account) => {
+  // Named for where the user goes to fix it, so the hint tells them what to do, not just what's
+  // absent. Only rendered while at least one category exists — a brand-new user gets the full
+  // empty state instead.
+  // Kept to one word or two per category so the joined line stays readable — at most two can be
+  // missing here, since all three missing means there are no accounts at all (the empty state).
+  const missingCategoryHint = [
+    !hasPortfolio ? 'investments' : null,
+    !hasAssets ? 'cash accounts' : null,
+    !hasRetirement ? 'EPF' : null,
+  ].filter(Boolean).join(' or ');
+
+  const renderHoldingRow = (account: Account) => {
     const stats = getAccountStats(account);
     const positive = stats.totalReturn >= 0;
     return (
@@ -425,7 +536,7 @@ export function Wealth() {
         key={account.id}
         onClick={() => {
           const appRoot = document.querySelector('.app-root');
-          listScrollRef.current = appRoot?.scrollTop ?? 0;
+          scrollRef.current.category = appRoot?.scrollTop ?? 0;
           setSelectedAsset(account);
         }}
         className="clickable"
@@ -471,27 +582,320 @@ export function Wealth() {
     );
   };
 
+  // Liquid accounts have no market price, no invested basis and no detail chart, so their row is a
+  // plain balance — not clickable, unlike a holding.
+  const ACCOUNT_TYPE_SUBTEXT: Record<string, string> = {
+    bank_account: 'Bank Account',
+    cash: 'Physical Wallet',
+    e_wallet: 'E-Wallet',
+    debit_card: 'Debit Card',
+    rewards: 'Rewards Wallet',
+  };
+
+  const renderLiquidRow = (account: Account) => {
+    const points = isPointsDenominated(account);
+    const bal = calculateBalance(account, data.transactions, currentMonth);
+    const travelBal = account.isNcmcEnabled
+      ? calculateBalance(account, data.transactions, currentMonth, true)
+      : null;
+    // Custom types carry no friendly label, so title-case the raw type ('chit_fund' → 'Chit Fund').
+    const subtext = ACCOUNT_TYPE_SUBTEXT[account.type]
+      || account.type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    return (
+      <div
+        key={account.id}
+        style={{
+          padding: '1rem 0',
+          borderBottom: '1px solid var(--border-color)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.9rem'
+        }}
+      >
+        <LogoAvatar name={account.name} logoUrl={getAssetLogoUrl(account)} size={42} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.3 }}>
+            {account.name}
+          </div>
+          <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.2rem', letterSpacing: '0.5px' }}>
+            {subtext}
+          </div>
+        </div>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+            {points
+              ? `${bal.toLocaleString('en-IN')} ${account.rewardUnit}`
+              : formatCurrency(bal)}
+          </div>
+          {travelBal !== null && (
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
+              + {formatCurrency(travelBal)} travel
+            </div>
+          )}
+          {points && (
+            <div className="text-mono uppercase" style={{ fontSize: '0.58rem', color: 'var(--text-muted)', marginTop: '0.2rem', letterSpacing: '0.5px' }}>
+              Not in total
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderCategoryCard = ({ icon, label, subtext, value, valueNote, onClick, tourClass }: {
+    icon: ReactNode;
+    label: string;
+    subtext: string;
+    value: string;
+    valueNote?: ReactNode;
+    onClick: () => void;
+    tourClass: string;
+  }) => (
+    <div
+      className={`clickable ${tourClass}`}
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '1rem',
+        padding: '1.15rem 1.25rem',
+        minHeight: '92px',
+        boxSizing: 'border-box',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border-color)',
+        borderRadius: '1rem',
+        cursor: 'pointer'
+      }}
+    >
+      <div style={{
+        width: '42px',
+        height: '42px',
+        borderRadius: '999px',
+        background: 'rgba(255,255,255,0.06)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        color: 'var(--text-primary)'
+      }}>
+        {icon}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="text-mono uppercase" style={{ fontSize: '0.74rem', fontWeight: 800, letterSpacing: '1.5px', color: 'var(--text-primary)' }}>
+          {label}
+        </div>
+        <div style={{
+          fontSize: '0.72rem',
+          color: 'var(--text-secondary)',
+          marginTop: '0.25rem',
+          lineHeight: 1.4,
+          // The text column is only ~110px wide, so a two-word subtext wraps. Breaking only on
+          // spaces keeps "E-Wallets"-style labels intact; the card's minHeight absorbs the extra
+          // line so all three cards stay the same height.
+          overflowWrap: 'normal',
+          wordBreak: 'keep-all'
+        }}>
+          {subtext}
+        </div>
+      </div>
+      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+        <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>{value}</div>
+        {valueNote}
+      </div>
+      <ChevronRight size={18} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+    </div>
+  );
+
+  const openCategory = (next: WealthCategory) => {
+    const appRoot = document.querySelector('.app-root');
+    scrollRef.current.tree = appRoot?.scrollTop ?? 0;
+    setCategory(next);
+  };
+
   useEffect(() => {
     const handleBack = (e: Event) => {
+      // Unwinds one level at a time, innermost first: holding detail → sub-view → tree.
       if (selectedAsset) {
         e.preventDefault();
         setSelectedAsset(null);
+      } else if (category) {
+        e.preventDefault();
+        setCategory(null);
       }
     };
     window.addEventListener('appBackButton', handleBack);
     return () => window.removeEventListener('appBackButton', handleBack);
-  }, [selectedAsset]);
+  }, [selectedAsset, category]);
 
   useEffect(() => {
     const appRoot = document.querySelector('.app-root');
     if (!appRoot) return;
-    // Opening a detail starts it at the top; returning restores the list's prior scroll position.
-    appRoot.scrollTo({ top: selectedAsset ? 0 : listScrollRef.current, behavior: 'auto' });
-  }, [selectedAsset]);
+    // Descending starts at the top; coming back restores that level's saved position.
+    const top = selectedAsset ? 0 : category ? scrollRef.current.category : scrollRef.current.tree;
+    appRoot.scrollTo({ top, behavior: 'auto' });
+  }, [selectedAsset, category]);
+
+  // A category the user emptied (last account archived/deleted) while its sub-view was open would
+  // otherwise leave them stranded on a blank screen.
+  useEffect(() => {
+    if (category === 'portfolio' && !hasPortfolio) setCategory(null);
+    else if (category === 'assets' && !hasAssets) setCategory(null);
+    else if (category === 'retirement' && !hasRetirement) setCategory(null);
+  }, [category, hasPortfolio, hasAssets, hasRetirement]);
+
+  // Shared chrome for a sub-view: back chevron + title, matching the holding detail's header.
+  const renderSubviewHeader = (title: string) => (
+    <div className="flex align-center gap-4" style={{ padding: '0 1.5rem 0.25rem', boxSizing: 'border-box' }}>
+      <button
+        className="btn btn-secondary tour-wealth-back"
+        style={{ padding: '0.5rem', flexShrink: 0 }}
+        onClick={() => setCategory(null)}
+      >
+        <ChevronLeft size={20} />
+      </button>
+      <div className="text-mono uppercase" style={{ fontSize: '0.8rem', fontWeight: 800, letterSpacing: '2px', color: 'var(--text-primary)' }}>
+        {title}
+      </div>
+    </div>
+  );
+
+  // A filter pill row. Pills are rendered only for classes the user actually holds, and the row
+  // disappears entirely below two — a lone "All" pill filters nothing. `flexible` lets the row span
+  // the available width instead of the fixed 68px-per-pill sizing, which overflows a narrow phone
+  // once there are five pills (Assets can have ALL + four classes).
+  const renderFilterPills = <T extends string>(
+    tabs: { v: T; label: string }[],
+    active: T,
+    onSelect: (v: T) => void,
+    opts: { marginTop: string; flexible?: boolean }
+  ) => {
+    if (tabs.length < 2) return null;
+    const N = tabs.length;
+    const activeIdx = Math.max(0, tabs.findIndex(t => t.v === active));
+    const PAD = 4;
+    return (
+      <div className="tour-wealth-tabs" style={{
+        position: 'relative',
+        display: 'flex',
+        marginTop: opts.marginTop,
+        padding: `${PAD}px`,
+        background: 'rgba(255,255,255,0.05)',
+        borderRadius: '999px',
+        border: '1px solid rgba(255,255,255,0.08)',
+        ...(opts.flexible
+          ? { width: '100%', maxWidth: `${N * 68}px` }
+          : { width: `${N * 68}px` }),
+      }}>
+        <div style={{
+          position: 'absolute',
+          top: `${PAD}px`,
+          bottom: `${PAD}px`,
+          width: `calc((100% - ${PAD * 2}px) / ${N})`,
+          left: `calc(${PAD}px + ${activeIdx} * (100% - ${PAD * 2}px) / ${N})`,
+          borderRadius: '999px',
+          background: 'rgba(255,255,255,0.11)',
+          backdropFilter: 'blur(8px)',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.14)',
+          transition: 'left 0.38s cubic-bezier(0.34, 1.56, 0.64, 1)',
+          pointerEvents: 'none'
+        }} />
+        {tabs.map(({ v, label }) => {
+          const isActive = active === v;
+          return (
+            <button
+              key={v}
+              onClick={() => onSelect(v)}
+              className="tour-wealth-tab-btn"
+              data-view={v}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                position: 'relative',
+                zIndex: 1,
+                padding: '0.5rem 0',
+                border: 'none',
+                background: 'transparent',
+                color: isActive ? 'var(--text-primary)' : 'rgba(255,255,255,0.32)',
+                borderRadius: '999px',
+                cursor: 'pointer',
+                fontSize: '0.72rem',
+                fontWeight: isActive ? 700 : 500,
+                fontFamily: 'var(--font-mono)',
+                letterSpacing: '1px',
+                textTransform: 'uppercase',
+                transition: 'color 0.28s ease',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // A collapsible, labelled group of rows. Collapsing is disabled when a filter has already
+  // narrowed the list to this one class — there'd be nothing left on screen.
+  const renderHoldingSection = (
+    key: string,
+    label: string,
+    accounts: Account[],
+    single: boolean,
+    renderRow: (a: Account) => ReactNode,
+    tourClass = ''
+  ) => {
+    const isCollapsed = single ? false : collapsedSections.has(key);
+    return (
+      <div className={tourClass} style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+        <div
+          className="flex align-center gap-3"
+          style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
+          onClick={single ? undefined : () => toggleSection(key)}
+        >
+          <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
+            {label}
+          </span>
+          <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
+            {accounts.length}
+          </span>
+          <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
+          {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
+        </div>
+        {!isCollapsed && <div>{accounts.map(renderRow)}</div>}
+      </div>
+    );
+  };
+
+  const metricCell = (label: ReactNode, value: string, color?: string) => (
+    <div style={{ flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem', lineHeight: 1.3 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: '0.92rem', fontWeight: 700, color: color || 'var(--text-primary)' }}>{value}</div>
+    </div>
+  );
+
+  const metricDivider = <div style={{ width: '1px', background: 'var(--border-color)' }} />;
+
+  const metricStrip = (children: ReactNode) => (
+    <div style={{
+      margin: '0 1.5rem',
+      padding: '1.25rem 0',
+      borderTop: '1px solid var(--border-color)',
+      borderBottom: '1px solid var(--border-color)',
+      display: 'flex',
+      justifyContent: 'space-between',
+      gap: '0.5rem'
+    }}>
+      {children}
+    </div>
+  );
 
   return (
     <div style={{ background: 'var(--bg-primary)', paddingBottom: '100px' }}>
-      {!selectedAsset && (
+      {/* ───────────────────────── Level 1: the category tree ───────────────────────── */}
+      {!selectedAsset && !category && (
       <>
       <div className="tour-wealth-summary" style={{ padding: '1.75rem 1.5rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
         <div style={{ marginBottom: '1rem' }}>
@@ -503,336 +907,318 @@ export function Wealth() {
         </div>
 
         <div className="text-serif" style={{ fontSize: '2.75rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
-          ₹{Math.round(wealthStats[wealthView].current).toLocaleString('en-IN')}
+          ₹{Math.round(totalWealth).toLocaleString('en-IN')}
         </div>
 
-        {isRefreshing && !hasRefreshed ? null : wealthOneDayReturn !== null ? (
+        {/* The daily figure can only ever cover market holdings — cash and EPF don't move with the
+            market — so it's suppressed entirely when the user has no Portfolio. */}
+        {!hasPortfolio ? null : isRefreshing && !hasRefreshed ? null : wealthOneDayReturn !== null ? (
           <div style={{ marginTop: '0.75rem', textAlign: 'center' }}>
             <div style={{ fontSize: '0.95rem', fontWeight: 600, color: wealthOneDayReturn.amount >= 0 ? '#22c55e' : '#ef4444' }}>
               {wealthOneDayReturn.amount >= 0 ? '↑' : '↓'} ₹{Math.abs(wealthOneDayReturn.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(wealthOneDayReturn.pct).toFixed(2)}%)
             </div>
             <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.2rem', letterSpacing: '0.5px' }}>
-              Today{wealthView === 'all' && commodityAccounts.length > 0 && todayScope ? ` (${todayScope})` : ''}
+              Today{todayScope ? ` (${todayScope})` : ''}
             </div>
           </div>
-        ) : (wealthView !== 'commodity' && wealthView !== 'epf') && (mfAccounts.length > 0 || stockAccounts.length > 0) ? (
+        ) : (mfAccounts.length > 0 || stockAccounts.length > 0) ? (
           <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.75rem', letterSpacing: '0.5px' }}>— today</div>
         ) : null}
-
-        {wealthView !== 'epf' && (
-          <button
-            onClick={() => handleRefresh()}
-            disabled={isRefreshing}
-            style={{
-              marginTop: '1.25rem',
-              padding: '0.55rem 1.25rem',
-              background: 'transparent',
-              border: '1px solid var(--border-color)',
-              color: 'var(--text-primary)',
-              borderRadius: '999px',
-              cursor: isRefreshing ? 'default' : 'pointer',
-              opacity: isRefreshing ? 0.6 : 1,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              fontSize: '0.72rem',
-              fontWeight: 700,
-              fontFamily: 'var(--font-mono)',
-              letterSpacing: '0.5px'
-            }}
-          >
-            <RotateCcw size={15} className={isRefreshing ? 'icon-spin-ccw' : ''} />
-            {isRefreshing ? 'Refreshing...' : 'Refresh prices'}
-          </button>
-        )}
-
-        {wealthView !== 'epf' && displayRefreshedAt && (
-          <div className="text-mono uppercase" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginTop: '0.6rem', letterSpacing: '0.5px' }}>
-            Last refresh at {formatTime(displayRefreshedAt)}
-          </div>
-        )}
-
-        {(() => {
-          const presentTabs = [
-            mfAccounts.length > 0 ? { v: 'mf' as const, label: 'MF' } : null,
-            stockAccounts.length > 0 ? { v: 'stocks' as const, label: 'Stocks' } : null,
-            commodityAccounts.length > 0 ? { v: 'commodity' as const, label: 'Metals' } : null,
-            epfAccounts.length > 0 ? { v: 'epf' as const, label: 'EPF' } : null,
-          ].filter((t): t is { v: 'mf' | 'stocks' | 'commodity' | 'epf'; label: string } => t !== null);
-          if (presentTabs.length < 2) return null;
-          const tabs = [{ v: 'all' as const, label: 'All' }, ...presentTabs];
-          const N = tabs.length;
-          const activeIdx = tabs.findIndex(t => t.v === wealthView);
-          const PAD = 4;
-          return (
-            <div className="tour-wealth-tabs" style={{
-              position: 'relative',
-              display: 'flex',
-              marginTop: (wealthView === 'epf' || !displayRefreshedAt) ? '2.2rem' : '1.5rem',
-              padding: `${PAD}px`,
-              background: 'rgba(255,255,255,0.05)',
-              borderRadius: '999px',
-              border: '1px solid rgba(255,255,255,0.08)',
-              width: `${N * 68}px`,
-            }}>
-              <div style={{
-                position: 'absolute',
-                top: `${PAD}px`,
-                bottom: `${PAD}px`,
-                width: `calc((100% - ${PAD * 2}px) / ${N})`,
-                left: `calc(${PAD}px + ${activeIdx} * (100% - ${PAD * 2}px) / ${N})`,
-                borderRadius: '999px',
-                background: 'rgba(255,255,255,0.11)',
-                backdropFilter: 'blur(8px)',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.14)',
-                transition: 'left 0.38s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                pointerEvents: 'none'
-              }} />
-              {tabs.map(({ v, label }) => {
-                const active = wealthView === v;
-                return (
-                  <button
-                    key={v}
-                    onClick={() => setWealthView(v)}
-                    className="tour-wealth-tab-btn"
-                    data-view={v}
-                    style={{
-                      flex: 1,
-                      position: 'relative',
-                      zIndex: 1,
-                      padding: '0.5rem 0',
-                      border: 'none',
-                      background: 'transparent',
-                      color: active ? 'var(--text-primary)' : 'rgba(255,255,255,0.32)',
-                      borderRadius: '999px',
-                      cursor: 'pointer',
-                      fontSize: '0.72rem',
-                      fontWeight: active ? 700 : 500,
-                      fontFamily: 'var(--font-mono)',
-                      letterSpacing: '1px',
-                      textTransform: 'uppercase',
-                      transition: 'color 0.28s ease',
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-          );
-        })()}
       </div>
 
-      <div className="tour-wealth-holdings-section">
-        <div className="tour-wealth-holdings-container">
-        <div style={{
-          margin: '0 1.5rem',
-          padding: '1.25rem 0',
-          borderTop: '1px solid var(--border-color)',
-          borderBottom: '1px solid var(--border-color)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          gap: '0.5rem'
-        }}>
-          {(() => {
-            if (wealthView === 'epf') {
-              const totalEpfBalance = epfAccounts.reduce((sum, a) => sum + calculateEPFProjection(a).balance, 0);
-              const totalAccruedInterest = epfAccounts.reduce((sum, a) => sum + calculateEPFProjection(a).accruedInterest, 0);
-              return (<>
-                <div style={{ flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                  <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Current</div>
-                  <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>{formatCurrency(totalEpfBalance)}</div>
-                </div>
-                <div style={{ width: '1px', background: 'var(--border-color)' }} />
-                <div style={{ flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                  <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem', lineHeight: 1.3 }}>
-                    Interest Earned<br />(Current FY)
-                  </div>
-                  <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--success)' }}>
-                    {formatCurrency(totalAccruedInterest)}
-                  </div>
-                </div>
-              </>);
-            }
-
-            const s = wealthStats[wealthView];
-            return (<>
-              <div style={{ flex: 1, textAlign: 'center' }}>
-                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Invested</div>
-                <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>{formatCurrency(s.invested)}</div>
-              </div>
-              <div style={{ width: '1px', background: 'var(--border-color)' }} />
-              <div style={{ flex: 1, textAlign: 'center' }}>
-                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Current</div>
-                <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--text-primary)' }}>{formatCurrency(s.invested + s.pnl)}</div>
-              </div>
-              <div style={{ width: '1px', background: 'var(--border-color)' }} />
-              <div style={{ flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Returns</div>
-                <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <div style={{ position: 'relative', fontSize: '0.88rem', fontWeight: 700, color: s.pnl >= 0 ? '#22c55e' : '#ef4444', lineHeight: 1.2 }}>
-                    <span style={{ position: 'absolute', right: '100%', marginRight: '2px', fontWeight: 700 }}>
-                      {s.pnl >= 0 ? '↑' : '↓'}
-                    </span>
-                    ₹{Math.abs(s.pnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                  <div style={{ fontSize: '0.70rem', fontWeight: 600, color: s.pnl >= 0 ? '#22c55e' : '#ef4444', opacity: 0.9, marginTop: '0.15rem' }}>
-                    ({Math.abs(s.pnlPct).toFixed(2)}%)
-                  </div>
-                </div>
-              </div>
-            </>);
-          })()}
+      {!hasAnyWealth ? (
+        <div style={{ padding: '3rem 1.5rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+          <TrendingUp size={48} style={{ opacity: 0.5, margin: '0 auto 1rem' }} />
+          <div style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.5rem' }}>Nothing to track yet</div>
+          <div style={{ fontSize: '0.9rem' }}>Add a bank account, investment or EPF from the Accounts tab</div>
         </div>
-
-        {error && (
-          <div style={{
-            padding: '1rem 1.5rem',
-            background: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            color: '#f87171',
-            fontSize: '0.9rem',
-            margin: '1rem'
-          }}>
-            {error}
-          </div>
-        )}
-
-        {!hasInvestments ? (
-          <div style={{
-            padding: '3rem 1.5rem',
-            textAlign: 'center',
-            color: 'var(--text-secondary)'
-          }}>
-            <TrendingUp size={48} style={{ opacity: 0.5, margin: '0 auto 1rem' }} />
-            <div style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.5rem' }}>No investments yet</div>
-            <div style={{ fontSize: '0.9rem' }}>Add stocks or mutual funds from the Accounts tab</div>
-          </div>
-        ) : (
-          <>
-            {mfAccounts.length > 0 && (wealthView === 'all' || wealthView === 'mf') && (() => {
-              const single = wealthView !== 'all';
-              const isCollapsed = single ? false : collapsedSections.has('mf');
-              return (
-              <div className="tour-wealth-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
-                <div
-                  className="flex align-center gap-3"
-                  style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
-                  onClick={single ? undefined : () => toggleSection('mf')}
-                >
-                  <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
-                    Mutual Funds
-                  </span>
-                  <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
-                    {mfAccounts.length}
-                  </span>
-                  <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
-                  {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
-                </div>
-                {!isCollapsed && (
-                  <div>
-                    {mfAccounts.map((account: Account) => renderAssetRow(account))}
-                  </div>
-                )}
+      ) : (
+        <div className="tour-wealth-categories" style={{ padding: '0.5rem 1.5rem 0', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          {hasPortfolio && renderCategoryCard({
+            icon: <TrendingUp size={20} />,
+            label: 'Portfolio',
+            // Fixed descriptors, not a list of what's present: a list changes length as accounts
+            // are added, which re-wraps and leaves the three cards at different heights. Each is
+            // short enough to wrap to exactly two lines in the ~100px text column.
+            subtext: 'Market investments',
+            value: formatCurrency(portfolioStats.all.current),
+            valueNote: (
+              <div style={{ fontSize: '0.72rem', fontWeight: 600, marginTop: '0.2rem', color: portfolioStats.all.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
+                {portfolioStats.all.pnl >= 0 ? '↑' : '↓'} {formatCurrency(Math.abs(portfolioStats.all.pnl))} ({Math.abs(portfolioStats.all.pnlPct).toFixed(2)}%)
               </div>
-              );
-            })()}
+            ),
+            onClick: () => openCategory('portfolio'),
+            tourClass: 'tour-wealth-cat-portfolio',
+          })}
 
-            {stockAccounts.length > 0 && (wealthView === 'all' || wealthView === 'stocks') && (() => {
-              const single = wealthView !== 'all';
-              const isCollapsed = single ? false : collapsedSections.has('stocks');
-              return (
-              <div className="tour-wealth-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
-                <div
-                  className="flex align-center gap-3"
-                  style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
-                  onClick={single ? undefined : () => toggleSection('stocks')}
-                >
-                  <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
-                    Stocks
-                  </span>
-                  <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
-                    {stockAccounts.length}
-                  </span>
-                  <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
-                  {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
-                </div>
-                {!isCollapsed && (
-                  <div>
-                    {stockAccounts.map((account: Account) => renderAssetRow(account))}
-                  </div>
-                )}
+          {hasAssets && renderCategoryCard({
+            icon: <Landmark size={20} />,
+            label: 'Assets',
+            subtext: 'Bank, cash & wallets',
+            value: formatCurrency(liquidTotals.all),
+            valueNote: (
+              <div className="text-mono uppercase" style={{ fontSize: '0.6rem', color: 'var(--text-secondary)', marginTop: '0.25rem', letterSpacing: '0.5px' }}>
+                Liquid
               </div>
-              );
-            })()}
+            ),
+            onClick: () => openCategory('assets'),
+            tourClass: 'tour-wealth-cat-assets',
+          })}
 
-            {commodityAccounts.length > 0 && (wealthView === 'all' || wealthView === 'commodity') && (() => {
-              const single = wealthView !== 'all';
-              const isCollapsed = single ? false : collapsedSections.has('commodity');
-              return (
-              <div className="tour-wealth-holdings" style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
-                <div
-                  className="flex align-center gap-3"
-                  style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
-                  onClick={single ? undefined : () => toggleSection('commodity')}
-                >
-                  <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
-                    Commodities
-                  </span>
-                  <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
-                    {commodityAccounts.length}
-                  </span>
-                  <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
-                  {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
-                </div>
-                {!isCollapsed && (
-                  <div>
-                    {commodityAccounts.map((account: Account) => renderAssetRow(account))}
-                  </div>
-                )}
+          {hasRetirement && renderCategoryCard({
+            icon: <ShieldCheck size={20} />,
+            label: 'Retirement',
+            subtext: 'Provident Fund (EPF)',
+            value: formatCurrency(retirementTotals.balance),
+            valueNote: (
+              <div style={{ fontSize: '0.72rem', fontWeight: 600, marginTop: '0.2rem', color: 'var(--success)' }}>
+                + {formatCurrency(retirementTotals.accruedInterest)} FY
               </div>
-              );
-            })()}
+            ),
+            onClick: () => openCategory('retirement'),
+            tourClass: 'tour-wealth-cat-retirement',
+          })}
 
-            {epfAccounts.length > 0 && (wealthView === 'all' || wealthView === 'epf') && (() => {
-              const single = wealthView !== 'all';
-              const isCollapsed = single ? false : collapsedSections.has('epf');
-              return (
-              <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
-                <div
-                  className="flex align-center gap-3"
-                  style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
-                  onClick={single ? undefined : () => toggleSection('epf')}
-                >
-                  <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
-                    Employee Provident Fund (EPF)
-                  </span>
-                  <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
-                    {epfAccounts.length}
-                  </span>
-                  <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
-                  {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
-                </div>
-                {!isCollapsed && (
-                  <div>
-                    {epfAccounts.map((account: Account) => renderAssetRow(account))}
-                  </div>
-                )}
-              </div>
-              );
-            })()}
-          </>
-        )}
-      </div>
-      </div>
+          {missingCategoryHint && (
+            <div className="text-mono uppercase" style={{ fontSize: '0.6rem', color: 'var(--text-muted)', letterSpacing: '0.5px', textAlign: 'center', marginTop: '0.35rem', lineHeight: 1.6 }}>
+              Add {missingCategoryHint} from the Accounts tab
+            </div>
+          )}
+        </div>
+      )}
       </>
+      )}
+
+      {/* ───────────────────────── Level 2a: Portfolio ───────────────────────── */}
+      {!selectedAsset && category === 'portfolio' && (() => {
+        const presentTabs = [
+          mfAccounts.length > 0 ? { v: 'mf' as const, label: 'MF' } : null,
+          stockAccounts.length > 0 ? { v: 'stocks' as const, label: 'Stocks' } : null,
+          commodityAccounts.length > 0 ? { v: 'commodity' as const, label: 'Metals' } : null,
+        ].filter((t): t is { v: 'mf' | 'stocks' | 'commodity'; label: string } => t !== null);
+        const tabs: { v: PortfolioFilter; label: string }[] = presentTabs.length < 2
+          ? []
+          : [{ v: 'all', label: 'All' }, ...presentTabs];
+        // A filter whose pill is gone (its asset class was archived/deleted) would show a ₹0 total
+        // over an empty list, so fall back to All.
+        const activeFilter: PortfolioFilter =
+          tabs.length === 0 || tabs.some(t => t.v === portfolioFilter) ? portfolioFilter : 'all';
+        const s = portfolioStats[activeFilter];
+        const oneDay = filteredPortfolioOneDayReturn;
+        return (
+        <div className="fade-in">
+          {renderSubviewHeader('Portfolio')}
+
+          <div style={{ padding: '0.75rem 1.5rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+            <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
+              ₹{Math.round(s.current).toLocaleString('en-IN')}
+            </div>
+
+            {isRefreshing && !hasRefreshed ? null : oneDay !== null ? (
+              <div style={{ marginTop: '0.75rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.95rem', fontWeight: 600, color: oneDay.amount >= 0 ? '#22c55e' : '#ef4444' }}>
+                  {oneDay.amount >= 0 ? '↑' : '↓'} ₹{Math.abs(oneDay.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(oneDay.pct).toFixed(2)}%)
+                </div>
+                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.2rem', letterSpacing: '0.5px' }}>
+                  Today{activeFilter === 'all' && commodityAccounts.length > 0 && todayScope ? ` (${todayScope})` : ''}
+                </div>
+              </div>
+            ) : activeFilter !== 'commodity' && (mfAccounts.length > 0 || stockAccounts.length > 0) ? (
+              <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.75rem', letterSpacing: '0.5px' }}>— today</div>
+            ) : null}
+
+            <button
+              onClick={() => handleRefresh()}
+              disabled={isRefreshing}
+              style={{
+                marginTop: '1.25rem',
+                padding: '0.55rem 1.25rem',
+                background: 'transparent',
+                border: '1px solid var(--border-color)',
+                color: 'var(--text-primary)',
+                borderRadius: '999px',
+                cursor: isRefreshing ? 'default' : 'pointer',
+                opacity: isRefreshing ? 0.6 : 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                fontFamily: 'var(--font-mono)',
+                letterSpacing: '0.5px'
+              }}
+            >
+              <RotateCcw size={15} className={isRefreshing ? 'icon-spin-ccw' : ''} />
+              {isRefreshing ? 'Refreshing...' : 'Refresh prices'}
+            </button>
+
+            {displayRefreshedAt && (
+              <div className="text-mono uppercase" style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginTop: '0.6rem', letterSpacing: '0.5px' }}>
+                Last refresh at {formatTime(displayRefreshedAt)}
+              </div>
+            )}
+
+            {renderFilterPills(tabs, activeFilter, setPortfolioFilter, {
+              marginTop: displayRefreshedAt ? '1.5rem' : '2.2rem',
+            })}
+          </div>
+
+          <div className="tour-wealth-holdings-section">
+            <div className="tour-wealth-holdings-container">
+              {metricStrip(<>
+                {metricCell('Invested', formatCurrency(s.invested))}
+                {metricDivider}
+                {metricCell('Current', formatCurrency(s.current))}
+                {metricDivider}
+                <div style={{ flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Returns</div>
+                  <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ position: 'relative', fontSize: '0.88rem', fontWeight: 700, color: s.pnl >= 0 ? '#22c55e' : '#ef4444', lineHeight: 1.2 }}>
+                      <span style={{ position: 'absolute', right: '100%', marginRight: '2px', fontWeight: 700 }}>
+                        {s.pnl >= 0 ? '↑' : '↓'}
+                      </span>
+                      ₹{Math.abs(s.pnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div style={{ fontSize: '0.70rem', fontWeight: 600, color: s.pnl >= 0 ? '#22c55e' : '#ef4444', opacity: 0.9, marginTop: '0.15rem' }}>
+                      ({Math.abs(s.pnlPct).toFixed(2)}%)
+                    </div>
+                  </div>
+                </div>
+              </>)}
+
+              {error && (
+                <div style={{
+                  padding: '1rem 1.5rem',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  color: '#f87171',
+                  fontSize: '0.9rem',
+                  margin: '1rem'
+                }}>
+                  {error}
+                </div>
+              )}
+
+              {mfAccounts.length > 0 && (activeFilter === 'all' || activeFilter === 'mf') &&
+                renderHoldingSection('mf', 'Mutual Funds', mfAccounts, activeFilter !== 'all', renderHoldingRow, 'tour-wealth-holdings')}
+
+              {stockAccounts.length > 0 && (activeFilter === 'all' || activeFilter === 'stocks') &&
+                renderHoldingSection('stocks', 'Stocks', stockAccounts, activeFilter !== 'all', renderHoldingRow, 'tour-wealth-holdings')}
+
+              {commodityAccounts.length > 0 && (activeFilter === 'all' || activeFilter === 'commodity') &&
+                renderHoldingSection('commodity', 'Commodities', commodityAccounts, activeFilter !== 'all', renderHoldingRow, 'tour-wealth-holdings')}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* ───────────────────────── Level 2b: Assets ───────────────────────── */}
+      {!selectedAsset && category === 'assets' && (() => {
+        const presentTabs = [
+          liquidGroups.bank.length > 0 ? { v: 'bank' as const, label: 'Bank' } : null,
+          liquidGroups.cash.length > 0 ? { v: 'cash' as const, label: 'Cash' } : null,
+          liquidGroups.ewallet.length > 0 ? { v: 'ewallet' as const, label: 'Wallets' } : null,
+          liquidGroups.other.length > 0 ? { v: 'other' as const, label: 'Other' } : null,
+        ].filter((t): t is { v: 'bank' | 'cash' | 'ewallet' | 'other'; label: string } => t !== null);
+        const tabs: { v: AssetsFilter; label: string }[] = presentTabs.length < 2
+          ? []
+          : [{ v: 'all', label: 'All' }, ...presentTabs];
+        // A filter the user can't see (its group emptied) would silently show an empty list.
+        const activeFilter: AssetsFilter =
+          tabs.length === 0 || tabs.some(t => t.v === assetsFilter) ? assetsFilter : 'all';
+        const single = activeFilter !== 'all';
+        const pointsOnly = liquidAccounts.filter(isPointsDenominated).length;
+        return (
+        <div className="fade-in">
+          {renderSubviewHeader('Assets')}
+
+          <div style={{ padding: '0.75rem 1.5rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+            <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
+              ₹{Math.round(liquidTotals[activeFilter]).toLocaleString('en-IN')}
+            </div>
+            <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.5rem', letterSpacing: '0.5px' }}>
+              Cash &amp; funds available
+            </div>
+
+            {renderFilterPills(tabs, activeFilter, setAssetsFilter, { marginTop: '1.75rem', flexible: true })}
+          </div>
+
+          {metricStrip(<>
+            {metricCell('Accounts', String(
+              activeFilter === 'all' ? liquidAccounts.length : liquidGroups[activeFilter].length
+            ))}
+            {metricDivider}
+            {metricCell('Total', formatCurrency(liquidTotals[activeFilter]))}
+          </>)}
+
+          {liquidGroups.bank.length > 0 && (activeFilter === 'all' || activeFilter === 'bank') &&
+            renderHoldingSection('bank', 'Bank Accounts', liquidGroups.bank, single, renderLiquidRow)}
+
+          {liquidGroups.cash.length > 0 && (activeFilter === 'all' || activeFilter === 'cash') &&
+            renderHoldingSection('cash', 'Physical Cash', liquidGroups.cash, single, renderLiquidRow)}
+
+          {liquidGroups.ewallet.length > 0 && (activeFilter === 'all' || activeFilter === 'ewallet') &&
+            renderHoldingSection('ewallet', 'E-Wallets', liquidGroups.ewallet, single, renderLiquidRow)}
+
+          {liquidGroups.other.length > 0 && (activeFilter === 'all' || activeFilter === 'other') &&
+            renderHoldingSection('other', 'Other Accounts', liquidGroups.other, single, renderLiquidRow)}
+
+          {pointsOnly > 0 && (
+            <div className="text-mono uppercase" style={{ fontSize: '0.6rem', color: 'var(--text-muted)', letterSpacing: '0.5px', textAlign: 'center', padding: '1.5rem', lineHeight: 1.6 }}>
+              {pointsOnly} points-based {pointsOnly === 1 ? 'wallet is' : 'wallets are'} listed but excluded from the total
+            </div>
+          )}
+        </div>
+        );
+      })()}
+
+      {/* ───────────────────────── Level 2c: Retirement ───────────────────────── */}
+      {!selectedAsset && category === 'retirement' && (
+        <div className="fade-in">
+          {renderSubviewHeader('Retirement')}
+
+          <div style={{ padding: '0.75rem 1.5rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+            <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
+              ₹{Math.round(retirementTotals.balance).toLocaleString('en-IN')}
+            </div>
+            <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.5rem', letterSpacing: '0.5px' }}>
+              Employee Provident Fund
+            </div>
+          </div>
+
+          {metricStrip(<>
+            {metricCell('Current', formatCurrency(retirementTotals.balance))}
+            {metricDivider}
+            {metricCell(<>Interest Earned<br />(Current FY)</>, formatCurrency(retirementTotals.accruedInterest), 'var(--success)')}
+          </>)}
+
+          <div style={{ padding: '0.5rem 1.75rem 0.5rem', boxSizing: 'border-box' }}>
+            <StatRow label="Monthly Credit" value={formatFullCurrency(retirementTotals.monthlyCredit)} />
+            <StatRow label="Employee Share (12%)" value={formatFullCurrency(retirementTotals.employeeContribution)} />
+            <StatRow label="Employer EPF Share" value={formatFullCurrency(retirementTotals.employerEPFContribution)} />
+            <StatRow label="Employer EPS (Pension)" value={formatFullCurrency(retirementTotals.employerEPSContribution)} color="var(--warning)" />
+
+            <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.75rem 0' }} />
+
+            <StatRow label="Est. Balance (1 Year)" value={formatFullCurrency(retirementTotals.projectedOneYearBalance)} />
+            <StatRow
+              label="Projected Annual Growth"
+              value={`+ ${formatFullCurrency(retirementTotals.projectedOneYearBalance - retirementTotals.balance)}`}
+              color="var(--success)"
+            />
+          </div>
+
+          {/* Per-account rows — the full passbook (wage ceiling, salary revisions, adjustments)
+              lives in each account's own detail view. */}
+          {renderHoldingSection('epf', 'EPF Accounts', epfAccounts, epfAccounts.length === 1, renderHoldingRow)}
+        </div>
       )}
 
       {selectedAsset && (() => {
         const stats = getAccountStats(selectedAsset);
         const oneDay = getOneDayReturn(selectedAsset);
-        // This holding's OWN last fetch time, not the portfolio-wide max shown in the list header.
+        // This holding's OWN last fetch time, not the Portfolio-wide max shown in the sub-view header.
         // Commodities live under a cINR_ cache key; a manual ₹/g override has no fetch time at all.
         const isManualCommodity = selectedAsset.type === 'commodity' && selectedAsset.manualPricePerGram !== undefined;
         const selectedFetchedAt = !selectedAsset.marketSymbol || isManualCommodity ? null

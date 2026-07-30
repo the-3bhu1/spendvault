@@ -393,7 +393,10 @@ function App() {
                 </div>
               )}
 
-              {data.accounts.some(acc => acc.type === 'mutual_funds' || acc.type === 'stocks' || acc.type === 'commodity' || acc.type === 'epf') && (
+              {/* Wealth now covers liquid Assets too, not just investments, so the entry has to
+                  appear for anyone holding anything at all. Credit cards are the sole exclusion —
+                  they're a liability and contribute no category. */}
+              {data.accounts.some(acc => !acc.archived && acc.type !== 'credit_card') && (
                 <div
                   className="card flex align-center gap-4 clickable"
                   onClick={() => { setActiveTab('wealth'); setIsHubOpen(false); }}
@@ -404,7 +407,7 @@ function App() {
                   </div>
                   <div className="flex-col flex-1">
                     <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Wealth</span>
-                    <span className="text-xs text-muted">Stocks, Mutual Funds, Metals & EPF</span>
+                    <span className="text-xs text-muted">Portfolio, Assets & Retirement</span>
                   </div>
                   <ChevronRight size={18} className="text-muted" />
                 </div>
@@ -534,8 +537,12 @@ function App() {
         </div>
       )}
 
-      {activeTour && isAuthenticated && (
-        <AppTour 
+      {/* No `isAuthenticated` guard here: reaching this render means `needsAuth` was false above,
+          so the vault is already unlocked. Gating on `isAuthenticated` instead meant users without
+          a PIN — who never pass through AuthScreen, so the flag stays false forever — never saw a
+          single feature tour. */}
+      {activeTour && (
+        <AppTour
           tourType={activeTour}
           activeTab={activeTab} 
           setActiveTab={setActiveTab} 

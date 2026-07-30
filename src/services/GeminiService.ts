@@ -6,7 +6,7 @@ import { getGeminiKey, getCommodityVendor, getGeminiModel } from './GeminiConfig
 // UI labels them as estimates and offers a manual override. Returns nulls on any failure.
 
 // INR-per-gram sanity rails — reject hallucinated / wrong-unit values (e.g. a per-10g
-// figure) so a bad number never reaches the portfolio. Wide, to allow for price rallies.
+// figure) so a bad number never reaches Wealth. Wide, to allow for price rallies.
 const BAND: Record<'gold' | 'silver', { min: number; max: number }> = {
   gold: { min: 3000, max: 60000 },
   silver: { min: 25, max: 800 },

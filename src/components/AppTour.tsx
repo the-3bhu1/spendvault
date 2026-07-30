@@ -44,7 +44,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
   }, [tourType]);
 
   // Step 6 (Smart Features) is platform-aware: Android leads with automatic SMS logging, while
-  // web/iOS show the AI/portfolio helpers that apply there. Same spotlight target — the grid
+  // web/iOS show the AI/wealth helpers that apply there. Same spotlight target — the grid
   // simply renders the subset of tiles available on each platform.
   const isAndroid = Capacitor.getPlatform() === 'android';
 
@@ -231,25 +231,25 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
     wealth: [
       {
         title: "Wealth Tour",
-        description: "Welcome to your Wealth dashboard! Track the live value of your stocks, mutual funds, metals, and EPF holdings — all in one place.",
+        description: "Welcome to your Wealth dashboard! Everything you own in one place — market investments, liquid cash, and retirement savings.",
         icon: TrendingUp
       },
       {
-        title: "Live Net Worth",
-        description: "Your holdings' combined current value, today's gain or loss, and a Refresh button that pulls the latest market prices. When you hold more than one asset class, the tabs let you view each one on its own.",
+        title: "Your Total Wealth",
+        description: "Everything you own, added up: market investments, the cash in your bank accounts and wallets, and your retirement savings. Below it, today's gain or loss across your market holdings.",
         selector: ".tour-wealth-summary",
         icon: Sparkles
       },
       {
-        title: "Your Holdings",
-        description: "Each holding shows what you invested, its current value, and returns. Tap any tab to filter by asset class — SpendVault even fetches real brand logos and AI-estimated metal prices automatically.",
-        selector: ".tour-wealth-tabs, .tour-wealth-holdings-section",
+        title: "Three Categories",
+        description: "Your wealth is split into Portfolio (stocks, funds, metals), Assets (bank, cash, e-wallets) and Retirement (EPF). Tap any category to open it — you'll find live prices, filters and per-holding charts inside. Categories you don't use yet stay hidden.",
+        selector: ".tour-wealth-categories",
         cardPosition: 'top',
         icon: Sparkles
       },
       {
         title: "Track Your Wealth",
-        description: "You're all set! We'll clear the sample holdings now so you can add your own from the Accounts tab.",
+        description: "You're all set! We'll clear the sample accounts now so you can add your own from the Accounts tab.",
         icon: ShieldCheck
       }
     ]
@@ -293,7 +293,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       document.querySelectorAll('.nav-header-btn, .tour-hub-btn, .tour-askvault-btn').forEach(btn => {
         btn.classList.remove('demo-hub-active', 'demo-hub-finger', 'demo-askvault-active', 'demo-askvault-finger');
       });
-      document.querySelectorAll('.tour-wealth-tab-btn').forEach(btn => {
+      document.querySelectorAll('.tour-wealth-tab-btn, .tour-wealth-categories .clickable').forEach(btn => {
         btn.classList.remove('demo-tab-active', 'demo-tab-finger');
       });
     };
@@ -489,35 +489,31 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       }
     }
 
-    if (tourType === 'wealth' && stepInfo && stepInfo.title === "Your Holdings") {
+    // Walks a finger down the category cards so the user sees they're tappable. Unlike the old
+    // filter-pill demo this must NOT click: a click navigates into the sub-view, which would
+    // strand the spotlight on an element that no longer exists.
+    if (tourType === 'wealth' && stepInfo && stepInfo.title === "Three Categories") {
       let tabIdx = 0;
-      const triggerTabCycle = () => {
-        const btns = document.querySelectorAll('.tour-wealth-tab-btn');
-        if (btns.length === 0) return;
+      const triggerCardCycle = () => {
+        const cards = document.querySelectorAll('.tour-wealth-categories .clickable');
+        if (cards.length === 0) return;
 
-        btns.forEach(b => {
-          b.classList.remove('demo-tab-active', 'demo-tab-finger');
+        cards.forEach(c => {
+          c.classList.remove('demo-tab-active', 'demo-tab-finger');
         });
 
-        const currentBtn = btns[tabIdx % btns.length] as HTMLElement;
-        if (currentBtn) {
-          currentBtn.classList.add('demo-tab-active');
-          currentBtn.classList.remove('demo-tab-finger');
-          void currentBtn.offsetWidth;
-          currentBtn.classList.add('demo-tab-finger');
-          window.setTimeout(() => {
-            currentBtn.click();
-            // Force spotlight recalculation for the newly rendered tab layout
-            window.setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
-            window.setTimeout(() => window.dispatchEvent(new Event('resize')), 200);
-          }, 280);
+        const currentCard = cards[tabIdx % cards.length] as HTMLElement;
+        if (currentCard) {
+          currentCard.classList.add('demo-tab-active');
+          void currentCard.offsetWidth;
+          currentCard.classList.add('demo-tab-finger');
         }
         tabIdx++;
       };
 
       wealthTimer = window.setTimeout(() => {
-        triggerTabCycle();
-        wealthInterval = window.setInterval(triggerTabCycle, 1800);
+        triggerCardCycle();
+        wealthInterval = window.setInterval(triggerCardCycle, 1800);
       }, 1000);
     }
 
@@ -967,10 +963,12 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
           animation: demoHubFinger 2s ease-in-out forwards;
         }
 
-        .tour-wealth-tab-btn.demo-tab-active {
+        .tour-wealth-tab-btn.demo-tab-active,
+        .tour-wealth-categories .clickable.demo-tab-active {
           position: relative;
         }
-        .tour-wealth-tab-btn.demo-tab-finger::after {
+        .tour-wealth-tab-btn.demo-tab-finger::after,
+        .tour-wealth-categories .clickable.demo-tab-finger::after {
           content: '';
           position: absolute;
           width: 22px;

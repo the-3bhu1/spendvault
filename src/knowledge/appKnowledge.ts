@@ -167,12 +167,44 @@ Mutual Funds bill behaves like any other bill; its LOG button opens the normal i
 the user chooses the funding account and the fund account themselves. Holdings and returns are
 tracked in Wealth, not here.
 
-# Wealth (formerly Portfolio)
-Aggregates stocks, mutual fund accounts, commodity holdings, and EPF (Employee Provident Fund): invested value vs. current
-value, with gain/loss. Prices: stocks/funds are fetched online; gold/silver are AI-estimated via the
-optional Gemini integration or set manually (₹/gram). EPF accounts project running balance, monthly credit breakdown (12% employee + 3.67% employer EPF + 8.33% EPS pension), monthly accrued interest (credited March 31st), and 1-year projected balance. Refresh all prices from the Wealth screen, or
-an individual holding from its account card. You can switch view modes, expand/collapse each asset
-class (Mutual Funds / Stocks / Commodities / EPF), and tap any holding to see its performance, allocation, subscreen details and transactions.
+# Wealth
+The top-level screen showing everything the user owns. It opens on a summary total ("<Name>'s Wealth")
+followed by up to three category cards, each with a chevron that opens its own sub-view:
+
+1. **Portfolio** — market investments: Stocks, Mutual Funds, Commodities (gold/silver).
+2. **Assets** — liquid money: Bank Accounts, Physical Cash, E-Wallets, plus an "Other" group holding
+   Debit Cards, Rewards wallets and any user-created custom account types.
+3. **Retirement** — EPF (Employee Provident Fund).
+
+The headline Wealth total = Portfolio current value + Assets liquid balance + Retirement balance. It is
+GROSS wealth: credit cards are excluded entirely (they're a liability) and tracked Debts are NOT
+subtracted, so this figure is not a net-worth number. A rewards wallet denominated in points/miles
+(it has a reward unit) is listed under Assets → Other but excluded from the ₹ total, since points
+can't be added to rupees; an NCMC debit card's travel-wallet balance IS counted, on top of its main
+balance.
+
+A category with no accounts is hidden — no card, no sub-view — and a muted hint below the cards names
+what's missing and points to the Accounts tab. A user with nothing at all sees a single empty state.
+
+## Portfolio sub-view
+Invested vs. current value with gain/loss, today's gain/loss, a "Refresh prices" button and a "Last
+refresh at" timestamp. Prices: stocks/funds are fetched online; gold/silver are AI-estimated via the
+optional Gemini integration or set manually (₹/gram). Filter pills (All / MF / Stocks / Metals) appear
+only for the asset classes the user actually holds, and only when there's more than one. Each class
+can be expanded/collapsed, and tapping a holding opens its performance chart, range selector,
+allocation and transactions. An individual holding can also be refreshed from its account card in the
+Accounts tab.
+
+## Assets sub-view
+Total cash and funds available, with filter pills (All / Bank / Cash / Wallets / Other) shown only for
+the groups present. Each row shows the account's running balance and its type. These rows are not
+tappable — liquid accounts have no price history; manage them from the Accounts tab.
+
+## Retirement sub-view
+Total EPF running balance and interest earned this financial year, plus the monthly credit breakdown
+(12% employee + 3.67% employer EPF + 8.33% EPS pension), the 1-year projected balance and projected
+annual growth. Interest accrues monthly and is credited March 31st. Tapping an EPF account row opens
+its full passbook detail.
 
 # Commodity (gold / silver) prices
 Gold/silver per-gram prices are approximate AI estimates fetched from a vendor (price reference) using
