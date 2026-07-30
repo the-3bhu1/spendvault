@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { format } from 'date-fns';
-import { Plus, Users, ChevronRight, Trash2, Check, Search, ChevronDown, Calendar, Edit2, ChevronLeft, ArrowRight, ImageDown } from 'lucide-react';
+import { Plus, Users, ChevronRight, Trash2, Check, Search, ChevronDown, Calendar, Edit2, ChevronLeft, ArrowRight, ImageDown, ReceiptIndianRupee } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import ConfirmDialog from './ConfirmDialog';
 import { useFinance } from '../FinanceContext';
 import type { SplitEvent, SplitItem } from '../types';
-import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName } from '../utils';
+import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, formatDateString } from '../utils';
 import { buildSplitShareImages, blobToBase64 } from '../services/splitImage';
 import { SubviewWrapper } from './SubviewWrapper.tsx';
 

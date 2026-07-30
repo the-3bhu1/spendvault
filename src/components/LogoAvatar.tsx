@@ -64,12 +64,10 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf }: { name: string
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: 'linear-gradient(135deg, #ffb703 0%, #fb8500 100%)',
-          color: '#ffffff',
-          boxShadow: '0 2px 8px rgba(251, 133, 0, 0.25)'
+          background: 'linear-gradient(135deg, #e0f2fe 0%, #93c5fd 50%, #60a5fa 100%)'
         }}
       >
-        <Landmark size={Math.round(size * 0.52)} color="#ffffff" strokeWidth={2} />
+        <Landmark size={Math.round(size * 0.52)} color="#1e3a8a" strokeWidth={2} />
       </div>
     );
   }

@@ -2402,24 +2402,46 @@ export default function Settings() {
       {viewContent}
 
       {isActionSheetOpen && (
-        <div className="modal-overlay" style={{ alignItems: 'flex-end' }} onClick={() => setIsActionSheetOpen(false)}>
-          <div className="action-sheet fade-in-up" onClick={e => e.stopPropagation()}>
-            <div style={{ width: '40px', height: '4px', background: 'var(--border-color)', borderRadius: '2px', margin: '0.5rem auto 1.5rem' }} />
-            <SectionHeader title="Profile Photo" first={true} />
-            <div className="flex-col gap-2">
-              <button className="action-sheet-btn" onClick={() => { setIsViewModeOpen(true); setIsActionSheetOpen(false); }}>
-                <Eye size={20} /> View Photo
-              </button>
-              <button className="action-sheet-btn" onClick={() => { fileInputRef.current?.click(); setIsActionSheetOpen(false); }}>
-                <Camera size={20} /> Change Photo
-              </button>
-              <button className="action-sheet-btn text-danger" onClick={() => { removeProfileImage(); setIsActionSheetOpen(false); }}>
-                <Trash2 size={20} /> Remove Photo
+        <div className="modal-overlay" onClick={() => setIsActionSheetOpen(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Profile Photo</h3>
+              <button onClick={() => setIsActionSheetOpen(false)}>
+                <CloseIcon size={20} />
               </button>
             </div>
-            <button className="btn btn-secondary w-100" style={{ marginTop: '1rem', padding: '1rem' }} onClick={() => setIsActionSheetOpen(false)}>
-              Cancel
-            </button>
+            <div className="modal-body flex-col gap-3">
+              {data.user?.profileImage && (
+                <button
+                  className="btn btn-secondary w-100 flex-row align-center gap-3"
+                  style={{ justifyContent: 'flex-start', padding: '1rem' }}
+                  onClick={() => { setIsViewModeOpen(true); setIsActionSheetOpen(false); }}
+                >
+                  <Eye size={20} /> View Photo
+                </button>
+              )}
+              <button
+                className="btn btn-secondary w-100 flex-row align-center gap-3"
+                style={{ justifyContent: 'flex-start', padding: '1rem' }}
+                onClick={() => { fileInputRef.current?.click(); setIsActionSheetOpen(false); }}
+              >
+                <Camera size={20} /> {data.user?.profileImage ? 'Change Photo' : 'Upload Photo'}
+              </button>
+              {data.user?.profileImage && (
+                <button
+                  className="btn btn-secondary w-100 flex-row align-center gap-3 text-danger"
+                  style={{ justifyContent: 'flex-start', padding: '1rem' }}
+                  onClick={() => { removeProfileImage(); setIsActionSheetOpen(false); }}
+                >
+                  <Trash2 size={20} /> Remove Photo
+                </button>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary w-100" style={{ padding: '1rem' }} onClick={() => setIsActionSheetOpen(false)}>
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2495,42 +2517,6 @@ export default function Settings() {
       <style>{`
         .crop-viewport { width: 300px; height: 300px; border-radius: 50%; overflow: hidden; background: #000; border: 4px solid var(--border-color); position: relative; display: flex; align-items: center; justify-content: center; touch-action: none; }
         .crop-viewport img { max-width: none; flex-shrink: 0; }
-        
-        .action-sheet {
-          background: var(--bg-card);
-          border: 1px solid var(--border-color);
-          border-radius: 24px 24px 0 0;
-          border-bottom: none;
-          padding: 1rem 1.5rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
-          width: 100%;
-          max-width: 100%;
-          box-shadow: 0 -10px 40px rgba(0,0,0,0.5);
-        }
-        .action-sheet-btn {
-          width: 100%;
-          display: flex;
-          align-items: center;
-          gap: 1rem;
-          padding: 1.25rem;
-          background: var(--bg-color);
-          border: 1px solid var(--border-color);
-          border-radius: 12px;
-          color: var(--text-primary);
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-        .action-sheet-btn:active {
-          transform: scale(0.98);
-          background: var(--bg-hover);
-        }
-        .fade-in-up {
-          animation: fadeInUp 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-        }
-        @keyframes fadeInUp {
-          from { transform: translateY(100%); opacity: 0; }
-          to { transform: translateY(0); opacity: 1; }
-        }
       `}</style>
       {/* Custom Confirmation Dialog */}
       <ConfirmDialog
