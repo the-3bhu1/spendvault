@@ -986,7 +986,7 @@ export function Wealth() {
     );
   };
 
-  const metricCell = (label: ReactNode, value: string, color?: string) => (
+  const metricCell = (label: ReactNode, value: ReactNode, color?: string) => (
     <div style={{ flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem', lineHeight: 1.3 }}>
         {label}
@@ -1321,7 +1321,7 @@ export function Wealth() {
                 const flat = Math.abs(change) < 0.005;
                 return metricCell(
                   'This Month',
-                  `${flat ? '' : change > 0 ? '+' : '−'}${formatCurrency(Math.abs(change))}`,
+                  flat ? formatCurrency(Math.abs(change)) : signedAmount(change > 0, formatCurrency(Math.abs(change))),
                   flat ? undefined : change > 0 ? 'var(--success)' : '#ef4444'
                 );
               })()}
