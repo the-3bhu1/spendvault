@@ -45,6 +45,21 @@ export function CustomPicker({
   const selectedOptions = options.filter(o => valueArray.includes(o.id));
   const selectedOption = selectedOptions[0];
 
+  // Which option's icon represents the whole selection on the closed trigger. With multi-select the
+  // label collapses to "N selected", so borrowing the FIRST selection's icon actively misinforms:
+  // one bank + one credit card read as "2 selected" under a bank icon. A specific icon is only
+  // honest when every selection is the same kind of thing — i.e. they share a group — so a mixed
+  // selection falls back to the neutral catch-all option ('all' / '') the caller supplied.
+  const catchAllOption = options.find(o => o.id === 'all' || o.id === '');
+  const triggerIconOption = (() => {
+    if (!isMulti) return selectedOption;
+    if (valueArray.includes('all') || valueArray.length === 0) return catchAllOption;
+    if (selectedOptions.length <= 1) return selectedOption;
+    const groups = new Set(selectedOptions.map(o => o.group));
+    const sameGroup = groups.size === 1 && selectedOptions[0].group !== undefined;
+    return sameGroup ? selectedOptions[0] : catchAllOption;
+  })();
+
   const uniqueGroups = Array.from(new Set(options.map(o => o.group).filter(Boolean))) as string[];
   const firstGroup = uniqueGroups[0] || '';
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
@@ -226,9 +241,9 @@ export function CustomPicker({
         onClick={() => setIsOpen(true)}
       >
         <div className="flex align-center gap-3" style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
-          {selectedOption && iconGetter && (
+          {triggerIconOption && iconGetter && (
             <div style={{ display: 'flex', alignItems: 'center' }}>
-              {iconGetter(selectedOption.id)}
+              {iconGetter(triggerIconOption.id)}
             </div>
           )}
           <span style={{

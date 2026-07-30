@@ -84,8 +84,12 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
   }, [data, currentMonth]);
 
 
-  const pieData = useMemo(() => Object.entries(spendByCategory).filter(([_, value]) => value > 0).map(([name, value]) => ({ name, value })), [spendByCategory]);
-  const accPieData = useMemo(() => Object.entries(spendByAccount).filter(([_, value]) => value > 0).map(([name, value]) => ({ name, value })), [spendByAccount]);
+  // Slices run largest-first (clockwise from 12 o'clock), so the ring reads as a ranking and the
+  // slivers collect at the end instead of scattering. Without the sort the order was object-key
+  // insertion order — i.e. whichever category/account happened to appear first in the transaction
+  // array — which reshuffled the chart every month and on any reorder.
+  const pieData = useMemo(() => Object.entries(spendByCategory).filter(([_, value]) => value > 0).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value })), [spendByCategory]);
+  const accPieData = useMemo(() => Object.entries(spendByAccount).filter(([_, value]) => value > 0).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value })), [spendByAccount]);
 
   const catColors = useMemo(() => getDistinctChartColors(pieData.length, CATEGORY_PALETTE), [pieData.length]);
   const accColors = useMemo(() => getDistinctChartColors(accPieData.length, ACCOUNT_PALETTE), [accPieData.length]);

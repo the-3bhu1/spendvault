@@ -7,10 +7,11 @@ import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHisto
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, RotateCcw, ChevronLeft, ChevronRight, ChevronDown, Landmark, ShieldCheck } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
+import WealthBackdrop from './WealthBackdrop';
 import { LogoAvatar } from './LogoAvatar';
 import { getAssetLogoUrl, ensureAssetLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
-import { calculateEPFProjection } from '../utils/epfEngine';
-import { calculateBalance, getCurrentMonthStr } from '../utils';
+import { calculateEPFProjection, getEPFInterestRate, getFinancialYearForDate } from '../utils/epfEngine';
+import { calculateBalance, getCurrentMonthStr, formatCurrency } from '../utils';
 
 type HistoryDataPoint = { date: number; close: number };
 type StockHistoryRange = '1d' | '5d' | '1mo' | '3mo' | '1y' | '5y';
@@ -24,7 +25,17 @@ type PortfolioFilter = 'all' | 'mf' | 'stocks' | 'commodity';
 // liquid type that isn't a bank account, cash or an e-wallet.
 type AssetsFilter = 'all' | 'bank' | 'cash' | 'ewallet' | 'other';
 
-function StatRow({ label, value, color }: { label: string; value: string; color?: string }) {
+// The arrow and the amount are one unit, so they're set with a hair of margin rather than a space
+// character: in the mono face a space carries a full advance plus .text-mono's 0.05em tracking, which
+// opened a visible gap between the arrow and the ₹.
+const signedAmount = (positive: boolean, body: ReactNode) => (
+  <>
+    <span style={{ marginRight: '0.14em' }}>{positive ? '↑' : '↓'}</span>
+    {body}
+  </>
+);
+
+function StatRow({ label, value, color }: { label: string; value: ReactNode; color?: string }) {
   return (
     <div style={{
       display: 'flex',
@@ -218,15 +229,23 @@ export function Wealth() {
   // to a ₹ total would be meaningless, so it contributes 0 (the row still shows its point balance).
   const isPointsDenominated = (a: Account) => a.type === 'rewards' && !!a.rewardUnit;
 
-  const getLiquidBalance = (account: Account) => {
+  const getLiquidBalanceAt = (account: Account, month: string) => {
     if (isPointsDenominated(account)) return 0;
-    let bal = calculateBalance(account, data.transactions, currentMonth);
+    let bal = calculateBalance(account, data.transactions, month);
     // An NCMC-enabled debit card carries a second, separate travel-wallet balance. It's real
     // money on the card, so it counts toward the account's contribution.
     if (account.isNcmcEnabled) {
-      bal += calculateBalance(account, data.transactions, currentMonth, true);
+      bal += calculateBalance(account, data.transactions, month, true);
     }
     return bal;
+  };
+  const getLiquidBalance = (account: Account) => getLiquidBalanceAt(account, currentMonth);
+
+  // 'YYYY-MM' one month back. Done by hand rather than with date-fns because constructing a Date from
+  // the string and subtracting would drag timezone handling into what is pure string arithmetic.
+  const previousMonthStr = (month: string) => {
+    const [y, m] = month.split('-').map(Number);
+    return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
   };
 
   const liquidTotals = useMemo(() => {
@@ -237,6 +256,22 @@ export function Wealth() {
       cash: sum(liquidGroups.cash),
       ewallet: sum(liquidGroups.ewallet),
       other: sum(liquidGroups.other),
+    };
+  }, [liquidGroups, liquidAccounts, data.transactions, currentMonth]);
+
+  // How much the liquid balances actually moved this month: this month's closing balance less last
+  // month's. It's the one fact about cash the headline total can't tell you, which is what earns it a
+  // place in the Assets strip beside the account count.
+  const liquidMonthChange = useMemo(() => {
+    const prev = previousMonthStr(currentMonth);
+    const delta = (accts: Account[]) =>
+      accts.reduce((s, a) => s + getLiquidBalanceAt(a, currentMonth) - getLiquidBalanceAt(a, prev), 0);
+    return {
+      all: delta(liquidAccounts),
+      bank: delta(liquidGroups.bank),
+      cash: delta(liquidGroups.cash),
+      ewallet: delta(liquidGroups.ewallet),
+      other: delta(liquidGroups.other),
     };
   }, [liquidGroups, liquidAccounts, data.transactions, currentMonth]);
 
@@ -434,6 +469,20 @@ export function Wealth() {
     };
   }, [epfAccounts]);
 
+  // The interest rate EPF is currently accruing at. Sourced from the engine (which honours a
+  // per-account override) instead of hardcoding 8.25%, so a customised account isn't misreported.
+  // Distinct rates across accounts have no single answer, so the spread is shown rather than a
+  // number that would be wrong for at least one of them.
+  const retirementRateLabel = useMemo(() => {
+    const fy = getFinancialYearForDate(currentMonth);
+    const rates = Array.from(
+      new Set(epfAccounts.map((a: Account) => getEPFInterestRate(fy, a.interestRateOverrides)))
+    ).sort((x, y) => x - y);
+    if (rates.length === 0) return '—';
+    if (rates.length === 1) return `${rates[0]}%`;
+    return `${rates[0]}–${rates[rates.length - 1]}%`;
+  }, [epfAccounts, currentMonth]);
+
   // The headline figure: every category summed. Liquid cash is included, so this is gross wealth —
   // credit-card outstanding and tracked debts are NOT subtracted.
   const totalWealth = portfolioStats.all.current + liquidTotals.all + retirementTotals.balance;
@@ -491,8 +540,10 @@ export function Wealth() {
     return ts && ts > 0 ? new Date(ts) : lastRefreshed;
   }, [portfolioFilter, lastRefreshed, mfAccounts, stockAccounts, commodityAccounts]);
 
-  const formatCurrency = (value: number) =>
-    `₹${Math.round(value).toLocaleString('en-IN')}`;
+  // Whole rupees, for the root screen only. The headline and the three category cards are summaries
+  // where paise are noise; every inner category and detail screen uses the shared formatCurrency so
+  // its figures reconcile digit-for-digit with the Accounts tab.
+  const formatWhole = (value: number) => `₹${Math.round(value).toLocaleString('en-IN')}`;
 
   const formatTime = (date: Date) => {
     const hours = String(date.getHours()).padStart(2, '0');
@@ -651,8 +702,13 @@ export function Wealth() {
     onClick: () => void;
     tourClass: string;
   }) => (
+    // Uses .card rather than a bespoke shell: that's what carries the app's NeoPOP treatment —
+    // 4px radius, the hard `4px 4px 0 #000` edge, and the lift-on-hover / press-down-on-tap
+    // transitions. These cards previously hand-rolled a 1rem-radius, shadowless box and leaned on a
+    // `clickable` class that has no CSS rule, so they read as flat panels from a different app and
+    // gave no feedback on tap despite being the primary navigation on this screen.
     <div
-      className={`clickable ${tourClass}`}
+      className={`card ${tourClass}`}
       onClick={onClick}
       style={{
         display: 'flex',
@@ -661,22 +717,23 @@ export function Wealth() {
         padding: '1.15rem 1.25rem',
         minHeight: '92px',
         boxSizing: 'border-box',
-        background: 'var(--bg-card)',
-        border: '1px solid var(--border-color)',
-        borderRadius: '1rem',
         cursor: 'pointer'
       }}
     >
+      {/* Square-cornered tile with its own hard edge, echoing .badge-scalloped — the soft circle it
+          replaced was the only rounded-pill shape on the screen. */}
       <div style={{
-        width: '42px',
-        height: '42px',
-        borderRadius: '999px',
-        background: 'rgba(255,255,255,0.06)',
+        width: '44px',
+        height: '44px',
+        borderRadius: '4px',
+        background: 'var(--bg-card-elevated)',
+        border: '1px solid var(--border-color)',
+        boxShadow: '3px 3px 0 #000',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
-        color: 'var(--text-primary)'
+        color: 'var(--accent)'
       }}>
         {icon}
       </div>
@@ -699,7 +756,9 @@ export function Wealth() {
         </div>
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0 }}>
-        <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>{value}</div>
+        {/* text-serif: every other figure in the app is set in the serif face (the wealth hero above,
+            account balances, holding values). A plain sans number here broke that. */}
+        <div className="text-serif" style={{ fontSize: '1.15rem', color: 'var(--text-primary)' }}>{value}</div>
         {valueNote}
       </div>
       <ChevronRight size={18} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
@@ -743,13 +802,17 @@ export function Wealth() {
     else if (category === 'retirement' && !hasRetirement) setCategory(null);
   }, [category, hasPortfolio, hasAssets, hasRetirement]);
 
-  // Shared chrome for a sub-view: back chevron + title, matching the holding detail's header.
-  const renderSubviewHeader = (title: string) => (
-    <div className="flex align-center gap-4" style={{ padding: '0 1.5rem 0.25rem', boxSizing: 'border-box' }}>
+  // Shared chrome for EVERY Wealth sub-view — both the category views and the holding detail.
+  // Deliberately carries no horizontal padding: that matches SubviewWrapper, Debts, Splits and
+  // AccountStatement, which all sit the chevron at the page container's own padding with the title
+  // beside it. Wealth used to add 1.5rem of its own here, putting its back button 24px further in
+  // than every other screen's, and the holding detail hand-rolled a second, title-less variant.
+  const renderSubviewHeader = (title: string, onBack: () => void, tourClass = '') => (
+    <div className="flex align-center gap-4" style={{ padding: '0 0 0.25rem', boxSizing: 'border-box' }}>
       <button
-        className="btn btn-secondary tour-wealth-back"
+        className={`btn btn-secondary ${tourClass}`}
         style={{ padding: '0.5rem', flexShrink: 0 }}
-        onClick={() => setCategory(null)}
+        onClick={onBack}
       >
         <ChevronLeft size={20} />
       </button>
@@ -758,6 +821,12 @@ export function Wealth() {
       </div>
     </div>
   );
+
+  const CATEGORY_LABELS: Record<WealthCategory, string> = {
+    portfolio: 'Portfolio',
+    assets: 'Assets',
+    retirement: 'Retirement',
+  };
 
   // A filter pill row. Pills are rendered only for classes the user actually holds, and the row
   // disappears entirely below two — a lone "All" pill filters nothing. `flexible` lets the row span
@@ -897,32 +966,44 @@ export function Wealth() {
       {/* ───────────────────────── Level 1: the category tree ───────────────────────── */}
       {!selectedAsset && !category && (
       <>
-      <div className="tour-wealth-summary" style={{ padding: '1.75rem 1.5rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-        <div style={{ marginBottom: '1rem' }}>
+      {/* position/overflow exist for WealthBackdrop: the sketch is absolutely positioned to this box
+          and bleeds past the horizontal padding, so it has to be clipped here.
+          minHeight gives the backdrop room to draw at full size — its viewBox is square, so a short
+          hero would scale it down by height and leave the arch small. justifyContent centring is what
+          lands the avatar and total on the door's hub (see COMPOSITION in WealthBackdrop): the drawing
+          is concentric about its own centre, so both must be centred in the same box. It also spends
+          the dead space that used to sit below the cards. */}
+      <div className="tour-wealth-summary" style={{ position: 'relative', overflow: 'hidden', minHeight: '400px', padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+        <WealthBackdrop />
+
+        {/* Every hero element is lifted above the backdrop; the sketch is the only thing at z 0. */}
+        <div style={{ position: 'relative', zIndex: 1, marginBottom: '1rem' }}>
           <ProfileAvatar size={64} />
         </div>
 
-        <div className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '2px', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+        <div className="text-mono uppercase" style={{ position: 'relative', zIndex: 1, fontSize: '0.72rem', fontWeight: 700, letterSpacing: '2px', color: 'var(--text-primary)', opacity: 0.85, marginBottom: '0.75rem' }}>
           {userName}'s Wealth
         </div>
 
-        <div className="text-serif" style={{ fontSize: '2.75rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
+        <div className="text-serif" style={{ position: 'relative', zIndex: 1, fontSize: '2.75rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
           ₹{Math.round(totalWealth).toLocaleString('en-IN')}
         </div>
 
         {/* The daily figure can only ever cover market holdings — cash and EPF don't move with the
             market — so it's suppressed entirely when the user has no Portfolio. */}
         {!hasPortfolio ? null : isRefreshing && !hasRefreshed ? null : wealthOneDayReturn !== null ? (
-          <div style={{ marginTop: '0.75rem', textAlign: 'center' }}>
-            <div style={{ fontSize: '0.95rem', fontWeight: 600, color: wealthOneDayReturn.amount >= 0 ? '#22c55e' : '#ef4444' }}>
-              {wealthOneDayReturn.amount >= 0 ? '↑' : '↓'} ₹{Math.abs(wealthOneDayReturn.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(wealthOneDayReturn.pct).toFixed(2)}%)
+          <div style={{ position: 'relative', zIndex: 1, marginTop: '0.75rem', textAlign: 'center' }}>
+            <div className="text-mono" style={{ fontSize: '0.9rem', fontWeight: 700, color: wealthOneDayReturn.amount >= 0 ? 'var(--success)' : '#ef4444' }}>
+              {/* Amount only. The root is a glance surface — the percentage lives on the Portfolio
+                  screen, where it sits beside Invested and can actually be reasoned about. */}
+              {signedAmount(wealthOneDayReturn.amount >= 0, formatWhole(Math.abs(wealthOneDayReturn.amount)))}
             </div>
-            <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.2rem', letterSpacing: '0.5px' }}>
+            <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-primary)', opacity: 0.7, marginTop: '0.2rem', letterSpacing: '0.5px' }}>
               Today{todayScope ? ` (${todayScope})` : ''}
             </div>
           </div>
         ) : (mfAccounts.length > 0 || stockAccounts.length > 0) ? (
-          <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.75rem', letterSpacing: '0.5px' }}>— today</div>
+          <div className="text-mono uppercase" style={{ position: 'relative', zIndex: 1, fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.75rem', letterSpacing: '0.5px' }}>— today</div>
         ) : null}
       </div>
 
@@ -933,7 +1014,7 @@ export function Wealth() {
           <div style={{ fontSize: '0.9rem' }}>Add a bank account, investment or EPF from the Accounts tab</div>
         </div>
       ) : (
-        <div className="tour-wealth-categories" style={{ padding: '0.5rem 1.5rem 0', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+        <div className="tour-wealth-categories" style={{ padding: '0.5rem 0 0', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
           {hasPortfolio && renderCategoryCard({
             icon: <TrendingUp size={20} />,
             label: 'Portfolio',
@@ -941,10 +1022,19 @@ export function Wealth() {
             // are added, which re-wraps and leaves the three cards at different heights. Each is
             // short enough to wrap to exactly two lines in the ~100px text column.
             subtext: 'Market investments',
-            value: formatCurrency(portfolioStats.all.current),
-            valueNote: (
-              <div style={{ fontSize: '0.72rem', fontWeight: 600, marginTop: '0.2rem', color: portfolioStats.all.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
-                {portfolioStats.all.pnl >= 0 ? '↑' : '↓'} {formatCurrency(Math.abs(portfolioStats.all.pnl))} ({Math.abs(portfolioStats.all.pnlPct).toFixed(2)}%)
+            value: formatWhole(portfolioStats.all.current),
+            // P&L is only meaningful against a live valuation. With no mutual funds or stocks the
+            // only holdings are commodities, whose ₹/gram comes from an AI estimate that may never
+            // have been fetched — current then reads 0 and this claimed a −100% loss on money that
+            // is still entirely there. Gating on `current > 0` rather than on account type also
+            // covers a fund/stock portfolio whose prices haven't been refreshed yet.
+            valueNote: portfolioStats.all.current > 0 ? (
+              <div className="text-mono" style={{ fontSize: '0.68rem', fontWeight: 700, marginTop: '0.25rem', color: portfolioStats.all.pnl >= 0 ? 'var(--success)' : '#ef4444' }}>
+                {signedAmount(portfolioStats.all.pnl >= 0, formatWhole(Math.abs(portfolioStats.all.pnl)))}
+              </div>
+            ) : (
+              <div className="text-mono uppercase" style={{ fontSize: '0.58rem', fontWeight: 700, marginTop: '0.3rem', color: 'var(--text-secondary)', letterSpacing: '0.5px' }}>
+                Awaiting prices
               </div>
             ),
             onClick: () => openCategory('portfolio'),
@@ -954,13 +1044,18 @@ export function Wealth() {
           {hasAssets && renderCategoryCard({
             icon: <Landmark size={20} />,
             label: 'Assets',
-            subtext: 'Bank, cash & wallets',
-            value: formatCurrency(liquidTotals.all),
-            valueNote: (
-              <div className="text-mono uppercase" style={{ fontSize: '0.6rem', color: 'var(--text-secondary)', marginTop: '0.25rem', letterSpacing: '0.5px' }}>
-                Liquid
-              </div>
-            ),
+            subtext: 'Bank, Cash & Wallets',
+            value: formatWhole(liquidTotals.all),
+            valueNote: (() => {
+              const change = liquidMonthChange.all;
+              const flat = Math.abs(change) < 0.005;
+              return (
+                <div className="text-mono" style={{ fontSize: '0.68rem', fontWeight: 700, marginTop: '0.25rem', color: flat ? 'var(--text-secondary)' : change > 0 ? 'var(--success)' : '#ef4444' }}>
+                  <span style={{ marginRight: '0.14em' }}>{flat ? '' : change > 0 ? '+' : '−'}</span>
+                  {formatWhole(Math.abs(change))} MO
+                </div>
+              );
+            })(),
             onClick: () => openCategory('assets'),
             tourClass: 'tour-wealth-cat-assets',
           })}
@@ -969,10 +1064,10 @@ export function Wealth() {
             icon: <ShieldCheck size={20} />,
             label: 'Retirement',
             subtext: 'Provident Fund (EPF)',
-            value: formatCurrency(retirementTotals.balance),
+            value: formatWhole(retirementTotals.balance),
             valueNote: (
-              <div style={{ fontSize: '0.72rem', fontWeight: 600, marginTop: '0.2rem', color: 'var(--success)' }}>
-                + {formatCurrency(retirementTotals.accruedInterest)} FY
+              <div className="text-mono" style={{ fontSize: '0.68rem', fontWeight: 700, marginTop: '0.25rem', color: 'var(--success)' }}>
+                <span style={{ marginRight: '0.14em' }}>+</span>{formatWhole(retirementTotals.accruedInterest)} FY
               </div>
             ),
             onClick: () => openCategory('retirement'),
@@ -1007,17 +1102,17 @@ export function Wealth() {
         const oneDay = filteredPortfolioOneDayReturn;
         return (
         <div className="fade-in">
-          {renderSubviewHeader('Portfolio')}
+          {renderSubviewHeader('Portfolio', () => setCategory(null), 'tour-wealth-back')}
 
           <div style={{ padding: '0.75rem 1.5rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
             <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
-              ₹{Math.round(s.current).toLocaleString('en-IN')}
+              {formatCurrency(s.current)}
             </div>
 
             {isRefreshing && !hasRefreshed ? null : oneDay !== null ? (
               <div style={{ marginTop: '0.75rem', textAlign: 'center' }}>
                 <div style={{ fontSize: '0.95rem', fontWeight: 600, color: oneDay.amount >= 0 ? '#22c55e' : '#ef4444' }}>
-                  {oneDay.amount >= 0 ? '↑' : '↓'} ₹{Math.abs(oneDay.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({Math.abs(oneDay.pct).toFixed(2)}%)
+                  {signedAmount(oneDay.amount >= 0, `₹${Math.abs(oneDay.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${Math.abs(oneDay.pct).toFixed(2)}%)`)}
                 </div>
                 <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.2rem', letterSpacing: '0.5px' }}>
                   Today{activeFilter === 'all' && commodityAccounts.length > 0 && todayScope ? ` (${todayScope})` : ''}
@@ -1065,24 +1160,31 @@ export function Wealth() {
 
           <div className="tour-wealth-holdings-section">
             <div className="tour-wealth-holdings-container">
+              {/* No 'Current' cell: the headline above is the same `s.current`, so it tracked the
+                  filter pills identically and simply repeated itself. Invested and Returns are the
+                  two figures the headline does NOT already give you. */}
               {metricStrip(<>
                 {metricCell('Invested', formatCurrency(s.invested))}
                 {metricDivider}
-                {metricCell('Current', formatCurrency(s.current))}
-                {metricDivider}
                 <div style={{ flex: 1, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                   <div className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Returns</div>
-                  <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <div style={{ position: 'relative', fontSize: '0.88rem', fontWeight: 700, color: s.pnl >= 0 ? '#22c55e' : '#ef4444', lineHeight: 1.2 }}>
-                      <span style={{ position: 'absolute', right: '100%', marginRight: '2px', fontWeight: 700 }}>
-                        {s.pnl >= 0 ? '↑' : '↓'}
-                      </span>
-                      ₹{Math.abs(s.pnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {/* Same guard as the Portfolio card: without a live valuation `current` is 0 and the
+                      return reads as a total loss of money that hasn't gone anywhere. */}
+                  {s.current > 0 ? (
+                    <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <div style={{ position: 'relative', fontSize: '0.88rem', fontWeight: 700, color: s.pnl >= 0 ? 'var(--success)' : '#ef4444', lineHeight: 1.2 }}>
+                        <span style={{ position: 'absolute', right: '100%', marginRight: '2px', fontWeight: 700 }}>
+                          {s.pnl >= 0 ? '↑' : '↓'}
+                        </span>
+                        {formatCurrency(Math.abs(s.pnl))}
+                      </div>
+                      <div style={{ fontSize: '0.70rem', fontWeight: 600, color: s.pnl >= 0 ? 'var(--success)' : '#ef4444', opacity: 0.9, marginTop: '0.15rem' }}>
+                        ({Math.abs(s.pnlPct).toFixed(2)}%)
+                      </div>
                     </div>
-                    <div style={{ fontSize: '0.70rem', fontWeight: 600, color: s.pnl >= 0 ? '#22c55e' : '#ef4444', opacity: 0.9, marginTop: '0.15rem' }}>
-                      ({Math.abs(s.pnlPct).toFixed(2)}%)
-                    </div>
-                  </div>
+                  ) : (
+                    <div className="text-mono" style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-secondary)' }}>—</div>
+                  )}
                 </div>
               </>)}
 
@@ -1131,11 +1233,11 @@ export function Wealth() {
         const pointsOnly = liquidAccounts.filter(isPointsDenominated).length;
         return (
         <div className="fade-in">
-          {renderSubviewHeader('Assets')}
+          {renderSubviewHeader('Assets', () => setCategory(null), 'tour-wealth-back')}
 
           <div style={{ padding: '0.75rem 1.5rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
             <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
-              ₹{Math.round(liquidTotals[activeFilter]).toLocaleString('en-IN')}
+              {formatCurrency(liquidTotals[activeFilter])}
             </div>
             <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.5rem', letterSpacing: '0.5px' }}>
               Cash &amp; funds available
@@ -1144,12 +1246,23 @@ export function Wealth() {
             {renderFilterPills(tabs, activeFilter, setAssetsFilter, { marginTop: '1.75rem', flexible: true })}
           </div>
 
+          {/* 'Total' used to sit here and simply repeated the headline above. Replaced with the
+              month's net movement — the one thing about these balances the headline doesn't say. */}
           {metricStrip(<>
             {metricCell('Accounts', String(
               activeFilter === 'all' ? liquidAccounts.length : liquidGroups[activeFilter].length
             ))}
             {metricDivider}
-            {metricCell('Total', formatCurrency(liquidTotals[activeFilter]))}
+            {(() => {
+              const change = liquidMonthChange[activeFilter];
+              // Sub-paise drift is noise, not a gain or a loss, so it stays uncoloured.
+              const flat = Math.abs(change) < 0.005;
+              return metricCell(
+                'This Month',
+                `${flat ? '' : change > 0 ? '+' : '−'}${formatCurrency(Math.abs(change))}`,
+                flat ? undefined : change > 0 ? 'var(--success)' : '#ef4444'
+              );
+            })()}
           </>)}
 
           {liquidGroups.bank.length > 0 && (activeFilter === 'all' || activeFilter === 'bank') &&
@@ -1176,38 +1289,30 @@ export function Wealth() {
       {/* ───────────────────────── Level 2c: Retirement ───────────────────────── */}
       {!selectedAsset && category === 'retirement' && (
         <div className="fade-in">
-          {renderSubviewHeader('Retirement')}
+          {renderSubviewHeader('Retirement', () => setCategory(null), 'tour-wealth-back')}
 
           <div style={{ padding: '0.75rem 1.5rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
             <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
-              ₹{Math.round(retirementTotals.balance).toLocaleString('en-IN')}
+              {formatCurrency(retirementTotals.balance)}
             </div>
             <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.5rem', letterSpacing: '0.5px' }}>
               Employee Provident Fund
             </div>
           </div>
 
+          {/* 'Current' used to sit here and simply repeated the headline above. The accruing rate is
+              the fact the headline can't carry, and it pairs naturally with the interest earned. */}
           {metricStrip(<>
-            {metricCell('Current', formatCurrency(retirementTotals.balance))}
+            {metricCell(<>Interest Rate<br />(Current FY)</>, retirementRateLabel)}
             {metricDivider}
             {metricCell(<>Interest Earned<br />(Current FY)</>, formatCurrency(retirementTotals.accruedInterest), 'var(--success)')}
           </>)}
 
-          <div style={{ padding: '0.5rem 1.75rem 0.5rem', boxSizing: 'border-box' }}>
-            <StatRow label="Monthly Credit" value={formatFullCurrency(retirementTotals.monthlyCredit)} />
-            <StatRow label="Employee Share (12%)" value={formatFullCurrency(retirementTotals.employeeContribution)} />
-            <StatRow label="Employer EPF Share" value={formatFullCurrency(retirementTotals.employerEPFContribution)} />
-            <StatRow label="Employer EPS (Pension)" value={formatFullCurrency(retirementTotals.employerEPSContribution)} color="var(--warning)" />
-
-            <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.75rem 0' }} />
-
-            <StatRow label="Est. Balance (1 Year)" value={formatFullCurrency(retirementTotals.projectedOneYearBalance)} />
-            <StatRow
-              label="Projected Annual Growth"
-              value={`+ ${formatFullCurrency(retirementTotals.projectedOneYearBalance - retirementTotals.balance)}`}
-              color="var(--success)"
-            />
-          </div>
+          {/* The contribution/projection breakdown is deliberately NOT repeated here. It's per-account
+              data, and the account's own detail view (tap a row below) already shows every line of it.
+              Rendering it at category level as well duplicated the whole block on the common
+              single-account setup, and would have read as a combined total once a second EPF account
+              existed — which it isn't; retirementTotals sums them. */}
 
           {/* Per-account rows — the full passbook (wage ceiling, salary revisions, adjustments)
               lives in each account's own detail view. */}
@@ -1232,16 +1337,9 @@ export function Wealth() {
               boxSizing: 'border-box'
             }}
           >
-            {/* Header with back button */}
-            <div className="flex align-center gap-4" style={{ padding: '0 0 0.5rem', boxSizing: 'border-box' }}>
-              <button
-                className="btn btn-secondary"
-                style={{ padding: '0.5rem', flexShrink: 0 }}
-                onClick={() => setSelectedAsset(null)}
-              >
-                <ChevronLeft size={20} />
-              </button>
-            </div>
+            {/* Titled with the parent category, not the asset name: the name is already set out below
+                with its logo, and naming the category says where "back" goes. */}
+            {renderSubviewHeader(category ? CATEGORY_LABELS[category] : 'Wealth', () => setSelectedAsset(null))}
 
             {/* Asset identity — centered, CRED style */}
             <div style={{ padding: '0 1.5rem 1.5rem', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
@@ -1278,7 +1376,7 @@ export function Wealth() {
                   marginTop: '0.75rem',
                   color: oneDay.perUnitChange >= 0 ? '#22c55e' : '#ef4444'
                 }}>
-                  {oneDay.perUnitChange >= 0 ? '↑' : '↓'} ₹{Math.abs(oneDay.perUnitChange).toFixed(2)} ({oneDay.pct >= 0 ? '+' : ''}{oneDay.pct.toFixed(2)}%)
+                  {signedAmount(oneDay.perUnitChange >= 0, `₹${Math.abs(oneDay.perUnitChange).toFixed(2)} (${oneDay.pct >= 0 ? '+' : ''}${oneDay.pct.toFixed(2)}%)`)}
                 </div>
               ) : (selectedAsset.type === 'commodity' || selectedAsset.type === 'epf') ? null : (
                 <div style={{
@@ -1514,13 +1612,13 @@ export function Wealth() {
                 />
                 <StatRow
                   label="Total Returns"
-                  value={`${stats.totalReturn >= 0 ? '↑' : '↓'} ₹${Math.abs(stats.totalReturn).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${stats.totalReturnPct >= 0 ? '+' : ''}${stats.totalReturnPct.toFixed(2)}%)`}
+                  value={signedAmount(stats.totalReturn >= 0, `₹${Math.abs(stats.totalReturn).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${stats.totalReturnPct >= 0 ? '+' : ''}${stats.totalReturnPct.toFixed(2)}%)`)}
                   color={stats.totalReturn >= 0 ? '#4ade80' : '#f87171'}
                 />
                 {oneDay && (
                   <StatRow
                     label="1 Day Returns"
-                    value={`${oneDay.amount >= 0 ? '↑' : '↓'} ₹${Math.abs(oneDay.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${oneDay.pct >= 0 ? '+' : ''}${oneDay.pct.toFixed(2)}%)`}
+                    value={signedAmount(oneDay.amount >= 0, `₹${Math.abs(oneDay.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${oneDay.pct >= 0 ? '+' : ''}${oneDay.pct.toFixed(2)}%)`)}
                     color={oneDay.amount >= 0 ? '#4ade80' : '#f87171'}
                   />
                 )}

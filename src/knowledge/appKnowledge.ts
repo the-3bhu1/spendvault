@@ -74,6 +74,10 @@ Actions (Transactions tab):
   linked transaction together with its counterpart legs as a block.
 - Filter/search: use the Filters panel in the Transactions tab to search and filter by type, account,
   category, tag, or month (with removable filter chips and income/spend summaries).
+  - Selecting the "Investments" category reveals an extra "Investment Type" filter (Mutual Funds /
+    Stocks / Commodity), so you can narrow to just fund purchases or just gold buys. It disappears
+    and resets when Investments is deselected, and it only constrains investment rows — filtering by
+    type alongside other categories leaves those other categories' transactions untouched.
 - Exclude from stats: this control appears in the editor only after you enable Settings → Smart
   Features → Passive Logs. You can exclude a transaction fully, or a partial amount; Dashboard and
   Insights then skip that amount.
@@ -90,9 +94,17 @@ deleting one keeps the legs in sync / removes them together. By category:
   billing cycle (current or previous statement).
   - With a reward split: if reward points are used toward the payment, a THIRD leg debits the rewards
     account for the points used; the bank leg covers the rest.
-- Investments: logging an investment purchase (mutual funds SIP / lumpsum, stocks, or commodities). Credits
-  the investment account with the holdings/units/grams and debits the paying bank account for the cost
-  (+ charges). Legacy categories ("Mutual Funds", "Stocks", "Commodity", "SIP") are consolidated under "Investments".
+- Investments: logging an investment purchase. Credits the investment account with the
+  holdings/units/grams and debits the paying bank account for the cost (+ charges). Legacy categories
+  ("Mutual Funds", "Stocks", "Commodity", "SIP") are consolidated under "Investments".
+  - Picking "Investments" reveals an "Investment Type" sub-picker — Mutual Funds, Stocks or Commodity
+    — which drives the rest of the form. Each type has its own fields and its own valid accounts:
+    - Mutual Funds: Allotted Amount + Stamp Duty/Charges + Units Allotted; pairs with a Mutual Funds account.
+    - Stocks: Invested Amount + Brokerage/Taxes + No. of Shares (required); pairs with a Stocks account.
+    - Commodity: a single gross amount + Grams (required); pairs with a Commodity (digital gold/silver)
+      account. Commodity has no invested-vs-charges split.
+    The transaction is described automatically after the holding account (e.g. the fund or stock name),
+    and switching type clears any account or quantity that no longer applies.
 - Cashback (instant): on a debit with instant cashback, an extra credit posts to the chosen rewards
   account (category "Cashback").
 - Cashback (delayed): see Rewards & Offers — confirming realized cashback posts a "Cashback" credit

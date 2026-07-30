@@ -134,6 +134,10 @@ export interface Account {
 
 export type TransactionType = 'credit' | 'debit';
 export type RewardEarnedType = 'delayed' | 'instant' | 'none';
+// Sub-kinds of the single 'Investments' category. Values deliberately match the corresponding
+// Account['type'] ('mutual_funds' | 'stocks' | 'commodity') — that 1:1 pairing is what lets the kind
+// of a legacy investment transaction be recovered from the account it moved money into or out of.
+export type InvestmentKind = 'mutual_funds' | 'stocks' | 'commodity';
 
 export interface Transaction {
   id: string;
@@ -172,6 +176,12 @@ export interface Transaction {
   allottedAmount?: number;
   investmentCharges?: number;
   numberOfShares?: number;
+  /** Which kind of investment an 'Investments' transaction is. Mutual funds, stocks and commodity
+   *  share one category but each has its own fields (units vs. shares vs. grams), account type and
+   *  auto-description, so the kind is what selects that behaviour. Only meaningful when the
+   *  category is 'Investments'; read it via getInvestmentKind(), which also infers it for rows
+   *  written before this field existed. */
+  investmentKind?: InvestmentKind;
   tags?: string[];
 }
 

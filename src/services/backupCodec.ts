@@ -61,7 +61,7 @@ export const KEY_MAP: Record<string, string> = {
   // NOTE: 'saa'/'sc' were minted for the old field names sipAllottedAmount/sipCharges. Those fields
   // were RENAMED (not replaced) to allottedAmount/investmentCharges, so keeping the same codes is
   // correct and keeps every previously-exported backup decoding into the new names.
-  allottedAmount: 'saa', investmentCharges: 'sc',
+  allottedAmount: 'saa', investmentCharges: 'sc', investmentKind: 'ik',
   hasSeenTour: 'hst', hasSeenFeatureTours: 'hsft',
   cycles: 'cy', currentCycleId: 'cci', cycleStartDate: 'csd',
   cycleNumber: 'cnm', startDate: 'sdt', endDate: 'edt', carriedOverPeople: 'cop',

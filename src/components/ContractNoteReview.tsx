@@ -5,7 +5,7 @@ import { useFinance } from '../FinanceContext';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import { getAccountTypeIcon } from './transactionIcons';
-import { generateId } from '../utils';
+import { generateId, INVESTMENT_CATEGORY } from '../utils';
 import type { AllocatedTrade } from '../services/ContractNoteService';
 
 const CREATE_NEW = '__create_new__';
@@ -133,7 +133,8 @@ export default function ContractNoteReview({ trades, skippedSellRows, reconcilia
         accountId: fundingAccountId,
         type: 'debit',
         amount: invested + charges,
-        category: 'Stocks',
+        category: INVESTMENT_CATEGORY,
+        investmentKind: 'stocks',
         isRecurring: false,
         linkedTransactionIds: [mainTxId],
         numberOfShares: quantity,
@@ -147,7 +148,8 @@ export default function ContractNoteReview({ trades, skippedSellRows, reconcilia
         accountId: stocksAccountId,
         type: 'credit',
         amount: invested,
-        category: 'Stocks',
+        category: INVESTMENT_CATEGORY,
+        investmentKind: 'stocks',
         isRecurring: false,
         linkedTransactionIds: [counterpartId],
         paymentSourceAccountId: fundingAccountId,

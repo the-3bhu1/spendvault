@@ -3,10 +3,10 @@ import { format, parseISO } from 'date-fns';
 import { Sparkles, Calendar, Hash, BanknoteArrowUp, BanknoteArrowDown, Wallet } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 import { useFinance } from '../FinanceContext';
-import type { Transaction, TransactionType, Account } from '../types';
+import type { Transaction, TransactionType, Account, InvestmentKind } from '../types';
 import { CustomPicker } from './CustomPicker';
-import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, sortByAccountType } from './transactionIcons';
-import { getBillingCycleForDate } from '../utils';
+import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, sortByAccountType, getInvestmentKindIcon } from './transactionIcons';
+import { getBillingCycleForDate, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor } from '../utils';
 
 // DUPLICATE MODAL WARNING: this is a separate, independent implementation of the
 // log/edit-transaction form from the one inlined in Transactions.tsx (the main Ledger's
@@ -26,7 +26,7 @@ interface TransactionModalProps {
 export const getAccountIcon = (accountId: string, accounts: Account[]) => {
   const acc = accounts.find(a => a.id === accountId);
   if (!acc) return <Wallet size={18} />;
-  return getAccountTypeIcon(acc.type);
+  return getAccountTypeIcon(acc.type, 18, acc.archived);
 };
 
 export const TransactionModal: React.FC<TransactionModalProps> = ({
@@ -128,6 +128,82 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   if (!isOpen) return null;
 
   const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
+  // Which investment this log is for. Mutual funds, stocks and commodity share the 'Investments'
+  // category but need different fields and account types, so the kind is the discriminator — mirrors
+  // activeInvestmentKind in Transactions.tsx (see the duplicate-modal warning at the top of this file).
+  const activeInvestmentKind: InvestmentKind | undefined =
+    isInvestmentCategory(newTx.category) ? newTx.investmentKind : undefined;
+
+  const investmentDescriptionFor = (kind: InvestmentKind, accountIds: (string | undefined)[]) => {
+    const wantType = investmentAccountTypeFor(kind);
+    const acc = accountIds
+      .map(id => (id ? data.accounts.find(a => a.id === id) : undefined))
+      .find(a => a?.type === wantType);
+    return acc?.name || investmentKindLabel(kind);
+  };
+
+  // Category (and, for Investments, the kind) decides which account types are valid, whether the
+  // amount splits into invested + charges, whether a quantity applies, and the auto-description.
+  // Both the Category picker and the Investment Type sub-picker route through here.
+  const applyCategorySelection = (nextCategory: string, nextKind?: InvestmentKind) => {
+    const prevKind = activeInvestmentKind;
+    setNewTx(prev => {
+      let nextAccountId = prev.accountId;
+      if (nextKind) {
+        // Drop an account that isn't valid for this kind and direction rather than saving a stock
+        // buy against a mutual-fund account.
+        const currentAcc = data.accounts.find(a => a.id === prev.accountId);
+        const isValid = !!currentAcc && (prev.type === 'credit'
+          ? currentAcc.type === investmentAccountTypeFor(nextKind)
+          : (currentAcc.type === 'bank_account' || currentAcc.type === 'e_wallet'));
+        if (!isValid) nextAccountId = '';
+      }
+
+      // The description counts as ours to rewrite only while it still matches what we'd generate for
+      // the kind being left, so a name the user typed themselves is never discarded.
+      const wasAutoFilled = !!prevKind
+        && prev.description === investmentDescriptionFor(prevKind, [prev.accountId, paymentSourceAccountId]);
+      let newDesc = prev.description;
+      if (nextKind && (!prev.description || wasAutoFilled)) {
+        newDesc = investmentDescriptionFor(nextKind, [nextAccountId, paymentSourceAccountId]);
+      } else if (!nextKind && wasAutoFilled) {
+        // Leaving investments — drop the name we generated for the old kind.
+        newDesc = '';
+      }
+
+      const splitsCharges = nextKind === 'mutual_funds' || nextKind === 'stocks';
+      const nextAllotted = splitsCharges ? (prev.allottedAmount || prev.amount || 0) : undefined;
+      const nextCharges = splitsCharges ? (prev.investmentCharges || 0) : undefined;
+      // Units, shares and grams aren't interchangeable, so a quantity survives only while its kind does.
+      const nextShares = (nextKind && nextKind === prevKind) ? prev.numberOfShares : undefined;
+      setInputStrings(s => ({
+        ...s,
+        allottedAmount: (nextAllotted === undefined || nextAllotted === 0) ? '' : nextAllotted.toString(),
+        investmentCharges: (nextCharges === undefined || nextCharges === 0) ? '' : nextCharges.toString(),
+        numberOfShares: toInputStr(nextShares)
+      }));
+      return {
+        ...prev,
+        category: nextCategory,
+        investmentKind: nextKind,
+        accountId: nextAccountId,
+        description: newDesc,
+        allottedAmount: nextAllotted,
+        investmentCharges: nextCharges,
+        numberOfShares: nextShares
+      };
+    });
+    // The counterpart's valid types depend on the kind, so any change of kind invalidates it.
+    if (isInvestmentCategory(nextCategory) !== isInvestmentCategory(newTx.category) || nextKind !== prevKind) {
+      setPaymentSourceAccountId('');
+    }
+    if (errors.category || errors.investmentKind) {
+      const newErr = { ...errors };
+      delete newErr.category;
+      delete newErr.investmentKind;
+      setErrors(newErr);
+    }
+  };
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
@@ -136,6 +212,15 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     if (!newTx.amount || newTx.amount <= 0) newErrors.amount = 'Amount must be greater than 0';
     if (!newTx.accountId) newErrors.accountId = 'Account is required';
     if (!newTx.category) newErrors.category = 'Category is required';
+    if (isInvestmentCategory(newTx.category) && !newTx.investmentKind) {
+      newErrors.investmentKind = 'Investment type is required';
+    }
+    if (activeInvestmentKind === 'stocks' && !newTx.numberOfShares) {
+      newErrors.numberOfShares = 'No. of Shares is required';
+    }
+    if (activeInvestmentKind === 'commodity' && !newTx.numberOfShares) {
+      newErrors.numberOfShares = 'Grams is required';
+    }
     if (showRewardSplit && (Number(newTx.rewardUsed) || 0) > 0 && !newTx.rewardUsedAccountId) {
       newErrors.rewardUsedAccountId = 'Reward account is required';
     }
@@ -177,9 +262,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         })()
       : undefined;
 
-    const isMf = newTx.category?.toLowerCase() === 'mutual funds';
-    const isStock = newTx.category?.toLowerCase() === 'stocks';
-    const isInvestment = isMf || isStock;
+    // Funds and stocks split into invested + charges; a commodity buy is a single gross amount.
+    const isInvestment = activeInvestmentKind === 'mutual_funds' || activeInvestmentKind === 'stocks';
     const allottedAmount = isInvestment ? (newTx.allottedAmount !== undefined ? Number(newTx.allottedAmount) : Number(newTx.amount)) : Number(newTx.amount);
     const investmentCharges = isInvestment ? (newTx.investmentCharges !== undefined ? Number(newTx.investmentCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined;
 
@@ -201,6 +285,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       category: newTx.category!,
       allottedAmount: isInvestment ? allottedAmount : undefined,
       investmentCharges: isInvestment ? investmentCharges : undefined,
+      investmentKind: activeInvestmentKind,
+      numberOfShares: activeInvestmentKind ? newTx.numberOfShares : undefined,
       rewardEarnedType: newTx.rewardEarnedType || (selectedCashbackLevelId ? 'delayed' : 'none'),
       cashbackLevelId: selectedCashbackLevelId || undefined,
       paymentSourceAccountId: paymentSourceAccountId || undefined,
@@ -248,16 +334,18 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           date: txData.date,
           description: isCCPayment
             ? (counterpartType === 'credit' ? 'CC Bill Payment' : `CC Payment: ${data.accounts.find(a => a.id === txData.accountId)?.name}`)
-            : (isInvestment ? txData.description : `Transfer to ${data.accounts.find(a => a.id === txData.accountId)?.name}`),
+            : (activeInvestmentKind ? txData.description : `Transfer to ${data.accounts.find(a => a.id === txData.accountId)?.name}`),
           amount: isInvestment ? (counterpartType === 'credit' ? allottedAmount : (allottedAmount + (investmentCharges || 0))) : txData.amount,
           type: counterpartType,
           accountId: paymentSourceAccountId,
           category: txData.category,
+          // The leg carries the kind too, so it keeps showing the right fields when opened on its own.
+          investmentKind: activeInvestmentKind,
           isCCPaymentRecord: isCCPayment,
           isRecurring: false,
           allottedAmount: isInvestment ? allottedAmount : undefined,
           investmentCharges: isInvestment ? investmentCharges : undefined,
-          numberOfShares: isInvestment ? newTx.numberOfShares : undefined,
+          numberOfShares: activeInvestmentKind ? newTx.numberOfShares : undefined,
           appliedBillingCycleYearMonth: isCCPayment && counterpartType === 'credit' && destAccount?.type === 'credit_card'
             ? (() => {
                 const safeStatementDay = destAccount.statementDay || 1;
@@ -372,7 +460,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                     setInputStrings(prev => ({ ...prev, amount: val }));
                     const totalAmount = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
                     setNewTx(prev => {
-                      const isInvestment = prev.category?.toLowerCase() === 'mutual funds' || prev.category?.toLowerCase() === 'stocks';
+                      const isInvestment = isInvestmentCategory(prev.category)
+                        && (prev.investmentKind === 'mutual_funds' || prev.investmentKind === 'stocks');
                       if (!isInvestment) return { ...prev, amount: totalAmount };
                       // Keep invested fixed; charges absorb the change (amount = invested + charges).
                       // Read invested from prev (current state), not a stale render closure.
@@ -389,11 +478,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               {errors.amount && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.amount}</span>}
             </div>
             <CustomPicker label="Type" value={newTx.type!} options={[{ id: 'debit', name: 'Debit (Spend)', subtext: 'Money Going Out' }, { id: 'credit', name: 'Credit (Receive)', subtext: 'Money Coming In' }]} onChange={val => {
-              const isInvestment = newTx.category?.toLowerCase() === 'mutual funds' || newTx.category?.toLowerCase() === 'stocks';
               setNewTx(prev => {
                 const nextType = val as TransactionType;
                 let nextAccountId = prev.accountId;
-                if (isInvestment) {
+                // Flipping direction swaps which leg holds the investment account, so any picked
+                // account is no longer valid for the new direction.
+                if (activeInvestmentKind) {
                   // Type changed: clear selections to avoid invalid combination
                   nextAccountId = '';
                   setPaymentSourceAccountId('');
@@ -406,6 +496,31 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               });
             }} iconGetter={_id => _id === 'debit' ? <BanknoteArrowDown size={18} /> : <BanknoteArrowUp size={18} />} style={{ marginBottom: 0 }} />
           </div>
+
+          <CustomPicker label="Category" value={newTx.category || ''} placeholder="Select Category" options={[...[...(data.categories || [])].sort((a, b) => {
+            const isAOther = a.toLowerCase().includes('other') || a.toLowerCase().includes('misc');
+            const isBOther = b.toLowerCase().includes('other') || b.toLowerCase().includes('misc');
+            if (isAOther && !isBOther) return 1;
+            if (!isAOther && isBOther) return -1;
+            return 0;
+          }).map(c => ({ id: c, name: c })), ...(newTx.category && !(data.categories || []).includes(newTx.category) ? [{ id: newTx.category, name: newTx.category }] : [])]} onChange={val => {
+            applyCategorySelection(val, isInvestmentCategory(val) ? activeInvestmentKind : undefined);
+          }} iconGetter={c => getCategoryIcon(c)} error={errors.category} />
+
+          {/* Investments is one category covering funds, stocks and metals, each with its own fields
+              and valid account types. This sub-picker is what selects between them; it shares the
+              category handler so both paths settle the same state. */}
+          {isInvestmentCategory(newTx.category) && (
+            <CustomPicker
+              label="Investment Type"
+              value={newTx.investmentKind || ''}
+              placeholder="Select Investment Type"
+              options={INVESTMENT_KIND_OPTIONS}
+              onChange={val => applyCategorySelection(newTx.category as string, val as InvestmentKind)}
+              iconGetter={id => getInvestmentKindIcon(id)}
+              error={errors.investmentKind}
+            />
+          )}
 
           <CustomPicker 
             label="Account" 
@@ -420,14 +535,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 if (newTx.category?.toLowerCase() === 'cc payment') {
                   return newTx.type === 'debit' ? (acc.type === 'bank_account' || acc.type === 'e_wallet') : acc.type === 'credit_card';
                 }
-                if (newTx.category?.toLowerCase() === 'mutual funds') {
-                  return newTx.type === 'credit' ? acc.type === 'mutual_funds' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
-                }
-                if (newTx.category?.toLowerCase() === 'stocks') {
-                  return newTx.type === 'credit' ? acc.type === 'stocks' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
-                }
-                if (newTx.category?.toLowerCase() === 'commodity') {
-                  return newTx.type === 'credit' ? acc.type === 'commodity' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
+                if (activeInvestmentKind) {
+                  return newTx.type === 'credit'
+                    ? acc.type === investmentAccountTypeFor(activeInvestmentKind)
+                    : (acc.type === 'bank_account' || acc.type === 'e_wallet');
                 }
                 return true;
               })
@@ -435,18 +546,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               .map(acc => ({ id: acc.id, name: acc.archived ? `${acc.name} (deleted)` : acc.name, subtext: acc.type.replace('_', ' '), group: getAccountGroupLabel(acc.type, acc.archived) }))
             }
             onChange={val => {
-              const isMf = newTx.category?.toLowerCase() === 'mutual funds';
-              const isStock = newTx.category?.toLowerCase() === 'stocks';
-              const selectedAcc = data.accounts.find(a => a.id === val);
               let updatedDesc = newTx.description;
-              if (isMf) {
-                const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
-                const mfAcc = selectedAcc?.type === 'mutual_funds' ? selectedAcc : (counterpartAcc?.type === 'mutual_funds' ? counterpartAcc : null);
-                updatedDesc = mfAcc ? mfAcc.name : 'Mutual Funds';
-              } else if (isStock) {
-                const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
-                const stockAcc = selectedAcc?.type === 'stocks' ? selectedAcc : (counterpartAcc?.type === 'stocks' ? counterpartAcc : null);
-                updatedDesc = stockAcc ? stockAcc.name : 'Stock Trade';
+              if (activeInvestmentKind) {
+                updatedDesc = investmentDescriptionFor(activeInvestmentKind, [val, paymentSourceAccountId]);
               }
               setNewTx(prev => ({ ...prev, accountId: val, description: updatedDesc }));
               if (errors.accountId) { const newErr = { ...errors }; delete newErr.accountId; setErrors(newErr); }
@@ -455,71 +557,31 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             error={errors.accountId} 
           />
 
-          <CustomPicker label="Category" value={newTx.category || ''} placeholder="Select Category" options={[...[...(data.categories || [])].sort((a, b) => {
-            const isAOther = a.toLowerCase().includes('other') || a.toLowerCase().includes('misc');
-            const isBOther = b.toLowerCase().includes('other') || b.toLowerCase().includes('misc');
-            if (isAOther && !isBOther) return 1;
-            if (!isAOther && isBOther) return -1;
-            return 0;
-          }).map(c => ({ id: c, name: c })), ...(newTx.category && !(data.categories || []).includes(newTx.category) ? [{ id: newTx.category, name: newTx.category }] : [])]} onChange={val => {
-            const isMf = val.toLowerCase() === 'mutual funds';
-            const isStock = val.toLowerCase() === 'stocks';
-            const isCommodity = val.toLowerCase() === 'commodity';
-            const isInvestment = isMf || isStock;
-            setNewTx(prev => {
-              let nextAccountId = prev.accountId;
-              if (isInvestment || isCommodity) {
-                const currentAcc = data.accounts.find(a => a.id === prev.accountId);
-                let isValid = false;
-                if (currentAcc) {
-                  if (prev.type === 'credit') {
-                    if (isMf) isValid = currentAcc.type === 'mutual_funds';
-                    else if (isStock) isValid = currentAcc.type === 'stocks';
-                    else if (isCommodity) isValid = currentAcc.type === 'commodity';
-                  } else {
-                    isValid = currentAcc.type === 'bank_account' || currentAcc.type === 'e_wallet';
+          {(activeInvestmentKind === 'stocks' || activeInvestmentKind === 'commodity') && (
+            <div className="input-group" style={{ marginTop: '0.5rem', marginBottom: '1rem' }}>
+              <label>{activeInvestmentKind === 'commodity' ? 'Grams' : 'No. of Shares'}</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                className={`input-field ${errors.numberOfShares ? 'border-danger' : ''}`}
+                value={inputStrings.numberOfShares}
+                onChange={e => {
+                  const val = e.target.value;
+                  if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                    setInputStrings(prev => ({ ...prev, numberOfShares: val }));
+                    setNewTx(prev => ({ ...prev, numberOfShares: val === '' ? undefined : parseFloat(val) }));
+                    if (errors.numberOfShares) setErrors(prev => ({ ...prev, numberOfShares: '' }));
                   }
-                }
-                if (!isValid) {
-                  nextAccountId = '';
-                }
-                setPaymentSourceAccountId('');
-              }
-              const mainAcc = data.accounts.find(a => a.id === nextAccountId);
-              
-              let newDesc = prev.description;
-              if (isMf) {
-                 const mfAcc = mainAcc?.type === 'mutual_funds' ? mainAcc : null;
-                 newDesc = mfAcc ? mfAcc.name : 'Mutual Funds';
-              } else if (isStock) {
-                 const stockAcc = mainAcc?.type === 'stocks' ? mainAcc : null;
-                 newDesc = stockAcc ? stockAcc.name : 'Stock Trade';
-              }
-              const nextAllotted = isInvestment ? (prev.allottedAmount || prev.amount || 0) : undefined;
-              const nextCharges = isInvestment ? (prev.investmentCharges || 0) : undefined;
-              const nextShares = isMf ? prev.numberOfShares : undefined;
-              setInputStrings(s => ({
-                ...s,
-                allottedAmount: (nextAllotted === undefined || nextAllotted === 0) ? '' : nextAllotted.toString(),
-                investmentCharges: (nextCharges === undefined || nextCharges === 0) ? '' : nextCharges.toString(),
-                numberOfShares: toInputStr(nextShares)
-              }));
-              return {
-                ...prev,
-                category: val,
-                accountId: nextAccountId,
-                description: newDesc,
-                allottedAmount: nextAllotted,
-                investmentCharges: nextCharges,
-                numberOfShares: nextShares
-              };
-            });
-            if (errors.category) { const newErr = { ...errors }; delete newErr.category; setErrors(newErr); } 
-          }} iconGetter={c => getCategoryIcon(c)} error={errors.category} />
+                }}
+                placeholder={activeInvestmentKind === 'commodity' ? 'e.g. 0.2456' : 'e.g. 10'}
+              />
+              {errors.numberOfShares && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.numberOfShares}</span>}
+            </div>
+          )}
 
           {(() => {
-            const isMf = newTx.category?.toLowerCase() === 'mutual funds';
-            const isStock = newTx.category?.toLowerCase() === 'stocks';
+            const isMf = activeInvestmentKind === 'mutual_funds';
+            const isStock = activeInvestmentKind === 'stocks';
             const isInvestment = isMf || isStock;
             return isInvestment && (
               <div style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', marginBottom: '1rem' }}>
@@ -597,35 +659,23 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             );
           })()}
 
-          {!editId && ((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') || isCCPayment || (newTx.category?.toLowerCase() === 'mutual funds' || newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity')) && (
-            <CustomPicker label={(newTx.category?.toLowerCase() === 'mutual funds' || newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity') ? (newTx.type === 'debit' ? 'Credit To Investment Account' : 'Debit From Account') : (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' ? 'Debit From Account (Auto-Debit)' : 'Pay To Card (Auto-Credit)')} value={paymentSourceAccountId} placeholder="None (Manual Log)" defaultCollapsed={true} options={[{ id: '', name: 'None (Manual Log)' }, ...[...data.accounts].sort(sortByAccountType).filter(a => {
+          {!editId && ((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') || isCCPayment || !!activeInvestmentKind) && (
+            <CustomPicker label={activeInvestmentKind ? (newTx.type === 'debit' ? `Credit To ${investmentKindLabel(activeInvestmentKind)} Account` : 'Debit From Account') : (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' ? 'Debit From Account (Auto-Debit)' : 'Pay To Card (Auto-Credit)')} value={paymentSourceAccountId} placeholder="None (Manual Log)" defaultCollapsed={true} options={[{ id: '', name: 'None (Manual Log)' }, ...[...data.accounts].sort(sortByAccountType).filter(a => {
               if (a.id === newTx.accountId) return false;
               if (a.archived) return false; // this picker only shows for new transactions
 
-              if (newTx.category?.toLowerCase() === 'mutual funds') {
-                return newTx.type === 'debit' ? a.type === 'mutual_funds' : (a.type === 'bank_account' || a.type === 'e_wallet');
-              }
-              if (newTx.category?.toLowerCase() === 'stocks') {
-                return newTx.type === 'debit' ? a.type === 'stocks' : (a.type === 'bank_account' || a.type === 'e_wallet');
-              }
-              if (newTx.category?.toLowerCase() === 'commodity') {
-                return newTx.type === 'debit' ? a.type === 'commodity' : (a.type === 'bank_account' || a.type === 'e_wallet');
+              // Mirror of the main Account filter, one direction over: on a debit the counterpart is
+              // the holding account receiving the units/shares/grams.
+              if (activeInvestmentKind) {
+                return newTx.type === 'debit'
+                  ? a.type === investmentAccountTypeFor(activeInvestmentKind)
+                  : (a.type === 'bank_account' || a.type === 'e_wallet');
               }
               return true;
             }).map(acc => ({ id: acc.id, name: acc.name, subtext: acc.type.replace('_', ' '), group: getAccountGroupLabel(acc.type, acc.archived) }))]} onChange={val => {
               setPaymentSourceAccountId(val);
-              const isMf = newTx.category?.toLowerCase() === 'mutual funds';
-              const isStock = newTx.category?.toLowerCase() === 'stocks';
-              if (isMf) {
-                const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
-                const counterpartAcc = data.accounts.find(a => a.id === val);
-                const mfAcc = mainAcc?.type === 'mutual_funds' ? mainAcc : (counterpartAcc?.type === 'mutual_funds' ? counterpartAcc : null);
-                setNewTx(prev => ({ ...prev, description: mfAcc ? mfAcc.name : 'Mutual Funds' }));
-              } else if (isStock) {
-                const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
-                const counterpartAcc = data.accounts.find(a => a.id === val);
-                const stockAcc = mainAcc?.type === 'stocks' ? mainAcc : (counterpartAcc?.type === 'stocks' ? counterpartAcc : null);
-                setNewTx(prev => ({ ...prev, description: stockAcc ? stockAcc.name : 'Stock Trade' }));
+              if (activeInvestmentKind) {
+                setNewTx(prev => ({ ...prev, description: investmentDescriptionFor(activeInvestmentKind, [newTx.accountId, val]) }));
               }
             }} iconGetter={_id => _id ? getAccountIcon(_id, data.accounts) : '🚫'} />
           )}

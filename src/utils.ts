@@ -1,5 +1,5 @@
 import { format, parseISO, addMonths, subMonths, addDays, addWeeks, addQuarters, addYears, setDate, isAfter, isBefore, startOfDay } from 'date-fns';
-import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitEvent, SplitCycle, SplitItem, RecurringFrequency } from './types';
+import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitEvent, SplitCycle, SplitItem, RecurringFrequency, InvestmentKind } from './types';
 
 // The canonical investment category name. Investment transactions (mutual funds, stocks,
 // commodities, SIPs) are consolidated under "Investments". Stored data is migrated on load
@@ -19,6 +19,57 @@ const INVESTMENT_CATEGORY_ALIASES = new Set([
 export const isInvestmentCategory = (category?: string) =>
   INVESTMENT_CATEGORY_ALIASES.has((category || '').toLowerCase());
 export const isMutualFundCategory = isInvestmentCategory; // Legacy alias
+
+// ---- Investment sub-kinds -------------------------------------------------------------------
+// One category, three behaviours. Mutual funds, stocks and commodity all log under 'Investments'
+// but each needs its own quantity field (units / shares / grams), its own valid account type and
+// its own auto-description, so every one of those decisions keys off the kind — never off the
+// category, which no longer distinguishes them.
+export const INVESTMENT_KIND_OPTIONS: { id: InvestmentKind; name: string; subtext: string }[] = [
+  { id: 'mutual_funds', name: 'Mutual Funds', subtext: 'SIP / Lumpsum · Units Allotted' },
+  { id: 'stocks', name: 'Stocks', subtext: 'Equity Buy / Sell · No. Of Shares' },
+  { id: 'commodity', name: 'Commodity', subtext: 'Digital Gold / Silver · Grams' },
+];
+
+export const investmentKindLabel = (kind?: InvestmentKind) =>
+  INVESTMENT_KIND_OPTIONS.find(o => o.id === kind)?.name || 'Investment';
+
+// The account type that holds each kind. Reversing this map is how a legacy investment transaction
+// (written before investmentKind existed) tells us what it was.
+const INVESTMENT_KIND_ACCOUNT_TYPES: Record<InvestmentKind, string> = {
+  mutual_funds: 'mutual_funds',
+  stocks: 'stocks',
+  commodity: 'commodity',
+};
+export const investmentAccountTypeFor = (kind: InvestmentKind) => INVESTMENT_KIND_ACCOUNT_TYPES[kind];
+export const investmentKindForAccountType = (accountType?: string): InvestmentKind | undefined =>
+  (Object.keys(INVESTMENT_KIND_ACCOUNT_TYPES) as InvestmentKind[])
+    .find(k => INVESTMENT_KIND_ACCOUNT_TYPES[k] === accountType);
+
+// First investment account among the given ids decides the kind. Used both for live form state
+// (main account or counterpart, whichever is the investment side) and for the load-time backfill.
+export const inferInvestmentKind = (
+  accountIds: (string | undefined)[],
+  accounts: Account[]
+): InvestmentKind | undefined => {
+  for (const id of accountIds) {
+    if (!id) continue;
+    const kind = investmentKindForAccountType(accounts.find(a => a.id === id)?.type);
+    if (kind) return kind;
+  }
+  return undefined;
+};
+
+// The kind an investment transaction is for, or undefined if it isn't an investment at all.
+// Prefers the stored field and falls back to inferring from the accounts on the transaction, so
+// pre-existing rows keep showing their specialized fields even if the backfill couldn't reach them.
+export const getInvestmentKind = (
+  tx: Pick<Transaction, 'category' | 'investmentKind' | 'accountId' | 'paymentSourceAccountId'>,
+  accounts: Account[]
+): InvestmentKind | undefined => {
+  if (!isInvestmentCategory(tx.category)) return undefined;
+  return tx.investmentKind || inferInvestmentKind([tx.accountId, tx.paymentSourceAccountId], accounts);
+};
 
 // Categories that never count toward Spends/Income stats: pure ledger movements (transfers, CC bill
 // payments, NCMC recharges), investments tracked separately (investments, mutual funds/stocks/commodity), and

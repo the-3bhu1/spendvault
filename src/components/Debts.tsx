@@ -858,7 +858,7 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
   const getAccountIcon = (accountId: string) => {
     const acc = accounts.find(a => a.id === accountId);
     if (!acc) return <Wallet size={18} />;
-    return getAccountTypeIcon(acc.type);
+    return getAccountTypeIcon(acc.type, 18, acc.archived);
   };
 
   const { data } = useFinance();
@@ -1153,7 +1153,7 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
   const getAccountIcon = (accountId: string) => {
     const acc = accounts.find(a => a.id === accountId);
     if (!acc) return <Wallet size={18} />;
-    return getAccountTypeIcon(acc.type);
+    return getAccountTypeIcon(acc.type, 18, acc.archived);
   };
 
   const accountOptions = useMemo(() => {

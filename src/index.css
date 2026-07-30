@@ -122,6 +122,16 @@ html.fonts-loaded #root {
   --logo-filter: invert(1);
   --btn-text: #ffffff;
   --primary-soft: rgba(99, 102, 241, 0.1);
+  /* Bas-relief tones for the Wealth backdrop illustration (see WealthBackdrop.tsx). Lit from the
+     top-left: -hi catches the light, -lo falls away, -shadow is cast, -line is the engraved edge.
+     Tokenised rather than inlined because the relief has to INVERT between themes — on the dark
+     theme the light is a white sheen, on the light theme it's ink and cast shadow. */
+  --relief-hi: rgba(255, 255, 255, 0.055);
+  --relief-mid: rgba(255, 255, 255, 0.028);
+  --relief-lo: rgba(255, 255, 255, 0.008);
+  --relief-line: rgba(255, 255, 255, 0.20);
+  --relief-edge: rgba(255, 255, 255, 0.34);
+  --relief-shadow: rgba(0, 0, 0, 0.65);
   color-scheme: dark;
 }
 
@@ -141,6 +151,12 @@ html.fonts-loaded #root {
   --logo-filter: none;
   --btn-text: #ffffff;
   --primary-soft: rgba(79, 70, 229, 0.1);
+  --relief-hi: rgba(255, 255, 255, 0.95);
+  --relief-mid: rgba(15, 23, 42, 0.035);
+  --relief-lo: rgba(15, 23, 42, 0.07);
+  --relief-line: rgba(15, 23, 42, 0.16);
+  --relief-edge: rgba(255, 255, 255, 0.9);
+  --relief-shadow: rgba(15, 23, 42, 0.22);
   color-scheme: light;
 }
 

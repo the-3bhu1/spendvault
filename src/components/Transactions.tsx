@@ -1,18 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import type { Transaction, TransactionType, Account } from '../types';
-import { generateId, formatCurrency, formatAmount, formatDateString, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isStatsExcludedCategory } from '../utils';
-import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, Sparkles, ChevronRight, Hash, BanknoteArrowUp, BanknoteArrowDown, Shapes } from 'lucide-react';
+import type { Transaction, TransactionType, Account, InvestmentKind } from '../types';
+import { generateId, formatCurrency, formatAmount, formatDateString, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind } from '../utils';
+import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, Sparkles, ChevronRight, Hash, BanknoteArrowUp, BanknoteArrowDown, Shapes, Layers } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
-import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, sortByAccountType } from './transactionIcons';
+import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, sortByAccountType, getInvestmentKindIcon } from './transactionIcons';
 
 const isCountableTransaction = (tx: Transaction) => {
   const catLower = (tx.category || '').toLowerCase();
-  // Scenario 1, 2, 3: Transfer, CC Payment, Mutual Funds, NCMC Travel Recharge
-  if (['transfer', 'cc payment', 'mutual funds', 'sip', 'ncmc travel recharge'].includes(catLower)) {
+  // Scenario 1, 2, 3: Transfer, CC Payment, Investments, NCMC Travel Recharge
+  if (['transfer', 'cc payment', 'ncmc travel recharge'].includes(catLower) || isInvestmentCategory(catLower)) {
     return false;
   }
   // Scenario 4: Cashback auto log
@@ -336,9 +336,12 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                 ? 'Hide linked entry'
                 : (() => {
                     const cats = counterparts!.map(c => c.tx.category.toLowerCase());
-                    if (cats.includes('mutual funds')) return 'Mutual fund auto-debited from bank';
-                    if (cats.includes('stocks')) return 'Stock purchase debited from wallet';
-                    if (cats.includes('commodity')) return 'Commodity purchase debited from bank';
+                    // Investment legs all share one category, so the wording comes from the leg's kind.
+                    const invKinds = counterparts!.filter(c => isInvestmentCategory(c.tx.category)).map(c => c.tx.investmentKind);
+                    if (invKinds.includes('mutual_funds')) return 'Mutual fund auto-debited from bank';
+                    if (invKinds.includes('stocks')) return 'Stock purchase debited from wallet';
+                    if (invKinds.includes('commodity')) return 'Commodity purchase debited from bank';
+                    if (invKinds.length > 0) return 'Investment auto-logged from funding account';
                     if (cats.includes('transfer')) return 'Transfer entry on destination account';
                     if (cats.includes('cc payment')) return 'Payment reflected on card';
                     if (cats.includes('ncmc travel recharge')) return 'Travel wallet top-up entry';
@@ -612,7 +615,7 @@ export default function Transactions() {
     if (accId === 'all') return <Activity size={18} />;
     const acc = data.accounts.find(a => a.id === accId);
     if (!acc) return <Wallet size={18} />;
-    return getAccountTypeIcon(acc.type);
+    return getAccountTypeIcon(acc.type, 18, acc.archived);
   };
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -625,11 +628,165 @@ export default function Transactions() {
   const [filterType, setFilterType] = useState<'all' | 'debit' | 'credit'>('all');
   const [filterAccountId, setFilterAccountId] = useState<string[]>(['all']);
   const [filterCategory, setFilterCategory] = useState<string[]>(['all']);
+  // Sub-filter for the Investments category: 'Investments' alone can't separate a fund SIP from a
+  // gold buy, so this narrows by kind. Only meaningful while an investment category is filtered on.
+  const [filterInvestmentKind, setFilterInvestmentKind] = useState<string[]>(['all']);
   const [filterMonth, setFilterMonth] = useState<string[]>(['all']);
   const [filterTag, setFilterTag] = useState<string[]>(['all']);
   const [searchQuery, setSearchQuery] = useState('');
 
   const [showFilters, setShowFilters] = useState(false);
+
+  // Which investment the form is currently logging — the single discriminator every
+  // investment-specific field, account filter and auto-description below reads. Guarded on the
+  // category so a stale kind left over from a previous selection can't leak into a non-investment log.
+  const activeInvestmentKind: InvestmentKind | undefined =
+    isInvestmentCategory(newTx.category) ? newTx.investmentKind : undefined;
+
+  // The holding account for a kind, found on whichever leg carries it (main account or counterpart).
+  const investmentAccountAmong = (kind: InvestmentKind, accountIds: (string | undefined)[]) => {
+    const wantType = investmentAccountTypeFor(kind);
+    return accountIds
+      .map(id => (id ? data.accounts.find(a => a.id === id) : undefined))
+      .find(a => a?.type === wantType);
+  };
+  // Investment logs are auto-named after the holding account (e.g. "Parag Parikh Flexi Cap Fund"),
+  // falling back to the kind's own label until an account is picked.
+  const investmentDescriptionFor = (kind: InvestmentKind, accountIds: (string | undefined)[]) =>
+    investmentAccountAmong(kind, accountIds)?.name || investmentKindLabel(kind);
+
+  // Picking a category — and, for Investments, picking the kind — settles the same five things: the
+  // auto-filled description, which account selections are still valid, whether the amount splits into
+  // invested + charges, whether a quantity applies, and the passive-log toggle. The Category picker
+  // and the Investment Type sub-picker both route through here so they can never disagree.
+  const applyCategorySelection = (nextCategory: string, nextKind?: InvestmentKind) => {
+    const currentDesc = newTx.description || '';
+    const isNcmcAccount = !!data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled;
+    const prevKind = activeInvestmentKind;
+    const wasInvestment = isInvestmentCategory(newTx.category);
+    const isNowInvestment = isInvestmentCategory(nextCategory);
+
+    // Transfer auto-fill / clear
+    const wasTransfer = newTx.category?.toLowerCase() === 'transfer';
+    const isNowTransfer = nextCategory.toLowerCase() === 'transfer';
+    const isTransferAutoFilled = currentDesc.startsWith('Transfer to ') || currentDesc.startsWith('Transfer from ');
+
+    // CC Payment auto-fill / clear
+    const wasCC = newTx.category?.toLowerCase() === 'cc payment';
+    const isNowCC = nextCategory.toLowerCase() === 'cc payment';
+    const isCCAutoFilled = currentDesc === 'CC Bill Payment' || currentDesc.startsWith('CC Payment: ');
+    const wasNcmc = newTx.category?.toLowerCase() === 'ncmc travel recharge';
+    const isNowNcmc = nextCategory.toLowerCase() === 'ncmc travel recharge';
+    const isNcmcAutoFilled = currentDesc === 'NCMC Travel Recharge';
+
+    // Investment auto-fill / clear: the description counts as ours only while it still matches what
+    // we'd generate for the kind being left, so a name the user typed themselves is never discarded.
+    const isInvAutoFilled = !!prevKind
+      && currentDesc === investmentDescriptionFor(prevKind, [newTx.accountId, paymentSourceAccountId]);
+
+    let updatedDesc = currentDesc;
+    if (wasTransfer && !isNowTransfer && isTransferAutoFilled) {
+      updatedDesc = '';
+    } else if (wasCC && !isNowCC && isCCAutoFilled) {
+      // Leaving CC Payment — clear CC auto-fill
+      updatedDesc = '';
+    } else if (wasNcmc && !isNowNcmc && (isNcmcAutoFilled || currentDesc === 'Transfer to Travel Wallet')) {
+      updatedDesc = '';
+    } else if (prevKind && !nextKind && isInvAutoFilled) {
+      updatedDesc = '';
+    } else if (isNowCC && paymentSourceAccountId) {
+      // Switching TO CC Payment with counterpart already selected — auto-fill
+      if (currentDesc === '' || isCCAutoFilled || isTransferAutoFilled) {
+        const selectedAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
+        if (selectedAcc) {
+          updatedDesc = newTx.type === 'debit'
+            ? `CC Payment: ${selectedAcc.name.trim()}`
+            : 'CC Bill Payment';
+        }
+      }
+    } else if (nextKind) {
+      // Entering investments or switching kind — regenerate from the new kind's holding account.
+      if (currentDesc === '' || isInvAutoFilled || isTransferAutoFilled || isCCAutoFilled || isNcmcAutoFilled) {
+        updatedDesc = investmentDescriptionFor(nextKind, [newTx.accountId, paymentSourceAccountId]);
+      }
+    }
+
+    const selectedAccForTravel = data.accounts.find(a => a.id === newTx.accountId);
+    const shouldAutoTravel = newTx.type === 'credit' && selectedAccForTravel?.type === 'debit_card' && selectedAccForTravel?.isNcmcEnabled && isNowNcmc;
+    const updatedIsTravel = shouldAutoTravel ? true : newTx.isTravelTransaction;
+
+    if (isNowNcmc && isNcmcAccount && updatedIsTravel && newTx.type === 'credit') {
+      if (currentDesc === '' || isNcmcAutoFilled || isTransferAutoFilled) {
+        updatedDesc = 'NCMC Travel Recharge';
+      }
+    } else if (isNowNcmc && isNcmcAccount && !updatedIsTravel && newTx.type === 'debit') {
+      if (currentDesc === '' || currentDesc === 'Transfer to Travel Wallet' || isTransferAutoFilled) {
+        updatedDesc = 'Transfer to Travel Wallet';
+      }
+    }
+
+    let updatedAccountId = newTx.accountId;
+    if (isNowCC && updatedAccountId) {
+      const selectedAcc = data.accounts.find(a => a.id === updatedAccountId);
+      if (newTx.type === 'debit' && selectedAcc?.type === 'credit_card') {
+        updatedAccountId = '';
+        setPaymentSourceAccountId('');
+      } else if (newTx.type === 'credit' && selectedAcc?.type !== 'credit_card') {
+        updatedAccountId = '';
+        setPaymentSourceAccountId('');
+      }
+    }
+
+    if (nextKind) {
+      // Keep the chosen account only if it's still valid for this kind and direction — otherwise a
+      // fund→stock switch would silently save the buy against a mutual-fund account.
+      const currentAcc = data.accounts.find(a => a.id === updatedAccountId);
+      const isValid = !!currentAcc && (newTx.type === 'credit'
+        ? currentAcc.type === investmentAccountTypeFor(nextKind)
+        : (currentAcc.type === 'bank_account' || currentAcc.type === 'e_wallet'));
+      if (!isValid) updatedAccountId = '';
+    }
+    // The counterpart's valid types depend on the kind, so any change of kind (or crossing the
+    // investment boundary at all) invalidates whatever was picked.
+    if (isNowInvestment !== wasInvestment || nextKind !== prevKind) {
+      setPaymentSourceAccountId('');
+    }
+
+    const hidesPassiveToggle = ['transfer', 'cc payment', 'ncmc travel recharge', 'lending & borrowing'].includes(nextCategory.toLowerCase());
+    // Funds and stocks quote an invested amount with AMC/brokerage on top; a commodity buy is a
+    // single gross amount, so it gets no allotted/charges pair.
+    const splitsCharges = nextKind === 'mutual_funds' || nextKind === 'stocks';
+    const nextAllotted = splitsCharges ? (newTx.allottedAmount || newTx.amount || 0) : undefined;
+    const nextCharges = splitsCharges ? (newTx.investmentCharges || 0) : undefined;
+    // A quantity only survives while the kind that measures it does — units, shares and grams
+    // aren't interchangeable.
+    const nextShares = (nextKind && nextKind === prevKind) ? newTx.numberOfShares : undefined;
+    setNewTx({
+      ...newTx,
+      category: nextCategory,
+      investmentKind: nextKind,
+      description: updatedDesc,
+      accountId: updatedAccountId,
+      isTravelTransaction: updatedIsTravel,
+      allottedAmount: nextAllotted,
+      investmentCharges: nextCharges,
+      numberOfShares: nextShares,
+      excludeFromStats: hidesPassiveToggle ? false : newTx.excludeFromStats,
+      excludedAmount: hidesPassiveToggle ? undefined : newTx.excludedAmount
+    });
+    setInputStrings(s => ({
+      ...s,
+      allottedAmount: (nextAllotted === undefined || nextAllotted === 0) ? '' : nextAllotted.toString(),
+      investmentCharges: (nextCharges === undefined || nextCharges === 0) ? '' : nextCharges.toString(),
+      numberOfShares: nextShares === undefined ? '' : nextShares.toString()
+    }));
+    if (errors.category || errors.investmentKind) {
+      const newErr = { ...errors };
+      delete newErr.category;
+      delete newErr.investmentKind;
+      setErrors(newErr);
+    }
+  };
 
   const handleSave = () => {
     console.log("=== handleSave TRIGGERED ===");
@@ -640,10 +797,13 @@ export default function Transactions() {
     if (!newTx.amount) newErrors.amount = 'Amount is required';
     if (!newTx.accountId) newErrors.accountId = 'Account is required';
     if (!newTx.category) newErrors.category = 'Category is required';
-    if (newTx.category?.toLowerCase() === 'stocks' && !newTx.numberOfShares) {
+    if (isInvestmentCategory(newTx.category) && !newTx.investmentKind) {
+      newErrors.investmentKind = 'Investment type is required';
+    }
+    if (activeInvestmentKind === 'stocks' && !newTx.numberOfShares) {
       newErrors.numberOfShares = 'No. of Shares is required';
     }
-    if (newTx.category?.toLowerCase() === 'commodity' && !newTx.numberOfShares) {
+    if (activeInvestmentKind === 'commodity' && !newTx.numberOfShares) {
       newErrors.numberOfShares = 'Grams is required';
     }
     if (newTx.excludeFromStats && (newTx.excludedAmount || 0) > (newTx.amount || 0)) {
@@ -723,9 +883,12 @@ export default function Transactions() {
     const isTransfer = newTx.category?.toLowerCase() === 'transfer';
     const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
     const hidesPassiveToggleFinal = ['transfer', 'cc payment', 'ncmc travel recharge', 'lending & borrowing'].includes((newTx.category || '').toLowerCase());
-    const isMf = newTx.category?.toLowerCase() === 'mutual funds';
-    const isStocks = newTx.category?.toLowerCase() === 'stocks';
-    const isCommodity = newTx.category?.toLowerCase() === 'commodity';
+    const investmentKind = activeInvestmentKind;
+    const isMf = investmentKind === 'mutual_funds';
+    const isStocks = investmentKind === 'stocks';
+    const isCommodity = investmentKind === 'commodity';
+    // "isInvestment" here means the allotted-vs-charges pair applies (funds and stocks quote an
+    // invested amount plus AMC/brokerage on top). Commodity buys are a single gross amount.
     const isInvestment = isMf || isStocks;
     const allottedAmount = isInvestment ? (newTx.allottedAmount !== undefined ? Number(newTx.allottedAmount) : Number(newTx.amount)) : Number(newTx.amount);
     const investmentCharges = isInvestment ? (newTx.investmentCharges !== undefined ? Number(newTx.investmentCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined;
@@ -738,9 +901,18 @@ export default function Transactions() {
       const lt = data.transactions.find(t => t.id === id);
       return !!lt && lt.id !== mainTxId && lt.category?.toLowerCase() === catLower;
     });
-    const hasStocksLeg = hasLinkedCategoryLeg('stocks');
-    const hasMfLeg = hasLinkedCategoryLeg('mutual funds');
-    const hasCommodityLeg = hasLinkedCategoryLeg('commodity');
+    // All three investment kinds share one category, so an existing leg is matched on kind. A leg
+    // whose kind can't be resolved still counts as this kind's leg: it IS the investment counterpart
+    // (nothing else links here), and treating it as absent would create a second, duplicate leg.
+    const hasLinkedInvestmentLeg = (kind: InvestmentKind) => currentLinkedIds.some(id => {
+      const lt = data.transactions.find(t => t.id === id);
+      if (!lt || lt.id === mainTxId || !isInvestmentCategory(lt.category)) return false;
+      const legKind = getInvestmentKind(lt, data.accounts);
+      return legKind === undefined || legKind === kind;
+    });
+    const hasStocksLeg = hasLinkedInvestmentLeg('stocks');
+    const hasMfLeg = hasLinkedInvestmentLeg('mutual_funds');
+    const hasCommodityLeg = hasLinkedInvestmentLeg('commodity');
     const hasTransferOrCCLeg = hasLinkedCategoryLeg('transfer') || hasLinkedCategoryLeg('cc payment');
 
     // A reward split always anchors on the CARD leg (whose amount is the full bill), per
@@ -765,7 +937,8 @@ export default function Transactions() {
         accountId: paymentSourceAccountId,
         type: counterpartType,
         amount: counterpartType === 'credit' ? allottedAmount : (allottedAmount + (investmentCharges || 0)),
-        category: 'Stocks',
+        category: INVESTMENT_CATEGORY,
+        investmentKind: 'stocks',
         isRecurring: false,
         linkedTransactionIds: [mainTxId],
         numberOfShares: newTx.numberOfShares,
@@ -783,7 +956,8 @@ export default function Transactions() {
         accountId: paymentSourceAccountId,
         type: counterpartType,
         amount: Number(newTx.amount),
-        category: 'Commodity',
+        category: INVESTMENT_CATEGORY,
+        investmentKind: 'commodity',
         isRecurring: false,
         linkedTransactionIds: [mainTxId],
         numberOfShares: newTx.numberOfShares
@@ -800,7 +974,8 @@ export default function Transactions() {
         accountId: paymentSourceAccountId,
         type: counterpartType,
         amount: counterpartType === 'credit' ? allottedAmount : (allottedAmount + (investmentCharges || 0)),
-        category: 'Mutual Funds',
+        category: INVESTMENT_CATEGORY,
+        investmentKind: 'mutual_funds',
         isRecurring: false,
         linkedTransactionIds: [mainTxId],
         allottedAmount: allottedAmount,
@@ -989,7 +1164,8 @@ export default function Transactions() {
       paymentSourceAccountId: paymentSourceAccountId,
       allottedAmount: isInvestment ? allottedAmount : undefined,
       investmentCharges: isInvestment ? investmentCharges : undefined,
-      numberOfShares: (isStocks || isMf || isCommodity) ? newTx.numberOfShares : undefined,
+      numberOfShares: investmentKind ? newTx.numberOfShares : undefined,
+      investmentKind: investmentKind,
       tags: (newTx.tags || []).length > 0 ? newTx.tags : undefined,
       order: newTx.order
     };
@@ -1154,6 +1330,12 @@ export default function Transactions() {
       const matchesType = filterType === 'all' || tx.type === filterType;
       const matchesAccount = filterAccountId.includes('all') || filterAccountId.includes(tx.accountId);
       const matchesCategory = filterCategory.includes('all') || filterCategory.includes(tx.category);
+      // Investment-kind sub-filter. Only constrains investment transactions — filtering by kind
+      // alongside other categories shouldn't wipe out those other categories' rows. The kind is read
+      // via getInvestmentKind so legacy rows the backfill couldn't reach still match by account type.
+      const matchesInvestmentKind = filterInvestmentKind.includes('all')
+        || !isInvestmentCategory(tx.category)
+        || filterInvestmentKind.includes(getInvestmentKind(tx, data.accounts) ?? '');
       const matchesMonth = filterMonth.includes('all') || filterMonth.includes(tx.date.substring(0, 7));
       const matchesTag = filterTag.includes('all') || (tx.tags || []).some(t => filterTag.includes(t));
       const matchesSearch = tx.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -1162,7 +1344,7 @@ export default function Transactions() {
       const today = format(new Date(), 'yyyy-MM-dd');
       const isFuture = tx.date > today;
 
-      return matchesType && matchesAccount && matchesCategory && matchesMonth && matchesTag && matchesSearch && !isFuture && tx.amount > 0;
+      return matchesType && matchesAccount && matchesCategory && matchesInvestmentKind && matchesMonth && matchesTag && matchesSearch && !isFuture && tx.amount > 0;
     });
 
   useEffect(() => {
@@ -1192,12 +1374,18 @@ export default function Transactions() {
     };
   }, [filteredTransactions]);
 
-  const isFilterActive = filterType !== 'all' || !filterAccountId.includes('all') || !filterCategory.includes('all') || !filterMonth.includes('all') || !filterTag.includes('all') || searchQuery !== '';
+  // The investment-kind picker only shows while an investment category is being filtered on, so a
+  // stale kind must still count as active — otherwise switching category away from Investments would
+  // silently keep filtering by a kind with no visible control to clear it.
+  const isInvestmentFilterVisible = !filterCategory.includes('all')
+    && filterCategory.some(c => isInvestmentCategory(c));
+  const isFilterActive = filterType !== 'all' || !filterAccountId.includes('all') || !filterCategory.includes('all') || !filterInvestmentKind.includes('all') || !filterMonth.includes('all') || !filterTag.includes('all') || searchQuery !== '';
 
   const clearFilters = () => {
     setFilterType('all');
     setFilterAccountId(['all']);
     setFilterCategory(['all']);
+    setFilterInvestmentKind(['all']);
     setFilterMonth(['all']);
     setFilterTag(['all']);
     setSearchQuery('');
@@ -1332,7 +1520,22 @@ export default function Transactions() {
                         : `${filterCategory.length} Categories`)}
                   </span>
                   <div
-                    onClick={() => setFilterCategory(['all'])}
+                    onClick={() => { setFilterCategory(['all']); setFilterInvestmentKind(['all']); }}
+                    style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', opacity: 0.6 }}
+                  >
+                    <X size={14} />
+                  </div>
+                </div>
+              )}
+              {!filterInvestmentKind.includes('all') && (
+                <div className="flex align-center gap-2" style={{ background: 'var(--bg-hover)', padding: '0.4rem 0.8rem', borderRadius: '20px', border: '1px solid var(--border-color)', whiteSpace: 'nowrap' }}>
+                  <span className="text-xs uppercase font-extrabold" style={{ color: 'var(--text-primary)', letterSpacing: '0.5px' }}>
+                    {filterInvestmentKind.length === 1
+                      ? investmentKindLabel(filterInvestmentKind[0] as InvestmentKind)
+                      : `${filterInvestmentKind.length} Investment Types`}
+                  </span>
+                  <div
+                    onClick={() => setFilterInvestmentKind(['all'])}
                     style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', opacity: 0.6 }}
                   >
                     <X size={14} />
@@ -1488,10 +1691,35 @@ export default function Transactions() {
                   { id: 'all', name: 'All Categories' },
                   ...(data.categories || []).map(c => ({ id: c, name: c }))
                 ]}
-                onChange={setFilterCategory}
+                onChange={(vals: string[]) => {
+                  setFilterCategory(vals);
+                  // Deselecting Investments hides the kind picker, so drop the kind with it rather
+                  // than leaving an invisible filter narrowing the results.
+                  const stillInvestments = !vals.includes('all') && vals.some(c => isInvestmentCategory(c));
+                  if (!stillInvestments) setFilterInvestmentKind(['all']);
+                }}
                 iconGetter={(c) => c === 'all' ? <Shapes size={17} /> : getCategoryIcon(c)}
               />
             </div>
+            {isInvestmentFilterVisible && (
+              <div className="flex-col gap-1" style={{ minWidth: 0 }}>
+                <label className="text-xs text-muted" style={{ marginLeft: '0.5rem', marginBottom: '2px' }}>Investment Type</label>
+                <CustomPicker
+                  label="Investment Type"
+                  hideLabel={true}
+                  value={filterInvestmentKind}
+                  isMulti={true}
+                  options={[
+                    { id: 'all', name: 'All Investment Types' },
+                    ...INVESTMENT_KIND_OPTIONS.map(o => ({ id: o.id as string, name: o.name }))
+                  ]}
+                  onChange={setFilterInvestmentKind}
+                  // Layers, not Shapes: Shapes is the "All Categories" glyph one row above, so both
+                  // "All" rows rendered identically while an investment category was filtered on.
+                  iconGetter={(k) => k === 'all' ? <Layers size={17} /> : getInvestmentKindIcon(k, 17)}
+                />
+              </div>
+            )}
             {(data.tags || []).length > 0 && (
               <div className="flex-col gap-1" style={{ minWidth: 0 }}>
                 <label className="text-xs text-muted" style={{ marginLeft: '0.5rem', marginBottom: '2px' }}>Tag</label>
@@ -1630,8 +1858,16 @@ export default function Transactions() {
                                     if (uncollapsedInGroup.length > 1) {
                                       const debitParent = uncollapsedInGroup.find(other => other.type === 'debit');
                                       const creditParent = uncollapsedInGroup.find(other => other.type === 'credit');
-                                      const creditCategories = ['mutual funds', 'stocks', 'cc payment', 'transfer', 'ncmc travel recharge'];
-                                      const isCreditParentGroup = uncollapsedInGroup.some(other => creditCategories.includes(other.category?.toLowerCase() ?? ''));
+                                      // Groups whose CREDIT leg is the one worth showing as the parent
+                                      // row. Every investment qualifies: the holding account receiving
+                                      // the units/shares/grams is the point of the entry, and the bank
+                                      // debit is just how it was funded. (Commodity used to be the odd
+                                      // one out here, showing its funding leg as the parent.)
+                                      const creditCategories = ['cc payment', 'transfer', 'ncmc travel recharge'];
+                                      const isCreditParentGroup = uncollapsedInGroup.some(other =>
+                                        creditCategories.includes(other.category?.toLowerCase() ?? '')
+                                        || isInvestmentCategory(other.category)
+                                      );
                                       const parent = isCreditParentGroup ? (creditParent || uncollapsedInGroup[0]) : (debitParent || uncollapsedInGroup[0]);
                                       const counterpartsList = uncollapsedInGroup.filter(other => other.id !== parent.id);
 
@@ -1806,7 +2042,7 @@ export default function Transactions() {
                       if (val === '' || /^\d*\.?\d*$/.test(val)) {
                         const numVal = parseFloat(val);
                         const finalAmount = isNaN(numVal) ? 0 : numVal;
-                        const isInvestment = newTx.category?.toLowerCase() === 'mutual funds' || newTx.category?.toLowerCase() === 'stocks';
+                        const isInvestment = activeInvestmentKind === 'mutual_funds' || activeInvestmentKind === 'stocks';
                         const allotted = newTx.allottedAmount || 0;
                         const charges = isInvestment ? Math.max(0, finalAmount - allotted) : undefined;
 
@@ -1879,8 +2115,11 @@ export default function Transactions() {
                       }
                     }
                     let updatedIsTravel = newTx.isTravelTransaction;
-                    const isMf = newTx.category?.toLowerCase() === 'mutual funds';
-                    if (isMf) {
+                    // Flipping direction swaps which side of an investment the main account is (the
+                    // holding account on a credit, the funding bank on a debit), so the picked
+                    // accounts can no longer be valid. Clear them for every kind — clearing only for
+                    // mutual funds used to leave stock/commodity logs pointing at the wrong account type.
+                    if (activeInvestmentKind) {
                       updatedAccountId = '';
                       setPaymentSourceAccountId('');
                     }
@@ -1904,6 +2143,43 @@ export default function Transactions() {
               </div>
 
               <CustomPicker
+                label="Category"
+                value={newTx.category || ''}
+                placeholder="Select Category"
+                options={[
+                  ...[...(data.categories || [])].sort((a, b) => {
+                    const isAOther = a.toLowerCase().includes('other') || a.toLowerCase().includes('misc');
+                    const isBOther = b.toLowerCase().includes('other') || b.toLowerCase().includes('misc');
+                    if (isAOther && !isBOther) return 1;
+                    if (!isAOther && isBOther) return -1;
+                    return 0;
+                  }).map(c => ({ id: c, name: c })),
+                  ...(newTx.category && !(data.categories || []).includes(newTx.category)
+                    ? [{ id: newTx.category, name: newTx.category }]
+                    : [])
+                ]}
+                onChange={val => applyCategorySelection(val, isInvestmentCategory(val) ? activeInvestmentKind : undefined)}
+                iconGetter={c => getCategoryIcon(c)}
+                error={errors.category}
+              />
+
+              {/* Investments is one category with three behaviours — this sub-picker is what selects
+                  which. Everything downstream (valid account types, quantity field, invested-vs-charges
+                  split, auto-description) keys off it, so it routes through the same handler as the
+                  category itself. */}
+              {isInvestmentCategory(newTx.category) && (
+                <CustomPicker
+                  label="Investment Type"
+                  value={newTx.investmentKind || ''}
+                  placeholder="Select Investment Type"
+                  options={INVESTMENT_KIND_OPTIONS}
+                  onChange={val => applyCategorySelection(newTx.category as string, val as InvestmentKind)}
+                  iconGetter={id => getInvestmentKindIcon(id)}
+                  error={errors.investmentKind}
+                />
+              )}
+
+              <CustomPicker
                 label="Account"
                 value={newTx.accountId || ''}
                 placeholder="Select an account"
@@ -1917,14 +2193,12 @@ export default function Transactions() {
                     if (isCCPayment) {
                       return newTx.type === 'debit' ? (acc.type === 'bank_account' || acc.type === 'e_wallet') : acc.type === 'credit_card';
                     }
-                    if (newTx.category?.toLowerCase() === 'mutual funds') {
-                      return newTx.type === 'credit' ? acc.type === 'mutual_funds' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
-                    }
-                    if (newTx.category?.toLowerCase() === 'stocks') {
-                      return newTx.type === 'credit' ? acc.type === 'stocks' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
-                    }
-                    if (newTx.category?.toLowerCase() === 'commodity') {
-                      return newTx.type === 'credit' ? acc.type === 'commodity' : (acc.type === 'bank_account' || acc.type === 'e_wallet');
+                    // Credit = the holding account receives the units/shares/grams; debit = the bank
+                    // or wallet funding the buy. One rule per kind, keyed off the matching account type.
+                    if (activeInvestmentKind) {
+                      return newTx.type === 'credit'
+                        ? acc.type === investmentAccountTypeFor(activeInvestmentKind)
+                        : (acc.type === 'bank_account' || acc.type === 'e_wallet');
                     }
                     return true;
                   })
@@ -1937,23 +2211,13 @@ export default function Transactions() {
                 onChange={val => {
                   const selectedAcc = data.accounts.find(a => a.id === val);
                   const isNcmcRecharge = newTx.category?.toLowerCase() === 'ncmc travel recharge';
-                  const isMf = newTx.category?.toLowerCase() === 'mutual funds';
-                  const isStocksCat = newTx.category?.toLowerCase() === 'stocks';
                   const shouldAutoTravel = newTx.type === 'credit' && selectedAcc?.type === 'debit_card' && selectedAcc?.isNcmcEnabled && isNcmcRecharge;
                   const shouldAutoDebitDesc = newTx.type === 'debit' && selectedAcc?.type === 'debit_card' && selectedAcc?.isNcmcEnabled && isNcmcRecharge;
                   let finalDesc = newTx.description;
-                  if (isMf) {
-                    const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
-                    const mfAcc = selectedAcc?.type === 'mutual_funds' ? selectedAcc : (counterpartAcc?.type === 'mutual_funds' ? counterpartAcc : null);
-                    finalDesc = mfAcc ? mfAcc.name : 'Mutual Funds';
-                  } else if (isStocksCat) {
-                    const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
-                    const stocksAcc = selectedAcc?.type === 'stocks' ? selectedAcc : (counterpartAcc?.type === 'stocks' ? counterpartAcc : null);
-                    finalDesc = stocksAcc ? stocksAcc.name : 'Stocks';
-                  } else if (newTx.category?.toLowerCase() === 'commodity') {
-                    const counterpartAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
-                    const commodityAcc = selectedAcc?.type === 'commodity' ? selectedAcc : (counterpartAcc?.type === 'commodity' ? counterpartAcc : null);
-                    finalDesc = commodityAcc ? commodityAcc.name : 'Commodity';
+                  if (activeInvestmentKind) {
+                    // Name the log after the holding account, whichever leg it's on, so a fund/stock
+                    // /metal entry reads as the instrument rather than a bare "Investments".
+                    finalDesc = investmentDescriptionFor(activeInvestmentKind, [val, paymentSourceAccountId]);
                   } else {
                     finalDesc = shouldAutoDebitDesc ? 'Transfer to Travel Wallet' : (shouldAutoTravel ? 'NCMC Travel Recharge' : newTx.description);
                   }
@@ -1973,180 +2237,9 @@ export default function Transactions() {
                 error={errors.accountId}
               />
 
-              <CustomPicker
-                label="Category"
-                value={newTx.category || ''}
-                placeholder="Select Category"
-                options={[
-                  ...[...(data.categories || [])].sort((a, b) => {
-                    const isAOther = a.toLowerCase().includes('other') || a.toLowerCase().includes('misc');
-                    const isBOther = b.toLowerCase().includes('other') || b.toLowerCase().includes('misc');
-                    if (isAOther && !isBOther) return 1;
-                    if (!isAOther && isBOther) return -1;
-                    return 0;
-                  }).map(c => ({ id: c, name: c })),
-                  ...(newTx.category && !(data.categories || []).includes(newTx.category)
-                    ? [{ id: newTx.category, name: newTx.category }]
-                    : [])
-                ]}
-                onChange={val => {
-                  const currentDesc = newTx.description || '';
-                  const isNcmcAccount = !!data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled;
-
-                  // Transfer auto-fill / clear
-                  const wasTransfer = newTx.category?.toLowerCase() === 'transfer';
-                  const isNowTransfer = val.toLowerCase() === 'transfer';
-                  const isTransferAutoFilled = currentDesc.startsWith('Transfer to ') || currentDesc.startsWith('Transfer from ');
-
-                  // CC Payment auto-fill / clear
-                  const wasCC = newTx.category?.toLowerCase() === 'cc payment';
-                  const isNowCC = val.toLowerCase() === 'cc payment';
-                  const isCCAutoFilled = currentDesc === 'CC Bill Payment' || currentDesc.startsWith('CC Payment: ');
-                  const wasNcmc = newTx.category?.toLowerCase() === 'ncmc travel recharge';
-                  const isNowNcmc = val.toLowerCase() === 'ncmc travel recharge';
-                  const isNcmcAutoFilled = currentDesc === 'NCMC Travel Recharge';
-
-                  // Mutual fund auto-fill / clear
-                  const wasMf = newTx.category?.toLowerCase() === 'mutual funds';
-                  const isNowMf = val.toLowerCase() === 'mutual funds';
-                  const mainAccForMf = data.accounts.find(a => a.id === newTx.accountId);
-                  const counterpartAccForMf = data.accounts.find(a => a.id === paymentSourceAccountId);
-                  const mfAccForMf = mainAccForMf?.type === 'mutual_funds' ? mainAccForMf : (counterpartAccForMf?.type === 'mutual_funds' ? counterpartAccForMf : null);
-                  const isMfAutoFilled = mfAccForMf && currentDesc === mfAccForMf.name;
-
-                  // Stocks auto-fill / clear
-                  const wasStocks = newTx.category?.toLowerCase() === 'stocks';
-                  const isNowStocks = val.toLowerCase() === 'stocks';
-                  const mainAccForStocks = data.accounts.find(a => a.id === newTx.accountId);
-                  const counterpartAccForStocks = data.accounts.find(a => a.id === paymentSourceAccountId);
-                  const stocksAccForStocks = mainAccForStocks?.type === 'stocks' ? mainAccForStocks : (counterpartAccForStocks?.type === 'stocks' ? counterpartAccForStocks : null);
-                  const isStocksAutoFilled = stocksAccForStocks && currentDesc === stocksAccForStocks.name;
-
-                  // Commodity auto-fill / clear
-                  const wasCommodity = newTx.category?.toLowerCase() === 'commodity';
-                  const isNowCommodity = val.toLowerCase() === 'commodity';
-                  const mainAccForCommodity = data.accounts.find(a => a.id === newTx.accountId);
-                  const counterpartAccForCommodity = data.accounts.find(a => a.id === paymentSourceAccountId);
-                  const commodityAccForCommodity = mainAccForCommodity?.type === 'commodity' ? mainAccForCommodity : (counterpartAccForCommodity?.type === 'commodity' ? counterpartAccForCommodity : null);
-                  const isCommodityAutoFilled = commodityAccForCommodity && currentDesc === commodityAccForCommodity.name;
-
-                  let updatedDesc = currentDesc;
-                  if (wasTransfer && !isNowTransfer && isTransferAutoFilled) {
-                    updatedDesc = '';
-                  } else if (wasCC && !isNowCC && isCCAutoFilled) {
-                    // Leaving CC Payment — clear CC auto-fill
-                    updatedDesc = '';
-                  } else if (wasNcmc && !isNowNcmc && (isNcmcAutoFilled || currentDesc === 'Transfer to Travel Wallet')) {
-                    updatedDesc = '';
-                  } else if (wasMf && !isNowMf && isMfAutoFilled) {
-                    updatedDesc = '';
-                  } else if (wasStocks && !isNowStocks && isStocksAutoFilled) {
-                    updatedDesc = '';
-                  } else if (wasCommodity && !isNowCommodity && isCommodityAutoFilled) {
-                    updatedDesc = '';
-                  } else if (isNowCC && paymentSourceAccountId) {
-                    // Switching TO CC Payment with counterpart already selected — auto-fill
-                    if (currentDesc === '' || isCCAutoFilled || isTransferAutoFilled) {
-                      const selectedAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
-                      if (selectedAcc) {
-                        updatedDesc = newTx.type === 'debit'
-                          ? `CC Payment: ${selectedAcc.name.trim()}`
-                          : 'CC Bill Payment';
-                      }
-                    }
-                  } else if (isNowMf) {
-                    if (currentDesc === '' || isMfAutoFilled || isTransferAutoFilled || isCCAutoFilled || isNcmcAutoFilled) {
-                      updatedDesc = mfAccForMf ? mfAccForMf.name : 'Mutual Funds';
-                    }
-                  } else if (isNowStocks) {
-                    if (currentDesc === '' || isStocksAutoFilled || isTransferAutoFilled || isCCAutoFilled || isNcmcAutoFilled || isMfAutoFilled) {
-                      updatedDesc = stocksAccForStocks ? stocksAccForStocks.name : 'Stocks';
-                    }
-                  } else if (isNowCommodity) {
-                    if (currentDesc === '' || isCommodityAutoFilled || isTransferAutoFilled || isCCAutoFilled || isNcmcAutoFilled || isMfAutoFilled || isStocksAutoFilled) {
-                      updatedDesc = commodityAccForCommodity ? commodityAccForCommodity.name : 'Commodity';
-                    }
-                  }
-                  const selectedAccForTravel = data.accounts.find(a => a.id === newTx.accountId);
-                  const shouldAutoTravel = newTx.type === 'credit' && selectedAccForTravel?.type === 'debit_card' && selectedAccForTravel?.isNcmcEnabled && isNowNcmc;
-                  const updatedIsTravel = shouldAutoTravel ? true : newTx.isTravelTransaction;
-
-                  if (isNowNcmc && isNcmcAccount && updatedIsTravel && newTx.type === 'credit') {
-                    if (currentDesc === '' || isNcmcAutoFilled || isTransferAutoFilled) {
-                      updatedDesc = 'NCMC Travel Recharge';
-                    }
-                  } else if (isNowNcmc && isNcmcAccount && !updatedIsTravel && newTx.type === 'debit') {
-                    if (currentDesc === '' || currentDesc === 'Transfer to Travel Wallet' || isTransferAutoFilled) {
-                      updatedDesc = 'Transfer to Travel Wallet';
-                    }
-                  }
-
-                  let updatedAccountId = newTx.accountId;
-                  if (isNowCC && updatedAccountId) {
-                    const selectedAcc = data.accounts.find(a => a.id === updatedAccountId);
-                    if (newTx.type === 'debit' && selectedAcc?.type === 'credit_card') {
-                      updatedAccountId = '';
-                      setPaymentSourceAccountId('');
-                    } else if (newTx.type === 'credit' && selectedAcc?.type !== 'credit_card') {
-                      updatedAccountId = '';
-                      setPaymentSourceAccountId('');
-                    }
-                  }
-
-                  const isMf = val.toLowerCase() === 'mutual funds';
-                  const isStock = val.toLowerCase() === 'stocks';
-                  const isCommodity = val.toLowerCase() === 'commodity';
-                  const isInvestment = isMf || isStock;
-                  if (isInvestment || isCommodity) {
-                    const currentAcc = data.accounts.find(a => a.id === updatedAccountId);
-                    let isValid = false;
-                    if (currentAcc) {
-                      if (newTx.type === 'credit') {
-                        if (isMf) isValid = currentAcc.type === 'mutual_funds';
-                        else if (isStock) isValid = currentAcc.type === 'stocks';
-                        else if (isCommodity) isValid = currentAcc.type === 'commodity';
-                      } else {
-                        isValid = currentAcc.type === 'bank_account' || currentAcc.type === 'e_wallet';
-                      }
-                    }
-                    if (!isValid) {
-                      updatedAccountId = '';
-                    }
-                    setPaymentSourceAccountId('');
-                  }
-                  const hidesPassiveToggle = ['transfer', 'cc payment', 'ncmc travel recharge', 'lending & borrowing'].includes(val.toLowerCase());
-                  const nextAllotted = isInvestment ? (newTx.allottedAmount || newTx.amount || 0) : undefined;
-                  const nextCharges = isInvestment ? (newTx.investmentCharges || 0) : undefined;
-                  setNewTx({
-                    ...newTx,
-                    category: val,
-                    description: updatedDesc,
-                    accountId: updatedAccountId,
-                    isTravelTransaction: updatedIsTravel,
-                    allottedAmount: nextAllotted,
-                    investmentCharges: nextCharges,
-                    numberOfShares: isNowStocks ? newTx.numberOfShares : undefined,
-                    excludeFromStats: hidesPassiveToggle ? false : newTx.excludeFromStats,
-                    excludedAmount: hidesPassiveToggle ? undefined : newTx.excludedAmount
-                  });
-                  setInputStrings(s => ({
-                    ...s,
-                    allottedAmount: (nextAllotted === undefined || nextAllotted === 0) ? '' : nextAllotted.toString(),
-                    investmentCharges: (nextCharges === undefined || nextCharges === 0) ? '' : nextCharges.toString()
-                  }));
-                  if (errors.category) {
-                    const newErr = { ...errors };
-                    delete newErr.category;
-                    setErrors(newErr);
-                  }
-                }}
-                iconGetter={c => getCategoryIcon(c)}
-                error={errors.category}
-              />
-
-              {(newTx.category?.toLowerCase() === 'stocks' || newTx.category?.toLowerCase() === 'commodity') && (
+              {(activeInvestmentKind === 'stocks' || activeInvestmentKind === 'commodity') && (
                 <div className="input-group" style={{ marginTop: '0.5rem', marginBottom: '1rem' }}>
-                  <label>{newTx.category?.toLowerCase() === 'commodity' ? 'Grams' : 'No. of Shares'}</label>
+                  <label>{activeInvestmentKind === 'commodity' ? 'Grams' : 'No. of Shares'}</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -2160,15 +2253,15 @@ export default function Transactions() {
                         if (errors.numberOfShares) setErrors(prev => ({ ...prev, numberOfShares: '' }));
                       }
                     }}
-                    placeholder={newTx.category?.toLowerCase() === 'commodity' ? 'e.g. 5.5' : 'e.g. 10'}
+                    placeholder={activeInvestmentKind === 'commodity' ? 'e.g. 0.2456' : 'e.g. 10'}
                   />
                   {errors.numberOfShares && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.numberOfShares}</span>}
                 </div>
               )}
 
               {(() => {
-                const isMf = newTx.category?.toLowerCase() === 'mutual funds';
-                const isStock = newTx.category?.toLowerCase() === 'stocks';
+                const isMf = activeInvestmentKind === 'mutual_funds';
+                const isStock = activeInvestmentKind === 'stocks';
                 const isInvestment = isMf || isStock;
                 return isInvestment && (
                   <div style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', marginBottom: '1rem' }}>
@@ -2262,18 +2355,14 @@ export default function Transactions() {
                     ? data.accounts.find(a => a.id === newTx.accountId)?.type !== 'credit_card'
                     : data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card'
                 ))
-                || (newTx.category?.toLowerCase() === 'mutual funds')
-                || (newTx.category?.toLowerCase() === 'stocks')
-                || (newTx.category?.toLowerCase() === 'commodity')
+                || !!activeInvestmentKind
               ) && (
                   <CustomPicker
                     label={
-                      newTx.category?.toLowerCase() === 'mutual funds'
-                        ? (newTx.type === 'debit' ? 'Credit To Mutual Fund Account' : 'Debit From Account')
-                        : newTx.category?.toLowerCase() === 'stocks'
-                        ? (newTx.type === 'debit' ? 'Credit To Stocks Account' : 'Debit From Account')
-                        : newTx.category?.toLowerCase() === 'commodity'
-                        ? (newTx.type === 'debit' ? 'Credit To Commodity Account' : 'Debit From Account')
+                      activeInvestmentKind
+                        ? (newTx.type === 'debit'
+                          ? `Credit To ${investmentKindLabel(activeInvestmentKind)} Account`
+                          : 'Debit From Account')
                         : (newTx.type === 'debit'
                           ? (isCCPayment ? 'Pay To Card (Auto-Credit)' : 'Credit To Account (Auto-Credit)')
                           : 'Debit From Account (Auto-Debit)')
@@ -2290,14 +2379,12 @@ export default function Transactions() {
                         if (isCCPayment) {
                           return newTx.type === 'debit' ? a.type === 'credit_card' : a.type !== 'credit_card';
                         }
-                        if (newTx.category?.toLowerCase() === 'mutual funds') {
-                          return newTx.type === 'debit' ? a.type === 'mutual_funds' : (a.type === 'bank_account' || a.type === 'e_wallet');
-                        }
-                        if (newTx.category?.toLowerCase() === 'stocks') {
-                          return newTx.type === 'debit' ? a.type === 'stocks' : (a.type === 'bank_account' || a.type === 'e_wallet');
-                        }
-                        if (newTx.category?.toLowerCase() === 'commodity') {
-                          return newTx.type === 'debit' ? a.type === 'commodity' : (a.type === 'bank_account' || a.type === 'e_wallet');
+                        // Mirror of the main Account filter, one direction over: on a debit the
+                        // counterpart is the holding account receiving the units/shares/grams.
+                        if (activeInvestmentKind) {
+                          return newTx.type === 'debit'
+                            ? a.type === investmentAccountTypeFor(activeInvestmentKind)
+                            : (a.type === 'bank_account' || a.type === 'e_wallet');
                         }
                         return true;
                       }).map(acc => ({
@@ -2326,18 +2413,11 @@ export default function Transactions() {
                           ? (newTx.type === 'debit' ? `CC Payment: ${selectedAcc.name.trim()}` : 'CC Bill Payment')
                           : '';
                         setNewTx(prev => ({ ...prev, description: autoDesc }));
-                      } else if (newTx.category?.toLowerCase() === 'mutual funds') {
-                        const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
-                        const mfAcc = mainAcc?.type === 'mutual_funds' ? mainAcc : (selectedAcc?.type === 'mutual_funds' ? selectedAcc : null);
-                        setNewTx(prev => ({ ...prev, description: mfAcc ? mfAcc.name : 'Mutual Funds' }));
-                      } else if (newTx.category?.toLowerCase() === 'stocks') {
-                        const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
-                        const stocksAcc = mainAcc?.type === 'stocks' ? mainAcc : (selectedAcc?.type === 'stocks' ? selectedAcc : null);
-                        setNewTx(prev => ({ ...prev, description: stocksAcc ? stocksAcc.name : 'Stocks' }));
-                      } else if (newTx.category?.toLowerCase() === 'commodity') {
-                        const mainAcc = data.accounts.find(a => a.id === newTx.accountId);
-                        const commodityAcc = mainAcc?.type === 'commodity' ? mainAcc : (selectedAcc?.type === 'commodity' ? selectedAcc : null);
-                        setNewTx(prev => ({ ...prev, description: commodityAcc ? commodityAcc.name : 'Commodity' }));
+                      } else if (activeInvestmentKind) {
+                        setNewTx(prev => ({
+                          ...prev,
+                          description: investmentDescriptionFor(activeInvestmentKind, [newTx.accountId, val])
+                        }));
                       }
                     }}
                     iconGetter={_id => _id ? getAccountIcon(_id) : '🚫'}
@@ -2440,7 +2520,7 @@ export default function Transactions() {
                 const isTransfer = newTx.category?.toLowerCase() === 'transfer';
                 const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
                 const isNcmcRecharge = newTx.category?.toLowerCase() === 'ncmc travel recharge';
-                const isMf = newTx.category?.toLowerCase() === 'mutual funds';
+                const isMf = activeInvestmentKind === 'mutual_funds';
 
                 if (isTransfer || isCCPayment || isNcmcRecharge || isMf) return null;
                 if (newTx.isTravelTransaction) return null;

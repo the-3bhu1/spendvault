@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Cuboid, Landmark } from 'lucide-react';
+import { Cuboid, ShieldUser } from 'lucide-react';
 import { getCachedLogo, cacheLogoImage } from '../services/LogoService';
 
 // Circular avatar for an investment holding. Renders the real brand logo when a URL resolves and
@@ -67,7 +67,9 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf }: { name: string
           background: 'linear-gradient(135deg, #e0f2fe 0%, #93c5fd 50%, #60a5fa 100%)'
         }}
       >
-        <Landmark size={Math.round(size * 0.52)} color="#1e3a8a" strokeWidth={2} />
+        {/* ShieldUser, matching getAccountTypeIcon('epf'): the avatar and the picker icon are the same
+            account type, so they mustn't disagree. Landmark here also collided with bank accounts. */}
+        <ShieldUser size={Math.round(size * 0.52)} color="#1e3a8a" strokeWidth={2} />
       </div>
     );
   }

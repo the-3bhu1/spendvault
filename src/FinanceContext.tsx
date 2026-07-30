@@ -3,7 +3,7 @@ import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitE
 import { BUILT_IN_ACCOUNT_TYPES } from './types';
 import { classifySmsIsTransaction } from './services/GeminiService';
 import { clearChatHistory } from './services/ChatHistoryService';
-import { INVESTMENT_CATEGORY, isInvestmentCategory } from './utils';
+import { INVESTMENT_CATEGORY, isInvestmentCategory, inferInvestmentKind, getInvestmentKind } from './utils';
 
 export interface PendingTransfer {
   fromAccountId: string;
@@ -358,6 +358,31 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
               return { ...tx, category: INVESTMENT_CATEGORY };
             }
             return tx;
+          });
+        }
+
+        // Migration: backfill investmentKind on investment transactions written before the
+        // sub-category existed (including those whose legacy 'Stocks'/'Commodity'/'Mutual Funds'
+        // category was just collapsed above, losing the only marker of which kind they were). The
+        // kind is recoverable because every investment log touches an account of the matching type
+        // on one of its legs — an MF buy a mutual_funds account, a gold buy a commodity account.
+        // A funding leg's own account is the bank, so its linked parent/sibling legs are searched
+        // too; without that, only the investment-side leg would be identifiable.
+        if (parsed.transactions) {
+          const txById = new Map<string, any>(parsed.transactions.map((t: any) => [t.id, t]));
+          parsed.transactions = parsed.transactions.map((tx: any) => {
+            if (!isInvestmentCategory(tx.category) || tx.investmentKind) return tx;
+            const legIds: string[] = tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []);
+            const candidateIds = [
+              tx.accountId,
+              tx.paymentSourceAccountId,
+              ...legIds.flatMap((id: string) => {
+                const leg = txById.get(id);
+                return leg ? [leg.accountId, leg.paymentSourceAccountId] : [];
+              }),
+            ];
+            const kind = inferInvestmentKind(candidateIds, parsed.accounts || []);
+            return kind ? { ...tx, investmentKind: kind } : tx;
           });
         }
 
@@ -1107,21 +1132,17 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   // and the "parent is source of truth" design rationale: docs/LINKED_TRANSACTIONS.md
   const updateTransaction = (transaction: Transaction) => {
     setData(prev => {
+      // Categories that own an auto-generated counterpart leg, so dropping the payment source has to
+      // delete it. Investments count via isInvestmentCategory() — they used to be listed here as
+      // 'mutual funds'/'stocks'/'commodity', which no longer match anything now that all three log
+      // under one category, leaving investment counterpart legs orphaned on edit.
+      const ownsCounterpartLeg = (category?: string) => {
+        const c = (category || '').toLowerCase();
+        return c === 'transfer' || c === 'cc payment' || c === 'ncmc travel recharge' || isInvestmentCategory(c);
+      };
       const oldTx = prev.transactions.find(t => t.id === transaction.id);
-      const wasTransferOrCC = oldTx && (
-        oldTx.category?.toLowerCase() === 'transfer' ||
-        oldTx.category?.toLowerCase() === 'cc payment' ||
-        oldTx.category?.toLowerCase() === 'ncmc travel recharge' ||
-        oldTx.category?.toLowerCase() === 'mutual funds' ||
-        oldTx.category?.toLowerCase() === 'stocks' ||
-        oldTx.category?.toLowerCase() === 'commodity'
-      );
-      const isNowTransferOrCC = transaction.category?.toLowerCase() === 'transfer' ||
-                                 transaction.category?.toLowerCase() === 'cc payment' ||
-                                 transaction.category?.toLowerCase() === 'ncmc travel recharge' ||
-                                 transaction.category?.toLowerCase() === 'mutual funds' ||
-                                 transaction.category?.toLowerCase() === 'stocks' ||
-                                 transaction.category?.toLowerCase() === 'commodity';
+      const wasTransferOrCC = oldTx && ownsCounterpartLeg(oldTx.category);
+      const isNowTransferOrCC = ownsCounterpartLeg(transaction.category);
       
       let txsToDelete: string[] = [];
       let updatedTransaction = { ...transaction };
@@ -1162,9 +1183,9 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       if (wasTransferOrCC && (!isNowTransferOrCC || !transaction.paymentSourceAccountId) && !isRewardSplitChildEdit && !isRewardSplitBankEdit) {
         const allLinkedIds = transaction.linkedTransactionIds || (transaction.linkedTransactionId ? [transaction.linkedTransactionId] : []);
         const counterpartTxs = prev.transactions.filter(t => 
-          allLinkedIds.includes(t.id) && 
+          allLinkedIds.includes(t.id) &&
           t.id !== transaction.id &&
-          (t.category?.toLowerCase() === 'transfer' || t.category?.toLowerCase() === 'cc payment' || t.category?.toLowerCase() === 'ncmc travel recharge' || t.category?.toLowerCase() === 'mutual funds' || t.category?.toLowerCase() === 'stocks' || t.category?.toLowerCase() === 'commodity')
+          ownsCounterpartLeg(t.category)
         );
         txsToDelete = counterpartTxs.map(t => t.id);
         
@@ -1210,9 +1231,12 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
             else {
               const isCCPayment = updatedTransaction.category?.toLowerCase() === 'cc payment';
               const isNcmcRecharge = updatedTransaction.category?.toLowerCase() === 'ncmc travel recharge';
-              const isMf = updatedTransaction.category?.toLowerCase() === 'mutual funds';
-              const isStocks = updatedTransaction.category?.toLowerCase() === 'stocks';
-              const isCommodity = updatedTransaction.category?.toLowerCase() === 'commodity';
+              // Which investment (if any) — the three kinds propagate different fields to their leg,
+              // so this has to come from the kind, not the shared 'Investments' category.
+              const invKind = getInvestmentKind(updatedTransaction, prev.accounts);
+              const isMf = invKind === 'mutual_funds';
+              const isStocks = invKind === 'stocks';
+              const isCommodity = invKind === 'commodity';
               if (isCCPayment) {
                 if (updatedTransaction.rewardUsed && updatedTransaction.rewardUsedAccountId) {
                   // It's the bank portion
@@ -1251,14 +1275,12 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
                 updated.category = 'NCMC Travel Recharge';
               } else if (updatedTransaction.category === 'Transfer') {
                 updated.category = 'Transfer';
-              } else if (isMf) {
-                updated.category = 'Mutual Funds';
-              } else if (isStocks) {
-                updated.category = 'Stocks';
-                updated.description = updatedTransaction.description;
-              } else if (isCommodity) {
-                updated.category = 'Commodity';
-                updated.description = updatedTransaction.description;
+              } else if (invKind) {
+                // Keep the leg's kind in step with the parent's, or an MF→Stocks edit would leave
+                // the funding leg claiming the old kind.
+                updated.category = INVESTMENT_CATEGORY;
+                updated.investmentKind = invKind;
+                if (isStocks || isCommodity) updated.description = updatedTransaction.description;
               }
 
               // Update counterpart account ID if changed

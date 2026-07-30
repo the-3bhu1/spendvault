@@ -5,7 +5,7 @@ import {
   Train, ShoppingBag, Utensils, Car, Zap, HeartPulse, Film, BadgeIndianRupee, Banknote,
   CreditCard, ArrowRightLeft, Home, Handshake, Gift, ChartNoAxesCombined, ChartCandlestick,
   Gem, HandCoins, MoreHorizontal, Coins, Landmark, WalletCards, WalletMinimal, BarChart3,
-  TrendingUp, Medal, Wallet
+  TrendingUp, Medal, Wallet, ShieldUser, ChartLine, ArchiveX
 } from 'lucide-react';
 
 export const getCategoryIcon = (category: string, size = 17) => {
@@ -28,6 +28,22 @@ export const getCategoryIcon = (category: string, size = 17) => {
   if (cat.includes('lend') || cat.includes('borrow')) return <HandCoins size={size} />;
   if (cat.includes('miscellaneous') || cat.includes('other')) return <MoreHorizontal size={size} />;
   return <Coins size={size} />;
+};
+
+// Per-KIND icons for the Investments sub-category (Transaction.investmentKind). The Investments
+// CATEGORY keeps TrendingUp in getCategoryIcon above — these three distinguish the kinds inside it,
+// which is what the category icon alone can no longer do now that funds, stocks and metals share it.
+export const getInvestmentKindIcon = (kind?: string, size = 18) => {
+  switch (kind) {
+    case 'mutual_funds':
+      return <ChartNoAxesCombined size={size} />;
+    case 'stocks':
+      return <ChartCandlestick size={size} />;
+    case 'commodity':
+      return <Gem size={size} />;
+    default:
+      return <TrendingUp size={size} />;
+  }
 };
 
 // Canonical emoji per account type — the "playful" style used on the Accounts page, the account-type
@@ -56,14 +72,22 @@ export const getAccountEmoji = (
   }
 };
 
-export const getAccountTypeIcon = (type: string, size = 18) => {
+// `archived` wins over the type: for a deleted account, what matters in a picker or a historical row
+// is that it's archived, not what kind it once was. Mirrors getAccountGroupLabel, which files every
+// archived account under one group regardless of type.
+export const getAccountTypeIcon = (type: string, size = 18, archived = false) => {
+  if (archived) return <ArchiveX size={size} />;
   switch (type) {
     case 'credit_card':
     case 'debit_card':
       return <CreditCard size={size} />;
     case 'bank_account':
-    case 'epf':
       return <Landmark size={size} />;
+    case 'epf':
+      // Not Landmark: EPF shared it with bank_account, so the two were indistinguishable at 18px.
+      // The shield reads as protected/statutory (matching the Retirement card on the Wealth screen)
+      // and the person marks it as the EMPLOYEE's fund, not an account you transact against.
+      return <ShieldUser size={size} />;
     case 'e_wallet':
       return <WalletCards size={size} />;
     case 'rewards':
@@ -74,7 +98,13 @@ export const getAccountTypeIcon = (type: string, size = 18) => {
       return <BarChart3 size={size} />;
     case 'stocks':
     case 'investment':
-      return <TrendingUp size={size} />;
+      // Not TrendingUp: that's the Investments CATEGORY icon, so a stocks account and the category
+      // it's logged under rendered identically side by side in the same form.
+      return <ChartLine size={size} />;
+    case 'commodity':
+      // Metal-agnostic: this takes only the type, so it can't tell gold from silver. The
+      // per-account 🥇/🥈 distinction lives in getAccountEmoji, which does get account context.
+      return <Medal size={size} />;
     default:
       return <Wallet size={size} />;
   }

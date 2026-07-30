@@ -12,7 +12,6 @@ import {
   isSameDay, 
   isToday,
   parseISO,
-  subDays,
   setMonth,
   setYear,
   getYear,
@@ -74,18 +73,6 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
   const handlePrevMonth = () => setViewDate(subMonths(viewDate, 1));
   const handleNextMonth = () => setViewDate(addMonths(viewDate, 1));
   
-  const handleToday = () => {
-    const today = new Date();
-    onChange(format(today, 'yyyy-MM-dd'));
-    onClose();
-  };
-
-  const handleYesterday = () => {
-    const yesterday = subDays(new Date(), 1);
-    onChange(format(yesterday, 'yyyy-MM-dd'));
-    onClose();
-  };
-
   const handleDateSelect = (date: Date) => {
     onChange(format(date, 'yyyy-MM-dd'));
     onClose();
@@ -110,42 +97,6 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
         </div>
 
         <div className="modal-body flex-col gap-4" style={{ padding: '1rem 1.5rem' }}>
-          {/* Quick Shortcuts */}
-          <div className="flex gap-2">
-            <button 
-              className="btn-secondary flex-1" 
-              style={{ 
-                padding: '0.75rem', 
-                fontSize: '0.75rem', 
-                borderRadius: '12px',
-                background: isToday(selectedDate) ? 'var(--success)' : 'var(--bg-hover)',
-                color: isToday(selectedDate) ? '#000' : 'var(--text-primary)',
-                border: '1px solid #000',
-                boxShadow: isToday(selectedDate) ? 'none' : '3px 3px 0 #000',
-                transform: isToday(selectedDate) ? 'translate(2px, 2px)' : 'none',
-              }}
-              onClick={handleToday}
-            >
-              Today
-            </button>
-            <button 
-              className="btn-secondary flex-1" 
-              style={{ 
-                padding: '0.75rem', 
-                fontSize: '0.75rem', 
-                borderRadius: '12px',
-                background: isSameDay(selectedDate, subDays(new Date(), 1)) ? 'var(--success)' : 'var(--bg-hover)',
-                color: isSameDay(selectedDate, subDays(new Date(), 1)) ? '#000' : 'var(--text-primary)',
-                border: '1px solid #000',
-                boxShadow: isSameDay(selectedDate, subDays(new Date(), 1)) ? 'none' : '3px 3px 0 #000',
-                transform: isSameDay(selectedDate, subDays(new Date(), 1)) ? 'translate(2px, 2px)' : 'none',
-              }}
-              onClick={handleYesterday}
-            >
-              Yesterday
-            </button>
-          </div>
-
           <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '20px', padding: '1.25rem', border: '1px solid var(--border-color)', minHeight: '320px', display: 'flex', flexDirection: 'column' }}>
             
             {viewMode === 'calendar' ? (
