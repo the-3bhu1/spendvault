@@ -441,7 +441,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           }
           // Migration: mutual-fund category rename ('SIP / Mutual Funds' -> 'SIP' -> 'Mutual Funds').
           if (t.category === 'SIP / Mutual Funds' || t.category === 'SIP') {
-            t.category = MUTUAL_FUNDS_CATEGORY;
+            t.category = INVESTMENT_CATEGORY;
           }
           // Migration: sipAllottedAmount/sipCharges were renamed to allottedAmount/investmentCharges
           // (they always applied to stock buys too, so the sip* prefix was wrong). Same values, new
