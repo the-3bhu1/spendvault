@@ -90,7 +90,7 @@ Actions (Transactions tab):
   - **Event / One-off tags** (hidden from the dropdown by default, but searchable when typing) — for
     infrequent or one-time events (e.g. a trip or special occasion). When creating a tag in the
     transaction editor, a toggle button switches between "Active" and "Event" target. Both types are
-    stored in the same `tags` field on the transaction.
+    stored in the same \`tags\` field on the transaction.
   Manage both types in Settings → Tags (two separate sections: "Active Tags" and "Event / One-off Tags");
   you can move a tag between types there (arrow icon), rename, or delete it.
   Deleting a tag removes it from all its transactions.

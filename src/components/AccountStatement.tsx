@@ -94,10 +94,8 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
   const [showAllTransactions, setShowAllTransactions] = useState(false);
   const [isTransactionsClipped, setIsTransactionsClipped] = useState(false);
 
-  const selectedCycleRangeStr = formatBillingCycleRange(selectedCycle, statementDay);
   const selectedDate = parseISO(`${selectedCycle}-01`);
   const selectedMonthName = format(selectedDate, 'MMMM');
-  const selectedMonthFullFmt = format(selectedDate, 'MMMM yyyy');
 
   const cycleTxs = relevantAccountTransactions
     .filter(t => getTransactionCycle(t) === selectedCycle)
