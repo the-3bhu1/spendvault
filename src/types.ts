@@ -41,6 +41,7 @@ export interface EPFProjectionResult {
   totalContribution: number;
   accruedInterest: number;
   projectedOneYearBalance: number;
+  projectedDecBalance: number;
   effectiveSalary: {
     basic: number;
     da: number;
@@ -89,6 +90,7 @@ export interface Account {
   // Specific to credit_card
   statementDay?: number;
   dueDay?: number;
+  creditLimit?: number;
   defaultCashbackRate?: number;
   cashbackRates?: CashbackRate[];
   roundOffCashback?: boolean;
@@ -121,6 +123,7 @@ export interface Account {
   rewardBalanceAdjustments?: Record<string, number>;
 
   // Specific to EPF (Employee Provident Fund)
+  currentEmployer?: string;
   joiningDate?: string;
   baseBalance?: number;
   baseBalanceDate?: string;
@@ -302,6 +305,7 @@ export interface FinanceData {
   cashbackStatements: CashbackStatement[];
   categories: string[];
   tags?: string[];
+  eventTags?: string[];
   customAccountTypes?: string[];
   /** Monthly spend budget (₹) per category name, e.g. { Food: 10000 }. Absent = no budget set. */
   categoryBudgets?: Record<string, number>;

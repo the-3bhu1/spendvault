@@ -293,6 +293,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       newErrors.commodityMetal = 'Metal type is required';
     }
     if (newAccount.type === 'credit_card') {
+      if (newAccount.creditLimit === undefined || isNaN(newAccount.creditLimit) || newAccount.creditLimit <= 0) {
+        newErrors.creditLimit = 'Card Limit is required';
+      }
       if (!newAccount.statementDay || newAccount.statementDay < 1 || newAccount.statementDay > 31) {
         newErrors.statementDay = 'Statement Generation Day is required';
       }
@@ -316,6 +319,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
         if (!rewardOpeningBalanceInput.trim()) {
           newErrors.rewardOpeningBalance = 'Reward Points Opening Balance is required';
         }
+      }
+    }
+
+    if (newAccount.type === 'epf') {
+      if (!newAccount.currentEmployer?.trim()) {
+        newErrors.currentEmployer = 'Current Employer is required';
       }
     }
 
@@ -464,6 +473,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       cashbackRates: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.cashbackRates : undefined,
       roundOffCashback: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.roundOffCashback : undefined,
       isCashbackEnabled: (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') ? newAccount.isCashbackEnabled : undefined,
+      creditLimit: newAccount.type === 'credit_card' ? newAccount.creditLimit : undefined,
       statementDay: newAccount.type === 'credit_card' ? newAccount.statementDay : undefined,
       dueDay: newAccount.type === 'credit_card' ? newAccount.dueDay : undefined,
       cashbackCreditCycle: newAccount.type === 'credit_card' ? (newAccount.cashbackCreditCycle || 'next_cycle') : undefined,
@@ -491,6 +501,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       rewardBalanceAdjustments: updatedRewardBalanceAdjustments,
       baseBalance: newAccount.type === 'epf' ? (parseFloat(openingBalanceInput) || 0) : undefined,
       baseBalanceDate: newAccount.type === 'epf' ? `${getCurrentMonthStr()}-01` : undefined,
+      currentEmployer: newAccount.type === 'epf' ? (newAccount.currentEmployer?.trim() || undefined) : undefined,
       joiningDate: newAccount.type === 'epf' ? newAccount.joiningDate : undefined,
       epfContributionBasis: newAccount.type === 'epf' ? (newAccount.epfContributionBasis || 'statutory_ceiling') : undefined,
       salaryRevisions: newAccount.type === 'epf' ? (newAccount.salaryRevisions || []) : undefined,
@@ -827,8 +838,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                   formatCurrency(bal)
                                 )}
                               </span>
-                              {(acc.type === 'credit_card' || acc.type === 'debit_card') && acc.defaultCashbackRate ? (
-                                <span className="text-muted text-xs" style={{ marginTop: '4px' }}>Base Reward Rate: {acc.defaultCashbackRate}%</span>
+                              {acc.type === 'credit_card' && acc.creditLimit ? (
+                                <span className="text-muted text-xs" style={{ marginTop: '0.65rem' }}>Card Limit: {formatCurrency(acc.creditLimit)}</span>
                               ) : null}
                             </div>
 
@@ -1325,6 +1336,24 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                 </div>
               )}
 
+              {newAccount.type === 'credit_card' && (
+                <div className="input-group">
+                  <label>Card Limit — ₹</label>
+                  <input
+                    type="number"
+                    className={`input-field ${errors.creditLimit ? 'border-danger' : ''}`}
+                    placeholder="e.g. 100000"
+                    value={newAccount.creditLimit ?? ''}
+                    onChange={e => {
+                      const val = e.target.value !== '' ? parseFloat(e.target.value) : undefined;
+                      setNewAccount({ ...newAccount, creditLimit: val });
+                      if (errors.creditLimit) setErrors(prev => ({ ...prev, creditLimit: '' }));
+                    }}
+                  />
+                  {errors.creditLimit && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.creditLimit}</span>}
+                </div>
+              )}
+
               {newAccount.type === 'debit_card' && (
                 <>
                   <div className="input-group">
@@ -1412,6 +1441,22 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
               {newAccount.type === 'epf' && (
                 <>
+                  {/* Current Employer */}
+                  <div className="input-group">
+                    <label>Current Employer</label>
+                    <input
+                      type="text"
+                      className={`input-field ${errors.currentEmployer ? 'border-danger' : ''}`}
+                      placeholder="e.g. TCS, Infosys, Wipro"
+                      value={newAccount.currentEmployer || ''}
+                      onChange={e => {
+                        setNewAccount({ ...newAccount, currentEmployer: e.target.value });
+                        if (errors.currentEmployer) setErrors(prev => ({ ...prev, currentEmployer: '' }));
+                      }}
+                    />
+                    {errors.currentEmployer && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.currentEmployer}</span>}
+                  </div>
+
                   {/* Contribution Basis */}
                   <div style={{ marginBottom: '1rem' }}>
                     <CustomPicker

@@ -134,7 +134,7 @@ export const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
   }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = Math.random() * 16 | 0;
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
@@ -172,7 +172,7 @@ export const formatCurrency = (amount: number) => {
     maximumFractionDigits: 2
   }).format(cleanAmount);
 };
- 
+
 export const formatAmount = (amount: number, account?: Account) => {
   if (account && account.type === 'rewards' && account.rewardUnit) {
     let cleanAmount = amount;
@@ -191,13 +191,13 @@ export const formatAmount = (amount: number, account?: Account) => {
 export const getCurrentMonthStr = () => format(new Date(), 'yyyy-MM'); // "2023-10"
 
 // Function to calculate credit card billing cycle for a given date
-// If statementDay is 16, a transaction on the 16th falls into the NEXT cycle.
-// This matches the rule that unbilled becomes billed exactly at 00:00 on the statement day.
+// A statement closes on statementDay (e.g. 13th), so transactions through statementDay
+// belong to the current cycle. Transactions after statementDay (14th onwards) fall into next cycle.
 export const getBillingCycleForDate = (dateStr: string, statementDay: number): string => {
   const date = parseISO(dateStr);
   const transDay = date.getDate();
-  
-  if (transDay >= statementDay) {
+
+  if (transDay > statementDay) {
     // Falls into the next month's statement
     return format(addMonths(date, 1), 'yyyy-MM');
   }
@@ -205,13 +205,22 @@ export const getBillingCycleForDate = (dateStr: string, statementDay: number): s
   return format(date, 'yyyy-MM');
 };
 
-// Start Date and End Date for a cycle string 'yyyy-MM' and statementDay
+// Start Date and End Date for a cycle string 'yyyy-MM' and statementDay.
+// Example for cycle 2026-08 & statementDay 13: 14 Jul 2026 to 13 Aug 2026.
 export const getBillingCycleDates = (cycle: string, statementDay: number) => {
-  const statementDate = setDate(parseISO(`${cycle}-01`), statementDay);
-  const endDate = addDays(statementDate, -1);
-  const startDate = addMonths(statementDate, -1);
+  const endDate = setDate(parseISO(`${cycle}-01`), statementDay);
+  const startDate = addDays(addMonths(endDate, -1), 1);
   return { startDate, endDate };
 };
+
+export const formatBillingCycleRange = (cycle: string, statementDay: number = 1): string => {
+  const { startDate, endDate } = getBillingCycleDates(cycle, statementDay);
+  const sameYear = startDate.getFullYear() === endDate.getFullYear();
+  const startFmt = format(startDate, sameYear ? 'd MMM' : 'd MMM yyyy');
+  const endFmt = format(endDate, 'd MMM yyyy');
+  return `${startFmt} – ${endFmt}`;
+};
+
 
 export const calculateCycleBalanceForCycle = (
   account: Account,
@@ -272,12 +281,12 @@ export const calculateBalance = (
     return calculateEPFProjection(account, monthStr).balance;
   }
 
-  const balancesMap = isRewardPoints 
-    ? (account.rewardOpeningBalances || {}) 
-    : isTravel 
-      ? (account.travelOpeningBalances || {}) 
+  const balancesMap = isRewardPoints
+    ? (account.rewardOpeningBalances || {})
+    : isTravel
+      ? (account.travelOpeningBalances || {})
       : (account.openingBalances || {});
-  
+
   // Find the most recent opening balance at or before monthStr
   const candidateMonths = Object.keys(balancesMap).filter(m => m <= monthStr).sort();
   const baseMonth = candidateMonths.length > 0 ? candidateMonths[candidateMonths.length - 1] : null;
@@ -300,7 +309,7 @@ export const calculateBalance = (
     // 2. Confirmed cashbacks (realized points) from cashbackStatements
     const confirmedCredits = cashbackStatements.filter(s => {
       if (s.accountId !== account.id || !s.confirmed) return false;
-      
+
       // Determine the month of the statement
       let sMonth = '';
       if (s.billingCycleYearMonth.length === 7) {
@@ -311,7 +320,7 @@ export const calculateBalance = (
           sMonth = format(parseISO(tx.date), 'yyyy-MM');
         }
       }
-      
+
       if (!sMonth) return false;
       if (baseMonth && sMonth < baseMonth) return false;
       if (sMonth > monthStr) return false;
@@ -324,11 +333,11 @@ export const calculateBalance = (
     const relevantTransactions = transactions.filter(t => {
       if (t.accountId !== account.id) return false;
       const tMonth = format(parseISO(t.date), 'yyyy-MM');
-      
+
       // Only count transactions from the baseMonth up to the target monthStr
       if (baseMonth && tMonth < baseMonth) return false;
       if (tMonth > monthStr) return false;
-      
+
       if (isTravel) {
         return !!t.isTravelTransaction;
       }
@@ -337,7 +346,7 @@ export const calculateBalance = (
 
     change = relevantTransactions.reduce((acc, t) => {
       let effectiveAmount = t.amount;
-      
+
       // For standard split expenses, the primary account only pays the out-of-pocket amount
       if (t.type === 'debit' && t.rewardUsed && t.rewardUsed > 0 && t.rewardUsedAccountId) {
         effectiveAmount = t.amount - t.rewardUsed;
@@ -355,8 +364,8 @@ export const calculateBalance = (
 
   const adjustmentsMap = isRewardPoints
     ? (account.rewardBalanceAdjustments || {})
-    : isTravel 
-      ? (account.travelBalanceAdjustments || {}) 
+    : isTravel
+      ? (account.travelBalanceAdjustments || {})
       : (account.balanceAdjustments || {});
   const adjustment = Object.keys(adjustmentsMap)
     .filter(m => (!baseMonth || m >= baseMonth) && m <= monthStr)
@@ -369,7 +378,7 @@ export const calculateTotalSpendPerCycle = (transactions: Transaction[], account
   const ccTransactions = transactions.filter(t => t.accountId === accountId);
   let spend = 0;
   let payment = 0;
-  
+
   ccTransactions.forEach(t => {
     const tCycle = t.appliedBillingCycleYearMonth || getBillingCycleForDate(t.date, statementDay);
     if (tCycle === cycle) {
@@ -394,7 +403,7 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork) => {
       back: 'linear-gradient(135deg, #111827 0%, #0f131a 100%)'
     };
   }
-  
+
   const themes = [
     { front: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', back: 'linear-gradient(135deg, #16213e 0%, #0f3460 100%)' }, // Blue
     { front: 'linear-gradient(135deg, #2b0f19 0%, #3d1524 50%, #4a1528 100%)', back: 'linear-gradient(135deg, #3d1524 0%, #4a1528 100%)' }, // Burgundy
@@ -421,13 +430,13 @@ export const getNextCycleEndDate = (startDate: string, freq: RecurringFrequency,
   const d = parseISO(startDate);
   let next: Date;
   switch (freq) {
-    case 'daily':     next = addDays(d, 1); break;
-    case 'weekly':    next = addWeeks(d, 1); break;
-    case 'monthly':   next = addMonths(d, 1); break;
+    case 'daily': next = addDays(d, 1); break;
+    case 'weekly': next = addWeeks(d, 1); break;
+    case 'monthly': next = addMonths(d, 1); break;
     case 'quarterly': next = addQuarters(d, 1); break;
-    case 'yearly':    next = addYears(d, 1); break;
-    case 'custom':    next = addDays(d, customDays ?? 1); break;
-    default:          next = addMonths(d, 1);
+    case 'yearly': next = addYears(d, 1); break;
+    case 'custom': next = addDays(d, customDays ?? 1); break;
+    default: next = addMonths(d, 1);
   }
   return format(next, 'yyyy-MM-dd');
 };

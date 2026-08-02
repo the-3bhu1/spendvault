@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, ChevronDown, Sparkles, ShieldAlert, Hash, Bot, BotOff, Cuboid, Image as ImageIcon, MessageSquare, Pencil } from 'lucide-react';
+import { Trash2, Tags, Database, Briefcase, Moon, Download, Info, HelpCircle, Sun, AlertTriangle, Mail, User as UserIcon, Camera, Check, Fingerprint, ZoomIn, Move, X as CloseIcon, Eye, Upload, Clipboard, Plus, GripVertical, RotateCcw, Share2, ChevronDown, Sparkles, ShieldAlert, Hash, Bot, BotOff, Cuboid, Image as ImageIcon, MessageSquare, Pencil, ArrowUpDown } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
 import ConfirmDialog from './ConfirmDialog';
 import TransparentLogo from './TransparentLogo';
@@ -106,7 +106,7 @@ import { SubviewWrapper } from './SubviewWrapper.tsx';
 import { hasLogoDevToken, setLogoDevToken } from '../services/LogoService';
 
 export default function Settings() {
-  const { data, updateCategories, updateCustomAccountTypes, updateTags, updateTransaction, clearAllData, updateUser, setAuthenticated, setTheme } = useFinance();
+  const { data, updateCategories, updateCustomAccountTypes, updateTags, updateEventTags, updateTransaction, clearAllData, updateUser, setAuthenticated, setTheme } = useFinance();
   const [newCat, setNewCat] = useState('');
   const [newAccountType, setNewAccountType] = useState('');
   const [newTagEntry, setNewTagEntry] = useState('');
@@ -572,16 +572,22 @@ export default function Settings() {
     });
   };
 
+  const [newTagTargetType, setNewTagTargetType] = useState<'active' | 'event'>('active');
+
   const handleAddTag = () => {
     const raw = newTagEntry.trim().replace(/^#/, '');
     if (!raw) return;
-    // Case-insensitive dedup: don't create a tag that differs only by case from an existing one.
-    const existing = (data.tags || []).find(t => t.toLowerCase() === raw.toLowerCase());
+    const allTags = [...(data.tags || []), ...(data.eventTags || [])];
+    const existing = allTags.find(t => t.toLowerCase() === raw.toLowerCase());
     if (existing) {
       setTagHint(`"#${existing}" already exists.`);
       return;
     }
-    updateTags([...(data.tags || []), raw]);
+    if (newTagTargetType === 'active') {
+      updateTags([...(data.tags || []), raw]);
+    } else {
+      updateEventTags([...(data.eventTags || []), raw]);
+    }
     setNewTagEntry('');
     setTagHint('');
   };
@@ -591,19 +597,39 @@ export default function Settings() {
     setEditTagValue(tag);
   };
 
+  const handleMoveTag = (tag: string, currentType: 'active' | 'event') => {
+    if (currentType === 'active') {
+      updateTags((data.tags || []).filter(t => t !== tag));
+      updateEventTags([...(data.eventTags || []), tag]);
+    } else {
+      updateEventTags((data.eventTags || []).filter(t => t !== tag));
+      updateTags([...(data.tags || []), tag]);
+    }
+  };
+
   const handleRenameTag = (oldTag: string) => {
     const newTag = editTagValue.trim().replace(/^#/, '');
     if (!newTag || newTag === oldTag) { setEditingTag(null); return; }
-    const tags = data.tags || [];
-    // Case-insensitive: if newTag matches a DIFFERENT existing tag, merge into that tag's casing.
-    // (A pure case-change of the same tag has no such match, so it renames in place.)
-    const existingMatch = tags.find(t => t !== oldTag && t.toLowerCase() === newTag.toLowerCase());
+    const activeTags = data.tags || [];
+    const eventTags = data.eventTags || [];
+    const isActive = activeTags.includes(oldTag);
+
+    const allTags = [...activeTags, ...eventTags];
+    const existingMatch = allTags.find(t => t !== oldTag && t.toLowerCase() === newTag.toLowerCase());
     const canonical = existingMatch || newTag;
-    const newTags = existingMatch
-      ? tags.filter(t => t !== oldTag)
-      : tags.map(t => (t === oldTag ? newTag : t));
-    updateTags(newTags);
-    // Carry the rename onto every transaction that used the old tag (dedupe in case of a merge).
+
+    if (isActive) {
+      const newActive = existingMatch
+        ? activeTags.filter(t => t !== oldTag)
+        : activeTags.map(t => (t === oldTag ? newTag : t));
+      updateTags(newActive);
+    } else {
+      const newEvent = existingMatch
+        ? eventTags.filter(t => t !== oldTag)
+        : eventTags.map(t => (t === oldTag ? newTag : t));
+      updateEventTags(newEvent);
+    }
+
     data.transactions
       .filter(t => (t.tags || []).includes(oldTag))
       .forEach(t => {
@@ -625,6 +651,7 @@ export default function Settings() {
       isDanger: usedByTxCount > 0,
       onConfirm: () => {
         updateTags((data.tags || []).filter(t => t !== tag));
+        updateEventTags((data.eventTags || []).filter(t => t !== tag));
         if (usedByTxCount > 0) {
           data.transactions
             .filter(t => (t.tags || []).includes(tag))
@@ -1301,79 +1328,146 @@ export default function Settings() {
       </SubviewWrapper>
     );
   } else if (activeView === 'tags') {
-    viewContent = (
-      <SubviewWrapper title="Tags" onBack={() => setActiveView('main')}>
-        <div className="card flex-col gap-4">
-          <SettingsCardHeader icon={Hash} title="Bucket Tags" level="h3" size={20} marginBottom="0.5rem" />
-          <p className="text-muted text-sm">Tags let you group expenses across categories for buckets or events like #Vacation2024 or #WeddingDec.</p>
-          <div className="flex-col gap-2">
-            {(data.tags || []).length === 0 ? (
-              <div className="text-sm text-muted" style={{ padding: '0.75rem 0' }}>No tags yet. Create your first tag below.</div>
-            ) : (
-              (data.tags || []).map(tag => {
-                const useCount = data.transactions.filter(t => (t.tags || []).includes(tag)).length;
-                return (
-                  <div
-                    key={tag}
-                    className="flex justify-between align-center gap-3"
-                    style={{ padding: '0.75rem 1rem', background: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: '8px', flexWrap: 'nowrap' }}
-                  >
-                    {editingTag === tag ? (
-                      <>
-                        <input
-                          className="input-field"
-                          style={{ flex: 1, minWidth: 0, fontSize: '0.85rem', padding: '0.4rem 0.6rem' }}
-                          value={editTagValue}
-                          autoFocus
-                          onChange={e => setEditTagValue(e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') handleRenameTag(tag);
-                            if (e.key === 'Escape') { setEditingTag(null); setEditTagValue(''); }
-                          }}
-                          placeholder="Tag name"
-                        />
-                        <div className="flex align-center gap-3" style={{ flexShrink: 0 }}>
-                          <button className="btn btn-secondary" style={{ width: '30px', height: '30px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }} onClick={() => handleRenameTag(tag)} aria-label="Save tag">
-                            <Check size={14} />
-                          </button>
-                          <button className="btn btn-secondary" style={{ width: '30px', height: '30px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }} onClick={() => { setEditingTag(null); setEditTagValue(''); }} aria-label="Cancel edit">
-                            <CloseIcon size={14} />
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex align-center gap-3" style={{ minWidth: 0, flex: 1 }}>
-                          <span className="tag-pill" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', display: 'block', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>#{tag}</span>
-                          {useCount > 0 && <span className="text-xs text-muted" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>{useCount} transaction{useCount !== 1 ? 's' : ''}</span>}
-                        </div>
-                        <div className="flex align-center gap-3" style={{ flexShrink: 0 }}>
-                          <button className="btn btn-secondary" style={{ width: '30px', height: '30px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }} onClick={() => startEditTag(tag)} aria-label="Edit tag">
-                            <Pencil size={14} />
-                          </button>
-                          <button className="btn btn-secondary" style={{ width: '30px', height: '30px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }} onClick={() => handleRemoveTag(tag)} aria-label="Delete tag">
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-          <div className="flex gap-2" style={{ marginTop: '0.5rem' }}>
+    const activeTagsList = data.tags || [];
+    const eventTagsList = data.eventTags || [];
+
+    const renderTagRow = (tag: string, type: 'active' | 'event') => (
+      <div
+        key={tag}
+        className="flex justify-between align-center gap-3"
+        style={{ padding: '0.65rem 0.85rem', background: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: '8px', flexWrap: 'nowrap' }}
+      >
+        {editingTag === tag ? (
+          <>
             <input
               className="input-field"
-              style={{ flex: 1 }}
-              value={newTagEntry}
-              onChange={e => { setNewTagEntry(e.target.value); if (tagHint) setTagHint(''); }}
-              placeholder="New tag (e.g. Vacation2024)"
-              onKeyDown={e => e.key === 'Enter' && handleAddTag()}
+              style={{ flex: 1, minWidth: 0, fontSize: '0.85rem', padding: '0.4rem 0.6rem' }}
+              value={editTagValue}
+              autoFocus
+              onChange={e => setEditTagValue(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleRenameTag(tag);
+                if (e.key === 'Escape') { setEditingTag(null); setEditTagValue(''); }
+              }}
+              placeholder="Tag name"
             />
-            <button className="btn btn-primary" style={{ minWidth: '54px', padding: '0.75rem' }} onClick={handleAddTag} aria-label="Add Tag"><Plus size={20} /></button>
+            <div className="flex align-center gap-2" style={{ flexShrink: 0 }}>
+              <button className="btn btn-secondary" style={{ width: '30px', height: '30px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }} onClick={() => handleRenameTag(tag)} aria-label="Save tag">
+                <Check size={14} />
+              </button>
+              <button className="btn btn-secondary" style={{ width: '30px', height: '30px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', minHeight: 'auto', boxShadow: '2px 2px 0 #000' }} onClick={() => { setEditingTag(null); setEditTagValue(''); }} aria-label="Cancel edit">
+                <CloseIcon size={14} />
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex align-center gap-2" style={{ minWidth: 0, flex: 1 }}>
+              <span className="tag-pill" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', display: 'block', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>#{tag}</span>
+            </div>
+            <div className="flex align-center gap-3" style={{ flexShrink: 0, gap: '0.6rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)', background: 'var(--bg-hover)', minHeight: 'auto', boxShadow: '2px 2px 0 #000', borderRadius: '6px' }}
+                onClick={() => handleMoveTag(tag, type)}
+                title={type === 'active' ? "Move to Event Tags" : "Move to Active Tags"}
+                aria-label={type === 'active' ? "Move to Event Tags" : "Move to Active Tags"}
+              >
+                <ArrowUpDown size={14} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', background: 'var(--bg-hover)', minHeight: 'auto', boxShadow: '2px 2px 0 #000', borderRadius: '6px' }}
+                onClick={() => startEditTag(tag)}
+                aria-label="Edit tag"
+                title="Edit tag"
+              >
+                <Pencil size={14} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)', background: 'var(--bg-hover)', minHeight: 'auto', boxShadow: '2px 2px 0 #000', borderRadius: '6px' }}
+                onClick={() => handleRemoveTag(tag)}
+                aria-label="Delete tag"
+                title="Delete tag"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+
+    viewContent = (
+      <SubviewWrapper title="Tags" onBack={() => setActiveView('main')}>
+        <div className="flex-col gap-4">
+          <div className="card flex-col gap-4">
+            <div>
+              <SettingsCardHeader icon={Hash} title="Active Tags" level="h3" size={20} marginBottom="0.25rem" />
+              <p className="text-muted text-xs" style={{ margin: 0 }}>Regular tags shown by default in tag picker dropdowns.</p>
+            </div>
+
+            <div className="flex-col gap-2">
+              {activeTagsList.length === 0 ? (
+                <div className="text-xs text-muted" style={{ padding: '0.5rem 0' }}>No active tags.</div>
+              ) : (
+                activeTagsList.map(tag => renderTagRow(tag, 'active'))
+              )}
+            </div>
           </div>
-          {tagHint && <span className="text-xs text-danger" style={{ marginTop: '-0.25rem' }}>{tagHint}</span>}
+
+          <div className="card flex-col gap-4">
+            <div>
+              <SettingsCardHeader icon={Hash} title="Event / One-off Tags" level="h3" size={20} marginBottom="0.25rem" />
+              <p className="text-muted text-xs" style={{ margin: 0 }}>Hidden from dropdowns by default to prevent clutter, but searchable when typing.</p>
+            </div>
+
+            <div className="flex-col gap-2">
+              {eventTagsList.length === 0 ? (
+                <div className="text-xs text-muted" style={{ padding: '0.5rem 0' }}>No event tags yet.</div>
+              ) : (
+                eventTagsList.map(tag => renderTagRow(tag, 'event'))
+              )}
+            </div>
+          </div>
+
+          <div className="card flex-col gap-3">
+            <span className="text-xs font-bold text-muted uppercase">Create New Tag</span>
+            <div className="flex align-center gap-2" style={{ marginBottom: '0.25rem' }}>
+              <button
+                type="button"
+                className={`btn text-xs ${newTagTargetType === 'active' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ flex: 1, height: '34px', padding: '0 0.5rem', fontSize: '0.75rem', border: '1.5px solid #000', boxShadow: '2px 2px 0 #000' }}
+                onClick={() => setNewTagTargetType('active')}
+              >
+                Active Tag
+              </button>
+              <button
+                type="button"
+                className={`btn text-xs ${newTagTargetType === 'event' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ flex: 1, height: '34px', padding: '0 0.5rem', fontSize: '0.75rem', border: '1.5px solid #000', boxShadow: '2px 2px 0 #000' }}
+                onClick={() => setNewTagTargetType('event')}
+              >
+                Event Tag
+              </button>
+            </div>
+            <div className="flex align-center" style={{ gap: '0.35rem' }}>
+              <input
+                className="input-field"
+                style={{ flex: 1, height: '42px', padding: '0 0.85rem', fontSize: '0.85rem' }}
+                value={newTagEntry}
+                onChange={e => { setNewTagEntry(e.target.value); if (tagHint) setTagHint(''); }}
+                placeholder={`New ${newTagTargetType === 'active' ? 'active' : 'event'} tag`}
+                onKeyDown={e => e.key === 'Enter' && handleAddTag()}
+              />
+              <button className="btn btn-primary flex align-center justify-center" style={{ width: '42px', height: '42px', padding: 0, borderRadius: '6px', flexShrink: 0 }} onClick={handleAddTag} aria-label="Add Tag"><Plus size={18} /></button>
+            </div>
+            {tagHint && <span className="text-xs text-danger" style={{ marginTop: '-0.25rem' }}>{tagHint}</span>}
+          </div>
         </div>
       </SubviewWrapper>
     );

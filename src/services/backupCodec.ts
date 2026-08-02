@@ -13,7 +13,7 @@
 export const KEY_MAP: Record<string, string> = {
   // Root keys
   version: 'v', exportedAt: 't', user: 'u', accounts: 'A', transactions: 'T',
-  categories: 'C', tags: 'tg', customAccountTypes: 'X', cashbackStatements: 'S',
+  categories: 'C', tags: 'tg', eventTags: 'etg', customAccountTypes: 'X', cashbackStatements: 'S',
   categoryBudgets: 'CB',
   splitEvents: 'E', recurringBills: 'R', theme: 'm', debts: 'H',
   // User fields
@@ -36,8 +36,9 @@ export const KEY_MAP: Record<string, string> = {
   // mapped so an ancient backup still expands them to a named field instead of a raw 2-char key.
   // Like 'lsa', these codes are burnt — never point them at a different field.
   balance: 'b', color: 'c', icon: 'o',
-  openingBalances: 'ob', statementDay: 'sd', dueDay: 'dd',
+  openingBalances: 'ob', statementDay: 'sd', dueDay: 'dd', creditLimit: 'clim',
   defaultCashbackRate: 'dr', cashbackRates: 'cr', roundOffCashback: 'ro',
+  currentEmployer: 'ce',
   cashbackCreditCycle: 'cc', travelOpeningBalances: 'tob', statementRounding: 'sr',
   isCashbackEnabled: 'ice',
   cardDetails: 'D', cardholderName: 'ch', cardNumber: 'cn', rate: 'rt',

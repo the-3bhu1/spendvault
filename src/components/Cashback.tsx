@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { format, addMonths } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import { formatCurrency, generateId, formatDateString, getBillingCycleForDate, getBillingCycleDates } from '../utils';
+import { formatCurrency, generateId, formatDateString, getBillingCycleForDate, getBillingCycleDates, formatBillingCycleRange } from '../utils';
 import type { CashbackStatement, Transaction } from '../types';
 import { Info, Pencil, Check, X, ChevronDown, RotateCcw } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
@@ -45,27 +45,8 @@ export default function Cashback() {
       const d = new Date(txDateStr);
       return d.toLocaleString('default', { month: 'long', year: 'numeric' });
     }
-    const d = new Date(txDateStr);
-    let year = d.getFullYear();
-    let month = d.getMonth();
-    let day = d.getDate();
-
-    if (day > statementDay) {
-      month++;
-      if (month > 11) {
-        month = 0;
-        year++;
-      }
-    }
-
-    // A statement closes on `statementDay`, so the cycle runs from the day after the previous
-    // close to this close — e.g. "17 May – 16 Jun 2026". Far clearer than "Cycle ending 16th 06-2026".
-    const end = new Date(year, month, statementDay);
-    const start = new Date(year, month - 1, statementDay + 1);
-    const fmt = (d: Date, withYear: boolean) =>
-      `${d.getDate()} ${d.toLocaleString('default', { month: 'short' })}${withYear ? ` ${d.getFullYear()}` : ''}`;
-    const sameYear = start.getFullYear() === end.getFullYear();
-    return `${fmt(start, !sameYear)} – ${fmt(end, true)}`;
+    const cycle = getBillingCycleForDate(txDateStr, statementDay);
+    return formatBillingCycleRange(cycle, statementDay);
   };
 
   const statements: Record<string, { expected: number, realized: number, confirmed: boolean, statementId: string | null, transaction: Transaction, account: any }> = {};

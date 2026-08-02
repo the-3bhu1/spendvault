@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { CreditCard, Calendar, ChevronLeft } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import { getCategoryIcon } from './transactionIcons';
 import RollingNumber from './RollingNumber';
-import { getBillingCycleForDate, getCardGradients } from '../utils';
+import { getBillingCycleForDate, getCardGradients, formatBillingCycleRange } from '../utils';
 import type { Account, Transaction } from '../types';
 import { CardNetworkLogo } from './CardNetworkLogo';
 import { useFinance } from '../FinanceContext';
@@ -75,12 +75,17 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
   ]))
     .sort((a, b) => b.localeCompare(a))
     .map(cycle => {
-      const date = new Date(`${cycle}-01`);
+      const cycleRangeStr = formatBillingCycleRange(cycle, statementDay);
+      const date = parseISO(`${cycle}-01`);
       const year = date.getFullYear();
+      const monthName = format(date, 'MMMM yyyy');
+      const shortMonthLabel = `${date.toLocaleString('default', { month: 'short' })} '${date.getFullYear().toString().slice(-2)}`;
+      const statusText = cycle === currentCycle ? 'Open Cycle' : 'Closed Statement';
       return {
         id: cycle,
-        name: `${date.toLocaleString('default', { month: 'short' })} '${date.getFullYear().toString().slice(-2)}`,
-        subtext: cycle === currentCycle ? 'Open Cycle' : 'Closed Statement',
+        name: monthName,
+        triggerName: shortMonthLabel,
+        subtext: `${cycleRangeStr} • ${statusText}`,
         group: `Year ${year}`
       };
     });
@@ -89,8 +94,10 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
   const [showAllTransactions, setShowAllTransactions] = useState(false);
   const [isTransactionsClipped, setIsTransactionsClipped] = useState(false);
 
-  const selectedCycleDate = new Date(`${selectedCycle}-01`);
-  const currentMonthName = selectedCycleDate.toLocaleString('default', { month: 'long' }).toLowerCase();
+  const selectedCycleRangeStr = formatBillingCycleRange(selectedCycle, statementDay);
+  const selectedDate = parseISO(`${selectedCycle}-01`);
+  const selectedMonthName = format(selectedDate, 'MMMM');
+  const selectedMonthFullFmt = format(selectedDate, 'MMMM yyyy');
 
   const cycleTxs = relevantAccountTransactions
     .filter(t => getTransactionCycle(t) === selectedCycle)
@@ -105,8 +112,6 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
   if (rounding === 'round') netAmount = Math.round(rawNetAmount);
   else if (rounding === 'floor') netAmount = Math.floor(rawNetAmount);
   else if (rounding === 'ceil') netAmount = Math.ceil(rawNetAmount);
-
-  const cycleTitle = selectedCycle === currentCycle ? 'CURRENT OPEN CYCLE' : 'CLOSED BILLING CYCLE';
 
   useEffect(() => {
     const updateClippingState = () => {
@@ -165,8 +170,8 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
               <ChevronLeft size={20} />
             </button>
             <div className="flex-col">
-              <span className="text-mono font-bold uppercase" style={{ opacity: 0.72, color: 'var(--text-primary)', fontSize: '1rem' }}>{acc.name}</span>
-              <span className="text-mono font-bold uppercase" style={{ color: selectedCycle === currentCycle ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '0.72rem', marginTop: '0.3rem' }}>{cycleTitle}</span>
+              <span className="text-mono font-bold uppercase" style={{ color: 'var(--text-primary)', fontSize: '1rem', letterSpacing: '0.5px' }}>{selectedMonthFullFmt}</span>
+              <span className="text-mono font-bold uppercase" style={{ color: selectedCycle === currentCycle ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '0.72rem', marginTop: '0.15rem' }}>{selectedCycleRangeStr}</span>
             </div>
           </div>
 
@@ -205,7 +210,7 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
             color: 'var(--text-primary)',
           }}>
             <h2 className="text-serif" style={{
-              fontSize: '2rem',
+              fontSize: '1.85rem',
               marginTop: '1rem',
               opacity: showAllTransactions ? 0 : 0.9,
               transform: showAllTransactions ? 'translateY(-40px) scale(0.92)' : 'translateY(0) scale(1)',
@@ -214,7 +219,7 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
                 ? 'opacity 0.6s ease, transform 0.7s cubic-bezier(0.4, 0, 1, 1), filter 0.6s ease'
                 : 'opacity 0.6s ease 0.5s, transform 0.7s cubic-bezier(0, 0, 0.2, 1) 0.5s, filter 0.6s ease 0.5s'
             }}>
-              here is your statement<br />for {currentMonthName}
+              here is your statement<br />for {selectedMonthName.toLowerCase()}
             </h2>
 
             <div style={{

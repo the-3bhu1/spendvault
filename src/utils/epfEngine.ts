@@ -268,7 +268,55 @@ export function calculateEPFProjection(
     fyIterDate = addMonths(fyIterDate, 1);
   }
 
-  // Calculate 1-Year Projected Balance from targetMonthKey
+  // Calculate Projected Dec (EOY) Balance and 1-Year Projected Balance from targetMonthKey
+  const currentTargetYear = targetDateObj.getFullYear();
+  const decTargetMonthKey = `${currentTargetYear}-12`;
+  let projectedDecBalance = runningBalance;
+  let decIterDate = parseISO(`${targetMonthKey}-01`);
+  const decTargetDateObj = parseISO(`${decTargetMonthKey}-01`);
+  let decTempAccruedInterest = accruedInterestInCurrentFY;
+
+  if (isAfter(decTargetDateObj, decIterDate)) {
+    decIterDate = addMonths(decIterDate, 1);
+    while (!isAfter(decIterDate, decTargetDateObj)) {
+      const monthKey = format(decIterDate, 'yyyy-MM');
+      const fy = getFinancialYearForDate(monthKey);
+      const annualInterestRate = getEPFInterestRate(fy, overrides);
+
+      const activeRevision = getEffectiveEPFSalary(revisions, monthKey);
+      const basic = activeRevision ? activeRevision.basicSalary : lastEffectiveSalary.basic;
+      const da = activeRevision ? (activeRevision.dearnessAllowance || 0) : lastEffectiveSalary.da;
+      const empPct = activeRevision?.employeeContributionPct ?? 12;
+      const emprPct = activeRevision?.employerContributionPct ?? 12;
+      const wage = basic + da;
+
+      const epfWageCeiling = 15000;
+      const isStatutoryCap = (account.epfContributionBasis || 'statutory_ceiling') === 'statutory_ceiling';
+      const epfEligibleWage = (isStatutoryCap && wage > epfWageCeiling) ? epfWageCeiling : wage;
+
+      const empContrib = Math.round(epfEligibleWage * (empPct / 100));
+      const totalEmprContrib = Math.round(epfEligibleWage * (emprPct / 100));
+      let epsContrib = 0;
+      if (!account.isEpsDisabled && wage > 0) {
+        const epsWageCeiling = account.epsWageCeiling || 15000;
+        epsContrib = Math.min(1250, Math.round(Math.min(wage, epsWageCeiling) * (8.33 / 100)));
+      }
+      const emprEpfContrib = Math.max(0, totalEmprContrib - epsContrib);
+
+      projectedDecBalance += (empContrib + emprEpfContrib);
+
+      const monthlyInterest = (projectedDecBalance * (annualInterestRate / 100)) / 12;
+      decTempAccruedInterest += monthlyInterest;
+
+      if ((decIterDate.getMonth() + 1) === 3) {
+        projectedDecBalance += Math.round(decTempAccruedInterest);
+        decTempAccruedInterest = 0;
+      }
+
+      decIterDate = addMonths(decIterDate, 1);
+    }
+  }
+
   let projectedOneYearBalance = runningBalance;
   let futureMonthDate = addMonths(parseISO(`${targetMonthKey}-01`), 1);
   const oneYearTargetDate = addMonths(parseISO(`${targetMonthKey}-01`), 12);
@@ -320,6 +368,7 @@ export function calculateEPFProjection(
     totalContribution: lastTotalContribution,
     accruedInterest: Math.round(accruedInterestInCurrentFY),
     projectedOneYearBalance: Math.round(projectedOneYearBalance),
+    projectedDecBalance: Math.round(projectedDecBalance),
     effectiveSalary: lastEffectiveSalary,
   };
 }

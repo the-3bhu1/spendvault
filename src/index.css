@@ -135,8 +135,13 @@ html.fonts-loaded #root {
   /* The frosted segmented control on the Wealth category screens (see renderFilterPills in
      Wealth.tsx). Tokenised for the same reason as the relief set above: the "glass" is a light
      tint on the dark theme but has to become a dark tint on the light theme, or the track, the
-     sliding thumb and the inactive labels all wash out to near-invisible white-on-white. */
-  --pill-track-bg: rgba(255, 255, 255, 0.025);
+     sliding thumb and the inactive labels all wash out to near-invisible white-on-white.
+     The track is a VEIL of the page colour, not a near-invisible 2.5% tint over a backdrop-filter.
+     The row is rendered fresh on every entry into a category screen, so a backdrop-filter on it
+     has no snapshot for its first paint(s) — the relief arcs used to show through crisply for
+     ~half a second before the blur landed, which read as the control flashing transparent. An
+     opaque-ish veil paints correctly on frame one and hides the arcs the same way. */
+  --pill-track-bg: rgba(12, 14, 19, 0.55);
   --pill-track-border: rgba(255, 255, 255, 0.07);
   --pill-thumb-bg: rgba(255, 255, 255, 0.08);
   color-scheme: dark;
@@ -164,7 +169,9 @@ html.fonts-loaded #root {
   --relief-line: rgba(15, 23, 42, 0.16);
   --relief-edge: rgba(255, 255, 255, 0.9);
   --relief-shadow: rgba(15, 23, 42, 0.22);
-  --pill-track-bg: rgba(15, 23, 42, 0.025);
+  /* Light theme veils with the page colour instead of ink — a dark veil here would read as a
+     grey slab rather than glass. The dark border below is what delineates the track. */
+  --pill-track-bg: rgba(248, 250, 252, 0.62);
   --pill-track-border: rgba(15, 23, 42, 0.07);
   --pill-thumb-bg: rgba(15, 23, 42, 0.05);
   color-scheme: light;

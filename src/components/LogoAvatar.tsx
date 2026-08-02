@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Cuboid, ShieldUser } from 'lucide-react';
+import { Cuboid, ShieldUser, WalletMinimal } from 'lucide-react';
 import { getCachedLogo, cacheLogoImage } from '../services/LogoService';
 
 // Circular avatar for an investment holding. Renders the real brand logo when a URL resolves and
@@ -42,7 +42,7 @@ export function getInitials(name: string): string {
     .slice(0, 2);
 }
 
-export function LogoAvatar({ name, logoUrl, size, metal, isEpf }: { name: string; logoUrl: string | null; size: number; metal?: 'gold' | 'silver'; isEpf?: boolean }) {
+export function LogoAvatar({ name, logoUrl, size, metal, isEpf, isWallet, accountType }: { name: string; logoUrl: string | null; size: number; metal?: 'gold' | 'silver'; isEpf?: boolean; isWallet?: boolean; accountType?: string }) {
   // Ordered logo sources to try before initials: the resolved logo URL, then (for logo.dev domain
   // URLs) that domain's favicon. `srcIdx` advances on each <img> error; when it runs past the end
   // we render initials. Each remote source is transparently swapped for its cached base64 data:
@@ -100,6 +100,7 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf }: { name: string
   }
 
   const showImg = srcIdx < sources.length;
+  const isWalletAccount = isWallet || accountType === 'cash' || name.toLowerCase().includes('wallet') || name.toLowerCase() === 'cash';
 
   return (
     <div
@@ -138,6 +139,8 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf }: { name: string
             display: 'block'
           }}
         />
+      ) : isWalletAccount ? (
+        <WalletMinimal size={Math.round(size * 0.48)} strokeWidth={2.2} />
       ) : (
         getInitials(name)
       )}

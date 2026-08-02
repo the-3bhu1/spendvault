@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account, InvestmentKind } from '../types';
 import { generateId, formatCurrency, formatAmount, formatDateString, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind } from '../utils';
-import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, Sparkles, ChevronRight, Hash, BanknoteArrowUp, BanknoteArrowDown, Shapes, Layers } from 'lucide-react';
+import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, Sparkles, ChevronRight, ChevronDown, Hash, BanknoteArrowUp, BanknoteArrowDown, Shapes, Layers } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
@@ -329,12 +329,14 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
             onMouseOver={e => e.currentTarget.style.background = 'var(--bg-hover)'}
             onMouseOut={e => e.currentTarget.style.background = 'transparent'}
           >
-            <span style={{ 
-              display: 'inline-block',
-              transform: isCounterpartExpanded ? 'rotate(90deg)' : 'none', 
-              transition: 'transform 0.2s',
-              fontSize: '0.6rem'
-            }}>▶</span>
+            <ChevronRight 
+              size={12} 
+              style={{ 
+                transform: isCounterpartExpanded ? 'rotate(90deg)' : 'none', 
+                transition: 'transform 0.2s',
+                flexShrink: 0
+              }} 
+            />
             <span>
               {isCounterpartExpanded
                 ? 'Hide linked entry'
@@ -382,7 +384,10 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
 }
 
 export default function Transactions() {
-  const { data, pendingTransfer, setPendingTransfer, smsQueue, removeFromSmsQueue, removeSmsByMatch, addTransaction, updateTransaction, reorderTransactions, deleteTransaction, updateTags } = useFinance();
+  const { data, pendingTransfer, setPendingTransfer, smsQueue, removeFromSmsQueue, removeSmsByMatch, addTransaction, updateTransaction, reorderTransactions, deleteTransaction, updateTags, updateEventTags } = useFinance();
+  const [tempCreatedActiveTags, setTempCreatedActiveTags] = useState<string[]>([]);
+  const [tempCreatedEventTags, setTempCreatedEventTags] = useState<string[]>([]);
+  const [newTagTargetType, setNewTagTargetType] = useState<'active' | 'event'>('active');
 
   const ACCOUNT_TYPE_ORDER = ['bank_account', 'credit_card', 'debit_card', 'cash', 'e_wallet', 'rewards', 'stocks', 'mutual_funds', 'commodity'];
   const sortByAccountType = (a: { type: string }, b: { type: string }) => {
@@ -868,6 +873,21 @@ export default function Transactions() {
     console.log("Validation Passed! Saving transaction...");
     setErrors({});
 
+    if (tempCreatedActiveTags.length > 0) {
+      const currentActive = data.tags || [];
+      const toAdd = tempCreatedActiveTags.filter(t => !currentActive.includes(t));
+      if (toAdd.length > 0) {
+        updateTags([...currentActive, ...toAdd]);
+      }
+    }
+    if (tempCreatedEventTags.length > 0) {
+      const currentEvent = data.eventTags || [];
+      const toAdd = tempCreatedEventTags.filter(t => !currentEvent.includes(t));
+      if (toAdd.length > 0) {
+        updateEventTags([...currentEvent, ...toAdd]);
+      }
+    }
+
     const account = data.accounts.find(a => a.id === newTx.accountId);
     const ccPaymentAppliedCycle = account?.type === 'credit_card' && newTx.type === 'credit'
       ? resolveCcPaymentCycle(newTx.date as string, account.statementDay)
@@ -1216,14 +1236,22 @@ export default function Transactions() {
   const handleCreateTag = () => {
     const raw = newTagInput.trim().replace(/^#/, '');
     if (!raw) return;
-    const existing = data.tags || [];
-    // Case-insensitive: reuse an existing tag (with its original casing) instead of creating a
-    // near-duplicate that differs only by case.
-    const match = existing.find(t => t.toLowerCase() === raw.toLowerCase());
-    const tagToApply = match || raw;
-    if (!match) {
-      updateTags([...existing, raw]);
+    const activeTags = [...(data.tags || []), ...tempCreatedActiveTags];
+    const eventTags = [...(data.eventTags || []), ...tempCreatedEventTags];
+    const matchActive = activeTags.find(t => t.toLowerCase() === raw.toLowerCase());
+    const matchEvent = eventTags.find(t => t.toLowerCase() === raw.toLowerCase());
+    const tagToApply = matchActive || matchEvent || raw;
+
+    if (newTagTargetType === 'active') {
+      if (!matchActive && !tempCreatedActiveTags.includes(raw)) {
+        setTempCreatedActiveTags(prev => [...prev, raw]);
+      }
+    } else {
+      if (!matchEvent && !tempCreatedEventTags.includes(raw)) {
+        setTempCreatedEventTags(prev => [...prev, raw]);
+      }
     }
+
     if (!(newTx.tags || []).includes(tagToApply)) {
       setNewTx(prev => ({ ...prev, tags: [...(prev.tags || []), tagToApply] }));
     }
@@ -1247,6 +1275,8 @@ export default function Transactions() {
     setCashbackPercentStr('');
     setShowRewardSplit(false);
     setNewTagInput('');
+    setTempCreatedActiveTags([]);
+    setTempCreatedEventTags([]);
     setErrors({});
     setIsModalOpen(true);
   };
@@ -1313,6 +1343,8 @@ export default function Transactions() {
     setShowRewardSplit(isSplitBankLeg || (tx.rewardUsed || 0) > 0);
     setNewTx(sanitizedTx);
     syncInputStrings(sanitizedTx);
+    setTempCreatedActiveTags([]);
+    setTempCreatedEventTags([]);
     setIsModalOpen(true);
   };
 
@@ -1666,7 +1698,6 @@ export default function Transactions() {
                 hideLabel={true}
                 value={filterAccountId}
                 isMulti={true}
-                defaultCollapsed={true}
                 options={[
                   { id: 'all', name: 'All Accounts' },
                   // Keep archived accounts here so their history is still filterable, just labelled
@@ -1732,9 +1763,12 @@ export default function Transactions() {
                   hideLabel={true}
                   value={filterTag}
                   isMulti={true}
+                  enableSearch={true}
+                  searchPlaceholder="Search active & event tags..."
                   options={[
                     { id: 'all', name: 'All Tags' },
-                    ...(data.tags || []).map(t => ({ id: t, name: `#${t}` }))
+                    ...(data.tags || []).map(t => ({ id: t, name: `#${t}` })),
+                    ...(data.eventTags || []).map(t => ({ id: t, name: `#${t}`, subtext: 'Event Tag', group: 'Event Tags', showOnlyOnSearch: true }))
                   ]}
                   onChange={setFilterTag}
                   iconGetter={() => <Hash size={16} />}
@@ -1748,6 +1782,7 @@ export default function Transactions() {
                 hideLabel={true}
                 value={filterMonth}
                 isMulti={true}
+                defaultGroupExpanded={true}
                 options={[
                   { id: 'all', name: 'All Months' },
                   ...availableMonths.map(m => {
@@ -1793,9 +1828,17 @@ export default function Transactions() {
                     onClick={() => toggleMonth(monthStr)}
                   >
                     <span className="text-mono" style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.85rem', letterSpacing: '0.5px', textTransform: 'uppercase' }}>{monthLabel}</span>
-                    <span className="text-mono text-muted" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}>
-                      {txsInMonth.filter(isCountableTransaction).length} transactions {isExpanded ? '▼' : '▶'}
-                    </span>
+                    <div className="flex align-center gap-2 text-mono text-muted" style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}>
+                      <span>{txsInMonth.filter(isCountableTransaction).length} transactions</span>
+                      <ChevronDown
+                        size={14}
+                        style={{
+                          transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                          transition: 'transform 0.2s ease',
+                          opacity: 0.7
+                        }}
+                      />
+                    </div>
                   </div>
 
                   {isExpanded && (
@@ -2187,7 +2230,6 @@ export default function Transactions() {
                 label="Account"
                 value={newTx.accountId || ''}
                 placeholder="Select an account"
-                defaultCollapsed={true}
                 options={[...data.accounts]
                   .sort(sortByAccountType)
                   .filter(acc => {
@@ -2373,7 +2415,6 @@ export default function Transactions() {
                     }
                     value={paymentSourceAccountId}
                     placeholder="None (Manual Log)"
-                    defaultCollapsed={true}
                     options={[
                       { id: '', name: 'None (Manual Log)' },
                       ...[...data.accounts].sort(sortByAccountType).filter(a => {
@@ -2485,13 +2526,18 @@ export default function Transactions() {
                   <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                     <Hash size={13} style={{ opacity: 0.6 }} />Tags <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: 400 }}>(optional)</span>
                   </label>
-                  {(data.tags || []).length > 0 && (
+                  {((data.tags || []).length > 0 || (data.eventTags || []).length > 0 || tempCreatedActiveTags.length > 0 || tempCreatedEventTags.length > 0) && (
                     <CustomPicker
                       label="Tags"
                       hideLabel={true}
                       value={newTx.tags || []}
                       isMulti={true}
-                      options={(data.tags || []).map(t => ({ id: t, name: `#${t}` }))}
+                      enableSearch={true}
+                      searchPlaceholder="Search active & event tags..."
+                      options={[
+                        ...Array.from(new Set([...(data.tags || []), ...tempCreatedActiveTags])).map(t => ({ id: t, name: `#${t}` })),
+                        ...Array.from(new Set([...(data.eventTags || []), ...tempCreatedEventTags])).map(t => ({ id: t, name: `#${t}`, subtext: 'Event Tag', group: 'Event Tags', showOnlyOnSearch: true }))
+                      ]}
                       onChange={(val: string[]) => {
                         const cleaned = (val || []).filter(v => v !== 'all' && v !== '');
                         setNewTx(prev => ({ ...prev, tags: cleaned.length > 0 ? cleaned : [] }));
@@ -2500,16 +2546,50 @@ export default function Transactions() {
                       noSelectionLabel="None"
                     />
                   )}
-                  <div className="flex gap-2" style={{ marginTop: (data.tags || []).length > 0 ? '0.5rem' : '0' }}>
+                  <div className="flex align-center" style={{ marginTop: '0.5rem', gap: '0.35rem' }}>
                     <input
                       className="input-field"
-                      style={{ flex: 1, fontSize: '0.85rem' }}
+                      style={{ flex: 1, fontSize: '0.85rem', height: '42px', padding: '0 0.85rem' }}
                       value={newTagInput}
                       onChange={e => setNewTagInput(e.target.value)}
-                      placeholder="Create tag (e.g. Vacation2024)"
+                      placeholder={`Create ${newTagTargetType} tag`}
                       onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateTag(); } }}
                     />
-                    <button className="btn btn-secondary" style={{ minWidth: '42px', padding: '0 0.75rem' }} onClick={handleCreateTag} type="button">+</button>
+                    <button
+                      type="button"
+                      className={`btn ${newTagTargetType === 'event' ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{
+                        width: '42px',
+                        height: '42px',
+                        padding: 0,
+                        fontSize: '0.65rem',
+                        fontWeight: 800,
+                        letterSpacing: '0.5px',
+                        flexShrink: 0,
+                        borderRadius: '6px',
+                        marginRight: '0.4rem'
+                      }}
+                      title={`Target: ${newTagTargetType === 'active' ? 'Active Tag' : 'Event Tag'}. Click to toggle.`}
+                      onClick={() => setNewTagTargetType(prev => prev === 'active' ? 'event' : 'active')}
+                    >
+                      {newTagTargetType === 'active' ? 'Active' : 'Event'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{
+                        width: '42px',
+                        height: '42px',
+                        padding: 0,
+                        fontSize: '1.1rem',
+                        fontWeight: 800,
+                        flexShrink: 0,
+                        borderRadius: '6px'
+                      }}
+                      onClick={handleCreateTag}
+                    >
+                      +
+                    </button>
                   </div>
                 </div>
               )}
@@ -2828,13 +2908,18 @@ export default function Transactions() {
                   <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                     <Hash size={13} style={{ opacity: 0.6 }} />Tags <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: 400 }}>(optional)</span>
                   </label>
-                  {(data.tags || []).length > 0 && (
+                  {((data.tags || []).length > 0 || (data.eventTags || []).length > 0 || tempCreatedActiveTags.length > 0 || tempCreatedEventTags.length > 0) && (
                     <CustomPicker
                       label="Tags"
                       hideLabel={true}
                       value={newTx.tags || []}
                       isMulti={true}
-                      options={(data.tags || []).map(t => ({ id: t, name: `#${t}` }))}
+                      enableSearch={true}
+                      searchPlaceholder="Search active & event tags..."
+                      options={[
+                        ...Array.from(new Set([...(data.tags || []), ...tempCreatedActiveTags])).map(t => ({ id: t, name: `#${t}` })),
+                        ...Array.from(new Set([...(data.eventTags || []), ...tempCreatedEventTags])).map(t => ({ id: t, name: `#${t}`, subtext: 'Event Tag', group: 'Event Tags', showOnlyOnSearch: true }))
+                      ]}
                       onChange={(val: string[]) => {
                         const cleaned = (val || []).filter(v => v !== 'all' && v !== '');
                         setNewTx(prev => ({ ...prev, tags: cleaned.length > 0 ? cleaned : [] }));
@@ -2843,16 +2928,50 @@ export default function Transactions() {
                       noSelectionLabel="None"
                     />
                   )}
-                  <div className="flex gap-2" style={{ marginTop: (data.tags || []).length > 0 ? '0.5rem' : '0' }}>
+                  <div className="flex align-center" style={{ marginTop: '0.5rem', gap: '0.35rem' }}>
                     <input
                       className="input-field"
-                      style={{ flex: 1, fontSize: '0.85rem' }}
+                      style={{ flex: 1, fontSize: '0.85rem', height: '42px', padding: '0 0.85rem' }}
                       value={newTagInput}
                       onChange={e => setNewTagInput(e.target.value)}
-                      placeholder="Create tag (e.g. Vacation2024)"
+                      placeholder={`Create ${newTagTargetType} tag`}
                       onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateTag(); } }}
                     />
-                    <button className="btn btn-secondary" style={{ minWidth: '42px', padding: '0 0.75rem' }} onClick={handleCreateTag} type="button">+</button>
+                    <button
+                      type="button"
+                      className={`btn ${newTagTargetType === 'event' ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{
+                        width: '42px',
+                        height: '42px',
+                        padding: 0,
+                        fontSize: '0.65rem',
+                        fontWeight: 800,
+                        letterSpacing: '0.5px',
+                        flexShrink: 0,
+                        borderRadius: '6px',
+                        marginRight: '0.4rem'
+                      }}
+                      title={`Target: ${newTagTargetType === 'active' ? 'Active Tag' : 'Event Tag'}. Click to toggle.`}
+                      onClick={() => setNewTagTargetType(prev => prev === 'active' ? 'event' : 'active')}
+                    >
+                      {newTagTargetType === 'active' ? 'Active' : 'Event'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{
+                        width: '42px',
+                        height: '42px',
+                        padding: 0,
+                        fontSize: '1.1rem',
+                        fontWeight: 800,
+                        flexShrink: 0,
+                        borderRadius: '6px'
+                      }}
+                      onClick={handleCreateTag}
+                    >
+                      +
+                    </button>
                   </div>
                 </div>
               )}

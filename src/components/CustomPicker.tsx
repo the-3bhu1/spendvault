@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, Check } from 'lucide-react';
+import { ChevronDown, Check, Search } from 'lucide-react';
 
 export interface PickerOption {
   id: string;
   name: string;
+  triggerName?: string;
   subtext?: string;
   group?: string;
+  showOnlyOnSearch?: boolean;
 }
 
 interface CustomPickerProps {
@@ -15,6 +17,8 @@ interface CustomPickerProps {
   options: PickerOption[];
   onChange: (val: any) => void;
   placeholder?: string;
+  displayValue?: string;
+  alwaysShowGroups?: boolean;
   iconGetter?: (id: string) => React.ReactNode;
   error?: string;
   hideLabel?: boolean;
@@ -23,6 +27,9 @@ interface CustomPickerProps {
   noSelectionLabel?: string;
   style?: React.CSSProperties;
   defaultCollapsed?: boolean;
+  defaultGroupExpanded?: boolean;
+  enableSearch?: boolean;
+  searchPlaceholder?: string;
 }
 
 export function CustomPicker({
@@ -31,6 +38,8 @@ export function CustomPicker({
   options,
   onChange,
   placeholder = "Select an option",
+  displayValue,
+  alwaysShowGroups = false,
   iconGetter,
   error,
   hideLabel,
@@ -38,9 +47,13 @@ export function CustomPicker({
   isMulti = false,
   noSelectionLabel = 'All',
   style = {},
-  defaultCollapsed = false
+  defaultCollapsed = false,
+  defaultGroupExpanded = true,
+  enableSearch = false,
+  searchPlaceholder = "Search options..."
 }: CustomPickerProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const valueArray = isMulti ? (Array.isArray(value) ? value : (value ? [value] : [])) : [value];
   const selectedOptions = options.filter(o => valueArray.includes(o.id));
   const selectedOption = selectedOptions[0];
@@ -65,24 +78,31 @@ export function CustomPicker({
   useEffect(() => {
     if (!isOpen) {
       setCollapsedGroups({});
+      setSearchQuery('');
     }
   }, [isOpen]);
 
   const flatListThreshold = 7;
   const groupCollapseThreshold = 4;
 
-  // If total options (excluding 'all' or empty placeholders) is <= 7, render as a flat list
-  const isFlatList = options.filter(o => o.id !== 'all' && o.id !== '').length <= flatListThreshold;
+  // If total options (excluding 'all' or empty placeholders) is <= 7 and no groups exist, render as flat list.
+  // When options have groups (e.g. Year 2026), always render group headers with collapsible chevrons.
+  const hasGroups = options.some(o => !!o.group);
+  const isFlatList = !alwaysShowGroups && !hasGroups && options.filter(o => o.id !== 'all' && o.id !== '').length <= flatListThreshold;
 
   const isGroupExpanded = (g?: string) => {
     if (!g || isFlatList) return true;
     if (collapsedGroups[g] !== undefined) {
       return !collapsedGroups[g];
     }
+    if (searchQuery.trim() !== '') return true;
     // Archived Accounts stays collapsed regardless of size, like a `defaultCollapsed` picker —
     // surfacing deleted accounts by default would bury the active ones it's meant to sit behind.
     if (g === 'Archived Accounts' || defaultCollapsed) {
       return selectedOption?.group === g;
+    }
+    if (defaultGroupExpanded) {
+      return true;
     }
     // Count items in group g
     const itemsInGroup = options.filter(o => o.group === g).length;
@@ -104,29 +124,72 @@ export function CustomPicker({
 
   // Guarantee Archived Accounts options are always placed at the end after all active options
   const sortedPickerOptions = React.useMemo(() => {
+    const isSearching = searchQuery.trim().length > 0;
     const activeOpts = options.filter(o => o.group !== 'Archived Accounts');
     const archivedOpts = options.filter(o => o.group === 'Archived Accounts');
-    return [...activeOpts, ...archivedOpts];
-  }, [options]);
+    const all = [...activeOpts, ...archivedOpts];
+
+    if (!isSearching) {
+      return all.filter(o => !o.showOnlyOnSearch || valueArray.includes(o.id));
+    }
+
+    const q = searchQuery.toLowerCase().trim();
+    return all.filter(o => 
+      o.name.toLowerCase().includes(q) || 
+      (o.id && o.id.toLowerCase().includes(q)) || 
+      (o.subtext && o.subtext.toLowerCase().includes(q)) || 
+      (o.group && o.group.toLowerCase().includes(q))
+    );
+  }, [options, searchQuery, valueArray]);
 
   const pickerContent = isOpen ? (
     <div className="bottom-sheet-overlay" onClick={() => setIsOpen(false)}>
       <div className="bottom-sheet" onClick={e => e.stopPropagation()}>
         <div className="sheet-handle" />
-        <div className="flex align-start" style={{ padding: '1.5rem 1.75rem 1rem', borderBottom: '2px solid #000', marginBottom: '0.5rem', gap: '1rem' }}>
+        <div className="flex align-start" style={{ padding: '1.5rem 1.75rem 0.75rem', borderBottom: '2px solid #000', gap: '1rem' }}>
           <h3 style={{ margin: 0, fontSize: '1.85rem', fontWeight: 700, letterSpacing: '-0.5px', color: 'var(--text-primary)', flex: 1, minWidth: 0, lineHeight: 1.1 }}>{label}</h3>
           <button onClick={() => setIsOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.25rem', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginLeft: 'auto' }}>
             ✕
           </button>
         </div>
+
+        {(enableSearch || options.length > 7) && (
+          <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-color)' }}>
+            <div style={{ position: 'relative', width: '100%' }}>
+              <Search size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.4 }} />
+              <input
+                type="text"
+                className="input-field"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder={searchPlaceholder || `Search ${label.toLowerCase()}...`}
+                style={{ paddingLeft: '3rem', paddingRight: searchQuery ? '2.5rem' : '1rem', borderRadius: '12px', width: '100%' }}
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  style={{ position: 'absolute', right: '1rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.9rem', display: 'flex', alignItems: 'center', padding: 0 }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         <div className="no-scrollbar" style={{ 
           overflowY: 'auto', 
           flex: 1, 
           padding: isMulti ? '0.5rem 1.5rem' : '0.5rem 1.5rem calc(1.5rem + env(safe-area-inset-bottom, 16px))' 
         }}>
-          {(() => {
-            let lastGroup = '';
-            return sortedPickerOptions.map(opt => {
+          {sortedPickerOptions.length === 0 ? (
+            <div className="text-center text-muted text-xs" style={{ padding: '1.5rem 0' }}>
+              No matching options found.
+            </div>
+          ) : (
+            (() => {
+              let lastGroup = '';
+              return sortedPickerOptions.map(opt => {
               const showHeader = !isFlatList && opt.group && opt.group !== lastGroup;
               if (opt.group) {
                 lastGroup = opt.group;
@@ -158,11 +221,12 @@ export function CustomPicker({
                     >
                       <span>{opt.group}</span>
                       <ChevronDown 
-                        size={12} 
+                        size={14} 
                         style={{ 
-                          transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                          transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)',
                           transition: 'transform 0.2s ease',
-                          color: expanded ? 'var(--accent)' : 'var(--text-muted)'
+                          color: expanded ? 'var(--accent)' : 'var(--text-muted)',
+                          opacity: 0.8
                         }} 
                       />
                     </div>
@@ -208,7 +272,8 @@ export function CustomPicker({
                 </React.Fragment>
               );
             });
-          })()}
+          })()
+        )}
         </div>
         {isMulti && (
           <div style={{ 
@@ -254,8 +319,8 @@ export function CustomPicker({
             lineHeight: allowTextWrap ? 1.2 : undefined
           }}>
             {isMulti
-              ? (valueArray.includes('all') || valueArray.length === 0 ? noSelectionLabel : (valueArray.length === 1 ? selectedOptions[0].name : `${valueArray.length} selected`))
-              : (selectedOption ? selectedOption.name : placeholder)}
+              ? (valueArray.includes('all') || valueArray.length === 0 ? noSelectionLabel : (valueArray.length === 1 ? (selectedOptions[0] ? (selectedOptions[0].triggerName || selectedOptions[0].name) : `#${valueArray[0]}`) : `${valueArray.length} selected`))
+              : (displayValue !== undefined ? displayValue : (selectedOption ? (selectedOption.triggerName || selectedOption.name) : placeholder))}
           </span>
         </div>
         <ChevronDown size={16} className={`text-muted transition-all ${isOpen ? 'rotate-180' : ''}`} />

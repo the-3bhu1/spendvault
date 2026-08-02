@@ -76,6 +76,7 @@ interface FinanceContextType {
   updateCategories: (categories: string[]) => void;
   updateCategoryBudgets: (budgets: Record<string, number>) => void;
   updateTags: (tags: string[]) => void;
+  updateEventTags: (eventTags: string[]) => void;
   updateCustomAccountTypes: (accountTypes: string[]) => void;
   updateUser: (user: User) => void;
   addSplitEvent: (event: SplitEvent) => void;
@@ -812,6 +813,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
 
         if (!parsed.debts) parsed.debts = [];
         if (!parsed.tags) parsed.tags = [];
+        if (!parsed.eventTags) parsed.eventTags = [];
         parsed.transactions = normalizeTransactionOrders(parsed.transactions || []);
         return parsed;
       } catch (e) {
@@ -825,6 +827,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       cashbackStatements: [],
       categories: DEFAULT_CATEGORIES,
       tags: DEFAULT_TAGS,
+      eventTags: [],
       customAccountTypes: DEFAULT_CUSTOM_ACCOUNT_TYPES,
       splitEvents: [],
       recurringBills: [],
@@ -1602,6 +1605,10 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     setData(prev => ({ ...prev, tags }));
   };
 
+  const updateEventTags = (eventTags: string[]) => {
+    setData(prev => ({ ...prev, eventTags }));
+  };
+
   const updateCustomAccountTypes = (accountTypes: string[]) => {
     setData(prev => ({ ...prev, customAccountTypes: accountTypes }));
   };
@@ -2025,6 +2032,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       updateCategories,
       updateCategoryBudgets,
       updateTags,
+      updateEventTags,
       updateCustomAccountTypes,
       addSplitEvent,
       updateSplitEvent,

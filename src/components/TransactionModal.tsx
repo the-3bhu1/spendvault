@@ -36,7 +36,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   initialData,
   onSuccess
 }) => {
-  const { data, addTransaction, updateTransaction, updateRecurringBill, updateTags } = useFinance();
+  const { data, addTransaction, updateTransaction, updateRecurringBill, updateTags, updateEventTags } = useFinance();
   const [newTx, setNewTx] = useState<Partial<Transaction>>({
     date: format(new Date(), 'yyyy-MM-dd'),
     description: '',
@@ -76,6 +76,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [selectedCashbackLevelId] = useState('');
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
+  const [tempCreatedActiveTags, setTempCreatedActiveTags] = useState<string[]>([]);
+  const [tempCreatedEventTags, setTempCreatedEventTags] = useState<string[]>([]);
 
   const rewardSplitRef = useRef<HTMLDivElement>(null);
 
@@ -108,19 +110,35 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         setPaymentSourceAccountId(initialData.paymentSourceAccountId || '');
       }
       setNewTagInput('');
+      setTempCreatedActiveTags([]);
+      setTempCreatedEventTags([]);
       setErrors({}); // clear stale validation errors from a previous open
     }
   }, [isOpen]); // Only run when modal opens
 
+  const [newTagTargetType, setNewTagTargetType] = useState<'active' | 'event'>('active');
+
   const handleCreateTag = () => {
     const raw = newTagInput.trim().replace(/^#/, '');
     if (!raw) return;
-    const existing = data.tags || [];
-    if (!existing.includes(raw)) {
-      updateTags([...existing, raw]);
+    const activeTags = [...(data.tags || []), ...tempCreatedActiveTags];
+    const eventTags = [...(data.eventTags || []), ...tempCreatedEventTags];
+    const matchActive = activeTags.find(t => t.toLowerCase() === raw.toLowerCase());
+    const matchEvent = eventTags.find(t => t.toLowerCase() === raw.toLowerCase());
+    const tagToApply = matchActive || matchEvent || raw;
+
+    if (newTagTargetType === 'active') {
+      if (!matchActive && !tempCreatedActiveTags.includes(raw)) {
+        setTempCreatedActiveTags(prev => [...prev, raw]);
+      }
+    } else {
+      if (!matchEvent && !tempCreatedEventTags.includes(raw)) {
+        setTempCreatedEventTags(prev => [...prev, raw]);
+      }
     }
-    if (!(newTx.tags || []).includes(raw)) {
-      setNewTx(prev => ({ ...prev, tags: [...(prev.tags || []), raw] }));
+
+    if (!(newTx.tags || []).includes(tagToApply)) {
+      setNewTx(prev => ({ ...prev, tags: [...(prev.tags || []), tagToApply] }));
     }
     setNewTagInput('');
   };
@@ -247,6 +265,21 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
   const handleSave = () => {
     if (!validate()) return;
+
+    if (tempCreatedActiveTags.length > 0) {
+      const currentActive = data.tags || [];
+      const toAdd = tempCreatedActiveTags.filter(t => !currentActive.includes(t));
+      if (toAdd.length > 0) {
+        updateTags([...currentActive, ...toAdd]);
+      }
+    }
+    if (tempCreatedEventTags.length > 0) {
+      const currentEvent = data.eventTags || [];
+      const toAdd = tempCreatedEventTags.filter(t => !currentEvent.includes(t));
+      if (toAdd.length > 0) {
+        updateEventTags([...currentEvent, ...toAdd]);
+      }
+    }
 
     const account = data.accounts.find(a => a.id === newTx.accountId);
     const ccPaymentAppliedCycle = account?.type === 'credit_card' && newTx.type === 'credit'
@@ -526,7 +559,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             label="Account" 
             value={newTx.accountId || ''} 
             placeholder="Select an account" 
-            defaultCollapsed={true}
             options={data.accounts
               .filter(acc => {
                 // Hide archived (deleted) accounts from selection, but keep the one already on this
@@ -660,7 +692,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
           })()}
 
           {!editId && ((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') || isCCPayment || !!activeInvestmentKind) && (
-            <CustomPicker label={activeInvestmentKind ? (newTx.type === 'debit' ? `Credit To ${investmentKindLabel(activeInvestmentKind)} Account` : 'Debit From Account') : (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' ? 'Debit From Account (Auto-Debit)' : 'Pay To Card (Auto-Credit)')} value={paymentSourceAccountId} placeholder="None (Manual Log)" defaultCollapsed={true} options={[{ id: '', name: 'None (Manual Log)' }, ...[...data.accounts].sort(sortByAccountType).filter(a => {
+            <CustomPicker label={activeInvestmentKind ? (newTx.type === 'debit' ? `Credit To ${investmentKindLabel(activeInvestmentKind)} Account` : 'Debit From Account') : (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' ? 'Debit From Account (Auto-Debit)' : 'Pay To Card (Auto-Credit)')} value={paymentSourceAccountId} placeholder="None (Manual Log)" options={[{ id: '', name: 'None (Manual Log)' }, ...[...data.accounts].sort(sortByAccountType).filter(a => {
               if (a.id === newTx.accountId) return false;
               if (a.archived) return false; // this picker only shows for new transactions
 
@@ -744,13 +776,18 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
               <Hash size={13} style={{ opacity: 0.6 }} />Tags <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: 400 }}>(optional)</span>
             </label>
-            {(data.tags || []).length > 0 && (
+            {((data.tags || []).length > 0 || (data.eventTags || []).length > 0 || tempCreatedActiveTags.length > 0 || tempCreatedEventTags.length > 0) && (
               <CustomPicker
                 label="Tags"
                 hideLabel={true}
                 value={newTx.tags || []}
                 isMulti={true}
-                options={(data.tags || []).map(t => ({ id: t, name: `#${t}` }))}
+                enableSearch={true}
+                searchPlaceholder="Search active & event tags..."
+                options={[
+                  ...Array.from(new Set([...(data.tags || []), ...tempCreatedActiveTags])).map(t => ({ id: t, name: `#${t}` })),
+                  ...Array.from(new Set([...(data.eventTags || []), ...tempCreatedEventTags])).map(t => ({ id: t, name: `#${t}`, subtext: 'Event Tag', group: 'Event Tags', showOnlyOnSearch: true }))
+                ]}
                 onChange={(val: string[]) => {
                   const cleaned = (val || []).filter(v => v !== 'all' && v !== '');
                   setNewTx(prev => ({ ...prev, tags: cleaned.length > 0 ? cleaned : [] }));
@@ -759,16 +796,50 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 noSelectionLabel="None"
               />
             )}
-            <div className="flex gap-2" style={{ marginTop: (data.tags || []).length > 0 ? '0.5rem' : '0' }}>
+            <div className="flex align-center" style={{ marginTop: '0.5rem', gap: '0.35rem' }}>
               <input
                 className="input-field"
-                style={{ flex: 1, fontSize: '0.85rem' }}
+                style={{ flex: 1, fontSize: '0.85rem', height: '42px', padding: '0 0.85rem' }}
                 value={newTagInput}
                 onChange={e => setNewTagInput(e.target.value)}
-                placeholder={`Create tag (e.g. Vacation2024)`}
+                placeholder={`Create ${newTagTargetType} tag`}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateTag(); } }}
               />
-              <button className="btn btn-secondary" style={{ minWidth: '42px', padding: '0 0.75rem' }} onClick={handleCreateTag} type="button">+</button>
+              <button
+                type="button"
+                className={`btn ${newTagTargetType === 'event' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{
+                  width: '42px',
+                  height: '42px',
+                  padding: 0,
+                  fontSize: '0.65rem',
+                  fontWeight: 800,
+                  letterSpacing: '0.5px',
+                  flexShrink: 0,
+                  borderRadius: '6px',
+                  marginRight: '0.4rem'
+                }}
+                title={`Target: ${newTagTargetType === 'active' ? 'Active Tag' : 'Event Tag'}. Click to toggle.`}
+                onClick={() => setNewTagTargetType(prev => prev === 'active' ? 'event' : 'active')}
+              >
+                {newTagTargetType === 'active' ? 'Active' : 'Event'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{
+                  width: '42px',
+                  height: '42px',
+                  padding: 0,
+                  fontSize: '1.1rem',
+                  fontWeight: 800,
+                  flexShrink: 0,
+                  borderRadius: '6px'
+                }}
+                onClick={handleCreateTag}
+              >
+                +
+              </button>
             </div>
           </div>
 

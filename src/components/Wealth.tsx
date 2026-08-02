@@ -10,7 +10,7 @@ import ProfileAvatar from './ProfileAvatar';
 import WealthBackdrop from './WealthBackdrop';
 import { PortfolioBackdrop, AssetsBackdrop, RetirementBackdrop } from './WealthCategoryBackdrops';
 import { LogoAvatar } from './LogoAvatar';
-import { getAssetLogoUrl, ensureAssetLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
+import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
 import { calculateEPFProjection, getEPFInterestRate, getFinancialYearForDate } from '../utils/epfEngine';
 import { calculateBalance, getCurrentMonthStr, formatCurrency } from '../utils';
 
@@ -104,9 +104,10 @@ export function Wealth() {
   // Start true: a refresh always runs on mount, and we don't want to flash a partial 1-day
   // return (e.g. stocks-only, before MF prev-NAV loads) for a frame before the spinner shows.
   const [isRefreshing, setIsRefreshing] = useState(true);
-  // Hide the 1-day return only on the day's first load. If we already refreshed today (per the
-  // persisted day), the cached value is current + complete, so seed this true and show it
-  // immediately on remount/reopen — and keep it on screen through later manual refreshes.
+  // Gates the PORTFOLIO hero's 1-day return, which stays put through later refreshes: if we
+  // already refreshed today (per the persisted day) the cached value is current + complete, so
+  // seed this true and show it immediately on remount/reopen. The root Wealth hero deliberately
+  // ignores this and keys off isRefreshing alone — see the loader branch in the root hero.
   const [hasRefreshed, setHasRefreshed] = useState(() => {
     try { return localStorage.getItem(WEALTH_REFRESH_DAY_KEY) === currentDayStr(); } catch { return false; }
   });
@@ -667,7 +668,7 @@ export function Wealth() {
           gap: '0.9rem'
         }}
       >
-        <LogoAvatar name={account.name} logoUrl={getAssetLogoUrl(account)} size={42} />
+        <LogoAvatar name={account.name} logoUrl={getLiquidLogoUrl(account)} size={42} accountType={account.type} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.3 }}>
             {account.name}
@@ -896,9 +897,11 @@ export function Wealth() {
         display: 'flex',
         marginTop: opts.marginTop,
         padding: `${PAD}px`,
+        // No backdrop-filter on the track or the thumb below: this row mounts fresh on every
+        // entry into a category screen, so its backdrop snapshot isn't ready for the first
+        // paint(s) and the control visibly flashed see-through before the blur applied. The
+        // --pill-* tokens carry the frost as a static veil instead, correct from frame one.
         background: 'var(--pill-track-bg)',
-        backdropFilter: 'blur(2px)',
-        WebkitBackdropFilter: 'blur(2px)',
         borderRadius: '999px',
         border: '1px solid var(--pill-track-border)',
         ...(opts.flexible
@@ -913,7 +916,6 @@ export function Wealth() {
           left: `calc(${PAD}px + ${activeIdx} * (100% - ${PAD * 2}px) / ${N})`,
           borderRadius: '999px',
           background: 'var(--pill-thumb-bg)',
-          backdropFilter: 'blur(8px)',
           boxShadow: '0 2px 10px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.14)',
           transition: 'left 0.38s cubic-bezier(0.34, 1.56, 0.64, 1)',
           pointerEvents: 'none'
@@ -1041,9 +1043,13 @@ export function Wealth() {
 
             {/* The daily figure can only ever cover market holdings — cash and EPF don't move with the
             market — so it's suppressed entirely when the user has no Portfolio. */}
-            {/* The daily figure can only ever cover market holdings — cash and EPF don't move with the
-            market — so it's suppressed entirely when the user has no Portfolio. */}
-            {!hasPortfolio ? null : isRefreshing && !hasRefreshed ? (
+            {/* Keyed off isRefreshing alone, NOT `&& !hasRefreshed`: the loader takes over for every
+            in-flight refresh, including the manual ones fired from the Portfolio screen's Refresh
+            prices button (this state is shared, so coming back out mid-fetch lands here). The root
+            is a glance surface — a figure sitting here while a refresh runs is a number the user
+            can't tell is stale, so we show the fetch instead and then render whatever it returns,
+            identical value or not. */}
+            {!hasPortfolio ? null : isRefreshing ? (
               <div style={{ position: 'relative', zIndex: 1, marginTop: '0.75rem', textAlign: 'center' }}>
                 <div className="flex align-center justify-center gap-2 text-mono" style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
                   <RotateCcw size={12} className="icon-spin-ccw" />
@@ -1415,6 +1421,11 @@ export function Wealth() {
                 <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
                   {selectedAsset.type === 'epf' ? 'Employee Provident Fund' : selectedAsset.type === 'mutual_funds' ? 'Mutual Fund' : selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'Silver' : 'Gold') : 'Stock'}
                 </div>
+                {selectedAsset.type === 'epf' && selectedAsset.currentEmployer && (
+                  <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', opacity: 0.8, marginTop: '0.2rem' }}>
+                    {selectedAsset.currentEmployer}
+                  </div>
+                )}
 
                 <div className="text-serif" style={{
                   fontSize: '3rem',
@@ -1654,6 +1665,10 @@ export function Wealth() {
 
                     <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.75rem 0' }} />
 
+                    <StatRow
+                      label={`Est. Balance (Dec ${new Date().getFullYear()} / EOY)`}
+                      value={formatFullCurrency(epfProj.projectedDecBalance)}
+                    />
                     <StatRow
                       label="Est. Balance (1 Year)"
                       value={formatFullCurrency(epfProj.projectedOneYearBalance)}

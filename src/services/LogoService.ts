@@ -122,6 +122,100 @@ const STOCK_REGISTRY: Record<string, string> = {
   NSLNISP: 'nmdc.co.in',
 };
 
+// --- Bank / wallet registry (Wealth → Assets screen only) -----------------------------
+// Deliberately SEPARATE from AMC_REGISTRY even where the keyword is identical: a bank account
+// named "HDFC" must resolve to hdfcbank.com, not the fund house's hdfcfund.com, and "Canara"
+// to canarabank.com rather than canararobeco.com. Same brand word, different company.
+const LIQUID_REGISTRY: BrandEntry[] = [
+  // Banks
+  { match: ['hdfc'], domain: 'hdfcbank.com' },
+  { match: ['icici'], domain: 'icicibank.com' },
+  { match: ['sbi', 'state bank'], domain: 'sbi.co.in' },
+  { match: ['axis'], domain: 'axisbank.com' },
+  { match: ['kotak'], domain: 'kotak.com' },
+  { match: ['canara'], domain: 'canarabank.com' },
+  { match: ['bank of baroda', 'bob'], domain: 'bankofbaroda.in' },
+  { match: ['punjab national', 'pnb'], domain: 'pnbindia.in' },
+  { match: ['union bank'], domain: 'unionbankofindia.co.in' },
+  { match: ['idfc first', 'idfc'], domain: 'idfcfirstbank.com' },
+  { match: ['indusind'], domain: 'indusind.com' },
+  { match: ['yes bank'], domain: 'yesbank.in' },
+  { match: ['federal'], domain: 'federalbank.co.in' },
+  { match: ['rbl'], domain: 'rblbank.com' },
+  { match: ['idbi'], domain: 'idbibank.in' },
+  { match: ['indian bank'], domain: 'indianbank.in' },
+  { match: ['bank of india'], domain: 'bankofindia.co.in' },
+  { match: ['central bank'], domain: 'centralbankofindia.co.in' },
+  { match: ['bandhan'], domain: 'bandhanbank.com' },
+  { match: ['au small finance', 'au bank'], domain: 'aubank.in' },
+  { match: ['equitas'], domain: 'equitasbank.com' },
+  { match: ['ujjivan'], domain: 'ujjivansfb.in' },
+  { match: ['karnataka bank'], domain: 'karnatakabank.com' },
+  { match: ['south indian bank'], domain: 'southindianbank.com' },
+  { match: ['karur vysya', 'kvb'], domain: 'kvb.co.in' },
+  { match: ['dbs', 'digibank'], domain: 'dbs.com' },
+  { match: ['hsbc'], domain: 'hsbc.co.in' },
+  { match: ['citibank', 'citi'], domain: 'citi.com' },
+  { match: ['standard chartered'], domain: 'sc.com' },
+  { match: ['airtel payments', 'airtel'], domain: 'airtel.in' },
+  { match: ['india post', 'ippb'], domain: 'ippbonline.com' },
+  // Neobanks / fintech accounts
+  { match: ['slice'], domain: 'sliceit.com' },
+  { match: ['jupiter'], domain: 'jupiter.money' },
+  { match: ['fi money', 'epifi'], domain: 'fi.money' },
+  { match: ['niyo'], domain: 'goniyo.com' },
+  // Wallets. 'cred' is why this matcher is whole-word: a substring pass would light up on the
+  // 'cred' inside "credit".
+  { match: ['cred'], domain: 'cred.club' },
+  { match: ['amazon pay', 'amazon'], domain: 'amazon.in' },
+  { match: ['phonepe', 'phone pe'], domain: 'phonepe.com' },
+  { match: ['paytm'], domain: 'paytm.com' },
+  { match: ['google pay', 'gpay'], domain: 'pay.google.com' },
+  { match: ['mobikwik'], domain: 'mobikwik.com' },
+  { match: ['freecharge'], domain: 'freecharge.in' },
+  { match: ['ola money', 'ola'], domain: 'olacabs.com' },
+  { match: ['uber'], domain: 'uber.com' },
+  { match: ['swiggy'], domain: 'swiggy.com' },
+  { match: ['zomato'], domain: 'zomato.com' },
+  { match: ['flipkart'], domain: 'flipkart.com' },
+  { match: ['groww'], domain: 'groww.in' },
+  { match: ['zerodha'], domain: 'zerodha.com' },
+  { match: ['upstox'], domain: 'upstox.com' },
+  { match: ['jio'], domain: 'jio.com' },
+  { match: ['irctc'], domain: 'irctc.co.in' },
+  { match: ['sodexo', 'pluxee'], domain: 'pluxee.in' },
+  // super.money (Flipkart's UPI app), the Transcorp prepaid network, and Tide — the three brands
+  // that can legitimately claim one co-branded card. All three resolve, so whichever name the
+  // account carries is the mark that shows; see the note in getLiquidLogoUrl.
+  { match: ['super.money', 'super money', 'supermoney'], domain: 'super.money' },
+  { match: ['transcorp'], domain: 'transcorpint.com' },
+  { match: ['tide'], domain: 'tide.co' },
+  // Transit cards. These are government transit bodies, not brands logo.dev indexes, so they
+  // land on the operator's site favicon rather than a clean logo.
+  { match: ['namma metro', 'bmrcl', 'bmrc'], domain: 'bmrc.co.in' },
+  { match: ['delhi metro', 'dmrc'], domain: 'delhimetrorail.com' },
+  { match: ['chennai metro', 'cmrl'], domain: 'chennaimetrorail.org' },
+  { match: ['hyderabad metro'], domain: 'ltmetro.in' },
+];
+
+// Whole-word match, unlike resolveAmcDomain's substring pass. Account names here are short and
+// human ("CRED Wallet", "Metro Card"), so a substring pass produces false hits inside ordinary
+// words — 'cred' in "credit", 'ola' in "Volatility". Longest matched keyword still wins, so
+// "amazon pay" beats "amazon" and "namma metro" beats a bare "metro" entry if one is ever added.
+function resolveLiquidDomain(name: string): string | null {
+  const n = name.toLowerCase();
+  let best: { domain: string; len: number } | null = null;
+  for (const entry of LIQUID_REGISTRY) {
+    for (const kw of entry.match) {
+      if (!best || kw.length > best.len) {
+        const re = new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+        if (re.test(n)) best = { domain: entry.domain, len: kw.length };
+      }
+    }
+  }
+  return best?.domain ?? null;
+}
+
 function logoFromDomain(domain: string): string {
   const token = getLogoDevToken();
   // fallback=404 → logo.dev returns a 404 (not a generated single-letter monogram) when it has no
@@ -293,6 +387,20 @@ function stockTickerGuessUrl(symbol: string | undefined): string | null {
 /** Logo URL for a mutual-fund holding (resolved from its scheme name), or null if no AMC match. */
 export function getMFLogoUrl(accountName: string): string | null {
   const domain = resolveAmcDomain(accountName);
+  return domain ? logoFromDomain(domain) : null;
+}
+
+/** Logo URL for a liquid account — bank, e-wallet, debit card, rewards wallet — resolved from its
+ *  NAME, or null for the initials fallback. Registry-only by design: no Gemini lookup, because a
+ *  plausible-but-wrong guess for a name like "Metro Card" renders a confidently incorrect brand
+ *  mark, which is worse than initials. To add coverage, add a keyword to LIQUID_REGISTRY.
+ *
+ *  Consequence worth knowing: the account NAME picks the logo. A card that could carry any of
+ *  several brands (issuer network vs. app vs. card brand) shows whichever one the name mentions.
+ *
+ *  Used only by the Wealth → Assets screen's liquid rows; the Accounts tab keeps its own avatars. */
+export function getLiquidLogoUrl(account: AccountLike): string | null {
+  const domain = resolveLiquidDomain(account.name);
   return domain ? logoFromDomain(domain) : null;
 }
 

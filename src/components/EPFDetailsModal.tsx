@@ -155,7 +155,7 @@ export const EPFDetailsView: React.FC<EPFDetailsViewProps> = ({
       title={
         <div style={{ flex: 1 }}>
           <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 800 }}>{account.name}</h2>
-          <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>EPF Auto-Projection Ledger</p>
+          <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>EPF Auto-Projection Ledger{account.currentEmployer ? ` • ${account.currentEmployer}` : ''}</p>
         </div>
       }
       onBack={onClose}
@@ -200,6 +200,17 @@ export const EPFDetailsView: React.FC<EPFDetailsViewProps> = ({
               </div>
 
               <div style={{ height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
+
+              <div className="flex justify-between align-end">
+                <div className="flex-col gap-1">
+                  <span className="text-mono text-muted text-xs">EST. BALANCE (DEC {new Date().getFullYear()} / EOY)</span>
+                  <span className="text-serif" style={{ fontSize: '1.35rem', color: 'var(--text-primary)', marginTop: '2px' }}>
+                    {formatCurrency(projection.projectedDecBalance)}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ height: '1px', background: 'var(--border-color)', opacity: 0.3 }} />
 
               <div className="flex justify-between align-end">
                 <div className="flex-col gap-1">

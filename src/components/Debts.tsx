@@ -865,7 +865,7 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
   const accountOptions = useMemo(() => {
     const currentMonth = getCurrentMonthStr();
     return accounts
-      .filter(acc => !acc.archived && !['stocks', 'mutual_funds', 'rewards', 'commodity'].includes(acc.type))
+      .filter(acc => !acc.archived && !['stocks', 'mutual_funds', 'rewards', 'commodity', 'epf'].includes(acc.type))
       .sort(sortByAccountType)
       .map(acc => ({
         id: acc.id,
@@ -1067,7 +1067,6 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
               options={accountOptions}
               onChange={setAccountId}
               iconGetter={getAccountIcon}
-              defaultCollapsed={true}
             />
           )}
 

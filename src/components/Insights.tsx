@@ -361,12 +361,14 @@ export default function Insights() {
               label="Select Month" 
               hideLabel={true}
               value={selectedMonth}
+              defaultGroupExpanded={true}
               options={availableMonths.map(m => {
                 const d = new Date(`${m}-01`);
                 const year = d.getFullYear();
                 return {
                   id: m,
-                  name: `${d.toLocaleString('default', { month: 'short' })} '${d.getFullYear().toString().slice(-2)}`,
+                  name: `${d.toLocaleString('default', { month: 'long' })} ${year}`,
+                  triggerName: `${d.toLocaleString('default', { month: 'short' })} '${year.toString().slice(-2)}`,
                   group: `Year ${year}`
                 };
               })}
