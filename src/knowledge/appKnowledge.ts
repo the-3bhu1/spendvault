@@ -35,6 +35,7 @@ Rupees (₹). The app is also packaged for Android/iOS via Capacitor.
 An account is any place money sits or is owed. Built-in types:
 - bank_account, cash, debit_card, e_wallet — normal balances (a credit adds, a debit subtracts).
 - credit_card — a debit (spend) INCREASES the outstanding balance; a credit (payment) reduces it.
+  Credit cards have an optional credit limit field (displayed on the account card as "Card Limit").
 - stocks / mutual_funds — investments; track invested value and units/shares and current value.
   These are the internal keys; in the Account Type picker the user SEES "Stocks" and "Mutual Funds",
   and the Accounts tab groups them under "Stocks & Investments" and "Mutual Funds". Always answer
@@ -42,7 +43,10 @@ An account is any place money sits or is owed. Built-in types:
   "SIPs" — it covers any mutual-fund holding, bought via SIP or lumpsum. If a user still calls it a
   "SIP account", they mean a Mutual Funds account.
 - commodity — gold or silver, valued at a ₹/gram price (AI-estimated or a manual override).
-- epf — Employee Provident Fund; tracks running EPF balance, monthly employer/employee credit breakdown, monthly accrued interest for current FY (credited on March 31st), and 1-year projections. Options include Statutory Wage Ceiling (₹15,000 cap) vs Actual Basic + DA.
+- epf — Employee Provident Fund; tracks running EPF balance, monthly employer/employee credit breakdown,
+  monthly accrued interest for current FY (credited on March 31st), and 1-year projections. Options
+  include Statutory Wage Ceiling (₹15,000 cap) vs Actual Basic + DA. Requires a "Current Employer"
+  name field (shown in the EPF passbook header and detail view).
 - rewards — a reward-points wallet (points, not rupees), with a reward unit and conversion rate.
 Add or remove custom account types in Settings → Account Types (a type that's in use can't be deleted).
 Actions (each account is a card on the Accounts tab):
@@ -81,8 +85,15 @@ Actions (Transactions tab):
 - Exclude from stats: this control appears in the editor only after you enable Settings → Smart
   Features → Passive Logs. You can exclude a transaction fully, or a partial amount; Dashboard and
   Insights then skip that amount.
-- Tag: in the editor, type a #tag. Manage tags (rename/delete, with usage counts) in Settings → Tags;
-  deleting a tag removes it from its transactions.
+- Tag: in the editor, type a #tag. There are two tag types:
+  - **Active tags** (shown by default in the tag picker dropdown) — for recurring tags like #food or #worktrip.
+  - **Event / One-off tags** (hidden from the dropdown by default, but searchable when typing) — for
+    infrequent or one-time events (e.g. a trip or special occasion). When creating a tag in the
+    transaction editor, a toggle button switches between "Active" and "Event" target. Both types are
+    stored in the same `tags` field on the transaction.
+  Manage both types in Settings → Tags (two separate sections: "Active Tags" and "Event / One-off Tags");
+  you can move a tag between types there (arrow icon), rename, or delete it.
+  Deleting a tag removes it from all its transactions.
 
 # Auto-generated (linked) transactions — what creates a child log
 Several actions create paired/child transactions, linked together (linkedTransactionIds). Editing or

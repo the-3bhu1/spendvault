@@ -243,7 +243,8 @@ function buildSlice(data: FinanceData, query: string): string {
   // known tag name. Filtering is AND with any month/category/account already applied above,
   // so "spend on #WorkTravel this month" narrows correctly.
   const hashTokens = (lower.match(/#([a-z0-9_]+)/g) || []).map(s => s.slice(1));
-  const queryTags = (data.tags || []).filter(tag => {
+  const allKnownTags = [...(data.tags || []), ...(data.eventTags || [])];
+  const queryTags = allKnownTags.filter(tag => {
     const t = tag.toLowerCase();
     if (hashTokens.includes(t)) return true;
     return new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(lower);

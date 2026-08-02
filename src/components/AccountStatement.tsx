@@ -170,8 +170,8 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
               <ChevronLeft size={20} />
             </button>
             <div className="flex-col">
-              <span className="text-mono font-bold uppercase" style={{ color: 'var(--text-primary)', fontSize: '1rem', letterSpacing: '0.5px' }}>{selectedMonthFullFmt}</span>
-              <span className="text-mono font-bold uppercase" style={{ color: selectedCycle === currentCycle ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '0.72rem', marginTop: '0.15rem' }}>{selectedCycleRangeStr}</span>
+              <span className="text-mono font-bold uppercase" style={{ color: 'var(--text-primary)', fontSize: '1rem', letterSpacing: '0.5px' }}>{account.name}</span>
+              <span className="text-mono font-bold uppercase" style={{ color: selectedCycle === currentCycle ? 'var(--accent)' : 'var(--text-secondary)', fontSize: '0.72rem', marginTop: '0.15rem' }}>{selectedCycle === currentCycle ? 'Current Open Cycle' : 'Closed Billing Cycle'}</span>
             </div>
           </div>
 
