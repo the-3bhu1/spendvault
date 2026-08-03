@@ -2,29 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account, InvestmentKind } from '../types';
-import { generateId, formatCurrency, formatAmount, formatDateString, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind } from '../utils';
+import { generateId, formatCurrency, formatAmount, formatDateString, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isCountableTransaction } from '../utils';
 import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, Sparkles, ChevronRight, ChevronDown, Hash, BanknoteArrowUp, BanknoteArrowDown, Shapes, Layers } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
 import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, getInvestmentKindIcon } from './transactionIcons';
 
-const isCountableTransaction = (tx: Transaction) => {
-  const catLower = (tx.category || '').toLowerCase();
-  // Scenario 1, 2, 3: Transfer, CC Payment, Investments, NCMC Travel Recharge
-  if (['transfer', 'cc payment', 'ncmc travel recharge'].includes(catLower) || isInvestmentCategory(catLower)) {
-    return false;
-  }
-  // Scenario 4: Cashback auto log
-  if (catLower === 'cashback') {
-    return false;
-  }
-  // Scenario 5: Reward Split auto log
-  if (tx.isRewardTransaction) {
-    return false;
-  }
-  return true;
-};
 
 function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, blockLen, counterparts }: {
   tx: Transaction,

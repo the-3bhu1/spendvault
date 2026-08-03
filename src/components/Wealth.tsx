@@ -4,7 +4,8 @@ import { useFinance } from '../FinanceContext';
 import type { Account } from '../types';
 import { BUILT_IN_ACCOUNT_TYPES } from '../types';
 import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHistoryByRange, getLatestFetchedAt, getLatestCommodityFetchedAt, getCacheFetchedAt, fetchCommodityPriceINR, getCachedPrice, getCachedCommodityPriceINR, fetchPrevClosesForSymbols, getCachedPrevPrice, getCachedPrevCommodityPriceINR } from '../services/MarketDataService';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Text } from 'recharts';
+import type { XAxisTickContentProps } from 'recharts';
 import { TrendingUp, RotateCcw, ChevronLeft, ChevronRight, ChevronDown, Landmark, ShieldCheck } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
 import WealthBackdrop from './WealthBackdrop';
@@ -64,6 +65,21 @@ function StatRow({ label, value, color }: { label: string; value: ReactNode; col
         {value}
       </span>
     </div>
+  );
+}
+
+// Recharts centres every x-axis label on its data point, then slides an outermost label inwards
+// when the centred text would spill out of the plot — which leaves the last date sitting past the
+// point it belongs to. Where it had to slide (tickCoord ≠ coordinate) we put the label back on its
+// point and anchor it to the edge it overflowed, so it ends/starts exactly where the line does.
+function ChartDateTick(props: XAxisTickContentProps) {
+  const { index, payload, tickFormatter } = props;
+  const slide = payload.tickCoord == null ? 0 : payload.tickCoord - payload.coordinate;
+  const anchor = slide < -0.5 ? 'end' : slide > 0.5 ? 'start' : 'middle';
+  return (
+    <Text {...props} x={payload.coordinate} textAnchor={anchor}>
+      {tickFormatter ? tickFormatter(payload.value, index) : payload.value}
+    </Text>
   );
 }
 
@@ -1051,9 +1067,9 @@ export function Wealth() {
             identical value or not. */}
             {!hasPortfolio ? null : isRefreshing ? (
               <div style={{ position: 'relative', zIndex: 1, marginTop: '0.75rem', textAlign: 'center' }}>
-                <div className="flex align-center justify-center gap-2 text-mono" style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                  <RotateCcw size={12} className="icon-spin-ccw" />
-                  <span>Updating live prices...</span>
+                <div className="flex align-center justify-center text-mono" style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', gap: '0.45rem' }}>
+                  <RotateCcw size={13} className="icon-spin-ccw" style={{ flexShrink: 0, display: 'inline-block' }} />
+                  <span style={{ lineHeight: 1, transform: 'translateY(1px)', display: 'inline-block' }}>Updating live prices...</span>
                 </div>
                 <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-primary)', opacity: 0.7, marginTop: '0.2rem', letterSpacing: '0.5px' }}>
                   Today{todayScope ? ` (${todayScope})` : ''}
@@ -1204,15 +1220,15 @@ export function Wealth() {
                   opacity: isRefreshing ? 0.6 : 1,
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '0.5rem',
-                  fontSize: '0.72rem',
+                  gap: '0.45rem',
+                  fontSize: '0.75rem',
                   fontWeight: 700,
                   fontFamily: 'var(--font-mono)',
                   letterSpacing: '0.5px'
                 }}
               >
-                <RotateCcw size={15} className={isRefreshing ? 'icon-spin-ccw' : ''} />
-                {isRefreshing ? 'Refreshing...' : 'Refresh prices'}
+                <RotateCcw size={13} className={isRefreshing ? 'icon-spin-ccw' : ''} style={{ flexShrink: 0, display: 'inline-block' }} />
+                <span style={{ lineHeight: 1, transform: 'translateY(1px)', display: 'inline-block' }}>{isRefreshing ? 'Refreshing...' : 'Refresh prices'}</span>
               </button>
 
               {displayRefreshedAt && (
@@ -1511,7 +1527,9 @@ export function Wealth() {
                           <XAxis
                             dataKey="date"
                             height={30}
-                            tick={{ fontSize: 11, fill: 'var(--text-secondary)' }}
+                            tick={ChartDateTick}
+                            fontSize={11}
+                            stroke="var(--text-secondary)"
                             tickFormatter={d => new Date(d).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}
                             minTickGap={50}
                             axisLine={false}

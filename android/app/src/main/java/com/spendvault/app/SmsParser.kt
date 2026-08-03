@@ -141,7 +141,7 @@ object SmsParser {
         android.util.Log.d("SmsParser", "Detected Type: $type")
 
         // 5. Merchant Extraction
-        var merchant = extractMerchant(normalized)
+        var merchant = extractMerchant(normalized, message)
         if (merchant == null && normalized.contains("salary")) {
             merchant = "Salary"
         }
@@ -192,7 +192,7 @@ object SmsParser {
         }
     }
 
-    private fun extractMerchant(text: String): String? {
+    private fun extractMerchant(text: String, original: String): String? {
         // Special Case: Axis Bank standalone merchant after IST
         if (text.contains("axis bank") && text.contains("ist")) {
             val istIndex = text.indexOf("ist")
@@ -200,52 +200,87 @@ object SmsParser {
                 var segment = text.substring(istIndex + 3).trim()
                 val limitIndex = segment.indexOf("avl limit")
                 if (limitIndex != -1) segment = segment.substring(0, limitIndex).trim()
-                
+
                 val blockIndex = segment.indexOf("not you?")
                 if (blockIndex != -1) segment = segment.substring(0, blockIndex).trim()
 
                 if (segment.isNotEmpty() && segment.length > 2) {
-                   return segment.replaceFirstChar { it.uppercase() }
+                   return restoreCase(original, segment)
                 }
             }
         }
 
+        // '*' and '&' belong to the merchant, not to the punctuation we stop on — card networks
+        // send descriptors like "Cashfree*FLIPKART INTE" and "PAYU*Swiggy". \b keeps a keyword
+        // from matching inside a word ("auto ", "into ").
+        val body = "([a-zA-Z0-9@.*&'/\\- ]+)"
         val patterns = listOf(
-            Pattern.compile("towards\\s([a-zA-Z0-9@.\\- ]+)"),
-            Pattern.compile("to\\s([a-zA-Z0-9@.\\- ]+)"),
-            Pattern.compile("at\\s([a-zA-Z0-9@.\\- ]+)"),
-            Pattern.compile("from\\s([a-zA-Z0-9@.\\- ]+)")
+            Pattern.compile("\\btowards\\s+$body"),
+            Pattern.compile("\\bto\\s+$body"),
+            Pattern.compile("\\bat\\s+$body"),
+            Pattern.compile("\\bfrom\\s+$body")
         )
 
+        // Position in the message decides, NOT the order of the list above. Bank footers carry
+        // "Not You? To Block+Reissue call ..." and "SMS BLOCK CC 2355 to 7308080808", so trying
+        // "to" ahead of "at" read the footer as the merchant ("Block") and never got as far as
+        // the real "at <merchant>" earlier in the same SMS.
+        val candidates = mutableListOf<Pair<Int, String>>()
         for (pattern in patterns) {
             val matcher = pattern.matcher(text)
-            if (matcher.find()) {
-                var merchant = matcher.group(1)?.trim() ?: continue
-                
-                // Cleanup: Ignore generic account mentions
-                val ignorePrefixes = listOf("your account", "my account", "self account", "a/c", "acc", "xxxx", "your hdfc bank", "your bank", "your axis bank")
-                if (ignorePrefixes.any { merchant.lowercase().startsWith(it) }) continue
-
-                // Post-processing: Remove trailing segments
-                val separators = listOf(" on ", " via ", " for ", " using ", ".not you?", " ref ", " upi ", " umrn:", " dial ", " if ", " ist ")
-                for (sep in separators) {
-                    if (merchant.contains(sep)) {
-                        merchant = merchant.substring(0, merchant.indexOf(sep)).trim()
-                    }
-                }
-                
-                // Cleanup trailing dots or special chars
-                merchant = merchant.replace(Regex("[^a-zA-Z0-9@.\\- ]$"), "").trim()
-                
-                // Don't treat "a/c" or "acc" as the merchant if it's just account info
-                if (merchant.startsWith("a/c") || merchant.startsWith("acc")) continue
-
-                if (merchant.isNotEmpty() && merchant.length > 2) {
-                    return merchant.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
-                }
+            while (matcher.find()) {
+                val value = matcher.group(1)?.trim().orEmpty()
+                if (value.isNotEmpty()) candidates.add(matcher.start() to value)
             }
         }
+        candidates.sortBy { it.first }
+
+        for ((_, candidate) in candidates) {
+            var merchant = candidate
+
+            // Cleanup: Ignore generic account mentions. The a/c test is a contains, not a prefix:
+            // "Sent Rs.2000 from HDFC Bank A/C x1234 to john@upi" must fall through to the "to"
+            // leg rather than log the sending account as the payee.
+            val ignorePrefixes = listOf("your account", "my account", "self account", "a/c", "acc", "xxxx", "your hdfc bank", "your bank", "your axis bank")
+            if (ignorePrefixes.any { merchant.lowercase().startsWith(it) }) continue
+            if (merchant.contains("a/c")) continue
+
+            // Post-processing: Remove trailing segments. " from " ends the payee in "paid to
+            // NETFLIX.COM from Kotak Bank Card 5678"; the balance clauses end it in "at
+            // ATM/CASH/CHENNAI. Avl bal Rs 9000" — both previously leaked into the description.
+            val separators = listOf(" on ", " via ", " for ", " using ", ".not you?", " ref ", " upi ", " umrn:", " dial ", " if ", " ist ",
+                " from ", " avl bal", " avl lmt", " avl limit", " available bal")
+            for (sep in separators) {
+                if (merchant.contains(sep)) {
+                    merchant = merchant.substring(0, merchant.indexOf(sep)).trim()
+                }
+            }
+
+            // Cleanup trailing dots or special chars
+            merchant = merchant.replace(Regex("[^a-zA-Z0-9@.\\- ]$"), "").trim()
+
+            // Don't treat "a/c" or "acc" as the merchant if it's just account info
+            if (merchant.startsWith("a/c") || merchant.startsWith("acc")) continue
+
+            // Safety-footer boilerplate and bare phone numbers are never the merchant. Still
+            // needed after the ordering fix, for messages that carry no "at <merchant>" at all
+            // and where the footer is therefore the only candidate.
+            val rejects = listOf("block", "report", "call", "dial", "stop", "unsubscribe", "know more")
+            if (rejects.any { merchant == it || merchant.startsWith("$it ") }) continue
+            if (merchant.all { it.isDigit() || it == ' ' }) continue
+
+            if (merchant.length > 2) return restoreCase(original, merchant)
+        }
         return null
+    }
+
+    // Parsing runs on a lowercased copy, but a merchant reads better in the casing the bank sent
+    // it ("Cashfree*FLIPKART INTE", not "Cashfree*flipkart inte"). Map the match back onto the
+    // original text; if normalization altered that span (₹/INR, commas) fall back to title case.
+    private fun restoreCase(original: String, lowered: String): String {
+        val idx = original.lowercase(Locale.ROOT).indexOf(lowered)
+        if (idx >= 0) return original.substring(idx, idx + lowered.length)
+        return lowered.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
     }
 
     private fun extractSourceIdentifier(text: String): String? {

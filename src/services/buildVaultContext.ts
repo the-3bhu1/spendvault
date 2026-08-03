@@ -16,6 +16,7 @@ import {
   getBillingCycleForDate,
   getLatestBilledCycle,
   isStatsExcludedCategory,
+  isCountableTransaction,
 } from '../utils';
 import { format, parseISO, addMonths, subMonths } from 'date-fns';
 import { calculateEPFProjection } from '../utils/epfEngine';
@@ -37,14 +38,18 @@ const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june',
 interface MonthStats {
   spend: number;
   income: number;
+  count: number;
   byCategory: Record<string, number>;
   byAccount: Record<string, number>;
   byTag: Record<string, number>;
 }
 
 function monthStats(data: FinanceData, month: string): MonthStats {
-  const stats: MonthStats = { spend: 0, income: 0, byCategory: {}, byAccount: {}, byTag: {} };
+  const stats: MonthStats = { spend: 0, income: 0, count: 0, byCategory: {}, byAccount: {}, byTag: {} };
   data.transactions.filter(t => t.date.startsWith(month)).forEach(t => {
+    // Insights headlines a transaction count, so quote the same number it does — the shared
+    // rule drops system categories, cashback/reward auto-logs and fully passive rows.
+    if (isCountableTransaction(t)) stats.count++;
     if (isSystemCategory(t.category)) return;
     const amt = effectiveAmount(t);
     if (t.type === 'debit') {
@@ -133,7 +138,7 @@ function buildSummary(data: FinanceData): string {
     const m = format(subMonths(parseISO(`${currentMonth}-01`), offset), 'yyyy-MM');
     const s = monthStats(data, m);
     out.push(`\n### ${monthLabel(m)}${offset === 0 ? ' (current)' : ''}`);
-    out.push(`  Total spend: ${formatCurrency(s.spend)} · Income: ${formatCurrency(s.income)}`);
+    out.push(`  Total spend: ${formatCurrency(s.spend)} · Income: ${formatCurrency(s.income)} · Transactions: ${s.count}`);
     out.push('  By category:');
     out.push(topEntries(s.byCategory));
     if (offset === 0) {

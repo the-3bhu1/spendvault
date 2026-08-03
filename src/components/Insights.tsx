@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useFinance } from '../FinanceContext';
-import { formatCurrency, formatDateString, STATS_EXCLUDED_CATEGORIES, CATEGORY_PALETTE, ACCOUNT_PALETTE, getDistinctChartColors } from '../utils';
+import { formatCurrency, formatDateString, STATS_EXCLUDED_CATEGORIES, CATEGORY_PALETTE, ACCOUNT_PALETTE, getDistinctChartColors, isCountableTransaction } from '../utils';
 import { TrendingUp, TrendingDown, Star, Trophy, Calendar, ArrowUpRight, ArrowDownRight, Zap, Activity, Hash, Target, Pencil, Trash2, Check, X } from 'lucide-react';
 
 
@@ -9,22 +9,7 @@ import RollingNumber from './RollingNumber';
 import type { Transaction } from '../types';
 import { CustomPicker } from './CustomPicker';
 
-const isCountableTransaction = (tx: Transaction) => {
-  const catLower = (tx.category || '').toLowerCase();
-  // Scenario 1, 2, 3: Transfer, CC Payment, Investments, NCMC Travel Recharge
-  if (['transfer', 'cc payment', 'investments', 'investment', 'mutual funds', 'sip', 'stocks', 'commodity', 'ncmc travel recharge'].includes(catLower)) {
-    return false;
-  }
-  // Scenario 4: Cashback auto log
-  if (catLower === 'cashback') {
-    return false;
-  }
-  // Scenario 5: Reward Split auto log
-  if (tx.isRewardTransaction) {
-    return false;
-  }
-  return true;
-};
+
 
 // Categories that aren't discretionary spend, so a monthly budget makes no sense for them.
 const NON_BUDGET_CATEGORIES = new Set([
@@ -815,7 +800,7 @@ export default function Insights() {
               {/* Custom Legend */}
               <div className="flex-1 flex-col gap-4" style={{ minWidth: '300px' }}>
                 {catPieData.map((entry, index) => {
-                  const txCount = insights.monthTxs.filter((t: Transaction) => t.category === entry.name).length;
+                  const txCount = insights.monthTxs.filter((t: Transaction) => t.category === entry.name && isCountableTransaction(t)).length;
                   const percentage = ((entry.value / (insights.totalSpend || 1)) * 100).toFixed(1);
                   const color = catColors[index];
 
@@ -912,7 +897,7 @@ export default function Insights() {
               {accPieData.map((entry, index) => {
                 const txCount = insights.monthTxs.filter((t: Transaction) => {
                   const account = data.accounts.find(a => a.id === t.accountId);
-                  return (account?.name || 'Unknown') === entry.name && t.type === 'debit';
+                  return (account?.name || 'Unknown') === entry.name && t.type === 'debit' && isCountableTransaction(t);
                 }).length;
                 const percentage = ((entry.value / (insights.totalSpend || 1)) * 100).toFixed(1);
                 const color = accColors[index];
@@ -964,7 +949,7 @@ export default function Insights() {
 
                 <div className="flex-col" style={{ gap: '1.25rem' }}>
                   {tagEntries.map(([tag, amount]) => {
-                    const txCount = insights.monthTxs.filter(t => (t.tags || []).includes(tag) && t.type === 'debit').length;
+                    const txCount = insights.monthTxs.filter(t => (t.tags || []).includes(tag) && t.type === 'debit' && isCountableTransaction(t)).length;
                     const pctOfTotal = ((amount / (insights.totalSpend || 1)) * 100).toFixed(1);
                     const barWidth = ((amount / maxTagSpend) * 100).toFixed(1);
 

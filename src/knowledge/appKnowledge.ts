@@ -247,6 +247,12 @@ categories above and respect exclude-from-stats. The Top Category and Biggest Ex
 exclude the "Rent" category (a predictable recurring bill) so they surface your most notable
 unplanned spend — total spend and the category breakdown still include Rent.
 
+Transaction count (and the per-category / per-account / per-tag counts beside each breakdown) counts
+only real spending activity: system categories (transfers, CC payments, investments, NCMC travel
+recharge), auto-logged cashback, reward-split legs, and fully excluded passive logs are all left out.
+A partially excluded transaction still counts as one — only the excluded rupees are dropped, not the
+transaction. So the count can be lower than the number of rows you see on the Ledger for that month.
+
 # SMS auto-log (Android only)
 On Android the app can read bank SMS on-device and create transactions automatically (opt-in:
 autoLogSms). OTPs and personal messages are excluded on-device and never sent anywhere. Paired bank

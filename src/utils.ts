@@ -81,6 +81,34 @@ export const STATS_EXCLUDED_CATEGORIES = new Set([
 export const isStatsExcludedCategory = (category: string) =>
   STATS_EXCLUDED_CATEGORIES.has((category || '').toLowerCase());
 
+// Determines whether a transaction is counted towards monthly transaction count totals.
+// System categories (transfers, cc payment, investments, etc.), cashback auto logs,
+// reward split legs, and fully passive transactions (where 100% of the amount is excluded)
+// are not counted. Partially passive transactions (where only a portion is excluded) ARE counted.
+export const isCountableTransaction = (tx: Transaction) => {
+  const catLower = (tx.category || '').toLowerCase();
+  // Scenario 1, 2, 3: Transfer, CC Payment, Investments, NCMC Travel Recharge
+  if (['transfer', 'cc payment', 'ncmc travel recharge'].includes(catLower) || isInvestmentCategory(catLower)) {
+    return false;
+  }
+  // Scenario 4: Cashback auto log
+  if (catLower === 'cashback') {
+    return false;
+  }
+  // Scenario 5: Reward Split auto log
+  if (tx.isRewardTransaction) {
+    return false;
+  }
+  // Scenario 6: Fully passive transactions (excludeFromStats is true and 100% of the amount is excluded)
+  if (tx.excludeFromStats) {
+    const isFullyPassive = tx.excludedAmount === undefined || tx.excludedAmount >= tx.amount;
+    if (isFullyPassive) {
+      return false;
+    }
+  }
+  return true;
+};
+
 // ---- Split settlement math ----------------------------------------------------------------
 // 'me' is the self key used across split items (paidBy/shares); everything else is a friend name.
 export const splitDisplayName = (key: string) => (key === 'me' ? 'Me' : key);
