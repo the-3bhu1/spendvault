@@ -226,7 +226,9 @@ export default function Splits() {
                           <div className="flex align-center gap-2">
                             <span className="font-bold" style={{ opacity: event.status === 'settled' ? 0.6 : 1 }}>{event.name}</span>
                             {event.status === 'settled' && (
-                              <span className="text-mono font-bold uppercase" style={{ fontSize: '8px', padding: '1px 5px', background: 'var(--bg-hover)', color: 'var(--text-muted)', borderRadius: '4px', border: '1px solid var(--border-color)', letterSpacing: '0.5px' }}>Settled</span>
+                              /* asymmetric vertical padding: Overpass Mono's baseline rides ~1px high in a
+                                 line-height:1 box, so even padding leaves the word optically above the title */
+                              <span className="text-mono font-bold uppercase" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', lineHeight: 1, padding: '3px 6px 1px', background: 'var(--bg-hover)', color: 'var(--text-muted)', borderRadius: '4px', border: '1px solid var(--border-color)', letterSpacing: '0.5px' }}>Settled</span>
                             )}
                           </div>
                           <span className="text-muted text-xs">{event.people.length} people • {itemsCount} items</span>
@@ -525,7 +527,8 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
             <div className="flex align-center gap-2">
               <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>Consolidated Summary</span>
               {event.status === 'settled' && (
-                <span className="text-mono font-bold uppercase" style={{ fontSize: '8px', padding: '1px 5px', background: 'var(--success-soft)', color: 'var(--success)', borderRadius: '4px', border: '1px solid var(--success)', letterSpacing: '0.5px' }}>Settled</span>
+                /* asymmetric vertical padding — see the list-card badge above */
+                <span className="text-mono font-bold uppercase" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', lineHeight: 1, padding: '3px 6px 1px', background: 'var(--success-soft)', color: 'var(--success)', borderRadius: '4px', border: '1px solid var(--success)', letterSpacing: '0.5px' }}>Settled</span>
               )}
             </div>
             <span className="text-xl font-bold">₹{totalSpent.toFixed(2)}</span>

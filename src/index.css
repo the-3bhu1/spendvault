@@ -691,9 +691,14 @@ h3 {
   cursor: pointer;
 }
 
-.btn:hover {
-  transform: translate(-1px, -1px);
-  box-shadow: 5px 5px 0 #000;
+/* Hover states are gated on real pointers: a touch WebView leaves the tapped element in :hover
+   until the next tap lands elsewhere, so on a phone these read as a button that stays lifted with
+   a lit border after you release it. Same guard as .picker-option below. */
+@media (hover: hover) {
+  .btn:hover {
+    transform: translate(-1px, -1px);
+    box-shadow: 5px 5px 0 #000;
+  }
 }
 
 .btn:active {
@@ -717,8 +722,10 @@ h3 {
   color: var(--text-primary);
 }
 
-.btn-secondary:hover {
-  border-color: var(--text-secondary);
+@media (hover: hover) {
+  .btn-secondary:hover {
+    border-color: var(--text-secondary);
+  }
 }
 
 .btn-danger {
@@ -727,8 +734,10 @@ h3 {
   border-color: var(--danger);
 }
 
-.btn-danger:hover {
-  background-color: rgba(239, 68, 68, 0.1);
+@media (hover: hover) {
+  .btn-danger:hover {
+    background-color: rgba(239, 68, 68, 0.1);
+  }
 }
 
 .input-group {

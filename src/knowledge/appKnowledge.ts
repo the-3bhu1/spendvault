@@ -167,14 +167,17 @@ Settle-Up image plus paginated Expenses images.
 
 # Lending & Borrowing (Debts)
 A per-person ledger of money lent or borrowed, plus repayments. Add a person/debt, log repayments
-(received or sent), mark individual entries done, and settle (or re-open) a debt. Each person shows a
+(received or sent), mark individual entries done, and settle a debt. Each person shows a
 net balance: they owe you, or you owe them. This feature supports 2-way sync: logging an entry in the
 Debt ledger can automatically create a transaction, and conversely, logging, editing, or deleting a
 transaction under the "Lending & Borrowing" category with a description format of "<PersonName> : <Lent/Borrowed/Repayment>"
 automatically creates, updates, or deletes the corresponding entry in the Debt ledger in real-time. Ledger
 entries can be linked to real transactions; when you delete a linked entry you can choose to delete both
 or keep the ledger transaction ("Remove from History Only"). Settling a debt that still has a balance
-offers "Settle Now", which adds a closing Final Settlement entry. Entries logged to the main ledger use the
+offers "Settle Now", which adds a closing Final Settlement entry. The tick in the debt's header is
+"Mark all as done": it marks every entry done and settles the debt in one tap, and ticking all the
+entries yourself settles it too. It only works one way — to re-open a settled debt, un-tick any entry.
+A debt whose net balance reaches zero settles on its own, with all its entries marked done. Entries logged to the main ledger use the
 "Lending & Borrowing" category, so they never count toward Spends or Income (see Categories & Budgets) —
 only the account balance moves.
 

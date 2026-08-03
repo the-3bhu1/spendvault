@@ -1068,8 +1068,12 @@ export function Wealth() {
             {!hasPortfolio ? null : isRefreshing ? (
               <div style={{ position: 'relative', zIndex: 1, marginTop: '0.75rem', textAlign: 'center' }}>
                 <div className="flex align-center justify-center text-mono" style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', gap: '0.45rem' }}>
-                  <RotateCcw size={13} className="icon-spin-ccw" style={{ flexShrink: 0, display: 'inline-block' }} />
-                  <span style={{ lineHeight: 1, transform: 'translateY(1px)', display: 'inline-block' }}>Updating live prices...</span>
+                  {/* size 12, not 13: the ring's ink is 5/6 of the icon box, so 12 makes it exactly as
+                  tall as the 12px text's cap box — at 13 the two heights differ by 1px and no nudge can
+                  centre them once the device rounds to whole pixels. translateY corrects Overpass Mono's
+                  baseline, which rides high in a line-height:1 box. Same pair on the Refresh button. */}
+                  <RotateCcw size={12} className="icon-spin-ccw" style={{ flexShrink: 0, display: 'inline-block' }} />
+                  <span style={{ lineHeight: 1, transform: 'translateY(1.25px)', display: 'inline-block' }}>Updating live prices...</span>
                 </div>
                 <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-primary)', opacity: 0.7, marginTop: '0.2rem', letterSpacing: '0.5px' }}>
                   Today{todayScope ? ` (${todayScope})` : ''}
@@ -1227,8 +1231,9 @@ export function Wealth() {
                   letterSpacing: '0.5px'
                 }}
               >
-                <RotateCcw size={13} className={isRefreshing ? 'icon-spin-ccw' : ''} style={{ flexShrink: 0, display: 'inline-block' }} />
-                <span style={{ lineHeight: 1, transform: 'translateY(1px)', display: 'inline-block' }}>{isRefreshing ? 'Refreshing...' : 'Refresh prices'}</span>
+                {/* size 12 + the 1.25px nudge — see the loader on the Wealth root for why */}
+                <RotateCcw size={12} className={isRefreshing ? 'icon-spin-ccw' : ''} style={{ flexShrink: 0, display: 'inline-block' }} />
+                <span style={{ lineHeight: 1, transform: 'translateY(1.25px)', display: 'inline-block' }}>{isRefreshing ? 'Refreshing...' : 'Refresh prices'}</span>
               </button>
 
               {displayRefreshedAt && (

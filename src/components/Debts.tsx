@@ -405,14 +405,20 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
     return sum;
   }, 0);
 
+  const allTicked = debt.transactions.length > 0 && debt.transactions.every(t => t.markedDone);
+  const isHeaderTicked = debt.status === 'settled' || allTicked;
+
   const toggleSettled = () => {
-    if (debt.status === 'settled') {
-      onUpdateDebt({
-        ...debt,
-        transactions: debt.transactions.filter(t => t.description !== 'Final Settlement'),
-        status: 'active',
-        updatedAt: Date.now()
-      });
+    if (isHeaderTicked) {
+      // Already settled / all ticked — ensure all transactions remain marked done and status is settled.
+      if (!allTicked || debt.status !== 'settled') {
+        onUpdateDebt({
+          ...debt,
+          transactions: debt.transactions.map(t => ({ ...t, markedDone: true })),
+          status: 'settled',
+          updatedAt: Date.now()
+        });
+      }
       return;
     }
 
@@ -427,11 +433,12 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
             amount: Math.abs(netBalance),
             date: format(new Date(), 'yyyy-MM-dd'),
             description: 'Final Settlement',
-            type: netBalance > 0 ? 'repayment_received' : 'repayment_sent'
+            type: netBalance > 0 ? 'repayment_received' : 'repayment_sent',
+            markedDone: true
           };
           onUpdateDebt({
             ...debt,
-            transactions: [...debt.transactions, settleTx],
+            transactions: [...debt.transactions.map(t => ({ ...t, markedDone: true })), settleTx],
             status: 'settled',
             updatedAt: Date.now()
           });
@@ -443,6 +450,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
 
     onUpdateDebt({
       ...debt,
+      transactions: debt.transactions.map(t => ({ ...t, markedDone: true })),
       status: 'settled',
       updatedAt: Date.now()
     });
@@ -500,12 +508,12 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
                 style={{
                   width: '36px', height: '36px', padding: 0,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: debt.status === 'settled' ? 'var(--success)' : 'var(--text-muted)',
-                  borderColor: debt.status === 'settled' ? 'var(--success)' : undefined,
-                  background: debt.status === 'settled' ? 'var(--success-soft)' : undefined
+                  color: isHeaderTicked ? 'var(--success)' : 'var(--text-muted)',
+                  borderColor: isHeaderTicked ? 'var(--success)' : undefined,
+                  background: isHeaderTicked ? 'var(--success-soft)' : undefined
                 }}
                 onClick={toggleSettled}
-                title={debt.status === 'settled' ? "Re-open" : "Mark Settled"}
+                title={isHeaderTicked ? "All marked as done" : "Mark all as done"}
               >
                 <Check size={18} strokeWidth={3} />
               </button>
@@ -644,7 +652,13 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
                         const updated = debt.transactions.map(t =>
                           t.id === tx.id ? { ...t, markedDone: !t.markedDone } : t
                         );
-                        onUpdateDebt({ ...debt, transactions: updated, updatedAt: Date.now() });
+                        const allDone = updated.length > 0 && updated.every(t => t.markedDone);
+                        onUpdateDebt({
+                          ...debt,
+                          transactions: updated,
+                          status: allDone ? 'settled' : (debt.status === 'settled' && !allDone ? 'active' : debt.status),
+                          updatedAt: Date.now()
+                        });
                       }}
                     >
                       <Check size={14} strokeWidth={3} />
