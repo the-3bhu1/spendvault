@@ -56,8 +56,8 @@ export default function Splits() {
 
     const event: SplitEvent = {
       id: generateId(),
-      name: newEvent.name,
-      people: newEvent.people,
+      name: newEvent.name.trim(),
+      people: newEvent.people.map(p => p.trim()),
       items: [],
       createdAt: Date.now(),
     };
@@ -393,7 +393,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
 
   const handleSaveItem = () => {
     const finalAmount = selectedTxId === 'custom' ? (parseFloat(customAmount) || 0) : (selectedTx?.amount || 0);
-    const finalDesc = selectedTxId === 'custom' ? (customDescription || 'Custom Expense') : (selectedTx?.description || '');
+    const finalDesc = selectedTxId === 'custom' ? (customDescription.trim() || 'Custom Expense') : (selectedTx?.description || '');
     if (finalAmount <= 0 || (involvedPeople.length === 0 && !includeMe)) return;
 
     let finalShares: Record<string, number> | undefined = undefined;
@@ -479,18 +479,22 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
 
   const handleSaveEvent = () => {
     if (!editEventName.trim() || editEventPeople.length === 0) return;
-    const removedPeople = event.people.filter(p => !editEventPeople.includes(p));
+    // Trimmed once up front, then used for every comparison below — the removed/paid diffs must
+    // compare against the same cleaned-up values that end up in the saved event, or a stray trailing
+    // space picked up while editing would make an untouched name look "removed".
+    const trimmedPeople = editEventPeople.map(p => p.trim());
+    const removedPeople = event.people.filter(p => !trimmedPeople.includes(p));
     const updatedItems = (event.items || []).map(item => ({
       ...item,
       involvedPeople: item.involvedPeople.filter(p => !removedPeople.includes(p))
     }));
-    
-    const updatedPaid = (event.paidPeople || []).filter(p => editEventPeople.includes(p));
-    
+
+    const updatedPaid = (event.paidPeople || []).filter(p => trimmedPeople.includes(p));
+
     onUpdate({
       ...event,
       name: editEventName.trim(),
-      people: editEventPeople,
+      people: trimmedPeople,
       paidPeople: updatedPaid,
       items: updatedItems,
     });

@@ -165,6 +165,12 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   // Both the Category picker and the Investment Type sub-picker route through here.
   const applyCategorySelection = (nextCategory: string, nextKind?: InvestmentKind) => {
     const prevKind = activeInvestmentKind;
+    // Any actual change of category or investment kind invalidates the counterpart account, any
+    // reward split, and the billing-cycle target — these are transient to whichever category/kind
+    // picked them, not properties of the transaction itself. Generic on purpose: it's not just CC
+    // Payment that must come back fresh — switching to ANY other category and back must never
+    // resurrect a stale pick from before the detour, regardless of which two categories are involved.
+    const categoryOrKindChanged = nextCategory !== newTx.category || nextKind !== prevKind;
     setNewTx(prev => {
       let nextAccountId = prev.accountId;
       if (nextKind) {
@@ -198,7 +204,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         ...s,
         allottedAmount: (nextAllotted === undefined || nextAllotted === 0) ? '' : nextAllotted.toString(),
         investmentCharges: (nextCharges === undefined || nextCharges === 0) ? '' : nextCharges.toString(),
-        numberOfShares: toInputStr(nextShares)
+        numberOfShares: toInputStr(nextShares),
+        ...(categoryOrKindChanged ? { rewardUsed: '' } : {})
       }));
       return {
         ...prev,
@@ -208,12 +215,14 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
         description: newDesc,
         allottedAmount: nextAllotted,
         investmentCharges: nextCharges,
-        numberOfShares: nextShares
+        numberOfShares: nextShares,
+        ...(categoryOrKindChanged ? { rewardUsed: 0, rewardUsedAccountId: '' } : {})
       };
     });
-    // The counterpart's valid types depend on the kind, so any change of kind invalidates it.
-    if (isInvestmentCategory(nextCategory) !== isInvestmentCategory(newTx.category) || nextKind !== prevKind) {
+    if (categoryOrKindChanged) {
       setPaymentSourceAccountId('');
+      setShowRewardSplit(false);
+      setCcPaymentCycleTarget('previous_statement');
     }
     if (errors.category || errors.investmentKind) {
       const newErr = { ...errors };
@@ -312,7 +321,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       id: txId,
       amount: isInvestment ? (newTx.type === 'debit' ? (allottedAmount + (investmentCharges || 0)) : allottedAmount) : Number(newTx.amount),
       date: newTx.date!,
-      description: newTx.description!,
+      description: (newTx.description || '').trim(),
       type: newTx.type!,
       accountId: newTx.accountId!,
       category: newTx.category!,
@@ -514,10 +523,19 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               setNewTx(prev => {
                 const nextType = val as TransactionType;
                 let nextAccountId = prev.accountId;
-                // Flipping direction swaps which leg holds the investment account, so any picked
-                // account is no longer valid for the new direction.
-                if (activeInvestmentKind) {
-                  // Type changed: clear selections to avoid invalid combination
+                const isCCCat = prev.category?.toLowerCase() === 'cc payment';
+                if (isCCCat) {
+                  // Flipping direction always invalidates Account for its own slot (debit needs
+                  // bank/wallet, credit needs the card — mutually exclusive), but the two accounts
+                  // already on the form are still the right (card, funding) PAIR, just with reversed
+                  // roles. Swap rather than discard, so a filled-in leg survives the flip. The
+                  // counterpart's own filter is the exact mirror of Account's, so whatever swaps in
+                  // is guaranteed to fit its new slot.
+                  nextAccountId = paymentSourceAccountId;
+                  setPaymentSourceAccountId(prev.accountId || '');
+                } else if (activeInvestmentKind) {
+                  // Flipping direction swaps which leg holds the investment account, so any picked
+                  // account is no longer valid for the new direction.
                   nextAccountId = '';
                   setPaymentSourceAccountId('');
                 }
@@ -585,9 +603,38 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               setNewTx(prev => ({ ...prev, accountId: val, description: updatedDesc }));
               if (errors.accountId) { const newErr = { ...errors }; delete newErr.accountId; setErrors(newErr); }
             }} 
-            iconGetter={id => getAccountIcon(id, data.accounts)} 
-            error={errors.accountId} 
+            iconGetter={id => getAccountIcon(id, data.accounts)}
+            error={errors.accountId}
           />
+
+          {/* Placed right after Account, ahead of the amount/quantity fields below — see Transactions.tsx
+              for the matching move and its rationale. */}
+          {!editId && ((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') || isCCPayment || !!activeInvestmentKind) && (
+            <CustomPicker label={activeInvestmentKind ? (newTx.type === 'debit' ? `Credit To ${investmentKindLabel(activeInvestmentKind)} Account` : 'Debit From Account') : (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' ? 'Debit From Account (Auto-Debit)' : 'Pay To Card (Auto-Credit)')} value={paymentSourceAccountId} placeholder="None (Manual Log)" options={[{ id: '', name: 'None (Manual Log)' }, ...[...data.accounts].sort(sortByAccountType).filter(a => {
+              if (a.id === newTx.accountId) return false;
+              if (a.archived) return false; // this picker only shows for new transactions
+
+              if (isCCPayment) {
+                // Symmetric with the main Account filter for the debit leg (bank_account/e_wallet
+                // only) — the credit leg's funding side is the same set of real money accounts, not
+                // "anything that isn't a card" (which let cash, rewards, debit cards etc. through).
+                return newTx.type === 'debit' ? a.type === 'credit_card' : (a.type === 'bank_account' || a.type === 'e_wallet');
+              }
+              // Mirror of the main Account filter, one direction over: on a debit the counterpart is
+              // the holding account receiving the units/shares/grams.
+              if (activeInvestmentKind) {
+                return newTx.type === 'debit'
+                  ? a.type === investmentAccountTypeFor(activeInvestmentKind)
+                  : (a.type === 'bank_account' || a.type === 'e_wallet');
+              }
+              return true;
+            }).map(acc => ({ id: acc.id, name: acc.name, subtext: acc.type.replace('_', ' '), group: getAccountGroupLabel(acc.type, acc.archived) }))]} onChange={val => {
+              setPaymentSourceAccountId(val);
+              if (activeInvestmentKind) {
+                setNewTx(prev => ({ ...prev, description: investmentDescriptionFor(activeInvestmentKind, [newTx.accountId, val]) }));
+              }
+            }} iconGetter={_id => _id ? getAccountIcon(_id, data.accounts) : '🚫'} />
+          )}
 
           {(activeInvestmentKind === 'stocks' || activeInvestmentKind === 'commodity') && (
             <div className="input-group" style={{ marginTop: '0.5rem', marginBottom: '1rem' }}>
@@ -691,27 +738,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             );
           })()}
 
-          {!editId && ((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') || isCCPayment || !!activeInvestmentKind) && (
-            <CustomPicker label={activeInvestmentKind ? (newTx.type === 'debit' ? `Credit To ${investmentKindLabel(activeInvestmentKind)} Account` : 'Debit From Account') : (data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card' ? 'Debit From Account (Auto-Debit)' : 'Pay To Card (Auto-Credit)')} value={paymentSourceAccountId} placeholder="None (Manual Log)" options={[{ id: '', name: 'None (Manual Log)' }, ...[...data.accounts].sort(sortByAccountType).filter(a => {
-              if (a.id === newTx.accountId) return false;
-              if (a.archived) return false; // this picker only shows for new transactions
-
-              // Mirror of the main Account filter, one direction over: on a debit the counterpart is
-              // the holding account receiving the units/shares/grams.
-              if (activeInvestmentKind) {
-                return newTx.type === 'debit'
-                  ? a.type === investmentAccountTypeFor(activeInvestmentKind)
-                  : (a.type === 'bank_account' || a.type === 'e_wallet');
-              }
-              return true;
-            }).map(acc => ({ id: acc.id, name: acc.name, subtext: acc.type.replace('_', ' '), group: getAccountGroupLabel(acc.type, acc.archived) }))]} onChange={val => {
-              setPaymentSourceAccountId(val);
-              if (activeInvestmentKind) {
-                setNewTx(prev => ({ ...prev, description: investmentDescriptionFor(activeInvestmentKind, [newTx.accountId, val]) }));
-              }
-            }} iconGetter={_id => _id ? getAccountIcon(_id, data.accounts) : '🚫'} />
-          )}
-
           {newTx.type === 'debit' && !showRewardSplit && !isCCPayment && (
             <button className="btn btn-secondary w-100 flex align-center justify-center gap-2" style={{ marginTop: '0.5rem', padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }} onClick={() => { setShowRewardSplit(true); setTimeout(() => { rewardSplitRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100); }}>
               <Sparkles size={14} className="text-primary" />
@@ -719,7 +745,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             </button>
           )}
 
-          {((newTx.type === 'debit' && showRewardSplit) || (isCCPayment && paymentSourceAccountId)) && (
+          {/* Doesn't need the counterpart account picked yet — the reward split just reduces the
+              total amount, and doesn't care which specific card/bank ends up on the other leg. */}
+          {((newTx.type === 'debit' && showRewardSplit) || isCCPayment) && (
             <div ref={rewardSplitRef} className="grid grid-cols-2 gap-4" style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}>
               <div className="flex justify-between align-center col-span-2">
                 <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>Split Payment</span>
@@ -755,7 +783,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 placeholder="Select Reward Account"
                 options={[
                   { id: '', name: 'None (Select Account)' },
-                  ...data.accounts.filter(a => (!a.archived || a.id === newTx.rewardUsedAccountId) && (a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points'))).map(acc => ({ id: acc.id, name: acc.archived ? `${acc.name} (deleted)` : acc.name }))
+                  // A card's own points balance (e.g. Jupiter's Jewels) only offsets THAT card's own bill
+                  // — issuer points aren't fungible across cards. For a CC Payment the relevant card is
+                  // the one being paid (paymentSourceAccountId); for a plain purchase split it's the
+                  // account being charged. Plain 'rewards' wallets stay universal — already rupee-denominated.
+                  ...data.accounts.filter(a => (!a.archived || a.id === newTx.rewardUsedAccountId) && (a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points' && a.id === (isCCPayment ? paymentSourceAccountId : newTx.accountId)))).map(acc => ({ id: acc.id, name: acc.archived ? `${acc.name} (deleted)` : acc.name }))
                 ]}
                 onChange={val => {
                   setNewTx({
@@ -843,8 +875,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             </div>
           </div>
 
-          {((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') ||
-            (newTx.type === 'debit' && isCCPayment && paymentSourceAccountId && data.accounts.find(a => a.id === paymentSourceAccountId)?.type === 'credit_card')) && (
+          {/* CC Payment always ends up with a credit_card leg somewhere, and these two options
+              (previous statement / current cycle) aren't specific to which card it is — so this
+              doesn't need to wait for either account to actually be picked. */}
+          {isCCPayment && (
             <div style={{ marginTop: '0.5rem' }}>
               <CustomPicker label="Apply Payment To" value={ccPaymentCycleTarget} options={[{ id: 'previous_statement', name: 'Previous Statement', subtext: 'Reduce Already Billed Dues' }, { id: 'current_cycle', name: 'Current Open Cycle', subtext: 'Count as an Early Payment for the Active Cycle' }]} onChange={val => setCcPaymentCycleTarget(val as 'current_cycle' | 'previous_statement')} iconGetter={id => id === 'current_cycle' ? '🟦' : '🧾'} />
             </div>

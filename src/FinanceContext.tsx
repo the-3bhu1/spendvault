@@ -99,6 +99,11 @@ interface FinanceContextType {
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_KEY = 'minimalist_finance_data_v1';
+// Deliberately separate from LOCAL_STORAGE_KEY / the FinanceData shape: unconfirmed SMS detections
+// are device-local scratch state, not part of the user's actual financial data, so they're kept out
+// of `data` (and therefore out of backup export/import) while still surviving app kills/backgrounding
+// the same way `data` does — see the persistence effect below.
+const SMS_QUEUE_STORAGE_KEY = 'minimalist_finance_sms_queue_v1';
 
 // Renumber each day's `order` to a gap-free, duplicate-free 0..N-1 run that matches the order the
 // list already renders in. Drag-reorder renumbers a day 0..N-1 on every move and assumes those
@@ -137,7 +142,15 @@ const DEFAULT_TAGS: string[] = [];
 export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isAuthenticated, setAuthenticated] = useState(false);
   const [pendingTransfer, setPendingTransfer] = useState<PendingTransfer | null>(null);
-  const [smsQueue, setSmsQueue] = useState<PendingSmsTransaction[]>([]);
+  const [smsQueue, setSmsQueue] = useState<PendingSmsTransaction[]>(() => {
+    try {
+      const saved = localStorage.getItem(SMS_QUEUE_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error("Failed to parse saved SMS queue", e);
+      return [];
+    }
+  });
   const [recentlyProcessedSms, setRecentlyProcessedSms] = useState<{ amount: number; type: string; sourceIdentifier?: string; source?: string; raw?: string; timestamp: number }[]>([]);
 
   // Always-current snapshot of the user, so the async SMS second filter can read the
@@ -814,6 +827,58 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         if (!parsed.debts) parsed.debts = [];
         if (!parsed.tags) parsed.tags = [];
         if (!parsed.eventTags) parsed.eventTags = [];
+
+        // Migration: trim stray leading/trailing whitespace left over from before every typable
+        // field trimmed on save (transaction description already had its own pass above — this
+        // covers the rest: account names/labels, debt & split people/descriptions, bill names, the
+        // user's own name, and the free-text tag/category/account-type lists).
+        const trimStr = (s: any) => typeof s === 'string' ? s.trim() : s;
+        const trimArr = (a: any) => Array.isArray(a) ? a.map(trimStr) : a;
+
+        parsed.accounts = (parsed.accounts || []).map((acc: any) => {
+          const updated = { ...acc, name: trimStr(acc.name) };
+          if (updated.rewardUnit !== undefined) updated.rewardUnit = trimStr(updated.rewardUnit);
+          if (updated.currentEmployer !== undefined) updated.currentEmployer = trimStr(updated.currentEmployer);
+          if (updated.cardDetails?.cardholderName !== undefined) {
+            updated.cardDetails = { ...updated.cardDetails, cardholderName: trimStr(updated.cardDetails.cardholderName) };
+          }
+          if (updated.cashbackRates?.length) {
+            updated.cashbackRates = updated.cashbackRates.map((r: any) => ({ ...r, name: trimStr(r.name) }));
+          }
+          return updated;
+        });
+
+        parsed.debts = (parsed.debts || []).map((d: any) => ({
+          ...d,
+          personName: trimStr(d.personName),
+          transactions: (d.transactions || []).map((t: any) => ({ ...t, description: trimStr(t.description) }))
+        }));
+
+        parsed.splitEvents = (parsed.splitEvents || []).map((e: any) => ({
+          ...e,
+          name: trimStr(e.name),
+          people: trimArr(e.people),
+          paidPeople: trimArr(e.paidPeople),
+          items: (e.items || []).map((it: any) => ({ ...it, description: trimStr(it.description), involvedPeople: trimArr(it.involvedPeople) })),
+          cycles: (e.cycles || []).map((c: any) => ({
+            ...c,
+            paidPeople: trimArr(c.paidPeople),
+            carriedOverPeople: trimArr(c.carriedOverPeople),
+            items: (c.items || []).map((it: any) => ({ ...it, description: trimStr(it.description), involvedPeople: trimArr(it.involvedPeople) }))
+          }))
+        }));
+
+        parsed.recurringBills = (parsed.recurringBills || []).map((b: any) => ({ ...b, name: trimStr(b.name) }));
+
+        if (parsed.user?.name !== undefined) {
+          parsed.user = { ...parsed.user, name: trimStr(parsed.user.name) };
+        }
+
+        parsed.tags = trimArr(parsed.tags);
+        parsed.eventTags = trimArr(parsed.eventTags);
+        parsed.categories = trimArr(parsed.categories);
+        parsed.customAccountTypes = trimArr(parsed.customAccountTypes);
+
         parsed.transactions = normalizeTransactionOrders(parsed.transactions || []);
         return parsed;
       } catch (e) {
@@ -847,6 +912,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   useEffect(() => {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
   }, [data]);
+
+  // Persisted separately from `data` (see SMS_QUEUE_STORAGE_KEY above) — survives an app kill or
+  // the OS reclaiming a backgrounded WebView, so an unconfirmed SMS detection isn't silently lost
+  // just because the native side already drained it into this queue exactly once.
+  useEffect(() => {
+    localStorage.setItem(SMS_QUEUE_STORAGE_KEY, JSON.stringify(smsQueue));
+  }, [smsQueue]);
 
   // Dev-only diagnostic: the drag-reorder logic requires each day's `order` to be a gap-free,
   // duplicate-free 0..N-1 run with linked-group legs sitting on adjacent indices. If either

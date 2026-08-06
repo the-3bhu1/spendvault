@@ -285,7 +285,7 @@ export default function Settings() {
     const hashedPin = profileForm.pin ? await hashString(profileForm.pin) : data.user?.pinHash;
     const updatedUser = {
       ...data.user!,
-      name: profileForm.name,
+      name: profileForm.name.trim(),
       pinHash: hashedPin,
       // Biometric unlock requires a PIN as fallback — never persist it enabled without one.
       biometricsEnabled: hashedPin ? profileForm.biometricsEnabled : false
@@ -373,7 +373,7 @@ export default function Settings() {
 
     updateUser({
       ...data.user!,
-      name: profileForm.name,
+      name: profileForm.name.trim(),
       pinHash: pinHash,
       recoveryKeyHash: keyHash,
       biometricsEnabled: profileForm.biometricsEnabled

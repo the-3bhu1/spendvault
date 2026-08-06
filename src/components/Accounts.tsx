@@ -184,16 +184,17 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
   const addCashbackRate = () => {
     if (!newCbName || !newCbRate) return;
+    const trimmedName = newCbName.trim();
     if (editingCashbackRateId) {
       setNewAccount(prev => ({
         ...prev,
-        cashbackRates: prev.cashbackRates?.map(r => r.id === editingCashbackRateId ? { ...r, name: newCbName, rate: parseFloat(newCbRate), roundOffCashback: newCbRoundOff } : r)
+        cashbackRates: prev.cashbackRates?.map(r => r.id === editingCashbackRateId ? { ...r, name: trimmedName, rate: parseFloat(newCbRate), roundOffCashback: newCbRoundOff } : r)
       }));
       setEditingCashbackRateId(null);
     } else {
       setNewAccount(prev => ({
         ...prev,
-        cashbackRates: [...(prev.cashbackRates || []), { id: generateId(), name: newCbName, rate: parseFloat(newCbRate), roundOffCashback: newCbRoundOff }]
+        cashbackRates: [...(prev.cashbackRates || []), { id: generateId(), name: trimmedName, rate: parseFloat(newCbRate), roundOffCashback: newCbRoundOff }]
       }));
     }
     setNewCbName('');
@@ -494,7 +495,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       commodityMetal: newAccount.type === 'commodity' ? newAccount.commodityMetal : undefined,
       manualPricePerGram: newAccount.type === 'commodity' ? newAccount.manualPricePerGram : undefined,
       avgNav: newAccount.type === 'mutual_funds' ? newAccount.avgNav : undefined,
-      rewardUnit: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.rewardUnit : undefined,
+      rewardUnit: (newAccount.type === 'rewards' || hasInternalRewards) ? (newAccount.rewardUnit?.trim() || undefined) : undefined,
       pointsConversionRate: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.pointsConversionRate : undefined,
       rewardType: (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.isCashbackEnabled ? (newAccount.rewardType || 'rupee') : undefined,
       rewardOpeningBalances: updatedRewardOpeningBalances,

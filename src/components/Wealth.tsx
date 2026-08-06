@@ -1426,12 +1426,14 @@ export function Wealth() {
                 boxSizing: 'border-box'
               }}
             >
-              {/* Titled with the parent category, not the asset name: the name is already set out below
-                with its logo, and naming the category says where "back" goes. */}
-              {renderSubviewHeader(category ? CATEGORY_LABELS[category] : 'Wealth', () => setSelectedAsset(null))}
+              {/* Title hidden: the asset's own name/logo right below already says what this screen is,
+                so the category label would only repeat it. The chevron alone still says where "back" goes. */}
+              {renderSubviewHeader(category ? CATEGORY_LABELS[category] : 'Wealth', () => setSelectedAsset(null), '', true)}
 
-              {/* Asset identity — centered, CRED style */}
-              <div style={{ padding: '0 1.5rem 1.5rem', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+              {/* Asset identity — centered, CRED style. Pulled up over the back button's row, same as
+                renderCategoryHero: that row is dead space once its title is hidden — just a small,
+                left-aligned chevron — so it can overlap this centered content without collision. */}
+              <div style={{ padding: '0 1.5rem 1.5rem', marginTop: '-28px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
                 <div style={{ marginBottom: '1rem' }}>
                   <LogoAvatar name={selectedAsset.name} logoUrl={getAssetLogoUrl(selectedAsset)} size={60} metal={selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'silver' : 'gold') : undefined} isEpf={selectedAsset.type === 'epf'} />
                 </div>

@@ -24,6 +24,9 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
   const { data } = useFinance();
   const [isCounterpartExpanded, setIsCounterpartExpanded] = useState(false);
   const isDemoAnimatingRow = tx.id === 'demo_tx_2' || tx.id === 'demo_tx_3';
+  // Hoisted out of the icon lookup below so the kind label pill (next to the category pill) can
+  // use it too, without a second, possibly inconsistent lookup.
+  const invKind = getInvestmentKind(tx, data.accounts);
   const [swipeX, setSwipeX] = useState(0);
   const [swipeY, setSwipeY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -219,10 +222,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
       >
         <div className="flex align-center" style={{ gap: '1rem', flex: 1, minWidth: 0, position: 'relative', zIndex: 2 }}>
           <div className="badge-scalloped">
-            {(() => {
-              const invKind = getInvestmentKind(tx, data.accounts);
-              return invKind ? getInvestmentKindIcon(invKind) : getCategoryIcon(tx.category);
-            })()}
+            {invKind ? getInvestmentKindIcon(invKind) : getCategoryIcon(tx.category)}
           </div>
           <div className="flex-col min-width-0">
             <div className="flex align-center gap-2">
@@ -238,6 +238,10 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
             <div className="flex align-center gap-2" style={{ marginTop: '2px', flexWrap: 'wrap', rowGap: '4px' }}>
               <span className="text-mono text-muted text-xs truncate" style={{ fontWeight: 600, flexShrink: 0, maxWidth: '100%' }}>{acc?.name || 'Unknown'}{acc?.archived ? ' (deleted)' : ''}</span>
               <span className="metric-pill truncate" style={{ flexShrink: 0, maxWidth: '100%' }}>{tx.category}</span>
+              {/* 'Investments' alone doesn't say fund vs. stock vs. metal — the kind pill fills that in. */}
+              {invKind && (
+                <span className="metric-pill truncate" style={{ flexShrink: 0, maxWidth: '100%' }}>{investmentKindLabel(invKind)}</span>
+              )}
               {(tx.tags || []).slice(0, 2).map(tag => (
                 <span key={tag} className="tag-pill truncate" style={{ flexShrink: 0, maxWidth: '100%' }}>#{tag}</span>
               ))}
@@ -333,7 +337,10 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                     if (invKinds.includes('commodity')) return 'Commodity purchase debited from bank';
                     if (invKinds.length > 0) return 'Investment auto-logged from funding account';
                     if (cats.includes('transfer')) return 'Transfer entry on destination account';
-                    if (cats.includes('cc payment')) return 'Payment reflected on card';
+                    // The grouping below always parents a CC Payment pair on the card's credit leg
+                    // (creditParent || uncollapsedInGroup[0], and the credit leg is always present) —
+                    // so the hidden counterpart here is always the funding/debit side, never the card.
+                    if (cats.includes('cc payment')) return 'Paid from funding account';
                     if (cats.includes('ncmc travel recharge')) return 'Travel wallet top-up entry';
                     return 'Linked entry';
                   })()}
@@ -656,8 +663,8 @@ export default function Transactions() {
     const currentDesc = newTx.description || '';
     const isNcmcAccount = !!data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled;
     const prevKind = activeInvestmentKind;
-    const wasInvestment = isInvestmentCategory(newTx.category);
-    const isNowInvestment = isInvestmentCategory(nextCategory);
+    // Whether this call is an actual category/kind change vs. a no-op re-selection of the same one.
+    const categoryOrKindChanged = nextCategory !== newTx.category || nextKind !== prevKind;
 
     // Transfer auto-fill / clear
     const wasTransfer = newTx.category?.toLowerCase() === 'transfer';
@@ -739,10 +746,15 @@ export default function Transactions() {
         : (currentAcc.type === 'bank_account' || currentAcc.type === 'e_wallet'));
       if (!isValid) updatedAccountId = '';
     }
-    // The counterpart's valid types depend on the kind, so any change of kind (or crossing the
-    // investment boundary at all) invalidates whatever was picked.
-    if (isNowInvestment !== wasInvestment || nextKind !== prevKind) {
+    // Any actual change of category or investment kind invalidates the counterpart account, any
+    // reward split, and the billing-cycle target — these are transient to whichever category/kind
+    // picked them, not properties of the transaction itself. Generic on purpose: it's not just CC
+    // Payment that must come back fresh — switching to ANY other category and back must never
+    // resurrect a stale pick from before the detour, regardless of which two categories are involved.
+    if (categoryOrKindChanged) {
       setPaymentSourceAccountId('');
+      setShowRewardSplit(false);
+      setCcPaymentCycleTarget('previous_statement');
     }
 
     const hidesPassiveToggle = ['transfer', 'cc payment', 'ncmc travel recharge', 'lending & borrowing'].includes(nextCategory.toLowerCase());
@@ -765,13 +777,15 @@ export default function Transactions() {
       investmentCharges: nextCharges,
       numberOfShares: nextShares,
       excludeFromStats: hidesPassiveToggle ? false : newTx.excludeFromStats,
-      excludedAmount: hidesPassiveToggle ? undefined : newTx.excludedAmount
+      excludedAmount: hidesPassiveToggle ? undefined : newTx.excludedAmount,
+      ...(categoryOrKindChanged ? { rewardUsed: 0, rewardUsedAccountId: '' } : {})
     });
     setInputStrings(s => ({
       ...s,
       allottedAmount: (nextAllotted === undefined || nextAllotted === 0) ? '' : nextAllotted.toString(),
       investmentCharges: (nextCharges === undefined || nextCharges === 0) ? '' : nextCharges.toString(),
-      numberOfShares: nextShares === undefined ? '' : nextShares.toString()
+      numberOfShares: nextShares === undefined ? '' : nextShares.toString(),
+      ...(categoryOrKindChanged ? { rewardUsed: '' } : {})
     }));
     if (errors.category || errors.investmentKind) {
       const newErr = { ...errors };
@@ -941,7 +955,7 @@ export default function Transactions() {
       addTransaction({
         id: bankCounterpartId,
         date: newTx.date as string,
-        description: newTx.description as string,
+        description: (newTx.description as string).trim(),
         accountId: paymentSourceAccountId,
         type: counterpartType,
         amount: counterpartType === 'credit' ? allottedAmount : (allottedAmount + (investmentCharges || 0)),
@@ -960,7 +974,7 @@ export default function Transactions() {
       addTransaction({
         id: bankCounterpartId,
         date: newTx.date as string,
-        description: newTx.description as string,
+        description: (newTx.description as string).trim(),
         accountId: paymentSourceAccountId,
         type: counterpartType,
         amount: Number(newTx.amount),
@@ -978,7 +992,7 @@ export default function Transactions() {
       addTransaction({
         id: bankCounterpartId,
         date: newTx.date as string,
-        description: newTx.description as string,
+        description: (newTx.description as string).trim(),
         accountId: paymentSourceAccountId,
         type: counterpartType,
         amount: counterpartType === 'credit' ? allottedAmount : (allottedAmount + (investmentCharges || 0)),
@@ -2125,25 +2139,31 @@ export default function Transactions() {
                           ? `Transfer to ${selectedAcc.name}`
                           : `Transfer from ${selectedAcc.name}`;
                       }
-                    } else if (isCCCat && isCCAutoFilled && paymentSourceAccountId) {
-                      const selectedAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
-                      if (selectedAcc) {
+                    } else if (isCCCat && isCCAutoFilled) {
+                      // The card is whichever of the two OLD values is actually a credit_card — not
+                      // "whichever slot happened to be called paymentSourceAccountId", since that's
+                      // Account under debit but the funding leg under credit. Looking up by type
+                      // instead of by slot keeps this correct across the flip either direction.
+                      const cardAcc = [newTx.accountId, paymentSourceAccountId]
+                        .map(id => id ? data.accounts.find(a => a.id === id) : undefined)
+                        .find(a => a?.type === 'credit_card');
+                      if (cardAcc) {
                         // debit = bank pays out → 'CC Payment: <card>'; credit = card receives → 'CC Bill Payment'
                         updatedDesc = newType === 'debit'
-                          ? `CC Payment: ${selectedAcc.name.trim()}`
+                          ? `CC Payment: ${cardAcc.name.trim()}`
                           : 'CC Bill Payment';
                       }
                     }
                     let updatedAccountId = newTx.accountId;
-                    if (isCCCat && updatedAccountId) {
-                      const selectedAcc = data.accounts.find(a => a.id === updatedAccountId);
-                      if (newType === 'debit' && selectedAcc?.type === 'credit_card') {
-                        updatedAccountId = '';
-                        setPaymentSourceAccountId('');
-                      } else if (newType === 'credit' && selectedAcc?.type !== 'credit_card') {
-                        updatedAccountId = '';
-                        setPaymentSourceAccountId('');
-                      }
+                    if (isCCCat) {
+                      // Flipping direction always invalidates Account for its own slot (debit needs
+                      // bank/wallet, credit needs the card — mutually exclusive), but the two accounts
+                      // already on the form are still the right (card, funding) PAIR, just with
+                      // reversed roles. Swap rather than discard, so a filled-in leg survives the
+                      // flip instead of forcing a full reselect. The counterpart's own filter is the
+                      // exact mirror of Account's, so whatever swaps in is guaranteed to fit its slot.
+                      updatedAccountId = paymentSourceAccountId;
+                      setPaymentSourceAccountId(newTx.accountId || '');
                     }
                     let updatedIsTravel = newTx.isTravelTransaction;
                     // Flipping direction swaps which side of an investment the main account is (the
@@ -2267,6 +2287,93 @@ export default function Transactions() {
                 error={errors.accountId}
               />
 
+              {/* Placed right after Account, ahead of the amount/quantity fields below: for an
+                  investment leg this picker names the OTHER side of the trade (the funding bank or
+                  the holding account), which reads more naturally as context before the numbers than
+                  buried under them. For CC Payment/Transfer/debit-card-credit nothing else renders
+                  between Account and here anyway, so the move is a no-op for those. */}
+              {(
+                // A plain credit to a card (refund, reversal, statement credit) has no funding bank,
+                // so don't offer the picker there. The debit_card case keeps its generic credit
+                // auto-debit source.
+                (newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'debit_card' && !newTx.isTravelTransaction)
+                || isTransfer
+                // CC Payment always needs the OTHER leg regardless of which account (if any) has been
+                // picked yet — the counterpart's own options filter is keyed entirely off newTx.type,
+                // not off which specific account ended up in Account, so there's nothing to wait for.
+                || isCCPayment
+                || !!activeInvestmentKind
+              ) && (
+                  <CustomPicker
+                    label={
+                      activeInvestmentKind
+                        ? (newTx.type === 'debit'
+                          ? `Credit To ${investmentKindLabel(activeInvestmentKind)} Account`
+                          : 'Debit From Account')
+                        : (newTx.type === 'debit'
+                          ? (isCCPayment ? 'Pay To Card (Auto-Credit)' : 'Credit To Account (Auto-Credit)')
+                          : 'Debit From Account (Auto-Debit)')
+                    }
+                    value={paymentSourceAccountId}
+                    placeholder="None (Manual Log)"
+                    options={[
+                      { id: '', name: 'None (Manual Log)' },
+                      ...[...data.accounts].sort(sortByAccountType).filter(a => {
+                        if (a.id === newTx.accountId) return false;
+                        // Hide archived, but keep the counterpart already selected on this transaction.
+                        if (a.archived && a.id !== paymentSourceAccountId) return false;
+                        if (isCCPayment) {
+                          // Symmetric with the main Account filter for the debit leg (bank_account/
+                          // e_wallet only) — the credit leg's funding side is the same set of real
+                          // money accounts, not "anything that isn't a card" (which let cash, rewards,
+                          // debit cards etc. through).
+                          return newTx.type === 'debit' ? a.type === 'credit_card' : (a.type === 'bank_account' || a.type === 'e_wallet');
+                        }
+                        // Mirror of the main Account filter, one direction over: on a debit the
+                        // counterpart is the holding account receiving the units/shares/grams.
+                        if (activeInvestmentKind) {
+                          return newTx.type === 'debit'
+                            ? a.type === investmentAccountTypeFor(activeInvestmentKind)
+                            : (a.type === 'bank_account' || a.type === 'e_wallet');
+                        }
+                        return true;
+                      }).map(acc => ({
+                        id: acc.id,
+                        name: acc.archived ? `${acc.name} (deleted)` : acc.name,
+                        subtext: acc.type.replace('_', ' '),
+                        group: getAccountGroupLabel(acc.type, acc.archived)
+                      }))
+                    ]}
+                    onChange={(val) => {
+                      setPaymentSourceAccountId(val);
+                      const selectedAcc = val ? data.accounts.find(a => a.id === val) : null;
+                      const currentDesc = newTx.description || '';
+                      const isTransferAutoFilled = currentDesc === '' || currentDesc.startsWith('Transfer to ') || currentDesc.startsWith('Transfer from ');
+                      const isCCAutoFilled = currentDesc === '' || currentDesc === 'CC Bill Payment' || currentDesc.startsWith('CC Payment: ');
+
+                      if (isTransfer && isTransferAutoFilled) {
+                        // Transfer: auto-fill from account name
+                        const autoDesc = selectedAcc
+                          ? (newTx.type === 'debit' ? `Transfer to ${selectedAcc.name.trim()}` : `Transfer from ${selectedAcc.name.trim()}`)
+                          : '';
+                        setNewTx(prev => ({ ...prev, description: autoDesc }));
+                      } else if (isCCPayment && isCCAutoFilled) {
+                        // CC Payment: debit = bank paying card → 'CC Payment: <card>'; credit = card receives → 'CC Bill Payment'
+                        const autoDesc = selectedAcc
+                          ? (newTx.type === 'debit' ? `CC Payment: ${selectedAcc.name.trim()}` : 'CC Bill Payment')
+                          : '';
+                        setNewTx(prev => ({ ...prev, description: autoDesc }));
+                      } else if (activeInvestmentKind) {
+                        setNewTx(prev => ({
+                          ...prev,
+                          description: investmentDescriptionFor(activeInvestmentKind, [newTx.accountId, val])
+                        }));
+                      }
+                    }}
+                    iconGetter={_id => _id ? getAccountIcon(_id) : '🚫'}
+                  />
+                )}
+
               {(activeInvestmentKind === 'stocks' || activeInvestmentKind === 'commodity') && (
                 <div className="input-group" style={{ marginTop: '0.5rem', marginBottom: '1rem' }}>
                   <label>{activeInvestmentKind === 'commodity' ? 'Grams' : 'No. of Shares'}</label>
@@ -2372,86 +2479,6 @@ export default function Transactions() {
                   </div>
                 );
               })()}
-
-              {(
-                // Crediting a credit card only needs an auto-debit funding source for a CC Payment
-                // (handled by the isCCPayment clause below). A plain credit to a card (refund, reversal,
-                // statement credit) has no funding bank, so don't offer the picker there. The debit_card
-                // case keeps its generic credit auto-debit source.
-                (newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'debit_card' && !newTx.isTravelTransaction)
-                || isTransfer
-                || (isCCPayment && newTx.accountId && (
-                  newTx.type === 'debit'
-                    ? data.accounts.find(a => a.id === newTx.accountId)?.type !== 'credit_card'
-                    : data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card'
-                ))
-                || !!activeInvestmentKind
-              ) && (
-                  <CustomPicker
-                    label={
-                      activeInvestmentKind
-                        ? (newTx.type === 'debit'
-                          ? `Credit To ${investmentKindLabel(activeInvestmentKind)} Account`
-                          : 'Debit From Account')
-                        : (newTx.type === 'debit'
-                          ? (isCCPayment ? 'Pay To Card (Auto-Credit)' : 'Credit To Account (Auto-Credit)')
-                          : 'Debit From Account (Auto-Debit)')
-                    }
-                    value={paymentSourceAccountId}
-                    placeholder="None (Manual Log)"
-                    options={[
-                      { id: '', name: 'None (Manual Log)' },
-                      ...[...data.accounts].sort(sortByAccountType).filter(a => {
-                        if (a.id === newTx.accountId) return false;
-                        // Hide archived, but keep the counterpart already selected on this transaction.
-                        if (a.archived && a.id !== paymentSourceAccountId) return false;
-                        if (isCCPayment) {
-                          return newTx.type === 'debit' ? a.type === 'credit_card' : a.type !== 'credit_card';
-                        }
-                        // Mirror of the main Account filter, one direction over: on a debit the
-                        // counterpart is the holding account receiving the units/shares/grams.
-                        if (activeInvestmentKind) {
-                          return newTx.type === 'debit'
-                            ? a.type === investmentAccountTypeFor(activeInvestmentKind)
-                            : (a.type === 'bank_account' || a.type === 'e_wallet');
-                        }
-                        return true;
-                      }).map(acc => ({
-                        id: acc.id,
-                        name: acc.archived ? `${acc.name} (deleted)` : acc.name,
-                        subtext: acc.type.replace('_', ' '),
-                        group: getAccountGroupLabel(acc.type, acc.archived)
-                      }))
-                    ]}
-                    onChange={(val) => {
-                      setPaymentSourceAccountId(val);
-                      const selectedAcc = val ? data.accounts.find(a => a.id === val) : null;
-                      const currentDesc = newTx.description || '';
-                      const isTransferAutoFilled = currentDesc === '' || currentDesc.startsWith('Transfer to ') || currentDesc.startsWith('Transfer from ');
-                      const isCCAutoFilled = currentDesc === '' || currentDesc === 'CC Bill Payment' || currentDesc.startsWith('CC Payment: ');
-
-                      if (isTransfer && isTransferAutoFilled) {
-                        // Transfer: auto-fill from account name
-                        const autoDesc = selectedAcc
-                          ? (newTx.type === 'debit' ? `Transfer to ${selectedAcc.name.trim()}` : `Transfer from ${selectedAcc.name.trim()}`)
-                          : '';
-                        setNewTx(prev => ({ ...prev, description: autoDesc }));
-                      } else if (isCCPayment && isCCAutoFilled) {
-                        // CC Payment: debit = bank paying card → 'CC Payment: <card>'; credit = card receives → 'CC Bill Payment'
-                        const autoDesc = selectedAcc
-                          ? (newTx.type === 'debit' ? `CC Payment: ${selectedAcc.name.trim()}` : 'CC Bill Payment')
-                          : '';
-                        setNewTx(prev => ({ ...prev, description: autoDesc }));
-                      } else if (activeInvestmentKind) {
-                        setNewTx(prev => ({
-                          ...prev,
-                          description: investmentDescriptionFor(activeInvestmentKind, [newTx.accountId, val])
-                        }));
-                      }
-                    }}
-                    iconGetter={_id => _id ? getAccountIcon(_id) : '🚫'}
-                  />
-                )}
 
               {data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled && (
                 <div className="input-group">
@@ -2741,7 +2768,8 @@ export default function Transactions() {
                             ...[...data.accounts].sort(sortByAccountType).filter(a => (!a.archived || a.id === newTx.rewardEarnedAccountId) && (a.type === 'rewards' || a.type === 'e_wallet')).map(acc => ({
                               id: acc.id,
                               name: acc.archived ? `${acc.name} (deleted)` : acc.name,
-                              subtext: acc.type.replace('_', ' ')
+                              subtext: acc.type.replace('_', ' '),
+                              group: getAccountGroupLabel(acc.type, acc.archived)
                             }))
                           ]}
                           onChange={val => {
@@ -2768,7 +2796,10 @@ export default function Transactions() {
                 );
               })()}
 
-              {!showRewardSplit && isCCPayment && paymentSourceAccountId && hasRewardsOrWallet && (
+              {/* Neither this button nor the panel below need the counterpart account picked yet:
+                  the reward split just reduces the total amount, and doesn't care which specific
+                  card/bank ends up on the other leg. */}
+              {!showRewardSplit && isCCPayment && hasRewardsOrWallet && (
                 <button
                   className="btn btn-secondary w-100 flex align-center justify-center gap-2"
                   style={{ marginBottom: '1rem', padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}
@@ -2784,7 +2815,7 @@ export default function Transactions() {
                 </button>
               )}
 
-              {showRewardSplit && isCCPayment && paymentSourceAccountId && hasRewardsOrWallet && (
+              {showRewardSplit && isCCPayment && hasRewardsOrWallet && (
                 <div
                   ref={rewardSplitRef}
                   className="grid grid-cols-2 gap-4"
@@ -2843,7 +2874,10 @@ export default function Transactions() {
                     placeholder="Select Reward Account"
                     options={[
                       { id: '', name: 'None (Select Account)' },
-                      ...[...data.accounts].sort(sortByAccountType).filter(a => (!a.archived || a.id === newTx.rewardUsedAccountId) && (a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points'))).map(acc => ({
+                      // A card's own points balance (e.g. Jupiter's Jewels) only offsets THAT card's own
+                      // bill — issuer points aren't fungible across cards. Plain 'rewards' wallets (CRED
+                      // coins, super.money) are already rupee-denominated, so they stay universal.
+                      ...[...data.accounts].sort(sortByAccountType).filter(a => (!a.archived || a.id === newTx.rewardUsedAccountId) && (a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points' && a.id === paymentSourceAccountId))).map(acc => ({
                         id: acc.id,
                         name: acc.archived ? `${acc.name} (deleted)` : acc.name,
                         subtext: acc.rewardType === 'points'
@@ -2869,8 +2903,10 @@ export default function Transactions() {
                 </div>
               )}
 
-              {((newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'credit_card') ||
-                (newTx.type === 'debit' && isCCPayment && paymentSourceAccountId && data.accounts.find(a => a.id === paymentSourceAccountId)?.type === 'credit_card')) && (
+              {/* CC Payment always ends up with a credit_card leg somewhere, and these two options
+                  (previous statement / current cycle) aren't specific to which card it is — so this
+                  doesn't need to wait for either account to actually be picked. */}
+              {isCCPayment && (
                   <div style={{ marginTop: '1rem' }}>
                     <CustomPicker
                       label="Apply Payment To"

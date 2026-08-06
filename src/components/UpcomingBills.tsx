@@ -128,10 +128,11 @@ export default function UpcomingBills() {
       alert('Please specify the number of days for custom frequency.');
       return;
     }
+    const trimmedBill = { ...newBill, name: newBill.name.trim() } as RecurringBill;
     if (editingBillId) {
-      updateRecurringBill({ ...newBill as RecurringBill, id: editingBillId });
+      updateRecurringBill({ ...trimmedBill, id: editingBillId });
     } else {
-      addRecurringBill({ ...newBill as RecurringBill, id: crypto.randomUUID() });
+      addRecurringBill({ ...trimmedBill, id: crypto.randomUUID() });
     }
     setActiveView('main');
     resetForm();

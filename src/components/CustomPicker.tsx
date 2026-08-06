@@ -153,7 +153,7 @@ export function CustomPicker({
           </button>
         </div>
 
-        {(enableSearch || options.length > 7) && (
+        {enableSearch && (
           <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-color)' }}>
             <div style={{ position: 'relative', width: '100%' }}>
               <Search size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.4 }} />

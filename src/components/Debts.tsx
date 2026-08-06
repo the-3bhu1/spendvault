@@ -132,12 +132,14 @@ export default function Debts() {
   };
 
   const handleAddDebt = (name: string, amount: number, type: 'lent' | 'borrowed', desc: string, date: string, accountId: string, logInLedger: boolean, linkedTxId?: string) => {
+    const trimmedName = name.trim();
+    const trimmedDesc = (desc || '').trim();
     const txId = generateId();
     const newTx: DebtTransaction = {
       id: txId,
       amount,
       date: date || format(new Date(), 'yyyy-MM-dd'),
-      description: desc || (type === 'lent' ? 'Lent' : 'Borrowed'),
+      description: trimmedDesc || (type === 'lent' ? 'Lent' : 'Borrowed'),
       type,
       linkedTxId
     };
@@ -149,14 +151,14 @@ export default function Debts() {
         amount,
         type: type === 'lent' ? 'debit' : 'credit',
         category: 'Lending & Borrowing',
-        description: `${name}: ${newTx.description}`,
+        description: `${trimmedName}: ${newTx.description}`,
         date: newTx.date,
         linkedTransactionIds: [txId]
       };
       addTransaction(ledgerTx as any);
     }
 
-    const existingDebt = debts.find(d => d.personName.toLowerCase() === name.toLowerCase());
+    const existingDebt = debts.find(d => d.personName.toLowerCase() === trimmedName.toLowerCase());
 
     if (existingDebt) {
       updateDebt({
@@ -168,7 +170,7 @@ export default function Debts() {
     } else {
       const newDebt: Debt = {
         id: generateId(),
-        personName: name,
+        personName: trimmedName,
         transactions: [newTx],
         status: 'active',
         createdAt: Date.now(),
@@ -189,7 +191,7 @@ export default function Debts() {
       id: txId,
       amount,
       date: date || format(new Date(), 'yyyy-MM-dd'),
-      description: desc,
+      description: (desc || '').trim(),
       type,
       linkedTxId
     };
@@ -768,7 +770,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
 
             // Always update the debt record itself with all custom fields (amt, desc, etc)
             const updatedTxs = debt.transactions.map(t =>
-              t.id === editingTx.id ? { ...t, amount: amt, type, description: desc, date, linkedTxId } : t
+              t.id === editingTx.id ? { ...t, amount: amt, type, description: (desc || '').trim(), date, linkedTxId } : t
             );
             const balanced = calcDebtBalance(updatedTxs) === 0;
             const finalTxs = balanced ? updatedTxs.map(t => ({ ...t, markedDone: true })) : updatedTxs;
