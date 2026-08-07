@@ -437,6 +437,30 @@ export async function fetchPrevClosesForSymbols(
   return results;
 }
 
+export async function ensureMarketPricesForAccounts(accounts: Array<{ archived?: boolean; type: string; marketSymbol?: string; manualPricePerGram?: number }>): Promise<void> {
+  const active = accounts.filter(a => !a.archived);
+  const items = active
+    .filter(a => (a.type === 'stocks' || a.type === 'mutual_funds') && a.marketSymbol)
+    .map(a => ({ symbol: a.marketSymbol!, kind: a.type === 'stocks' ? ('stock' as const) : ('mf' as const) }));
+
+  const commodityTickers = active
+    .filter(a => a.type === 'commodity' && a.marketSymbol && a.manualPricePerGram == null)
+    .map(a => a.marketSymbol!);
+
+  const promises: Promise<any>[] = [];
+  if (items.length > 0) {
+    promises.push(fetchPricesForSymbols(items));
+    promises.push(fetchPrevClosesForSymbols(items));
+  }
+  commodityTickers.forEach(ticker => {
+    promises.push(fetchCommodityPriceINR(ticker));
+  });
+
+  if (promises.length > 0) {
+    await Promise.all(promises).catch(() => {});
+  }
+}
+
 export function sliceHistoryByRange(
   data: HistoryDataPoint[],
   range: 'all' | '1y' | '6m' | '1m' | '1w' | '1d'

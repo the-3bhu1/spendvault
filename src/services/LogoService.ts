@@ -1,6 +1,12 @@
-// Resolves real brand logos for investment holdings (mutual funds → AMC/fund-house logo,
-// stocks → company logo) from a built-in domain registry. Resolution is pure and synchronous:
-// a holding's name/ticker maps to a brand domain, and the domain maps to a logo URL.
+// Resolves real brand logos for investment holdings (mutual funds → AMC/fund-house logo, stocks →
+// company logo) and for liquid accounts (banks, e-wallets, debit cards) from a built-in domain
+// registry. Reading a logo URL is always pure and synchronous — a name/ticker maps to a brand
+// domain, and the domain maps to a logo URL — so a render never awaits the network.
+//
+// Coverage the registry misses is filled in the BACKGROUND by a one-shot Gemini lookup
+// (ensureAssetLogo / ensureLiquidLogo), whose answer is cached in localStorage forever and
+// announced via LOGOS_UPDATED_EVENT. Every tier is optional: with no API keys at all, resolution
+// degrades cleanly to registry → Google favicon → initials.
 //
 // Image source is layered:
 //   - If a logo.dev publishable token is configured → high-quality logos (img.logo.dev).
@@ -178,6 +184,7 @@ const LIQUID_REGISTRY: BrandEntry[] = [
   { match: ['swiggy'], domain: 'swiggy.com' },
   { match: ['zomato'], domain: 'zomato.com' },
   { match: ['flipkart'], domain: 'flipkart.com' },
+  { match: ['ajio'], domain: 'ajio.com' },
   { match: ['groww'], domain: 'groww.in' },
   { match: ['zerodha'], domain: 'zerodha.com' },
   { match: ['upstox'], domain: 'upstox.com' },
@@ -216,12 +223,67 @@ function resolveLiquidDomain(name: string): string | null {
   return best?.domain ?? null;
 }
 
-function logoFromDomain(domain: string): string {
-  const token = getLogoDevToken();
-  // fallback=404 → logo.dev returns a 404 (not a generated single-letter monogram) when it has no
-  // logo for the domain, so the <img> errors out and LogoAvatar shows our 2-letter initials avatar.
-  if (token) return `https://img.logo.dev/${domain}?token=${encodeURIComponent(token)}&size=256&retina=true&format=png&fallback=404`;
+// --- Brand heuristic (liquid accounts the registry misses) ----------------------------
+// Words that describe what an account IS rather than who it's with. Stripped before guessing a
+// domain, so "AJIO Wallet" reduces to the brand token "ajio".
+const LIQUID_NOISE_TOKENS = new Set([
+  'wallet', 'wallets', 'pay', 'payment', 'payments', 'balance', 'card', 'cards', 'bank',
+  'account', 'acct', 'savings', 'saving', 'current', 'credit', 'debit', 'prepaid',
+  'rewards', 'reward', 'points', 'cash', 'money', 'app', 'upi', 'my', 'the',
+]);
+
+// Tokens that survive the strip but are ordinary nouns, not brands. Guessing "<word>.com" for one
+// of these resolves to a REAL but unrelated company — metro.com is Metro AG, travel.com is a
+// booking portal — which paints a confidently WRONG logo. That's strictly worse than initials,
+// which at least admit they don't know. These stay registry-or-Gemini only.
+const LIQUID_AMBIGUOUS_TOKENS = new Set([
+  'metro', 'travel', 'transit', 'food', 'fuel', 'petrol', 'grocery', 'shopping', 'home',
+  'family', 'personal', 'primary', 'secondary', 'main', 'joint', 'emergency', 'daily',
+  'monthly', 'office', 'work', 'business', 'salary', 'expense', 'expenses', 'gift',
+  'voucher', 'coupon', 'local', 'city', 'physical', 'petty', 'spare', 'misc', 'other',
+  'general', 'test', 'demo', 'sample', 'temp', 'new', 'old', 'kids', 'child', 'wife',
+  'husband', 'mom', 'dad', 'parents', 'house', 'rent', 'trip', 'holiday', 'vacation',
+]);
+
+/** Best-effort domain for an unlisted brand, or null when guessing would be reckless.
+ *  Deliberately conservative: it only fires when exactly ONE distinctive token survives the noise
+ *  strip. Multi-word leftovers ("Big Basket Wallet") are left to Gemini, which can actually look
+ *  them up, rather than concatenated into a coin-flip like "bigbasket.com" vs "emergencyfund.com". */
+function liquidBrandGuess(name: string): string | null {
+  const words = name
+    .toLowerCase()
+    .replace(/[^a-z0-9.\s-]/g, ' ')
+    .split(/[\s-]+/)
+    .filter(Boolean)
+    .filter(w => !LIQUID_NOISE_TOKENS.has(w));
+
+  if (words.length !== 1) return null;
+  const brand = words[0];
+  if (brand.length < 4) return null;                  // 2-3 letter fragments collide with everything
+  if (/^\d/.test(brand)) return null;                 // "2nd", "401k" — not brands
+  if (LIQUID_AMBIGUOUS_TOKENS.has(brand)) return null;
+  // Already domain-shaped ("super.money") → take it as-is; otherwise assume the .com.
+  return brand.includes('.') ? brand : `${brand}.com`;
+}
+
+// Liquid accounts key their AI-resolved domain off the account NAME. Prefix keeps them in their own
+// namespace inside the shared domainCache, alongside 's:' (stocks) and 'm:' (mutual funds).
+function liquidAiKey(name: string): string {
+  return `l:${name.toLowerCase()}`;
+}
+
+function googleFaviconUrl(domain: string): string {
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`;
+}
+
+function logoFromDomain(domain: string): string {
+  // No logo.dev token configured → skip img.logo.dev entirely and serve Google's no-key favicon
+  // service directly. This is what lets the app show real brand marks with ZERO API keys set.
+  if (!hasLogoDevToken()) return googleFaviconUrl(domain);
+  // fallback=404 → logo.dev returns a 404 (not a generated single-letter monogram) when it has no
+  // logo for the domain, so the <img> errors out and LogoAvatar retries the SAME domain via Google
+  // favicons (see faviconFallback there) before finally landing on our 2-letter initials avatar.
+  return `https://img.logo.dev/${domain}?token=${encodeURIComponent(getLogoDevToken())}&size=256&retina=true&format=png&fallback=404`;
 }
 
 function resolveAmcDomain(name: string): string | null {
@@ -245,10 +307,11 @@ function baseTicker(symbol: string): string {
 type AccountLike = { type: string; name: string; marketSymbol?: string };
 
 // --- AI-resolved domain cache ---------------------------------------------------------
-// Domains resolved by Gemini for holdings the static registries miss. Cached forever (a brand's
-// domain doesn't change): a positive hit is the hostname, a negative result is '' so we never
-// re-ask. Negatives are only stored when a Gemini key was present, so adding a key later still
-// triggers a fresh lookup.
+// Domains resolved by Gemini for holdings AND liquid accounts the static registries miss. Cached
+// forever (a brand's domain doesn't change): a positive hit is the hostname, a negative result is
+// '' so we never re-ask. Negatives are only stored when a Gemini key was present, so adding a key
+// later still triggers a fresh lookup. Keys are namespaced by kind — 's:' stocks, 'm:' mutual
+// funds, 'l:' liquid accounts — so a bank and a fund house sharing a name can't collide.
 const DOMAIN_CACHE_KEY = 'logo_domain_cache';
 const DOMAIN_CACHE_MIGRATION_KEY = 'logo_domain_cache_v2';
 let domainCache: Record<string, string> = (() => {
@@ -391,17 +454,58 @@ export function getMFLogoUrl(accountName: string): string | null {
 }
 
 /** Logo URL for a liquid account — bank, e-wallet, debit card, rewards wallet — resolved from its
- *  NAME, or null for the initials fallback. Registry-only by design: no Gemini lookup, because a
- *  plausible-but-wrong guess for a name like "Metro Card" renders a confidently incorrect brand
- *  mark, which is worse than initials. To add coverage, add a keyword to LIQUID_REGISTRY.
+ *  NAME, or null for the initials fallback. Synchronous and offline-safe.
+ *
+ *  Order: static registry → Gemini-resolved domain (cached from a prior ensureLiquidLogo run) →
+ *  conservative brand heuristic. The registry wins because it's curated and disambiguates brands
+ *  that share a word ("HDFC" the bank vs. the fund house); the cache outranks the heuristic because
+ *  a looked-up domain beats a guessed one.
+ *
+ *  Physical cash is skipped past the heuristic/AI tiers entirely: it isn't a brand, and a name like
+ *  "Petty Cash" has no logo to find — LogoAvatar renders its WalletMinimal glyph instead.
  *
  *  Consequence worth knowing: the account NAME picks the logo. A card that could carry any of
  *  several brands (issuer network vs. app vs. card brand) shows whichever one the name mentions.
  *
  *  Used only by the Wealth → Assets screen's liquid rows; the Accounts tab keeps its own avatars. */
 export function getLiquidLogoUrl(account: AccountLike): string | null {
-  const domain = resolveLiquidDomain(account.name);
-  return domain ? logoFromDomain(domain) : null;
+  const registry = resolveLiquidDomain(account.name);
+  if (registry) return logoFromDomain(registry);
+
+  if (account.type === 'cash') return null;
+
+  const aiDomain = domainCache[liquidAiKey(account.name)];
+  if (aiDomain) return logoFromDomain(aiDomain);
+
+  const guess = liquidBrandGuess(account.name);
+  return guess ? logoFromDomain(guess) : null;
+}
+
+/** Fire-and-forget: for a liquid account the static registry can't resolve, ask Gemini for its
+ *  brand domain once, cache it permanently, and emit LOGOS_UPDATED_EVENT so listeners re-render.
+ *  Mirrors ensureAssetLogo. No-op without a Gemini key — and deliberately caches NOTHING in that
+ *  case, so adding a key later still triggers a fresh lookup. */
+export async function ensureLiquidLogo(account: AccountLike): Promise<void> {
+  if (account.type === 'cash') return;          // physical cash has no brand to resolve
+  if (resolveLiquidDomain(account.name)) return; // already covered deterministically
+
+  const key = liquidAiKey(account.name);
+  if (key in domainCache || inFlight.has(key)) return;
+
+  inFlight.add(key);
+  try {
+    if (!(await hasGeminiKey())) return; // no key → skip without caching, so a future key retries
+    const domain = await resolveBrandDomain(
+      `${account.name} (Indian bank, fintech, e-wallet, card issuer or consumer brand)`
+    );
+    domainCache[key] = domain || '';
+    try { localStorage.setItem(DOMAIN_CACHE_KEY, JSON.stringify(domainCache)); } catch { /* ignore */ }
+    if (domain) notifyLogosUpdated();
+  } catch {
+    /* transient failure — leave uncached so it retries next session */
+  } finally {
+    inFlight.delete(key);
+  }
 }
 
 /** Best-known logo URL for an investment account right now, or null for the initials fallback.

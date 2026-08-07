@@ -74,10 +74,10 @@ export async function resolveBrandDomain(query: string): Promise<string | null> 
 
   const model = getGeminiModel();
   const prompt =
-`Using Google Search, find the official primary website domain of this Indian-listed company or mutual fund house: "${query}".
+`Using Google Search, find the official primary website domain of this Indian company, bank, consumer brand or mutual fund house: "${query}".
 Respond with ONLY this strict minified JSON and NOTHING else — no prose, no markdown:
 {"domain":"<bare hostname>"}
-Rules: bare registrable hostname only (e.g. "olaelectric.com", "tcs.com") — no "https://", no "www.", no path. Use the company's main corporate site, not a stock-exchange or aggregator page. If you cannot confidently identify it, use an empty string.`;
+Rules: bare registrable hostname only (e.g. "olaelectric.com", "tcs.com") — no "https://", no "www.", no path. Use the brand's own main site, not a stock-exchange or aggregator page — for a consumer brand or app owned by a larger group, prefer the brand's OWN domain (e.g. "ajio.com", not "relianceretail.com"). If you cannot confidently identify it, use an empty string.`;
 
   const body = { contents: [{ parts: [{ text: prompt }] }], tools: [{ google_search: {} }] };
   let j: any = null;

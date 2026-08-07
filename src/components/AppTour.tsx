@@ -122,7 +122,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       },
       {
         title: "Inside a Split",
-        description: "SpendVault shows your share, net balance, and each person's dues. Tap a person to mark them paid. Expenses are listed below — and use the Share button (↗) in the header to send the full summary via WhatsApp.",
+        description: "SpendVault shows your share, net balance, and each person's dues. Tap a person to mark them paid. Expenses are listed below — and use the Share button in the header to share the full summary as an image.",
         selector: ".tour-split-detail-header, .tour-split-detail-summary, .tour-split-per-person",
         actionBefore: () => window.dispatchEvent(new CustomEvent('tour-open-split-detail')),
         icon: Sparkles
@@ -293,7 +293,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       document.querySelectorAll('.nav-header-btn, .tour-hub-btn, .tour-askvault-btn').forEach(btn => {
         btn.classList.remove('demo-hub-active', 'demo-hub-finger', 'demo-askvault-active', 'demo-askvault-finger');
       });
-      document.querySelectorAll('.tour-wealth-tab-btn, .tour-wealth-categories .clickable').forEach(btn => {
+      document.querySelectorAll('.tour-wealth-tab-btn, .tour-wealth-categories .card').forEach(btn => {
         btn.classList.remove('demo-tab-active', 'demo-tab-finger');
       });
     };
@@ -495,7 +495,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
     if (tourType === 'wealth' && stepInfo && stepInfo.title === "Three Categories") {
       let tabIdx = 0;
       const triggerCardCycle = () => {
-        const cards = document.querySelectorAll('.tour-wealth-categories .clickable');
+        const cards = document.querySelectorAll('.tour-wealth-categories .card');
         if (cards.length === 0) return;
 
         cards.forEach(c => {
@@ -964,11 +964,11 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
         }
 
         .tour-wealth-tab-btn.demo-tab-active,
-        .tour-wealth-categories .clickable.demo-tab-active {
+        .tour-wealth-categories .card.demo-tab-active {
           position: relative;
         }
         .tour-wealth-tab-btn.demo-tab-finger::after,
-        .tour-wealth-categories .clickable.demo-tab-finger::after {
+        .tour-wealth-categories .card.demo-tab-finger::after {
           content: '';
           position: absolute;
           width: 22px;

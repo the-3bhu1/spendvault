@@ -1,11 +1,10 @@
-import { format, parseISO, addMonths, subMonths, addDays, addWeeks, addQuarters, addYears, setDate, isAfter, isBefore, startOfDay } from 'date-fns';
-import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitEvent, SplitCycle, SplitItem, RecurringFrequency, InvestmentKind } from './types';
+import { format, parseISO, addMonths, subMonths, addDays, setDate } from 'date-fns';
+import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitItem, InvestmentKind } from './types';
 
 // The canonical investment category name. Investment transactions (mutual funds, stocks,
 // commodities, SIPs) are consolidated under "Investments". Stored data is migrated on load
 // (see FinanceContext), but isInvestmentCategory() also accepts legacy category spellings.
 export const INVESTMENT_CATEGORY = 'Investments';
-export const MUTUAL_FUNDS_CATEGORY = INVESTMENT_CATEGORY; // Legacy alias
 
 const INVESTMENT_CATEGORY_ALIASES = new Set([
   INVESTMENT_CATEGORY.toLowerCase(),
@@ -18,7 +17,6 @@ const INVESTMENT_CATEGORY_ALIASES = new Set([
 ]);
 export const isInvestmentCategory = (category?: string) =>
   INVESTMENT_CATEGORY_ALIASES.has((category || '').toLowerCase());
-export const isMutualFundCategory = isInvestmentCategory; // Legacy alias
 
 // ---- Investment sub-kinds -------------------------------------------------------------------
 // One category, three behaviours. Mutual funds, stocks and commodity all log under 'Investments'
@@ -284,17 +282,6 @@ export const getLatestBilledCycle = (statementDay: number): string => {
   return format(subMonths(currentCycleDate, 1), 'yyyy-MM');
 };
 
-// Calculates the most recent statement generation date based on a given statement Day (1-31)
-export const getMostRecentStatementDate = (statementDay: number) => {
-  const today = startOfDay(new Date());
-  let candidate = setDate(today, statementDay);
-  if (isAfter(candidate, today)) {
-    // If the 13th of this month is in the future, the last statement was last month
-    candidate = addMonths(candidate, -1);
-  }
-  return candidate;
-};
-
 import { calculateEPFProjection } from './utils/epfEngine';
 
 export const calculateBalance = (
@@ -424,7 +411,81 @@ export const calculateTotalSpendPerCycle = (transactions: Transaction[], account
   return { spend, payment, netPayable };
 };
 
-export const getCardGradients = (themeIndex: number, network?: CardNetwork) => {
+export const getCardGradients = (themeIndex: number, network?: CardNetwork, cardName?: string) => {
+  const name = (cardName || '').toLowerCase();
+
+  // Supermoney x Axis
+  if (name.includes('supermoney')) {
+    return {
+      front: 'linear-gradient(135deg, #0a0f1d 0%, #151d33 50%, #0d2e2b 100%)',
+      back: 'linear-gradient(135deg, #151d33 0%, #0d2e2b 100%)'
+    };
+  }
+
+  // Swiggy x HDFC
+  if (name.includes('swiggy')) {
+    return {
+      front: 'linear-gradient(135deg, #1c092b 0%, #3b1459 55%, #fc8019 100%)',
+      back: 'linear-gradient(135deg, #3b1459 0%, #fc8019 100%)'
+    };
+  }
+
+  // Amazon Pay ICICI
+  if (name.includes('amazon')) {
+    return {
+      front: 'linear-gradient(135deg, #0d131f 0%, #1a2332 60%, #ff9900 100%)',
+      back: 'linear-gradient(135deg, #1a2332 0%, #ff9900 100%)'
+    };
+  }
+
+  // Flipkart Axis
+  if (name.includes('flipkart')) {
+    return {
+      front: 'linear-gradient(135deg, #07152b 0%, #0f2952 65%, #2874f0 100%)',
+      back: 'linear-gradient(135deg, #0f2952 0%, #2874f0 100%)'
+    };
+  }
+
+  // OneCard
+  if (name.includes('onecard') || name.includes('one card')) {
+    return {
+      front: 'linear-gradient(135deg, #141414 0%, #1f1f1f 50%, #050505 100%)',
+      back: 'linear-gradient(135deg, #1f1f1f 0%, #050505 100%)'
+    };
+  }
+
+  // Scapia
+  if (name.includes('scapia')) {
+    return {
+      front: 'linear-gradient(135deg, #022c22 0%, #0d9488 60%, #14b8a6 100%)',
+      back: 'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)'
+    };
+  }
+
+  // Tata Neu HDFC
+  if (name.includes('tata neu') || name.includes('neu')) {
+    return {
+      front: 'linear-gradient(135deg, #1a0026 0%, #36004d 60%, #c026d3 100%)',
+      back: 'linear-gradient(135deg, #36004d 0%, #c026d3 100%)'
+    };
+  }
+
+  // SBI Cashback / SBI
+  if (name.includes('sbi')) {
+    return {
+      front: 'linear-gradient(135deg, #0c2340 0%, #0284c7 65%, #38bdf8 100%)',
+      back: 'linear-gradient(135deg, #0284c7 0%, #38bdf8 100%)'
+    };
+  }
+
+  // Infinia / Regalia / Millennia
+  if (name.includes('infinia') || name.includes('regalia') || name.includes('millennia') || name.includes('gold')) {
+    return {
+      front: 'linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #ca8a04 100%)',
+      back: 'linear-gradient(135deg, #1e293b 0%, #ca8a04 100%)'
+    };
+  }
+
   if (network === 'amex') {
     return {
       front: 'linear-gradient(135deg, #1f2937 0%, #111827 100%)',
@@ -450,80 +511,6 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork) => {
 };
 
 export const APP_VERSION = 'v2.1.0';
-
-// ─── Recurring Split Cycle Helpers ──────────────────────────────────────────
-
-/** Returns the end date (start of next cycle) given a cycle's start date + frequency. */
-export const getNextCycleEndDate = (startDate: string, freq: RecurringFrequency, customDays?: number): string => {
-  const d = parseISO(startDate);
-  let next: Date;
-  switch (freq) {
-    case 'daily': next = addDays(d, 1); break;
-    case 'weekly': next = addWeeks(d, 1); break;
-    case 'monthly': next = addMonths(d, 1); break;
-    case 'quarterly': next = addQuarters(d, 1); break;
-    case 'yearly': next = addYears(d, 1); break;
-    case 'custom': next = addDays(d, customDays ?? 1); break;
-    default: next = addMonths(d, 1);
-  }
-  return format(next, 'yyyy-MM-dd');
-};
-
-/** True if today is on or after the current cycle's endDate. */
-export const isCycleDue = (event: SplitEvent): boolean => {
-  if (!event.isRecurring || !event.cycles || event.cycles.length === 0) return false;
-  const current = event.cycles.find(c => c.id === event.currentCycleId);
-  if (!current || current.status === 'settled') return false;
-  const today = startOfDay(new Date());
-  const end = parseISO(current.endDate);
-  return !isBefore(today, end); // today >= endDate
-};
-
-/** Creates a brand-new SplitCycle object for the next period. */
-export const buildNewCycle = (
-  event: SplitEvent,
-  prevCycle?: SplitCycle,
-  copyItems: boolean = false
-): SplitCycle => {
-  const startDate = prevCycle ? prevCycle.endDate : (event.cycleStartDate || format(new Date(event.createdAt), 'yyyy-MM-dd'));
-  const endDate = getNextCycleEndDate(startDate, event.frequency ?? 'monthly', event.customDays);
-  const cycleNumber = prevCycle ? prevCycle.cycleNumber + 1 : 1;
-  return {
-    id: crypto.randomUUID ? crypto.randomUUID() : `cycle-${Date.now()}`,
-    cycleNumber,
-    startDate,
-    endDate,
-    items: copyItems && prevCycle ? [...prevCycle.items.map(i => ({ ...i, id: crypto.randomUUID ? crypto.randomUUID() : `item-${Date.now()}-${i.id}` }))] : [],
-    paidPeople: [],
-    status: 'active',
-  };
-};
-
-/**
- * One-time migration: takes a legacy recurring event (flat items/paidPeople)
- * and wraps everything into Cycle 1, returning the updated event.
- */
-export const migrateEventToCycles = (event: SplitEvent): SplitEvent => {
-  if (!event.isRecurring) return event;
-  if (event.cycles && event.cycles.length > 0) return event; // already migrated
-
-  const startDate = event.cycleStartDate || format(new Date(event.createdAt), 'yyyy-MM-dd');
-  const endDate = getNextCycleEndDate(startDate, event.frequency ?? 'monthly', event.customDays);
-  const cycle1: SplitCycle = {
-    id: crypto.randomUUID ? crypto.randomUUID() : `cycle-${Date.now()}`,
-    cycleNumber: 1,
-    startDate,
-    endDate,
-    items: event.items ?? [],
-    paidPeople: event.paidPeople ?? [],
-    status: event.status ?? 'active',
-  };
-  return {
-    ...event,
-    cycles: [cycle1],
-    currentCycleId: cycle1.id,
-  };
-};
 
 export const CATEGORY_PALETTE = [
   '#38bdf8', // Sky Blue
@@ -587,4 +574,36 @@ export function getDistinctChartColors(count: number, palette: string[]): string
     result.push(palette[idx]);
   }
   return result;
+}
+
+export function getInvestmentAccountStats(
+  account: Account,
+  transactions: Transaction[],
+  currentPrice: number = 0
+) {
+  const totalUnits = Number(account.numberOfShares ?? 0) +
+    transactions
+      .filter((t: any) => t.accountId === account.id && t.numberOfShares !== undefined)
+      .reduce((sum: number, t: any) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0);
+
+  const txInvested = transactions
+    .filter((t: any) => t.accountId === account.id && !t.isTravelTransaction && !t.isRewardTransaction)
+    .reduce((sum: number, t: any) => t.type === 'credit' ? sum + t.amount : sum - t.amount, 0);
+
+  const totalInvested = account.investedValue !== undefined
+    ? account.investedValue + txInvested
+    : (account.avgNav && totalUnits > 0 ? account.avgNav * totalUnits : 0);
+
+  const currentValue = currentPrice * totalUnits;
+  const totalReturn = currentValue - totalInvested;
+  const totalReturnPct = totalInvested > 0 ? (totalReturn / totalInvested) * 100 : 0;
+
+  return {
+    totalUnits,
+    totalInvested,
+    currentValue,
+    totalReturn,
+    totalReturnPct,
+    currentPrice
+  };
 }

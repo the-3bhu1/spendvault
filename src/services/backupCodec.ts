@@ -31,10 +31,11 @@ export const KEY_MAP: Record<string, string> = {
   paymentSourceAccountId: 'psid', ccPaymentCycleTarget: 'ctar', isCCPaymentRecord: 'iscr',
   isRecurring: 'isrc', transactionId: 'txid', expectedCashback: 'exc',
   name: 'n', isNcmcEnabled: 'z',
-  // RETIRED: 'b'/'c'/'o' mapped Account.balance/color/icon, none of which exist on Account any more
-  // (balances became the per-month openingBalances map; colour/icon were never shipped). They stay
-  // mapped so an ancient backup still expands them to a named field instead of a raw 2-char key.
-  // Like 'lsa', these codes are burnt — never point them at a different field.
+  // MOSTLY RETIRED: 'c'/'o' mapped Account.color/icon, neither of which exists on Account any more
+  // (colour/icon were never shipped). They stay mapped so an ancient backup still expands them to a
+  // named field instead of a raw 2-char key. 'b' is NOT retired — Account.balance became the per-month
+  // openingBalances map, but EPFBalanceAdjustment.balance still uses this code today (same field name,
+  // so the shared mapping is correct). Like 'lsa', these codes are burnt — never repoint them.
   balance: 'b', color: 'c', icon: 'o',
   openingBalances: 'ob', statementDay: 'sd', dueDay: 'dd', creditLimit: 'clim',
   defaultCashbackRate: 'dr', cashbackRates: 'cr', roundOffCashback: 'ro',

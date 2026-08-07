@@ -60,7 +60,8 @@ Actions (each account is a card on the Accounts tab):
   Dashboard's Outstanding Dues list. In the statement, a cycle picker switches between past and current
   billing cycles.
 - View saved card details: the "Card" button flips the card to reveal number/expiry/CVV; tap a field to
-  copy it.
+  copy it. A Share button on that view sends the full details (card name, cardholder, number, expiry,
+  CVV) to the OS share sheet, falling back to copying them to the clipboard.
 - Send to Bank: rewards and e-wallet accounts have a "Send to Bank" button that transfers their full
   balance to a bank account.
 - Refresh a holding's price: stock/fund/commodity cards have a per-holding Fetch/Refresh button.
@@ -105,6 +106,13 @@ deleting one keeps the legs in sync / removes them together. By category:
   billing cycle (current or previous statement).
   - With a reward split: if reward points are used toward the payment, a THIRD leg debits the rewards
     account for the points used; the bank leg covers the rest.
+  - Which reward accounts can be used: a card's OWN points wallet (e.g. Jupiter's Jewels) only offsets
+    THAT card's bill — issuer points aren't fungible between cards, so another card's points wallet
+    won't appear in the "From Rewards" picker. Rupee-denominated "rewards" wallets are universal and
+    can be used against any payment or purchase. Switching category (or investment type) clears an
+    in-progress split.
+  - The split panel and "Apply Payment To" cycle picker appear as soon as the category is CC Payment —
+    you don't have to pick the paying account first.
 - Investments: logging an investment purchase. Credits the investment account with the
   holdings/units/grams and debits the paying bank account for the cost (+ charges). Legacy categories
   ("Mutual Funds", "Stocks", "Commodity", "SIP") are consolidated under "Investments".
@@ -128,6 +136,8 @@ Spending is grouped by category. Add, delete and reorder categories in Settings 
 row by its handle to reorder; "Other/Misc" always stays last). Set or change a monthly ₹ budget per
 category in the Insights screen (not Settings), which shows actual-vs-budget progress. Deleting a
 category leaves existing transactions with their old category text.
+"Fuel" is a standard spend category (with its own fuel-pump icon) and is auto-added just after "Rent"
+for existing users on upgrade, so it may appear without you creating it.
 System categories (internal bookkeeping, EXCLUDED from spend totals so transfers/payments/investments
 don't look like spending): Transfer, CC Payment, NCMC Travel Recharge, Investments, and
 Lending & Borrowing. Lending & Borrowing is auto-excluded from both Spends and Income everywhere
@@ -261,7 +271,11 @@ On Android the app can read bank SMS on-device and create transactions automatic
 autoLogSms). OTPs and personal messages are excluded on-device and never sent anywhere. Paired bank
 messages (e.g. a payment and its confirmation) are de-duplicated. An optional AI second filter
 (Gemini, opt-in) drops EMI offers, promos, and reward-point "credits" before logging; if it errors it
-fails open (keeps the SMS). New SMS appear as a preview queue to confirm before adding.
+fails open (keeps the SMS). New SMS appear as a preview queue to confirm before adding. The merchant
+name parsed out of the SMS becomes the transaction's description (kept in the bank's original casing).
+That preview queue is saved on-device so it survives closing/restarting the app, but it is device-local
+and is deliberately NOT included in a backup/export — confirm or discard pending items before restoring
+a backup elsewhere.
 
 # Profile & appearance
 - Profile: tap your profile card in Settings → User Details to set your name and a profile photo (with
@@ -300,7 +314,14 @@ can tap "Restore from backup" on the first step to import an existing backup fil
   It's stored in the device keystore (never bundled); removing it disables all those AI features.
   In Settings → AI Features you can Test a saved key, and a meter shows today's AI-fetch count against
   the daily cap (50).
-- Asset Logos: Settings → Asset Logos — optionally add a logo.dev token for sharper stock/fund logos.
+- Asset Logos: Settings → Asset Logos — optionally add a logo.dev token for sharper brand logos.
+  Real brand logos are shown for stocks/funds AND for liquid accounts (banks, e-wallets, debit cards,
+  rewards wallets) on Wealth → Assets, resolved from the account's NAME: a built-in registry first, then
+  a cached background Gemini lookup for brands the registry misses (cached permanently, so it's a
+  one-time lookup per name and counts against the daily AI cap), then a conservative domain guess.
+  If no logo resolves it falls back to a Google favicon and finally a 2-letter coloured monogram;
+  physical-cash accounts always show a wallet icon. No API keys are required — without them the chain
+  still yields favicons or initials, and logos already loaded are cached on-device for offline use.
 - Background Guide (Android): Settings → Background Guide gives per-brand battery-optimization steps so
   SMS auto-log keeps working in the background.
 

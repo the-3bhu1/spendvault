@@ -465,12 +465,12 @@ export default function AskVault({ isOpen: _isOpen, onClose, onOpenSettings, isD
             onChange={handleFileSelected}
           />
           <button
-            className="askvault-icon-btn"
+            className="askvault-attach"
             onClick={handleAttachClick}
             disabled={pendingReview?.status === 'loading'}
             title="Attach a contract note"
           >
-            <Paperclip size={18} />
+            <Paperclip size={20} />
           </button>
           <textarea
             ref={inputRef}

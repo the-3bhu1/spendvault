@@ -225,7 +225,7 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
               width: '340px',
               height: '210px',
               background: account.cardDetails
-                ? getCardGradients(themeIndex, account.cardDetails.network).front
+                ? getCardGradients(themeIndex, account.cardDetails.network, account.name).front
                 : 'var(--bg-card)',
               borderRadius: '16px',
               perspective: '800px',

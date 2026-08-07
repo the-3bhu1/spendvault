@@ -5,7 +5,7 @@ import {
   Train, ShoppingBag, Utensils, Car, Zap, HeartPulse, Film, BadgeIndianRupee, Banknote,
   CreditCard, ArrowRightLeft, Home, Handshake, Gift, ChartNoAxesCombined, ChartCandlestick,
   Gem, HandCoins, MoreHorizontal, Coins, Landmark, WalletCards, WalletMinimal, BarChart3,
-  TrendingUp, Medal, Wallet, ShieldUser, ChartLine, ArchiveX
+  TrendingUp, Medal, Wallet, ShieldUser, ChartLine, ArchiveX, Fuel
 } from 'lucide-react';
 
 export const getCategoryIcon = (category: string, size = 17) => {
@@ -13,7 +13,8 @@ export const getCategoryIcon = (category: string, size = 17) => {
   if (cat.includes('ncmc')) return <Train size={size} />;
   if (cat.includes('shop')) return <ShoppingBag size={size} />;
   if (cat.includes('food') || cat.includes('eat') || cat.includes('dine')) return <Utensils size={size} />;
-  if (cat.includes('travel') || cat.includes('transport') || cat.includes('fuel')) return <Car size={size} />;
+  if (cat.includes('fuel')) return <Fuel size={size} />;
+  if (cat.includes('travel') || cat.includes('transport')) return <Car size={size} />;
   if (cat.includes('bill') || cat.includes('recharge') || cat.includes('utility')) return <Zap size={size} />;
   if (cat.includes('health') || cat.includes('med')) return <HeartPulse size={size} />;
   if (cat.includes('entertain') || cat.includes('movie') || cat.includes('ott')) return <Film size={size} />;

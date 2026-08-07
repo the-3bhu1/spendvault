@@ -520,6 +520,10 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
       title={
         <div className="flex align-center gap-2">
           <h2 style={{ margin: 0, textTransform: 'lowercase' }}>{event.name}</h2>
+          {event.status === 'settled' && (
+            /* asymmetric vertical padding — see the list-card badge above */
+            <span className="text-mono font-bold uppercase" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', lineHeight: 1, padding: '3px 6px 1px', background: 'var(--success-soft)', color: 'var(--success)', borderRadius: '4px', border: '1px solid var(--success)', letterSpacing: '0.5px' }}>Settled</span>
+          )}
         </div>
       } 
       onBack={onBack}
@@ -528,13 +532,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
 
         <div className="flex justify-between align-center tour-split-detail-header">
           <div className="flex-col">
-            <div className="flex align-center gap-2">
-              <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>Consolidated Summary</span>
-              {event.status === 'settled' && (
-                /* asymmetric vertical padding — see the list-card badge above */
-                <span className="text-mono font-bold uppercase" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', lineHeight: 1, padding: '3px 6px 1px', background: 'var(--success-soft)', color: 'var(--success)', borderRadius: '4px', border: '1px solid var(--success)', letterSpacing: '0.5px' }}>Settled</span>
-              )}
-            </div>
+            <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>Consolidated Summary</span>
             <span className="text-xl font-bold">₹{totalSpent.toFixed(2)}</span>
           </div>
           <div className="flex gap-3">

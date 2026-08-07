@@ -832,6 +832,11 @@ export default function Settings() {
     categories: data.categories || [],
     categoryBudgets: data.categoryBudgets || {},
     tags: data.tags || [],
+    // eventTags must be exported alongside tags: it's user-created data, and the import path
+    // resets it to [] when absent (FinanceContext), so omitting it here silently wipes every
+    // event tag on restore. It already has a KEY_MAP short code ('etg') — only the payload
+    // builder was missing it, which leaked past all three export paths (file, SV_BKP_, SV_ULTRA_).
+    eventTags: data.eventTags || [],
     customAccountTypes: data.customAccountTypes || [],
     cashbackStatements: data.cashbackStatements || [],
     splitEvents: data.splitEvents || [],

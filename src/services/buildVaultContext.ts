@@ -17,9 +17,11 @@ import {
   getLatestBilledCycle,
   isStatsExcludedCategory,
   isCountableTransaction,
+  getInvestmentAccountStats,
 } from '../utils';
 import { format, parseISO, addMonths, subMonths } from 'date-fns';
 import { calculateEPFProjection } from '../utils/epfEngine';
+import { getCachedPrice, getCachedPrevPrice, getCachedCommodityPriceINR } from './MarketDataService';
 
 const SLICE_CAP = 60;
 const RECENT_FALLBACK = 40;
@@ -97,16 +99,44 @@ function buildSummary(data: FinanceData): string {
   out.push('\n## Accounts & balances');
   if (!active.length) out.push('  (no accounts yet)');
   active.forEach(a => {
+    if (a.type === 'stocks' || a.type === 'mutual_funds' || a.type === 'commodity') {
+      const symbol = a.marketSymbol || '';
+      const price = a.type === 'commodity'
+        ? (a.manualPricePerGram ?? (symbol ? getCachedCommodityPriceINR(symbol) : null) ?? 0)
+        : (symbol ? getCachedPrice(symbol) : null) ?? 0;
+      const prevPrice = a.type === 'commodity' ? null : (symbol ? getCachedPrevPrice(symbol) : null);
+
+      const stats = getInvestmentAccountStats(a, data.transactions, price);
+
+      let invLine = `  - ${a.name} [${a.type}]: `;
+      if (stats.currentPrice > 0) {
+        invLine += `Current Value ${formatCurrency(stats.currentValue)} (Total Invested: ${formatCurrency(stats.totalInvested)}, Overall P&L: ${stats.totalReturn >= 0 ? '+' : ''}${formatCurrency(stats.totalReturn)} / ${stats.totalReturnPct.toFixed(2)}%)`;
+        if (prevPrice && prevPrice > 0) {
+          const oneDayReturn = (stats.currentPrice - prevPrice) * stats.totalUnits;
+          const oneDayPct = ((stats.currentPrice - prevPrice) / prevPrice) * 100;
+          invLine += ` [Today's Gain/Loss: ${oneDayReturn >= 0 ? '+' : ''}${formatCurrency(oneDayReturn)} / ${oneDayPct.toFixed(2)}%]`;
+        }
+      } else {
+        invLine += `Total Invested ${formatCurrency(stats.totalInvested)} (Units: ${stats.totalUnits})`;
+      }
+      if (a.type === 'commodity' && a.commodityMetal) invLine += ` (${a.commodityMetal})`;
+      out.push(invLine);
+      return;
+    }
+
     const isReward = a.type === 'rewards';
     const bal = calculateBalance(a, data.transactions, currentMonth, false, isReward, data.cashbackStatements);
     let line = `  - ${a.name} [${a.type}]: ${isReward ? `${bal} ${a.rewardUnit || 'pts'}` : formatCurrency(bal)}`;
-    if (a.type === 'commodity' && a.commodityMetal) line += ` (${a.commodityMetal})`;
-    if (a.type === 'stocks' || a.type === 'mutual_funds') {
-      if (a.investedValue != null) line += ` (invested ${formatCurrency(a.investedValue)})`;
-    }
     if (a.type === 'epf') {
       const proj = calculateEPFProjection(a, currentMonth);
       line += ` (Monthly Credit: ${formatCurrency(proj.totalContribution)}, Accrued Interest FY: ${formatCurrency(proj.accruedInterest)}, 1-Yr Projection: ${formatCurrency(proj.projectedOneYearBalance)})`;
+    }
+    // An NCMC-enabled card carries a SECOND, separate travel purse on top of its main balance, and the
+    // Wealth screen counts both. calculateBalance returns only one at a time (the isTravel flag picks
+    // which), so without this the assistant quotes a lower figure than Wealth shows for the same card.
+    if (a.isNcmcEnabled) {
+      const travelBal = calculateBalance(a, data.transactions, currentMonth, true, false, data.cashbackStatements);
+      line += ` (+ NCMC travel balance: ${formatCurrency(travelBal)})`;
     }
     out.push(line);
   });

@@ -5,6 +5,7 @@
 
 import { getGeminiKey, getGeminiModel } from './GeminiConfig';
 import { buildVaultContext } from './buildVaultContext';
+import { ensureMarketPricesForAccounts } from './MarketDataService';
 import { APP_KNOWLEDGE, OUT_OF_SCOPE_REPLY, CONTACT } from '../knowledge/appKnowledge';
 import type { FinanceData } from '../types';
 
@@ -52,6 +53,9 @@ ${context}`;
 export async function askVault(history: ChatMessage[], data: FinanceData): Promise<string> {
   const key = await getGeminiKey();
   if (!key) throw new Error('gemini: no key');
+
+  // Ensure prices and previous closes are cached before building prompt context
+  await ensureMarketPricesForAccounts(data.accounts);
 
   const lastUser = [...history].reverse().find(m => m.role === 'user');
   const context = buildVaultContext(data, lastUser?.text || '');

@@ -135,7 +135,7 @@ function normalizeTransactionOrders(transactions: Transaction[]): Transaction[] 
   });
   return changed ? result : transactions;
 }
-const DEFAULT_CATEGORIES = ['Food', 'Shopping', 'Income', 'Salary', 'Rent', 'Travel', 'Bills', 'Entertainment', 'CC Payment', 'Loans', 'Lending & Borrowing', 'NCMC Travel Recharge', 'Cashback', 'Investments', 'Other/Miscellaneous'];
+const DEFAULT_CATEGORIES = ['Food', 'Shopping', 'Income', 'Salary', 'Rent', 'Fuel', 'Travel', 'Bills', 'Entertainment', 'CC Payment', 'Loans', 'Lending & Borrowing', 'NCMC Travel Recharge', 'Cashback', 'Investments', 'Other/Miscellaneous'];
 const DEFAULT_CUSTOM_ACCOUNT_TYPES: string[] = [];
 const DEFAULT_TAGS: string[] = [];
 
@@ -425,6 +425,14 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           parsed.categories = [...DEFAULT_CATEGORIES];
         } else {
           // Auto-add missing standard categories
+          if (!parsed.categories.includes('Fuel')) {
+            const rentIdx = parsed.categories.indexOf('Rent');
+            if (rentIdx !== -1) {
+              parsed.categories.splice(rentIdx + 1, 0, 'Fuel');
+            } else {
+              parsed.categories.push('Fuel');
+            }
+          }
           if (!parsed.categories.includes('Loans')) {
             parsed.categories.push('Loans');
           }

@@ -11,9 +11,9 @@ import ProfileAvatar from './ProfileAvatar';
 import WealthBackdrop from './WealthBackdrop';
 import { PortfolioBackdrop, AssetsBackdrop, RetirementBackdrop } from './WealthCategoryBackdrops';
 import { LogoAvatar } from './LogoAvatar';
-import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
+import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
 import { calculateEPFProjection, getEPFInterestRate, getFinancialYearForDate } from '../utils/epfEngine';
-import { calculateBalance, getCurrentMonthStr, formatCurrency } from '../utils';
+import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats } from '../utils';
 
 type HistoryDataPoint = { date: number; close: number };
 type StockHistoryRange = '1d' | '5d' | '1mo' | '3mo' | '1y' | '5y';
@@ -354,14 +354,17 @@ export function Wealth() {
     handleRefresh();
   }, [mfAccounts, stockAccounts, commodityAccounts]);
 
-  // Resolve real logos for any stock/MF the static registry misses (one cached Gemini lookup
-  // each), and re-render when one lands.
+  // Resolve real logos for any stock/MF/liquid account the static registry misses (one cached
+  // Gemini lookup each, in the background), and re-render when one lands. Both ensure* calls are
+  // no-ops for anything already covered by a registry, already cached, or already in flight, so
+  // re-running this effect on every account change is cheap.
   useEffect(() => {
     const onLogosUpdated = () => setLogoTick(t => t + 1);
     window.addEventListener(LOGOS_UPDATED_EVENT, onLogosUpdated);
     [...mfAccounts, ...stockAccounts].forEach(acc => { ensureAssetLogo(acc); });
+    liquidAccounts.forEach(acc => { ensureLiquidLogo(acc); });
     return () => window.removeEventListener(LOGOS_UPDATED_EVENT, onLogosUpdated);
-  }, [mfAccounts, stockAccounts]);
+  }, [mfAccounts, stockAccounts, liquidAccounts]);
 
   useEffect(() => {
     if (!selectedAsset) {
@@ -408,31 +411,8 @@ export function Wealth() {
       };
     }
     const symbol = account.marketSymbol || '';
-    // Commodity manual override (₹/g) wins over the fetched estimate; harmless for others.
     const currentPrice = account.manualPricePerGram ?? prices[symbol] ?? 0;
-
-    const totalUnits = getTotalUnits(account);
-
-    const txInvested = data.transactions
-      .filter((t: any) => t.accountId === account.id && !t.isTravelTransaction && !t.isRewardTransaction)
-      .reduce((sum: number, t: any) => t.type === 'credit' ? sum + t.amount : sum - t.amount, 0);
-
-    const totalInvested = account.investedValue !== undefined
-      ? account.investedValue + txInvested
-      : (account.avgNav && totalUnits > 0 ? account.avgNav * totalUnits : 0);
-
-    const currentValue = currentPrice * totalUnits;
-    const totalReturn = currentValue - totalInvested;
-    const totalReturnPct = totalInvested > 0 ? (totalReturn / totalInvested) * 100 : 0;
-
-    return {
-      totalUnits,
-      totalInvested,
-      currentValue,
-      totalReturn,
-      totalReturnPct,
-      currentPrice
-    };
+    return getInvestmentAccountStats(account, data.transactions, currentPrice);
   };
 
   const getOneDayReturn = (account: Account) => {

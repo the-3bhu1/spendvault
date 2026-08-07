@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, CornerDownRight } from 'lucide-react';
+import { X, CornerDownRight, Share2 } from 'lucide-react';
 import type { Account } from '../types';
 import { CardNetworkLogo } from './CardNetworkLogo';
 import { getCardGradients } from '../utils';
@@ -29,7 +29,7 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
   // Find index in sorted accounts list to guarantee uniqueness
   const allAccounts = context ? [...context.data.accounts].sort((a, b) => a.id.localeCompare(b.id)) : [];
   const accountIndex = allAccounts.findIndex(acc => acc.id === id);
-  const gradients = getCardGradients(accountIndex >= 0 ? accountIndex : 0, cardDetails?.network);
+  const gradients = getCardGradients(accountIndex >= 0 ? accountIndex : 0, cardDetails?.network, name);
 
   const expiryFormatted = cardDetails?.expiryMonth && cardDetails?.expiryYear
     ? `${String(cardDetails.expiryMonth).padStart(2, '0')}/${String(cardDetails.expiryYear).slice(-2)}`
@@ -53,6 +53,46 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
     toast.style.zIndex = '10000';
     toast.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
     toast.style.animation = 'fadeOut 2s forwards';
+    document.body.appendChild(toast);
+    setTimeout(() => document.body.removeChild(toast), 2000);
+  };
+
+  const handleShareAll = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const formattedCardNumber = cardDetails?.cardNumber?.match(/.{1,4}/g)?.join(' ') || 'N/A';
+    const cardholder = cardDetails?.cardholderName || 'N/A';
+    const cardName = name || 'N/A';
+    const expiry = expiryFormatted;
+    const cvv = cardDetails?.cvv || 'N/A';
+
+    const shareText = `Card Name: ${cardName}\nCardholder Name: ${cardholder}\nCard Number: ${formattedCardNumber}\nExpiry Date: ${expiry}\nCVV: ${cvv}`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `${cardName} Details`,
+          text: shareText,
+        });
+        return;
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') return;
+      }
+    }
+
+    navigator.clipboard.writeText(shareText);
+    const toast = document.createElement('div');
+    toast.textContent = 'All card details copied to clipboard';
+    toast.style.position = 'fixed';
+    toast.style.bottom = '20px';
+    toast.style.left = '50%';
+    toast.style.transform = 'translateX(-50%)';
+    toast.style.background = 'rgba(20, 184, 166, 0.9)';
+    toast.style.color = 'white';
+    toast.style.padding = '8px 16px';
+    toast.style.borderRadius = '20px';
+    toast.style.fontSize = '12px';
+    toast.style.zIndex = '10000';
+    toast.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
     document.body.appendChild(toast);
     setTimeout(() => document.body.removeChild(toast), 2000);
   };
@@ -292,24 +332,51 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
         </div>
       </div>
 
-      <button 
-        className="btn-icon" 
-        onClick={handleBackdropClick}
-        style={{ 
-          marginTop: '60px',
-          width: '48px', 
-          height: '48px', 
-          borderRadius: '50%', 
-          background: 'rgba(255,255,255,0.1)', 
-          color: 'white',
-          border: '1px solid rgba(255,255,255,0.2)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}
-      >
-        <X size={24} />
-      </button>
+      <div style={{ marginTop: '55px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <button 
+          className="btn-icon" 
+          onClick={handleShareAll}
+          title="Share all card details"
+          style={{ 
+            width: '48px', 
+            height: '48px', 
+            borderRadius: '50%', 
+            background: 'rgba(255,255,255,0.12)', 
+            color: 'white',
+            border: '1px solid rgba(255,255,255,0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+          }}
+        >
+          <Share2 size={22} />
+        </button>
+
+        <button 
+          className="btn-icon" 
+          onClick={handleBackdropClick}
+          title="Close"
+          style={{ 
+            width: '48px', 
+            height: '48px', 
+            borderRadius: '50%', 
+            background: 'rgba(255,255,255,0.12)', 
+            color: 'white',
+            border: '1px solid rgba(255,255,255,0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+          }}
+        >
+          <X size={24} />
+        </button>
+      </div>
 
       <style>
         {`

@@ -100,7 +100,7 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf, isWallet, accoun
   }
 
   const showImg = srcIdx < sources.length;
-  const isWalletAccount = isWallet || accountType === 'cash' || name.toLowerCase().includes('wallet') || name.toLowerCase() === 'cash';
+  const isPhysicalCash = isWallet || accountType === 'cash';
 
   return (
     <div
@@ -139,7 +139,7 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf, isWallet, accoun
             display: 'block'
           }}
         />
-      ) : isWalletAccount ? (
+      ) : isPhysicalCash ? (
         <WalletMinimal size={Math.round(size * 0.48)} strokeWidth={2.2} />
       ) : (
         getInitials(name)
