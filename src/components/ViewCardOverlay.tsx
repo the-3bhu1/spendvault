@@ -4,6 +4,8 @@ import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import type { Account } from '../types';
 import { CardNetworkLogo } from './CardNetworkLogo';
+import { CardSurface } from './CardSurface';
+import { CardChip } from './CardChip';
 import { getCardGradients } from '../utils';
 import { useFinance } from '../FinanceContext';
 
@@ -171,18 +173,18 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
           onClick={handleCardClick}
         >
           {/* Front of Card */}
-          <div 
+          <CardSurface
+            skin={gradients}
+            face="front"
             style={{
               position: 'absolute',
               width: '100%',
               height: '100%',
               backfaceVisibility: 'hidden',
               WebkitBackfaceVisibility: 'hidden',
-              background: gradients.front,
               borderRadius: '16px',
-              border: '1px solid rgba(255,255,255,0.1)',
+              border: '1px solid rgba(var(--card-ink), 0.1)',
               boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
-              overflow: 'hidden',
               padding: '24px',
               display: 'flex',
               flexDirection: 'column',
@@ -191,20 +193,7 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
           >
             {/* Top Section: SIM Chip & Network Logo */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              {/* SIM Chip */}
-              <div style={{ position: 'relative', width: '42px', height: '30px', background: 'linear-gradient(135deg, #ffd700 0%, #ca8a04 100%)', borderRadius: '4px', overflow: 'hidden' }}>
-                <svg width="42" height="30" viewBox="0 0 42 30" style={{ position: 'absolute', top: 0, left: 0 }}>
-                  <line x1="0" y1="15" x2="42" y2="15" stroke="rgba(139,90,0,0.4)" strokeWidth="0.8" />
-                  <line x1="21" y1="0" x2="21" y2="30" stroke="rgba(139,90,0,0.4)" strokeWidth="0.8" />
-                  <line x1="14" y1="0" x2="14" y2="30" stroke="rgba(139,90,0,0.3)" strokeWidth="0.5" />
-                  <line x1="28" y1="0" x2="28" y2="30" stroke="rgba(139,90,0,0.3)" strokeWidth="0.5" />
-                  <line x1="0" y1="8" x2="14" y2="8" stroke="rgba(139,90,0,0.3)" strokeWidth="0.5" />
-                  <line x1="0" y1="22" x2="14" y2="22" stroke="rgba(139,90,0,0.3)" strokeWidth="0.5" />
-                  <line x1="28" y1="8" x2="42" y2="8" stroke="rgba(139,90,0,0.3)" strokeWidth="0.5" />
-                  <line x1="28" y1="22" x2="42" y2="22" stroke="rgba(139,90,0,0.3)" strokeWidth="0.5" />
-                  <rect x="14" y="5" width="14" height="20" rx="2" fill="none" stroke="rgba(139,90,0,0.35)" strokeWidth="0.8" />
-                </svg>
-              </div>
+              <CardChip width={42} />
             </div>
 
             {/* Network logo bottom-right, Names bottom-left */}
@@ -214,7 +203,7 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
                   <span style={{ 
                     fontFamily: 'var(--font-family)', 
                     fontSize: '10px', 
-                    color: 'rgba(255,255,255,0.5)',
+                    color: 'rgba(var(--card-ink), 0.5)',
                     textTransform: 'uppercase',
                     letterSpacing: '0.5px'
                   }}>
@@ -224,7 +213,7 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
                 <span style={{ 
                   fontFamily: '"Courier New", Courier, monospace', 
                   fontSize: '14px', 
-                  color: 'rgba(255,255,255,0.9)',
+                  color: 'rgba(var(--card-ink), 0.9)',
                   textTransform: 'uppercase',
                   letterSpacing: '1.5px',
                   textShadow: '0 1px 2px rgba(0,0,0,0.5)',
@@ -236,22 +225,22 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
                 {cardDetails?.network && <CardNetworkLogo network={cardDetails.network} size="md" />}
               </div>
             </div>
-          </div>
+          </CardSurface>
 
           {/* Back of Card */}
-          <div 
+          <CardSurface
+            skin={gradients}
+            face="back"
             style={{
               position: 'absolute',
               width: '100%',
               height: '100%',
               backfaceVisibility: 'hidden',
               WebkitBackfaceVisibility: 'hidden',
-              background: gradients.back,
               borderRadius: '16px',
-              border: '1px solid rgba(255,255,255,0.1)',
+              border: '1px solid rgba(var(--card-ink), 0.1)',
               boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
               transform: 'rotateY(180deg)',
-              overflow: 'hidden',
               display: 'flex',
               flexDirection: 'column'
             }}
@@ -291,7 +280,7 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
                   style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'copy', width: 'fit-content' }}
                   onClick={(e) => handleCopy(cardDetails?.cvv || '', e)}
                 >
-                  <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', fontWeight: 600 }}>CVV</span>
+                  <span style={{ fontSize: '10px', color: 'rgba(var(--card-ink), 0.6)', textTransform: 'uppercase', fontWeight: 600 }}>CVV</span>
                   <div style={{ 
                     background: 'white', 
                     height: '30px', 
@@ -318,8 +307,8 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
                   style={{ display: 'flex', flexDirection: 'column', gap: '2px', cursor: 'copy', width: 'fit-content' }}
                   onClick={(e) => handleCopy(cardDetails?.cardNumber || '', e)}
                 >
-                  <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', fontWeight: 600 }}>Card Number</span>
-                  <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '15px', color: 'white', fontWeight: 700, letterSpacing: '2px', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+                  <span style={{ fontSize: '9px', color: 'rgba(var(--card-ink), 0.5)', textTransform: 'uppercase', fontWeight: 600 }}>Card Number</span>
+                  <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '15px', color: 'rgb(var(--card-ink))', fontWeight: 700, letterSpacing: '2px', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
                     {cardDetails?.cardNumber?.match(/.{1,4}/g)?.join(' ') || '•••• •••• •••• ••••'}
                   </span>
                 </div>
@@ -328,8 +317,8 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
                   style={{ display: 'flex', flexDirection: 'column', gap: '2px', cursor: 'copy', width: 'fit-content' }}
                   onClick={(e) => handleCopy(expiryFormatted, e)}
                 >
-                  <span style={{ fontSize: '9px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', fontWeight: 600 }}>Expiry Date</span>
-                  <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '14px', color: 'white', fontWeight: 700, letterSpacing: '1px', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+                  <span style={{ fontSize: '9px', color: 'rgba(var(--card-ink), 0.5)', textTransform: 'uppercase', fontWeight: 600 }}>Expiry Date</span>
+                  <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '14px', color: 'rgb(var(--card-ink))', fontWeight: 700, letterSpacing: '1px', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
                     {expiryFormatted}
                   </span>
                 </div>
@@ -337,10 +326,10 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
             </div>
             
             {/* Tiny contact text at bottom */}
-            <div style={{ padding: '8px 20px', fontSize: '7px', color: 'rgba(255,255,255,0.3)', textAlign: 'center', lineHeight: 1.2 }}>
+            <div style={{ padding: '8px 20px', fontSize: '7px', color: 'rgba(var(--card-ink), 0.3)', textAlign: 'center', lineHeight: 1.2 }}>
               This card is non-transferable. Use of this card is subject to the terms and conditions of the issuer. Found cards should be destroyed immediately.
             </div>
-          </div>
+          </CardSurface>
         </div>
         
         {/* Helper text */}

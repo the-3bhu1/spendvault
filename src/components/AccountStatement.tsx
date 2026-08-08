@@ -5,6 +5,8 @@ import { CustomPicker } from './CustomPicker';
 import { getCategoryIcon } from './transactionIcons';
 import RollingNumber from './RollingNumber';
 import { getBillingCycleForDate, getCardGradients, formatBillingCycleRange } from '../utils';
+import { CardSurface } from './CardSurface';
+import { CardChip } from './CardChip';
 import type { Account, Transaction } from '../types';
 import { CardNetworkLogo } from './CardNetworkLogo';
 import { useFinance } from '../FinanceContext';
@@ -220,43 +222,30 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
               here is your statement<br />for {selectedMonthName.toLowerCase()}
             </h2>
 
-            <div style={{
-              marginTop: '2rem',
-              width: '340px',
-              height: '210px',
-              background: account.cardDetails
-                ? getCardGradients(themeIndex, account.cardDetails.network, account.name).front
-                : 'var(--bg-card)',
-              borderRadius: '16px',
-              perspective: '800px',
-              transform: showAllTransactions
-                ? 'rotateX(70deg) translateY(-60px) scale(0.85)'
-                : 'perspective(800px) rotateY(-4deg) rotateX(3deg) rotateZ(-1deg)',
-              boxShadow: showAllTransactions
-                ? '0 0px 10px rgba(0,0,0,0.1)'
-                : '12px 16px 0 #000000',
-              opacity: showAllTransactions ? 0 : 1,
-              border: '1px solid rgba(255,255,255,0.1)',
-              position: 'relative',
-              overflow: 'hidden',
-              transition: showAllTransactions
-                ? 'transform 0.8s cubic-bezier(0.4, 0, 1, 1), opacity 0.7s ease, box-shadow 0.6s ease'
-                : 'transform 0.8s cubic-bezier(0, 0, 0.2, 1) 0.5s, opacity 0.7s ease 0.5s, box-shadow 0.6s ease 0.5s'
-            }}>
+            <CardSurface
+              skin={account.cardDetails
+                ? getCardGradients(themeIndex, account.cardDetails.network, account.name)
+                : undefined}
+              style={{
+                marginTop: '2rem',
+                width: '340px',
+                height: '210px',
+                borderRadius: '16px',
+                perspective: '800px',
+                transform: showAllTransactions
+                  ? 'rotateX(70deg) translateY(-60px) scale(0.85)'
+                  : 'perspective(800px) rotateY(-4deg) rotateX(3deg) rotateZ(-1deg)',
+                boxShadow: showAllTransactions
+                  ? '0 0px 10px rgba(0,0,0,0.1)'
+                  : '12px 16px 0 #000000',
+                opacity: showAllTransactions ? 0 : 1,
+                border: '1px solid rgba(255,255,255,0.1)',
+                transition: showAllTransactions
+                  ? 'transform 0.8s cubic-bezier(0.4, 0, 1, 1), opacity 0.7s ease, box-shadow 0.6s ease'
+                  : 'transform 0.8s cubic-bezier(0, 0, 0.2, 1) 0.5s, opacity 0.7s ease 0.5s, box-shadow 0.6s ease 0.5s'
+              }}>
               {/* SIM Chip — always shown */}
-              <div style={{ position: 'absolute', top: '24px', left: '24px', width: '34px', height: '24px', background: 'linear-gradient(135deg, #ffd700 0%, #ca8a04 100%)', borderRadius: '3px', overflow: 'hidden' }}>
-                <svg width="34" height="24" viewBox="0 0 42 30" style={{ position: 'absolute', top: 0, left: 0 }}>
-                  <line x1="0" y1="15" x2="42" y2="15" stroke="rgba(139,90,0,0.4)" strokeWidth="0.8" />
-                  <line x1="21" y1="0" x2="21" y2="30" stroke="rgba(139,90,0,0.4)" strokeWidth="0.8" />
-                  <line x1="14" y1="0" x2="14" y2="30" stroke="rgba(139,90,0,0.3)" strokeWidth="0.5" />
-                  <line x1="28" y1="0" x2="28" y2="30" stroke="rgba(139,90,0,0.3)" strokeWidth="0.5" />
-                  <line x1="0" y1="8" x2="14" y2="8" stroke="rgba(139,90,0,0.3)" strokeWidth="0.5" />
-                  <line x1="0" y1="22" x2="14" y2="22" stroke="rgba(139,90,0,0.3)" strokeWidth="0.5" />
-                  <line x1="28" y1="8" x2="42" y2="8" stroke="rgba(139,90,0,0.3)" strokeWidth="0.5" />
-                  <line x1="28" y1="22" x2="42" y2="22" stroke="rgba(139,90,0,0.3)" strokeWidth="0.5" />
-                  <rect x="14" y="5" width="14" height="20" rx="2" fill="none" stroke="rgba(139,90,0,0.35)" strokeWidth="0.8" />
-                </svg>
-              </div>
+              <CardChip width={34} style={{ position: 'absolute', top: '24px', left: '24px' }} />
 
               {acc.cardDetails ? (
                 /* ── Real card details ── */
@@ -273,7 +262,7 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
                     <span style={{
                       fontFamily: 'var(--font-family)',
                       fontSize: '10px',
-                      color: 'rgba(255,255,255,0.5)',
+                      color: 'rgba(var(--card-ink), 0.5)',
                       textTransform: 'uppercase',
                       letterSpacing: '0.5px'
                     }}>
@@ -282,7 +271,7 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
                     <span style={{
                       fontFamily: '"Courier New", Courier, monospace',
                       fontSize: '14px',
-                      color: 'rgba(255,255,255,0.9)',
+                      color: 'rgba(var(--card-ink), 0.9)',
                       textTransform: 'uppercase',
                       letterSpacing: '1.5px',
                       textShadow: '0 1px 2px rgba(0,0,0,0.5)',
@@ -305,7 +294,7 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
                   <div style={{ position: 'absolute', top: '0', right: '0', width: '140px', height: '140px', background: 'var(--accent)', opacity: 0.03, borderRadius: '50%', transform: 'translate(30%, -30%)' }} />
                 </>
               )}
-            </div>
+            </CardSurface>
           </div>
         </div>
 

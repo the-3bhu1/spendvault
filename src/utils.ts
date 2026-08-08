@@ -411,99 +411,136 @@ export const calculateTotalSpendPerCycle = (transactions: Transaction[], account
   return { spend, payment, netPayable };
 };
 
-export const getCardGradients = (themeIndex: number, network?: CardNetwork, cardName?: string) => {
+export type CardTexture = 'weave' | 'hairline' | 'guilloche' | 'dots' | 'none';
+export type CardGeometry = 'chevron' | 'slash' | 'facet' | 'arc' | 'none';
+
+/**
+ * The *material* a card is made of — everything <CardSurface> needs to render the
+ * plastic itself. Content printed on the card (chip, network mark, names, buttons)
+ * is layered on top by the consumer and is deliberately not part of this.
+ *
+ * `texture` / `geometry` / `sheen` are the layers that give the surface depth.
+ * Every skin currently opts out of all three, so the surface renders exactly as it
+ * did before this type existed — turning them on is a pure data change here.
+ *
+ * `ink` is the one piece of knowledge that has to cross the material/content
+ * boundary: only the skin knows whether the surface is dark or light, and content
+ * needs that to pick a text color. CardSurface publishes it as `--card-ink`.
+ */
+export interface CardSkin {
+  front: string;
+  back: string;
+  texture: CardTexture;
+  geometry: CardGeometry;
+  sheen: number;          // 0–1 — opacity of the specular highlight layer
+  ink: 'light' | 'dark';
+}
+
+type CardMaterial = Partial<Pick<CardSkin, 'texture' | 'geometry' | 'sheen' | 'ink'>>;
+
+const defineSkin = (front: string, back: string, material: CardMaterial = {}): CardSkin => ({
+  front,
+  back,
+  texture: 'none',
+  geometry: 'none',
+  sheen: 0,
+  ink: 'light',
+  ...material,
+});
+
+export const getCardGradients = (themeIndex: number, network?: CardNetwork, cardName?: string): CardSkin => {
   const name = (cardName || '').toLowerCase();
 
   // Supermoney x Axis
   if (name.includes('supermoney')) {
-    return {
-      front: 'linear-gradient(135deg, #0a0f1d 0%, #151d33 50%, #0d2e2b 100%)',
-      back: 'linear-gradient(135deg, #151d33 0%, #0d2e2b 100%)'
-    };
+    return defineSkin(
+      'linear-gradient(135deg, #0a0f1d 0%, #151d33 50%, #0d2e2b 100%)',
+      'linear-gradient(135deg, #151d33 0%, #0d2e2b 100%)'
+    );
   }
 
   // Swiggy x HDFC
   if (name.includes('swiggy')) {
-    return {
-      front: 'linear-gradient(135deg, #1c092b 0%, #3b1459 55%, #fc8019 100%)',
-      back: 'linear-gradient(135deg, #3b1459 0%, #fc8019 100%)'
-    };
+    return defineSkin(
+      'linear-gradient(135deg, #1c092b 0%, #3b1459 55%, #fc8019 100%)',
+      'linear-gradient(135deg, #3b1459 0%, #fc8019 100%)'
+    );
   }
 
   // Amazon Pay ICICI
   if (name.includes('amazon')) {
-    return {
-      front: 'linear-gradient(135deg, #0d131f 0%, #1a2332 60%, #ff9900 100%)',
-      back: 'linear-gradient(135deg, #1a2332 0%, #ff9900 100%)'
-    };
+    return defineSkin(
+      'linear-gradient(135deg, #0d131f 0%, #1a2332 60%, #ff9900 100%)',
+      'linear-gradient(135deg, #1a2332 0%, #ff9900 100%)'
+    );
   }
 
   // Flipkart Axis
   if (name.includes('flipkart')) {
-    return {
-      front: 'linear-gradient(135deg, #07152b 0%, #0f2952 65%, #2874f0 100%)',
-      back: 'linear-gradient(135deg, #0f2952 0%, #2874f0 100%)'
-    };
+    return defineSkin(
+      'linear-gradient(135deg, #07152b 0%, #0f2952 65%, #2874f0 100%)',
+      'linear-gradient(135deg, #0f2952 0%, #2874f0 100%)'
+    );
   }
 
   // OneCard
   if (name.includes('onecard') || name.includes('one card')) {
-    return {
-      front: 'linear-gradient(135deg, #141414 0%, #1f1f1f 50%, #050505 100%)',
-      back: 'linear-gradient(135deg, #1f1f1f 0%, #050505 100%)'
-    };
+    return defineSkin(
+      'linear-gradient(135deg, #141414 0%, #1f1f1f 50%, #050505 100%)',
+      'linear-gradient(135deg, #1f1f1f 0%, #050505 100%)'
+    );
   }
 
   // Scapia
   if (name.includes('scapia')) {
-    return {
-      front: 'linear-gradient(135deg, #022c22 0%, #0d9488 60%, #14b8a6 100%)',
-      back: 'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)'
-    };
+    return defineSkin(
+      'linear-gradient(135deg, #022c22 0%, #0d9488 60%, #14b8a6 100%)',
+      'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)'
+    );
   }
 
   // Tata Neu HDFC
   if (name.includes('tata neu') || name.includes('neu')) {
-    return {
-      front: 'linear-gradient(135deg, #1a0026 0%, #36004d 60%, #c026d3 100%)',
-      back: 'linear-gradient(135deg, #36004d 0%, #c026d3 100%)'
-    };
+    return defineSkin(
+      'linear-gradient(135deg, #1a0026 0%, #36004d 60%, #c026d3 100%)',
+      'linear-gradient(135deg, #36004d 0%, #c026d3 100%)'
+    );
   }
 
   // SBI Cashback / SBI
   if (name.includes('sbi')) {
-    return {
-      front: 'linear-gradient(135deg, #0c2340 0%, #0284c7 65%, #38bdf8 100%)',
-      back: 'linear-gradient(135deg, #0284c7 0%, #38bdf8 100%)'
-    };
+    return defineSkin(
+      'linear-gradient(135deg, #0c2340 0%, #0284c7 65%, #38bdf8 100%)',
+      'linear-gradient(135deg, #0284c7 0%, #38bdf8 100%)'
+    );
   }
 
   // Infinia / Regalia / Millennia
   if (name.includes('infinia') || name.includes('regalia') || name.includes('millennia') || name.includes('gold')) {
-    return {
-      front: 'linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #ca8a04 100%)',
-      back: 'linear-gradient(135deg, #1e293b 0%, #ca8a04 100%)'
-    };
+    return defineSkin(
+      'linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #ca8a04 100%)',
+      'linear-gradient(135deg, #1e293b 0%, #ca8a04 100%)'
+    );
   }
 
   if (network === 'amex') {
-    return {
-      front: 'linear-gradient(135deg, #1f2937 0%, #111827 100%)',
-      back: 'linear-gradient(135deg, #111827 0%, #0f131a 100%)'
-    };
+    return defineSkin(
+      'linear-gradient(135deg, #1f2937 0%, #111827 100%)',
+      'linear-gradient(135deg, #111827 0%, #0f131a 100%)'
+    );
   }
 
-  const themes = [
-    { front: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', back: 'linear-gradient(135deg, #16213e 0%, #0f3460 100%)' }, // Blue
-    { front: 'linear-gradient(135deg, #2b0f19 0%, #3d1524 50%, #4a1528 100%)', back: 'linear-gradient(135deg, #3d1524 0%, #4a1528 100%)' }, // Burgundy
-    { front: 'linear-gradient(135deg, #0f2b26 0%, #133b34 50%, #164a41 100%)', back: 'linear-gradient(135deg, #133b34 0%, #164a41 100%)' }, // Emerald
-    { front: 'linear-gradient(135deg, #1b1338 0%, #24194a 50%, #2d205c 100%)', back: 'linear-gradient(135deg, #24194a 0%, #2d205c 100%)' }, // Indigo
-    { front: 'linear-gradient(135deg, #1f1f1f 0%, #141414 50%, #0a0a0a 100%)', back: 'linear-gradient(135deg, #141414 0%, #0a0a0a 100%)' }, // Onyx
-    { front: 'linear-gradient(135deg, #2c3e50 0%, #000000 100%)', back: 'linear-gradient(135deg, #1c2833 0%, #000000 100%)' }, // Charcoal
-    { front: 'linear-gradient(135deg, #1a2a6c 0%, #b21f1f 50%, #fdbb2d 100%)', back: 'linear-gradient(135deg, #1a2a6c 0%, #b21f1f 100%)' }, // Sunset
-    { front: 'linear-gradient(135deg, #301934 0%, #1e0d21 100%)', back: 'linear-gradient(135deg, #1e0d21 0%, #000000 100%)' }, // Deep Purple
-    { front: 'linear-gradient(135deg, #010c1e 0%, #001f3f 100%)', back: 'linear-gradient(135deg, #001f3f 0%, #000000 100%)' }, // Midnight Navy
-    { front: 'linear-gradient(135deg, #0b1e0b 0%, #1e3a1e 100%)', back: 'linear-gradient(135deg, #1e3a1e 0%, #000000 100%)' }, // Forest Green
+  const themes: CardSkin[] = [
+    defineSkin('linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', 'linear-gradient(135deg, #16213e 0%, #0f3460 100%)'), // Blue
+    defineSkin('linear-gradient(135deg, #2b0f19 0%, #3d1524 50%, #4a1528 100%)', 'linear-gradient(135deg, #3d1524 0%, #4a1528 100%)'), // Burgundy
+    defineSkin('linear-gradient(135deg, #0f2b26 0%, #133b34 50%, #164a41 100%)', 'linear-gradient(135deg, #133b34 0%, #164a41 100%)'), // Emerald
+    defineSkin('linear-gradient(135deg, #1b1338 0%, #24194a 50%, #2d205c 100%)', 'linear-gradient(135deg, #24194a 0%, #2d205c 100%)'), // Indigo
+    defineSkin('linear-gradient(135deg, #1f1f1f 0%, #141414 50%, #0a0a0a 100%)', 'linear-gradient(135deg, #141414 0%, #0a0a0a 100%)'), // Onyx
+    defineSkin('linear-gradient(135deg, #2c3e50 0%, #000000 100%)', 'linear-gradient(135deg, #1c2833 0%, #000000 100%)'), // Charcoal
+    defineSkin('linear-gradient(135deg, #1a2a6c 0%, #b21f1f 50%, #fdbb2d 100%)', 'linear-gradient(135deg, #1a2a6c 0%, #b21f1f 100%)'), // Sunset
+    defineSkin('linear-gradient(135deg, #301934 0%, #1e0d21 100%)', 'linear-gradient(135deg, #1e0d21 0%, #000000 100%)'), // Deep Purple
+    defineSkin('linear-gradient(135deg, #010c1e 0%, #001f3f 100%)', 'linear-gradient(135deg, #001f3f 0%, #000000 100%)'), // Midnight Navy
+    defineSkin('linear-gradient(135deg, #0b1e0b 0%, #1e3a1e 100%)', 'linear-gradient(135deg, #1e3a1e 0%, #000000 100%)'), // Forest Green
   ];
 
   const index = Math.abs(themeIndex) % themes.length;
