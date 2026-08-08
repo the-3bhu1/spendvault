@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { X, CornerDownRight, Share2 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { Share } from '@capacitor/share';
 import type { Account } from '../types';
 import { CardNetworkLogo } from './CardNetworkLogo';
 import { getCardGradients } from '../utils';
@@ -13,6 +15,8 @@ interface ViewCardOverlayProps {
 export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
   const [isFlipped, setIsFlipped] = useState(false);
   const context = useFinance();
+  // Guards against a double-tap / synthetic touch+click firing the share sheet twice.
+  const sharingRef = useRef(false);
 
   // Stop propagation on overlay click so it only closes when clicking outside the card
   const handleBackdropClick = () => {
@@ -35,12 +39,10 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
     ? `${String(cardDetails.expiryMonth).padStart(2, '0')}/${String(cardDetails.expiryYear).slice(-2)}`
     : 'MM/YY';
 
-  const handleCopy = (text: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(text);
-    // Simple temporary notification
+  // Simple temporary notification
+  const showToast = (message: string) => {
     const toast = document.createElement('div');
-    toast.textContent = 'Copied to clipboard';
+    toast.textContent = message;
     toast.style.position = 'fixed';
     toast.style.bottom = '20px';
     toast.style.left = '50%';
@@ -52,49 +54,77 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
     toast.style.fontSize = '12px';
     toast.style.zIndex = '10000';
     toast.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-    toast.style.animation = 'fadeOut 2s forwards';
     document.body.appendChild(toast);
-    setTimeout(() => document.body.removeChild(toast), 2000);
+    setTimeout(() => toast.remove(), 2000);
   };
 
-  const handleShareAll = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const formattedCardNumber = cardDetails?.cardNumber?.match(/.{1,4}/g)?.join(' ') || 'N/A';
-    const cardholder = cardDetails?.cardholderName || 'N/A';
-    const cardName = name || 'N/A';
-    const expiry = expiryFormatted;
-    const cvv = cardDetails?.cvv || 'N/A';
-
-    const shareText = `Card Name: ${cardName}\nCardholder Name: ${cardholder}\nCard Number: ${formattedCardNumber}\nExpiry Date: ${expiry}\nCVV: ${cvv}`;
-
-    if (navigator.share) {
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Older WebViews / insecure contexts have no async clipboard API.
       try {
-        await navigator.share({
-          title: `${cardName} Details`,
-          text: shareText,
-        });
-        return;
-      } catch (err) {
-        if ((err as Error).name === 'AbortError') return;
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        return ok;
+      } catch {
+        return false;
       }
     }
+  };
 
-    navigator.clipboard.writeText(shareText);
-    const toast = document.createElement('div');
-    toast.textContent = 'All card details copied to clipboard';
-    toast.style.position = 'fixed';
-    toast.style.bottom = '20px';
-    toast.style.left = '50%';
-    toast.style.transform = 'translateX(-50%)';
-    toast.style.background = 'rgba(20, 184, 166, 0.9)';
-    toast.style.color = 'white';
-    toast.style.padding = '8px 16px';
-    toast.style.borderRadius = '20px';
-    toast.style.fontSize = '12px';
-    toast.style.zIndex = '10000';
-    toast.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-    document.body.appendChild(toast);
-    setTimeout(() => document.body.removeChild(toast), 2000);
+  const handleCopy = (text: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    void copyToClipboard(text);
+    showToast('Copied to clipboard');
+  };
+
+  // Copies the details AND opens the OS share sheet. On native the Web Share API is unavailable in
+  // the Capacitor WebView, so we go through the Share plugin — same flow as the split image share.
+  const handleShareAll = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (sharingRef.current) return; // ignore a second tap while a share is already in flight
+    sharingRef.current = true;
+    try {
+      const formattedCardNumber = cardDetails?.cardNumber?.match(/.{1,4}/g)?.join(' ') || 'N/A';
+      const cardholder = cardDetails?.cardholderName || 'N/A';
+      const cardName = name || 'N/A';
+      const expiry = expiryFormatted;
+      const cvv = cardDetails?.cvv || 'N/A';
+
+      const shareText = `Card Name: ${cardName}\nCardholder Name: ${cardholder}\nCard Number: ${formattedCardNumber}\nExpiry Date: ${expiry}\nCVV: ${cvv}`;
+
+      // Clipboard copy always happens, regardless of whether the share sheet opens.
+      const copied = await copyToClipboard(shareText);
+      if (copied) showToast('All card details copied to clipboard');
+
+      if (Capacitor.isNativePlatform()) {
+        await Share.share({
+          title: `${cardName} Details`,
+          text: shareText,
+          dialogTitle: 'Share card details',
+        });
+      } else if (navigator.share) {
+        await navigator.share({ title: `${cardName} Details`, text: shareText });
+      } else if (!copied) {
+        showToast('Could not share or copy card details');
+      }
+    } catch (err) {
+      // User dismissed the share sheet — not a real error
+      const error = err as Error;
+      const msg = String(error?.message ?? err).toLowerCase();
+      if (error?.name === 'AbortError' || msg.includes('cancel') || msg.includes('abort')) return;
+      console.error('Share card details failed', err);
+    } finally {
+      sharingRef.current = false;
+    }
   };
 
   return (

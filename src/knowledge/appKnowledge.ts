@@ -60,8 +60,8 @@ Actions (each account is a card on the Accounts tab):
   Dashboard's Outstanding Dues list. In the statement, a cycle picker switches between past and current
   billing cycles.
 - View saved card details: the "Card" button flips the card to reveal number/expiry/CVV; tap a field to
-  copy it. A Share button on that view sends the full details (card name, cardholder, number, expiry,
-  CVV) to the OS share sheet, falling back to copying them to the clipboard.
+  copy it. A Share button on that view copies the full details (card name, cardholder, number, expiry,
+  CVV) to the clipboard AND opens the OS share sheet, so they can be sent to any app.
 - Send to Bank: rewards and e-wallet accounts have a "Send to Bank" button that transfers their full
   balance to a bank account.
 - Refresh a holding's price: stock/fund/commodity cards have a per-holding Fetch/Refresh button.
