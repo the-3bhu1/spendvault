@@ -1438,7 +1438,7 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
             <button
               className="btn btn-primary"
               style={{ marginTop: 'auto', padding: '1rem' }}
-              disabled={!amount || (logInLedger && !accountId)}
+              disabled={(parseFloat(amount) || 0) <= 0 || (logInLedger && !accountId)}
               onClick={handleAdd}
             >
               {initialTx ? 'Save Changes' : 'Log Transaction'}

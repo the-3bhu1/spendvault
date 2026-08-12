@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { format, parseISO, addDays, addMonths } from 'date-fns';
 import {
   Repeat,
@@ -23,6 +23,7 @@ import { LogTransactionForm } from './LogTransactionForm';
 import { getCategoryIcon } from './transactionIcons';
 import CustomDatePicker from './CustomDatePicker';
 import { calculateTotalSpendPerCycle, getLatestBilledCycle } from '../utils';
+import { scrollToFirstError } from '../utils/formErrors';
 
 const FREQUENCY_LABELS: Record<RecurringFrequency, string> = {
   daily: 'Daily',
@@ -43,6 +44,8 @@ export default function UpcomingBills() {
   const [selectedBill, setSelectedBill] = useState<RecurringBill | null>(null);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [editingBillId, setEditingBillId] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const billFormRef = useRef<HTMLDivElement>(null);
 
   // The category picker offers EVERY category, Mutual Funds included — a fund instalment is a
   // legitimate thing to want a due-date reminder for. What was removed is the special MF wiring:
@@ -129,15 +132,24 @@ export default function UpcomingBills() {
     });
     setAmountInput('');
     setEditingBillId(null);
+    setErrors({});
   };
 
   const handleAddBill = () => {
-    if (!newBill.name || !newBill.amount) return;
+    // Every one of these used to fail silently (or via an alert() that said nothing about which
+    // field), so "Start Tracking" looked dead. Mark the fields instead and scroll to the first.
+    const newErrors: Record<string, string> = {};
+    if (!newBill.name?.trim()) newErrors.name = 'Bill Name is required';
+    if (!newBill.amount) newErrors.amount = 'Amount must be greater than 0';
     if (newBill.frequency === 'custom' && !newBill.customDays) {
-      alert('Please specify the number of days for custom frequency.');
+      newErrors.customDays = 'Number of days is required for a custom frequency';
+    }
+    setErrors(newErrors);
+    if (Object.keys(newErrors).length > 0) {
+      scrollToFirstError(billFormRef.current);
       return;
     }
-    const trimmedBill = { ...newBill, name: newBill.name.trim() } as RecurringBill;
+    const trimmedBill = { ...newBill, name: (newBill.name || '').trim() } as RecurringBill;
     if (editingBillId) {
       updateRecurringBill({ ...trimmedBill, id: editingBillId });
     } else {
@@ -425,16 +437,20 @@ export default function UpcomingBills() {
             </button>
           }
         >
-          <div className="flex-col gap-6">
+          <div className="flex-col gap-6" ref={billFormRef}>
             <div className="input-group">
               <label>Bill Name</label>
               <input
                 type="text"
-                className="input-field"
+                className={`input-field ${errors.name ? 'border-danger' : ''}`}
                 placeholder="e.g. Rent, Netflix, Electricity"
                 value={newBill.name}
-                onChange={e => setNewBill({ ...newBill, name: e.target.value })}
+                onChange={e => {
+                  setNewBill({ ...newBill, name: e.target.value });
+                  if (errors.name) setErrors(prev => ({ ...prev, name: '' }));
+                }}
               />
+              {errors.name && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.name}</span>}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -443,7 +459,7 @@ export default function UpcomingBills() {
                 <input
                   type="text"
                   inputMode="decimal"
-                  className="input-field"
+                  className={`input-field ${errors.amount ? 'border-danger' : ''}`}
                   placeholder="0.00"
                   value={amountInput}
                   onChange={e => {
@@ -451,9 +467,11 @@ export default function UpcomingBills() {
                     if (val === '' || /^\d*\.?\d*$/.test(val)) {
                       setAmountInput(val);
                       setNewBill({ ...newBill, amount: val === '' ? 0 : (val === '.' ? 0 : parseFloat(val)) });
+                      if (errors.amount) setErrors(prev => ({ ...prev, amount: '' }));
                     }
                   }}
                 />
+                {errors.amount && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.amount}</span>}
               </div>
               <div className="input-group flex-1">
                 <label>Frequency</label>
@@ -474,11 +492,15 @@ export default function UpcomingBills() {
                 <label>Days Interval</label>
                 <input
                   type="number"
-                  className="input-field"
+                  className={`input-field ${errors.customDays ? 'border-danger' : ''}`}
                   placeholder="e.g. 28, 56, 84"
                   value={newBill.customDays || ''}
-                  onChange={e => setNewBill({ ...newBill, customDays: parseInt(e.target.value) })}
+                  onChange={e => {
+                    setNewBill({ ...newBill, customDays: parseInt(e.target.value) });
+                    if (errors.customDays) setErrors(prev => ({ ...prev, customDays: '' }));
+                  }}
                 />
+                {errors.customDays && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.customDays}</span>}
                 <p className="text-xs text-muted" style={{ marginTop: '0.5rem' }}>Bill will automatically advance by this many days after each payment.</p>
               </div>
             )}

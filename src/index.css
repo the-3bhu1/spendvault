@@ -663,9 +663,13 @@ h3 {
   border-radius: 4px;
 }
 
-.card:hover:not(.card-static) {
-  transform: translate(-2px, -2px);
-  box-shadow: var(--shadow);
+/* Gated on a real pointer, like .btn below: a tapped card stays in :hover until the next tap lands
+   elsewhere, so on a phone every card you touched sat lifted with a drop shadow behind it. */
+@media (hover: hover) {
+  .card:hover:not(.card-static) {
+    transform: translate(-2px, -2px);
+    box-shadow: var(--shadow);
+  }
 }
 
 .card:active:not(.card-static) {
@@ -1409,6 +1413,27 @@ tr:hover td {
   background-color: rgba(255, 255, 255, 0.02);
 }
 
+/* A "Current Outstanding Dues" row on the Dashboard. Same reason as .linked-entry-toggle below:
+   in CSS so the lift can be gated on a real pointer. */
+@media (hover: hover) {
+  .due-row:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* The "Linked entry" disclosure under a transaction row. Kept in CSS rather than inline JS hover
+   handlers so the hover can be gated on a real pointer — same guard as .btn and .picker-option. */
+.linked-entry-toggle {
+  background: transparent;
+  transition: background 0.2s;
+}
+
+@media (hover: hover) {
+  .linked-entry-toggle:hover {
+    background: var(--bg-hover);
+  }
+}
+
 .transaction-grid-row.is-dragging {
   background: var(--bg-hover) !important;
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
@@ -1451,8 +1476,12 @@ tr:hover td {
   touch-action: pan-y;
 }
 
-.custom-select-trigger:hover {
-  border-color: var(--text-secondary);
+/* Gated: the trigger stays behind the bottom sheet it opens, so on touch it kept a lit border for
+   as long as the sheet was up and after it closed. */
+@media (hover: hover) {
+  .custom-select-trigger:hover {
+    border-color: var(--text-secondary);
+  }
 }
 
 .custom-select-trigger.active {

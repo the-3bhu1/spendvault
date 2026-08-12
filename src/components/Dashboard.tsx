@@ -135,14 +135,15 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
            <div className="flex-col gap-3">
              {ccDues.map((due, idx) => {
                const account = data.accounts.find(a => a.name === due.accountName);
+               // Lift-on-hover lives in CSS (.due-row), gated on a real pointer. As an inline
+               // onMouseEnter/onMouseLeave pair it stuck on touch: the enter fired on tap and the
+               // leave never arrived, so the row stayed raised until the next tap elsewhere.
                return (
-                <div 
-                  key={idx} 
-                  className="flex-col" 
+                <div
+                  key={idx}
+                  className="flex-col due-row"
                   onClick={() => account && onViewStatement(account)}
                   style={{ background: 'var(--bg-color)', borderRadius: '12px', padding: '1.25rem', cursor: account ? 'pointer' : 'default', border: '1px solid var(--border-color)', transition: 'transform 0.2s ease', position: 'relative' }}
-                  onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-                  onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
                 >
                   <div className="flex justify-between align-center" style={{ marginBottom: '0.75rem' }}>
                     <div className="flex align-center gap-3">

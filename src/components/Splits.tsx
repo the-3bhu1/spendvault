@@ -8,6 +8,7 @@ import ConfirmDialog from './ConfirmDialog';
 import { useFinance } from '../FinanceContext';
 import type { SplitEvent, SplitItem } from '../types';
 import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, formatDateString } from '../utils';
+import { scrollToFirstError } from '../utils/formErrors';
 import { buildSplitShareImages, blobToBase64 } from '../services/splitImage';
 import { SubviewWrapper } from './SubviewWrapper.tsx';
 
@@ -20,6 +21,8 @@ export default function Splits() {
 
   const [newEvent, setNewEvent] = useState({ name: '', people: [] as string[] });
   const [newPerson, setNewPerson] = useState('');
+  const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
+  const createEventFormRef = useRef<HTMLDivElement>(null);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   // Suggest names seen in previous split events (and their carried-over people) as you type, so you
@@ -52,7 +55,16 @@ export default function Splits() {
   }, [data.splitEvents]);
 
   const handleCreateEvent = () => {
-    if (!newEvent.name || newEvent.people.length === 0) return;
+    // Was a bare return, and unlike the other Split forms this button isn't disabled when invalid —
+    // so pressing "Create Event" with a blank name or nobody added did nothing at all.
+    const newErrors: Record<string, string> = {};
+    if (!newEvent.name?.trim()) newErrors.eventName = 'Event Name is required';
+    if (newEvent.people.length === 0) newErrors.eventPeople = 'Add at least one person';
+    setCreateErrors(newErrors);
+    if (Object.keys(newErrors).length > 0) {
+      scrollToFirstError(createEventFormRef.current);
+      return;
+    }
 
     const event: SplitEvent = {
       id: generateId(),
@@ -63,6 +75,7 @@ export default function Splits() {
     };
     addSplitEvent(event);
     setNewEvent({ name: '', people: [] });
+    setCreateErrors({});
     setActiveView('main');
   };
 
@@ -247,23 +260,27 @@ export default function Splits() {
       {activeView === 'create_event' && (
         <SubviewWrapper 
           title="Create Split Event" 
-          onBack={() => setActiveView('main')}
+          onBack={() => { setActiveView('main'); setCreateErrors({}); }}
           footer={
             <button className="btn btn-primary w-100" style={{ padding: '0.9rem' }} onClick={handleCreateEvent}>
               Create Event
             </button>
           }
         >
-          <div className="flex-col gap-6">
+          <div className="flex-col gap-6" ref={createEventFormRef}>
             <div className="input-group" style={{ marginBottom: 0 }}>
               <label>Event Name</label>
               <input
                 type="text"
-                className="input-field"
+                className={`input-field ${createErrors.eventName ? 'border-danger' : ''}`}
                 placeholder="e.g. Goa Trip 2024"
                 value={newEvent.name}
-                onChange={e => setNewEvent({ ...newEvent, name: e.target.value })}
+                onChange={e => {
+                  setNewEvent({ ...newEvent, name: e.target.value });
+                  if (createErrors.eventName) setCreateErrors(prev => ({ ...prev, eventName: '' }));
+                }}
               />
+              {createErrors.eventName && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{createErrors.eventName}</span>}
             </div>
 
 
@@ -272,14 +289,14 @@ export default function Splits() {
               <div className="flex gap-2" style={{ marginBottom: '0.75rem' }}>
                 <input
                   type="text"
-                  className="input-field"
+                  className={`input-field ${createErrors.eventPeople ? 'border-danger' : ''}`}
                   style={{ flex: 7 }}
                   placeholder="Person name"
                   value={newPerson}
                   onChange={e => setNewPerson(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), newPerson && (setNewEvent({ ...newEvent, people: [...newEvent.people, newPerson] }), setNewPerson('')))}
+                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), newPerson && (setNewEvent({ ...newEvent, people: [...newEvent.people, newPerson] }), setNewPerson(''), setCreateErrors(prev => ({ ...prev, eventPeople: '' }))))}
                 />
-                <button className="btn btn-primary" style={{ flex: 3, padding: 0 }} onClick={() => newPerson && (setNewEvent({ ...newEvent, people: [...newEvent.people, newPerson] }), setNewPerson(''))}>
+                <button className="btn btn-primary" style={{ flex: 3, padding: 0 }} onClick={() => newPerson && (setNewEvent({ ...newEvent, people: [...newEvent.people, newPerson] }), setNewPerson(''), setCreateErrors(prev => ({ ...prev, eventPeople: '' })))}>
                   <Plus size={24} strokeWidth={3} />
                 </button>
               </div>
@@ -291,18 +308,19 @@ export default function Splits() {
                       type="button"
                       className="metric-pill clickable flex align-center gap-1"
                       style={{ padding: '0.4rem 0.7rem', cursor: 'pointer', background: 'var(--bg-hover)' }}
-                      onClick={() => { setNewEvent({ ...newEvent, people: [...newEvent.people, p] }); setNewPerson(''); }}
+                      onClick={() => { setNewEvent({ ...newEvent, people: [...newEvent.people, p] }); setNewPerson(''); setCreateErrors(prev => ({ ...prev, eventPeople: '' })); }}
                     >
                       <Plus size={12} strokeWidth={3} />{p}
                     </button>
                   ))}
                 </div>
               )}
+              {createErrors.eventPeople && <span className="text-xs text-danger" style={{ marginBottom: '0.5rem', display: 'block' }}>{createErrors.eventPeople}</span>}
               <div className="flex flex-wrap gap-2">
                 {newEvent.people.map((p, i) => (
                   <div key={i} className="metric-pill flex align-center gap-2" style={{ padding: '0.5rem 0.75rem' }}>
                     {p}
-                    <Trash2 size={14} className="clickable" onClick={() => setNewEvent({ ...newEvent, people: newEvent.people.filter((_, idx) => idx !== i) })} />
+                    <Trash2 size={14} className="clickable" onClick={() => { setNewEvent({ ...newEvent, people: [...newEvent.people].filter((_, idx) => idx !== i) }); }} />
                   </div>
                 ))}
               </div>
@@ -1182,9 +1200,13 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
                     </div>
 
                     {(() => {
-                      const isSplitValid = splitType === 'equal' 
-                        ? (includeMe || involvedPeople.length > 0) 
-                        : (sumOfShares > 0);
+                      // Must mirror handleSaveItem's own guard exactly, amount included: with only the
+                      // participant check here, a custom expense of ₹0 left the button enabled and the
+                      // save silently returned.
+                      const splitAmount = selectedTxId === 'custom' ? (parseFloat(customAmount) || 0) : (selectedTx?.amount || 0);
+                      const isSplitValid = splitAmount > 0 && (splitType === 'equal'
+                        ? (includeMe || involvedPeople.length > 0)
+                        : (sumOfShares > 0));
                       const isSumMatched = Math.abs(remainingAmount) < 0.01;
 
                       return (

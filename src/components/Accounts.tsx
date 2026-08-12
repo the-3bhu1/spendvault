@@ -11,6 +11,7 @@ import { getAccountEmoji } from './transactionIcons';
 import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardNetwork } from '../types';
 import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, calculateCycleBalanceForCycle, getBillingCycleForDate, getOrdinalSuffix } from '../utils';
+import { scrollToFirstError } from '../utils/formErrors';
 import { CardNetworkLogo } from './CardNetworkLogo';
 import { ViewCardOverlay } from './ViewCardOverlay';
 
@@ -156,6 +157,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const [travelOpeningBalanceInput, setTravelOpeningBalanceInput] = useState('');
   const [rewardOpeningBalanceInput, setRewardOpeningBalanceInput] = useState('');
   const cardDetailsRef = useRef<HTMLDivElement>(null);
+  const modalBodyRef = useRef<HTMLDivElement>(null);
 
   const [newCbRoundOff, setNewCbRoundOff] = useState(false);
   const [showCvv, setShowCvv] = useState(false);
@@ -334,7 +336,13 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   };
 
   const handleSave = () => {
-    if (!validate()) return;
+    if (!validate()) {
+      // This form is long and its required fields are spread across every section, so a failure on a
+      // field that happens to be scrolled out of view read as "Save does nothing at all" — no close,
+      // no message, no clue which field.
+      scrollToFirstError(modalBodyRef.current);
+      return;
+    }
     const month = getCurrentMonthStr();
 
     let updatedOpeningBalances = { ...(newAccount.openingBalances || {}) };
@@ -1292,7 +1300,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
               <h3>{editId ? 'Edit Account' : 'Add New Account'}</h3>
               <button onClick={() => setIsModalOpen(false)}>✕</button>
             </div>
-            <div className="modal-body">
+            <div className="modal-body" ref={modalBodyRef}>
               <div className="input-group">
                 <label>Account Name</label>
                 <input

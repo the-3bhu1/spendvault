@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import type { Account, EPFInterestRateConfig, EPFSalaryRevision, EPFBalanceAdjustment } from '../types';
 import { calculateEPFProjection, DEFAULT_EPF_INTEREST_RATES } from '../utils/epfEngine';
 import { generateId, formatCurrency } from '../utils';
+import { scrollToFirstError } from '../utils/formErrors';
 import { Plus, Trash2, Edit2 } from 'lucide-react';
 
 import { SubviewWrapper } from './SubviewWrapper';
@@ -28,6 +29,11 @@ export const EPFDetailsView: React.FC<EPFDetailsViewProps> = ({
   const [revEmpPct, setRevEmpPct] = useState('12');
   const [revEmprPct, setRevEmprPct] = useState('12');
   const [revNotes, setRevNotes] = useState('');
+  // Both inline panels below used to bail out of their save with a bare `return`, so a missing
+  // required field read as a dead button. Messages are shown against the field instead.
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const revisionFormRef = useRef<HTMLDivElement>(null);
+  const correctionFormRef = useRef<HTMLDivElement>(null);
 
   // Form states for Balance Corrections
   const [isAddingAdj, setIsAddingAdj] = useState(false);
@@ -43,7 +49,14 @@ export const EPFDetailsView: React.FC<EPFDetailsViewProps> = ({
   const projection = calculateEPFProjection(account);
 
   const handleSaveRevision = () => {
-    if (!revDate || !revBasic) return;
+    const newErrors: Record<string, string> = {};
+    if (!revDate) newErrors.revDate = 'Effective Date is required';
+    if (!revBasic) newErrors.revBasic = 'Basic Salary is required';
+    setErrors(newErrors);
+    if (Object.keys(newErrors).length > 0) {
+      scrollToFirstError(revisionFormRef.current);
+      return;
+    }
     const basicVal = parseFloat(revBasic) || 0;
     const daVal = parseFloat(revDa) || 0;
     const empPctVal = parseFloat(revEmpPct) || 12;
@@ -109,7 +122,14 @@ export const EPFDetailsView: React.FC<EPFDetailsViewProps> = ({
   };
 
   const handleSaveCorrection = () => {
-    if (!adjDate || !adjBalance) return;
+    const newErrors: Record<string, string> = {};
+    if (!adjDate) newErrors.adjDate = 'Passbook Statement Date is required';
+    if (!adjBalance) newErrors.adjBalance = 'Verified Balance is required';
+    setErrors(newErrors);
+    if (Object.keys(newErrors).length > 0) {
+      scrollToFirstError(correctionFormRef.current);
+      return;
+    }
     const balVal = parseFloat(adjBalance) || 0;
 
     const currentAdjs = account.epfBalanceAdjustments || [];
@@ -295,7 +315,7 @@ export const EPFDetailsView: React.FC<EPFDetailsViewProps> = ({
 
             {/* Add / Edit Revision Form */}
             {isAddingRevision && (
-              <div style={{ background: 'var(--bg-secondary)', padding: '1rem', borderRadius: '10px', border: '1px solid var(--accent)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div ref={revisionFormRef} style={{ background: 'var(--bg-secondary)', padding: '1rem', borderRadius: '10px', border: '1px solid var(--accent)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <h4 style={{ margin: 0, fontSize: '0.85rem', color: 'var(--accent)' }}>{editingRevId ? 'Edit Salary Revision' : 'Add New Salary Revision'}</h4>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -304,10 +324,14 @@ export const EPFDetailsView: React.FC<EPFDetailsViewProps> = ({
                     <input
                       type="date"
                       value={revDate}
-                      onChange={e => setRevDate(e.target.value)}
-                      className="input"
+                      onChange={e => {
+                        setRevDate(e.target.value);
+                        if (errors.revDate) setErrors(prev => ({ ...prev, revDate: '' }));
+                      }}
+                      className={`input ${errors.revDate ? 'border-danger' : ''}`}
                       style={{ width: '100%', padding: '0.4rem' }}
                     />
+                    {errors.revDate && <span className="text-xs text-danger" style={{ marginTop: '0.2rem', display: 'block' }}>{errors.revDate}</span>}
                   </div>
 
                   <div>
@@ -316,10 +340,14 @@ export const EPFDetailsView: React.FC<EPFDetailsViewProps> = ({
                       type="number"
                       placeholder="e.g. 50000"
                       value={revBasic}
-                      onChange={e => setRevBasic(e.target.value)}
-                      className="input"
+                      onChange={e => {
+                        setRevBasic(e.target.value);
+                        if (errors.revBasic) setErrors(prev => ({ ...prev, revBasic: '' }));
+                      }}
+                      className={`input ${errors.revBasic ? 'border-danger' : ''}`}
                       style={{ width: '100%', padding: '0.4rem' }}
                     />
+                    {errors.revBasic && <span className="text-xs text-danger" style={{ marginTop: '0.2rem', display: 'block' }}>{errors.revBasic}</span>}
                   </div>
 
                   <div>
@@ -408,7 +436,7 @@ export const EPFDetailsView: React.FC<EPFDetailsViewProps> = ({
             </div>
 
             {isAddingAdj && (
-              <div style={{ background: 'var(--bg-secondary)', padding: '1rem', borderRadius: '10px', border: '1px solid var(--accent)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div ref={correctionFormRef} style={{ background: 'var(--bg-secondary)', padding: '1rem', borderRadius: '10px', border: '1px solid var(--accent)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <h4 style={{ margin: 0, fontSize: '0.85rem', color: 'var(--accent)' }}>Record Passbook Balance Correction</h4>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
@@ -417,10 +445,14 @@ export const EPFDetailsView: React.FC<EPFDetailsViewProps> = ({
                     <input
                       type="date"
                       value={adjDate}
-                      onChange={e => setAdjDate(e.target.value)}
-                      className="input"
+                      onChange={e => {
+                        setAdjDate(e.target.value);
+                        if (errors.adjDate) setErrors(prev => ({ ...prev, adjDate: '' }));
+                      }}
+                      className={`input ${errors.adjDate ? 'border-danger' : ''}`}
                       style={{ width: '100%', padding: '0.4rem' }}
                     />
+                    {errors.adjDate && <span className="text-xs text-danger" style={{ marginTop: '0.2rem', display: 'block' }}>{errors.adjDate}</span>}
                   </div>
 
                   <div>
@@ -429,10 +461,14 @@ export const EPFDetailsView: React.FC<EPFDetailsViewProps> = ({
                       type="number"
                       placeholder="e.g. 520000"
                       value={adjBalance}
-                      onChange={e => setAdjBalance(e.target.value)}
-                      className="input"
+                      onChange={e => {
+                        setAdjBalance(e.target.value);
+                        if (errors.adjBalance) setErrors(prev => ({ ...prev, adjBalance: '' }));
+                      }}
+                      className={`input ${errors.adjBalance ? 'border-danger' : ''}`}
                       style={{ width: '100%', padding: '0.4rem' }}
                     />
+                    {errors.adjBalance && <span className="text-xs text-danger" style={{ marginTop: '0.2rem', display: 'block' }}>{errors.adjBalance}</span>}
                   </div>
                 </div>
 
