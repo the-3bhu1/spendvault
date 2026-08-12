@@ -134,6 +134,11 @@ a bill, a recharge) as long as a reward account can fund it. Investments are the
   Tapping that redemption opens the spend it belongs to, with the split panel in view — the amount
   redeemed is edited there, next to the full price. Deleting it un-splits instead: the payment stays
   and the primary account absorbs the reward portion.
+- A redemption is NOT a charge on the card. It never appears on the card's statement, in its
+  outstanding balance, or in its billed/unbilled dues — those count only what the credit line actually
+  lent. So a ₹448 purchase paid with ₹362 of credit and ₹86 worth of points shows ₹362 on the
+  statement, and the points balance drops instead. The redemption is visible in the ledger, as the
+  linked entry under the spend.
 - Reward points are always tracked in the account's own unit, while the ledger, spending totals and
   Insights charts count the RUPEE value of what the points paid for. So a ₹448 purchase split with 430
   Jewels still shows as ₹448 of spending, and the Jewels balance drops by 430.

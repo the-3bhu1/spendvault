@@ -4,7 +4,7 @@ import { CreditCard, Calendar, ChevronLeft } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import { getCategoryIcon } from './transactionIcons';
 import RollingNumber from './RollingNumber';
-import { getBillingCycleForDate, getCardGradients, formatBillingCycleRange } from '../utils';
+import { getBillingCycleForDate, getCardGradients, formatBillingCycleRange, affectsRupeeBalance } from '../utils';
 import { CardSurface } from './CardSurface';
 import { CardChip } from './CardChip';
 import type { Account, Transaction } from '../types';
@@ -63,14 +63,19 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
     }
     return getBillingCycleForDate(tx.date, statementDay);
   };
-  // This is only ever opened for credit_card accounts (see Accounts.tsx's onViewStatement
-  // gating), so every transaction on this accountId is a real posting on the card — no
-  // category should be excluded from the due calculation. Matches calculateCycleBalanceForCycle
-  // (utils.ts), which Accounts.tsx's "Total Balance" uses and which has no category filter either.
-  // A prior version excluded 'transfer'/'ncmc travel recharge'/'mutual funds' (borrowed from a
-  // spend-analytics pattern meant for dashboards), which silently dropped real balance-affecting
-  // transactions like a bank-reversed CC payment logged as a Transfer.
-  const relevantAccountTransactions = transactions.filter(t => t.accountId === acc.id);
+  // This is only ever opened for credit_card accounts (see Accounts.tsx's onViewStatement gating), so
+  // no CATEGORY is excluded from the due calculation — a prior version dropped
+  // 'transfer'/'ncmc travel recharge'/'mutual funds' (borrowed from a spend-analytics pattern meant for
+  // dashboards), which silently lost real balance-affecting postings like a bank-reversed CC payment
+  // logged as a Transfer.
+  //
+  // What IS excluded is a leg that never posted to the credit line at all. A points redemption draws on
+  // the card's reward wallet, so it belongs on neither side of a statement: it inflated the Statement
+  // Amount to the full purchase price and listed a row for money the card never lent. Same rule, same
+  // predicate as calculateCycleBalanceForCycle (utils.ts), which backs the "Total Balance" in Accounts —
+  // the two must agree or the statement contradicts the card. Redemptions are a reward-wallet ledger
+  // and want their own surface, not a line in the card's bill.
+  const relevantAccountTransactions = transactions.filter(t => t.accountId === acc.id && affectsRupeeBalance(t));
   const cycleOptions = Array.from(new Set([
     currentCycle,
     ...relevantAccountTransactions.map(getTransactionCycle)
