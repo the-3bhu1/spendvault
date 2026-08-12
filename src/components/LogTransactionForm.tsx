@@ -53,8 +53,16 @@ const buildInputStrings = (tx: Partial<Transaction>) => ({
   rewardEarned: (tx.rewardEarned === 0 || tx.rewardEarned === undefined) ? '' : tx.rewardEarned.toString(),
   rewardUsed: (tx.rewardUsed === 0 || tx.rewardUsed === undefined) ? '' : tx.rewardUsed.toString(),
   excludedAmount: (tx.excludedAmount === 0 || tx.excludedAmount === undefined) ? '' : tx.excludedAmount.toString(),
+  // Counted against the amount the primary account actually pays, not the full price — the same base
+  // the passive inputs use (see selfFundedAmount). `amount` here is the FULL price on a reopened split
+  // (openEditModal adds the reward back), so without the subtraction a fully passive ₹448 purchase
+  // split with ₹86 read "active share 86" while being entirely excluded.
   activeShare: (tx.excludeFromStats && tx.amount !== undefined)
-    ? (() => { const s = Math.max(0, (tx.amount || 0) - (tx.excludedAmount || 0)); return s === 0 ? '' : parseFloat(s.toFixed(2)).toString(); })()
+    ? (() => {
+        const base = Math.max(0, (tx.amount || 0) - (tx.type === 'debit' ? (tx.rewardUsed || 0) : 0));
+        const s = Math.max(0, base - (tx.excludedAmount || 0));
+        return s === 0 ? '' : parseFloat(s.toFixed(2)).toString();
+      })()
     : '',
   allottedAmount: (tx.allottedAmount === 0 || tx.allottedAmount === undefined) ? '' : tx.allottedAmount.toString(),
   investmentCharges: (tx.investmentCharges === 0 || tx.investmentCharges === undefined) ? '' : tx.investmentCharges.toString(),
@@ -159,6 +167,16 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       && !!tx.rewardUsedAccountId;
     if (isPlainSplitAnchor) {
       sanitizedTx.amount = (tx.amount || 0) + (tx.rewardUsed || 0);
+    }
+
+    // Rows logged before the passive controls accounted for a split can hold an exclusion LARGER than
+    // the amount they store — the toggle measured against the pre-split total, so a ₹448 purchase split
+    // with ₹86 saved excludedAmount 448 beside a stored amount of 362. The tightened check in validate()
+    // would refuse to re-save such a row untouched, so heal it on open instead. `tx.amount` is by
+    // definition the self-funded figure, and clamping to it preserves the behaviour these rows already
+    // had: excludedAmount >= amount still reads as fully passive.
+    if (sanitizedTx.excludeFromStats && (sanitizedTx.excludedAmount || 0) > (tx.amount || 0)) {
+      sanitizedTx.excludedAmount = tx.amount || 0;
     }
 
     const isRewardChild = linkedTxs.some(p => p.rewardUsedAccountId && p.rewardUsedAccountId === tx.accountId);
@@ -477,8 +495,12 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     if (activeInvestmentKind === 'commodity' && !newTx.numberOfShares) {
       newErrors.numberOfShares = 'Grams is required';
     }
-    if (newTx.excludeFromStats && (newTx.excludedAmount || 0) > (newTx.amount || 0)) {
-      newErrors.excludedAmount = 'Cannot exclude more than total amount';
+    // Compared against what the row will store, not the full price — see selfFundedAmount. The message
+    // names the figure, since with a split active it is not the number in the Amount field.
+    if (newTx.excludeFromStats && (newTx.excludedAmount || 0) > passiveCeiling + 0.001) {
+      newErrors.excludedAmount = passiveCeiling < (Number(newTx.amount) || 0)
+        ? `Cannot exclude more than ${formatCurrency(passiveCeiling)} paid from this account`
+        : 'Cannot exclude more than total amount';
     }
     if (newTx.rewardEarnedType === 'instant' && (Number(newTx.rewardEarned) || 0) > 0 && !newTx.rewardEarnedAccountId) {
       newErrors.rewardEarnedAccountId = 'Deposit account is required for instant cashback';
@@ -870,7 +892,11 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       linkedTransactionIds: currentLinkedIds,
       cashbackLevelId: selectedCashbackLevelId,
       excludeFromStats: hidesPassiveToggleFinal ? false : newTx.excludeFromStats,
-      excludedAmount: (!hidesPassiveToggleFinal && newTx.excludeFromStats) ? newTx.excludedAmount : undefined,
+      // Clamped to what is actually stored: a stale exclusion (e.g. the split was raised after the
+      // passive amount was set) must never exceed the amount, or the row reads as fully passive.
+      excludedAmount: (!hidesPassiveToggleFinal && newTx.excludeFromStats)
+        ? Math.min(newTx.excludedAmount ?? mainAccountAmount, mainAccountAmount)
+        : undefined,
       paymentSourceAccountId: paymentSourceAccountId,
       allottedAmount: isInvestment ? allottedAmount : undefined,
       investmentCharges: isInvestment ? investmentCharges : undefined,
@@ -1006,6 +1032,21 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   const rewardInputToRupees = (n: number) =>
     activeRewardUnit === 'points' ? rewardPointsToRupees(n, rewardSourceAcc) : n;
 
+  // What this row will actually STORE — the Amount field means the full price, but a reward split
+  // leaves the primary account paying only the remainder (mirrors mainAccountAmount in handleSave).
+  //
+  // This is the ceiling for a passive exclusion. The passive controls used to work off the full price,
+  // so on a ₹448 purchase split with ₹86 of rewards, marking it passive wrote excludedAmount 448 next
+  // to a stored amount of 362 — an exclusion larger than the thing it excludes. Marking it FULLY
+  // passive still behaved correctly (isFullyPassive tests `excludedAmount >= amount`), but a partial
+  // exclusion was measured against a total this row never held, and the "Cannot exclude more than
+  // total amount" check compared against the pre-split figure so it couldn't catch it. Excluded plus
+  // active now always sum to what the row records.
+  const selfFundedAmount = (total: number) => newTx.type === 'debit'
+    ? Math.max(0, total - (showRewardSplit ? (Number(newTx.rewardUsed) || 0) : 0))
+    : total;
+  const passiveCeiling = selfFundedAmount(Number(newTx.amount) || 0);
+
   return (
   <div className="modal-overlay">
     <div className="modal-content">
@@ -1100,12 +1141,12 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                     // Excluded amount is authoritative; refresh the derived active-share field
                     // so it stays consistent when the total changes.
                     activeShare: newTx.excludeFromStats
-                      ? (() => { const share = Math.max(0, finalAmount - (newTx.excludedAmount || 0)); return share === 0 ? '' : parseFloat(share.toFixed(2)).toString(); })()
+                      ? (() => { const share = Math.max(0, selfFundedAmount(finalAmount) - (newTx.excludedAmount || 0)); return share === 0 ? '' : parseFloat(share.toFixed(2)).toString(); })()
                       : s.activeShare
                   }));
 
                   if (errors.amount) setErrors(prev => ({ ...prev, amount: '' }));
-                  if (errors.excludedAmount && finalAmount >= (newTx.excludedAmount || 0)) {
+                  if (errors.excludedAmount && selfFundedAmount(finalAmount) >= (newTx.excludedAmount || 0)) {
                     setErrors(prev => ({ ...prev, excludedAmount: '' }));
                   }
                 }
@@ -2097,7 +2138,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                 style={{ padding: '0.4rem 0.8rem', borderRadius: '8px', fontSize: '0.75rem' }}
                 onClick={() => {
                   const isExpanding = !newTx.excludeFromStats;
-                  const amountToExclude = isExpanding ? (newTx.amount || 0) : undefined;
+                  // The row's own figure, not the full price — see selfFundedAmount.
+                  const amountToExclude = isExpanding ? passiveCeiling : undefined;
                   const updatedTx = {
                     ...newTx,
                     excludeFromStats: isExpanding,
@@ -2164,8 +2206,9 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                         if (val === '' || /^\d*\.?\d*$/.test(val)) {
                           const numVal = parseFloat(val);
                           const share = val === '' ? undefined : (isNaN(numVal) ? 0 : numVal);
-                          // Active share typed → back out the excluded amount (clamped to the total).
-                          const excluded = Math.max(0, (newTx.amount || 0) - (share || 0));
+                          // Active share typed → back out the excluded amount, against what this row
+                          // stores rather than the full price, so excluded + active always reconcile.
+                          const excluded = Math.max(0, passiveCeiling - (share || 0));
                           setInputStrings(prev => ({
                             ...prev,
                             activeShare: val,
