@@ -183,6 +183,11 @@ A card has a statement day and a due day.
 - Billed = the most recently generated statement (what's due). Unbilled = the cycle in progress.
 - Due day: shown for reference (when payment is due); it does not lock anything.
 - Rounding rule (round/floor/ceil/none) can be applied to the billed amount.
+- Which statement a credit lands on: only a CC PAYMENT gets to choose. Logging one shows "Apply
+  Payment To" — Previous Statement (reduce already-billed dues) or Current Open Cycle (an early
+  payment against the cycle in progress). Every OTHER credit on a card — a merchant refund, a
+  reversal, a cashback credit — simply falls in the cycle its own date belongs to, exactly like a
+  spend does. So a refund dated the 12th appears on the statement covering the 12th.
 The Dashboard shows billed, unbilled, and total dues per card.
 
 # Cashback / Rewards & Offers

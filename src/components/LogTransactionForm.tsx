@@ -578,7 +578,18 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     }
 
     const account = data.accounts.find(a => a.id === newTx.accountId);
-    const ccPaymentAppliedCycle = account?.type === 'credit_card' && newTx.type === 'credit'
+    const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
+    // Only a CC PAYMENT chooses which statement it lands on. That is the one flow where the
+    // "Apply Payment To" picker is rendered, and the only one where "reduce already billed dues" is a
+    // meaningful thing to ask. Every OTHER credit on a card — a merchant refund, a reversal, a
+    // cashback credit — belongs to the cycle its own date falls in, exactly like a debit does.
+    //
+    // This used to fire for EVERY card credit while the picker rendered only for CC Payment, so those
+    // credits silently inherited the picker's default of 'previous_statement' with no UI ever shown and
+    // no way to change it: a 569 refund dated 12 Aug was filed against the JULY statement and vanished
+    // from the August one it belonged to. Leaving it undefined makes every consumer fall back to
+    // getBillingCycleForDate, which is what the debit side has always done.
+    const ccPaymentAppliedCycle = isCCPayment && account?.type === 'credit_card' && newTx.type === 'credit'
       ? resolveCcPaymentCycle(newTx.date as string, account.statementDay)
       : undefined;
 
@@ -594,7 +605,6 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     // Linked counterpart (child leg) creation. Edit/delete sync behavior is documented in
     // docs/LINKED_TRANSACTIONS.md — keep that matrix accurate when changing this block.
     const isTransfer = newTx.category?.toLowerCase() === 'transfer';
-    const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
     const hidesPassiveToggleFinal = ['transfer', 'cc payment', 'ncmc travel recharge', 'lending & borrowing'].includes((newTx.category || '').toLowerCase());
     const investmentKind = activeInvestmentKind;
     const isMf = investmentKind === 'mutual_funds';
