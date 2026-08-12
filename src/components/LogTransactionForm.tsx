@@ -812,6 +812,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
           case 'weekly': nextDate.setDate(currentDate.getDate() + 7); break;
           case 'monthly': nextDate.setMonth(currentDate.getMonth() + 1); break;
           case 'quarterly': nextDate.setMonth(currentDate.getMonth() + 3); break;
+          case 'half_yearly': nextDate.setMonth(currentDate.getMonth() + 6); break;
           case 'yearly': nextDate.setFullYear(currentDate.getFullYear() + 1); break;
           case 'custom': nextDate.setDate(currentDate.getDate() + (bill.customDays || 30)); break;
         }
