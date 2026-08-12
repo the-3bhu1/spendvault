@@ -113,6 +113,25 @@ deleting one keeps the legs in sync / removes them together. By category:
     in-progress split.
   - The split panel and "Apply Payment To" cycle picker appear as soon as the category is CC Payment —
     you don't have to pick the paying account first.
+
+"Split with Rewards?" is NOT limited to CC Payments — it appears on ANY ordinary debit (a purchase,
+a bill, a recharge) as long as a reward account can fund it. Investments are the only exclusion.
+- On an ordinary purchase the split is a PAIR of entries, not three: the chosen account is debited for
+  the part you actually paid, and a second leg debits the reward account for the rest. The Amount field
+  always means the FULL price — the panel shows the derived "Primary Account Debit" underneath, and
+  reopening the entry shows the full price again, not the reduced figure.
+- Unit toggle (₹ | PTS): when the reward source is a card's own points wallet, the "Rewards Used" field
+  can be typed in either unit and a "= ..." line underneath shows the converted value. Typing 430 in
+  PTS mode and typing 86 in ₹ mode are the same redemption when the rate is 5 Jewels = ₹1 — pick
+  whichever the issuer's app showed you. A rupee-denominated rewards wallet has nothing to convert, so
+  it shows no toggle. The conversion rate is set per account (Accounts → edit the card → reward unit
+  and conversion rate).
+- Redeeming more than the wallet holds is refused on save, and the message names what IS available in
+  that account's own unit (e.g. "Only 432 Jewels available"). Editing an existing split can always be
+  re-saved or lowered — its own already-recorded redemption counts as available.
+- Reward points are always tracked in the account's own unit, while the ledger, spending totals and
+  Insights charts count the RUPEE value of what the points paid for. So a ₹448 purchase split with 430
+  Jewels still shows as ₹448 of spending, and the Jewels balance drops by 430.
 - Investments: logging an investment purchase. Credits the investment account with the
   holdings/units/grams and debits the paying bank account for the cost (+ charges). Legacy categories
   ("Mutual Funds", "Stocks", "Commodity", "SIP") are consolidated under "Investments".
@@ -202,6 +221,10 @@ can NOT be linked to a mutual fund account, and logging it does NOT auto-credit 
 Mutual Funds bill behaves like any other bill; its LOG button opens the normal investment form where
 the user chooses the funding account and the fund account themselves. Holdings and returns are
 tracked in Wealth, not here.
+A bill's LOG button opens the SAME form as "Log Transaction" on the Ledger, so everything available
+there is available here — tags, instant cashback, Split with Rewards, investment fields, NCMC travel,
+the passive-log toggle. The only differences are deliberate: logging from a bill also advances that
+bill's next due date and marks the entry recurring, and SMS auto-fill is a Ledger-only entry point.
 
 # Wealth
 The top-level screen showing everything the user owns. It opens on a summary total ("<Name>'s Wealth")

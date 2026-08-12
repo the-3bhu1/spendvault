@@ -18,6 +18,7 @@ import {
   isStatsExcludedCategory,
   isCountableTransaction,
   getInvestmentAccountStats,
+  isPointsDenominated,
 } from '../utils';
 import { format, parseISO, addMonths, subMonths } from 'date-fns';
 import { calculateEPFProjection } from '../utils/epfEngine';
@@ -127,6 +128,16 @@ function buildSummary(data: FinanceData): string {
     const isReward = a.type === 'rewards';
     const bal = calculateBalance(a, data.transactions, currentMonth, false, isReward, data.cashbackStatements);
     let line = `  - ${a.name} [${a.type}]: ${isReward ? `${bal} ${a.rewardUnit || 'pts'}` : formatCurrency(bal)}`;
+    // A card with its own points programme (Jupiter's Jewels, Amex MR, Edge Miles) carries a SECOND
+    // balance denominated in points, on top of its rupee outstanding — same shape as the NCMC travel
+    // purse below. `isReward` only catches standalone rewards ACCOUNTS, so without this a card's
+    // points are invisible to the assistant and "how many Jewels do I have" gets an honest but wrong
+    // "I can't see that". Points became a first-class spending unit once reward splits opened up to
+    // ordinary purchases, so this is now a question users actually ask.
+    if (!isReward && isPointsDenominated(a)) {
+      const pts = calculateBalance(a, data.transactions, currentMonth, false, true, data.cashbackStatements);
+      line += ` (+ ${pts} ${a.rewardUnit || 'points'} available, ${a.pointsConversionRate || 1} ${a.rewardUnit || 'points'} = ₹1)`;
+    }
     if (a.type === 'epf') {
       const proj = calculateEPFProjection(a, currentMonth);
       line += ` (Monthly Credit: ${formatCurrency(proj.totalContribution)}, Accrued Interest FY: ${formatCurrency(proj.accruedInterest)}, 1-Yr Projection: ${formatCurrency(proj.projectedOneYearBalance)})`;
