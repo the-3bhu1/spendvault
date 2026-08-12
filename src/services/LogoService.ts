@@ -414,6 +414,9 @@ export async function cacheLogoImage(url: string): Promise<void> {
 
     imgCache[key] = dataUrl;
     persistImgCache();
+    // The bytes are in hand, so measure the artwork's shape now rather than making the avatar fetch
+    // them again for it. Fire-and-forget: it resolves into the shape cache and is read on next mount.
+    void ensureLogoShape(url);
     // No notifyLogosUpdated() here: the image is already on screen from the remote URL, and
     // swapping its src to the freshly-cached data URL would only cause a needless reload/flicker.
     // The cache is consumed on the NEXT mount, where getCachedLogo() serves it from the start.
@@ -422,6 +425,241 @@ export async function cacheLogoImage(url: string): Promise<void> {
   } finally {
     imgInFlight.delete(key);
   }
+}
+
+// --- Logo shape analysis (the white-ring fix) -------------------------------------------
+// Brand logo sources arrive in two incompatible shapes, and an avatar has to render both inside the
+// same circle:
+//
+//   1. FULL-BLEED icons — the mark already sits on its own opaque square (Uber's black tile, CRED,
+//      Amazon Pay, Groww). These should fill the circle edge to edge and be clipped round.
+//   2. MARKS ON TRANSPARENCY — a logo centred in a transparent canvas with generous padding. Every
+//      logo.dev PNG is one, and so is every small Google favicon: measured, tcs.com / nmdc.co.in /
+//      bmrc.co.in come back 16x16 with a 14x14 opaque box, i.e. ~23% of the image is empty.
+//
+// LogoAvatar used to paint one opaque white circle behind both classes, which is correct for (1) —
+// the white is never seen — but for (2) that padding exposes the plate as a white ANNULUS between
+// the mark and the clip edge. Which class you got varied per mount (the avatar tries the logo.dev
+// URL first and falls back to the favicon on error, and the byte-cache changes what wins next
+// time), so the same logo would ring, then not, then ring again. Hence "sometimes".
+//
+// Neither `cover` nor `contain` fixes both: `cover` leaves the ring on (2), `contain` makes (1)
+// float as a square inside a white circle. The distinction isn't knowable from the URL — only from
+// the pixels — so measure them once per source and record two things:
+//
+//   - `plate`: the artwork's OWN outer-edge colour rather than a hardcoded white. A full-bleed icon
+//     then has a plate matching the pixels that meet the clip edge, so neither leftover padding nor
+//     the antialiased boundary of the border-radius can read as a foreign-coloured rim. This is what
+//     handles the near-misses: flipkart.com is 128x128 with a 124x126 opaque box (a 2px transparent
+//     border) and ajio.com's edge is semi-transparent (alpha ~210), both of which showed a hairline
+//     against white and now blend into their own colour.
+//   - `box`: the opaque bounding box, recorded ONLY when the padding is substantial. LogoAvatar
+//     zooms that box up to fill the circle, so a 16x16 favicon with 23% padding presents at the same
+//     optical size as a full-bleed one. Deliberately not applied to the near-misses above — zooming
+//     a 4%-padded square would crop its own corners for no gain.
+//
+// Reading pixels needs the bytes, and canvas taints on a cross-origin <img> — Google's favicon host
+// sends no CORS header, and requesting it with crossOrigin="anonymous" would fail the load outright
+// and lose the logo. So the analysis runs off the base64 copy the byte-cache already fetches (a
+// data: URL is same-origin, so getImageData works), which on device goes through CapacitorHttp and
+// bypasses CORS entirely. Where that fetch can't succeed there is no shape, and the avatar renders
+// exactly as it did before — no regression, just no improvement.
+
+export interface LogoShape {
+  /** Colour to paint behind the image: the artwork's own edge colour, white if its border is bare. */
+  plate: string;
+  /** Opaque bounds in natural pixels, present only when the artwork needs zooming to fill. `r` is the
+   *  distance from the box's centre to the farthest inked pixel — the radius the circle must clear. */
+  box: { nw: number; nh: number; x: number; y: number; w: number; h: number; r: number } | null;
+}
+
+const LOGO_SHAPE_CACHE_KEY = 'logo_shape_cache';
+// Padding below this is a rounding artifact, not design space — a couple of pixels that the plate
+// already hides. Not worth a transform.
+const SHAPE_TRIM_MIN_PAD = 0.03;
+// A pixel counts as "solid" for edge-colour sampling at this alpha. Antialiased boundary pixels sit
+// below it and are excluded, so a soft edge is sampled from the colour behind it, not from its own
+// blend with nothing.
+const SHAPE_SOLID_ALPHA = 200;
+// Alpha above which a pixel is part of the mark at all, for bounding-box purposes.
+const SHAPE_VISIBLE_ALPHA = 8;
+
+// null is a real, cacheable answer: "measured, and there is nothing worth recording". undefined
+// means not yet measured, which is what makes the avatar kick off an analysis.
+let shapeCache: Record<string, LogoShape | null> = (() => {
+  try {
+    const raw = localStorage.getItem(LOGO_SHAPE_CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+})();
+const shapeInFlight = new Map<string, Promise<LogoShape | null>>();
+
+function persistShapeCache(): void {
+  try {
+    localStorage.setItem(LOGO_SHAPE_CACHE_KEY, JSON.stringify(shapeCache));
+  } catch {
+    try { shapeCache = {}; localStorage.removeItem(LOGO_SHAPE_CACHE_KEY); } catch { /* ignore */ }
+  }
+}
+
+/** Measured shape for a logo source, `null` if measured and unremarkable, `undefined` if unmeasured.
+ *  Synchronous, so a source measured in an earlier session renders correctly on its FIRST paint. */
+export function getLogoShape(url: string): LogoShape | null | undefined {
+  if (!url) return null;
+  return shapeCache[imgCacheKey(url)];
+}
+
+function measure(img: HTMLImageElement): LogoShape | null {
+  const nw = img.naturalWidth, nh = img.naturalHeight;
+  if (!nw || !nh) return null;
+  // Analyse at most 128px a side: a favicon is smaller anyway, and a 256px logo.dev PNG measures
+  // identically at half resolution while scanning a quarter of the pixels.
+  const scale = Math.min(1, 128 / Math.max(nw, nh));
+  const w = Math.max(1, Math.round(nw * scale)), h = Math.max(1, Math.round(nh * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0, w, h);
+  const { data } = ctx.getImageData(0, 0, w, h);
+  const at = (x: number, y: number) => (y * w + x) * 4;
+
+  // Opaque bounding box.
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (data[at(x, y) + 3] > SHAPE_VISIBLE_ALPHA) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;   // fully transparent image — nothing to measure
+
+  const boxW = maxX - minX + 1, boxH = maxY - minY + 1;
+
+  // Sample the artwork's colour ALONG THE CIRCLE WHERE THE CLIP EDGE WILL LAND, rather than along the
+  // canvas edge or the bounding box. That matters because these sources turn out not to be square
+  // tiles at all: measured, most are round or heavily-rounded icons drawn to the full canvas — AJIO,
+  // Groww, Flipkart and Uber's favicon are all essentially circles, with only 2%-52% of their
+  // bounding box's perimeter inked. Sampling any rectangle therefore reads mostly empty corner and
+  // reports "no background" for artwork that plainly has one.
+  //
+  // Taking the sample on the seam itself makes the match correct by construction: whatever pixels
+  // meet the rounded clip edge are exactly the pixels the plate has to agree with. Drawn at 94% of
+  // the radius, just inside the boundary, so an antialiased outer edge doesn't dilute it.
+  let r = 0, g = 0, b = 0, wsum = 0, seen = 0;
+  const seamR = 0.94 * Math.min(w, h) / 2, mx = w / 2, my = h / 2;
+  for (let i = 0; i < 180; i++) {
+    const t = (i / 180) * Math.PI * 2;
+    const x = Math.round(mx + Math.cos(t) * seamR), y = Math.round(my + Math.sin(t) * seamR);
+    if (x < 0 || y < 0 || x >= w || y >= h) continue;
+    seen++;
+    const p = at(x, y), a = data[p + 3];
+    if (a < SHAPE_SOLID_ALPHA) continue;
+    const k = a / 255;
+    r += data[p] * k; g += data[p + 1] * k; b += data[p + 2] * k; wsum += k;
+  }
+
+  const pad = 1 - Math.max(boxW / w, boxH / h);
+  const hex = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+
+  // A solid seam means the artwork carries its own background right up to the clip edge — a tile or a
+  // full-canvas round icon. Plate = that colour, and the artwork renders edge to edge exactly as
+  // before. What changes is that the seam is now invisible: a rounded corner, a couple of pixels of
+  // leftover transparent margin, and the antialiased boundary of the border-radius all blend into the
+  // brand's own colour instead of flashing white. That last one is why the ring came and went while
+  // scrolling — the boundary's coverage shifts with the row's sub-pixel offset.
+  if (wsum / Math.max(1, seen) > 0.6 && pad < SHAPE_TRIM_MIN_PAD) {
+    return { plate: `#${hex(r / wsum)}${hex(g / wsum)}${hex(b / wsum)}`, box: null };
+  }
+
+  // Otherwise the mark floats on transparency (a logo glyph in a 16px favicon, a logo.dev wordmark).
+  // No background exists to borrow, so the plate stays white — brand marks are drawn for light
+  // backgrounds, and falling through to the card colour would sink a dark mark into the dark theme.
+  // White is not a rim here, because the mark gets zoomed to fill the circle below.
+  if (pad < SHAPE_TRIM_MIN_PAD) return { plate: '#ffffff', box: null };
+
+  // How far the ink actually reaches from the box's centre. The box's own diagonal would be the
+  // conservative answer, but it assumes ink in the corners: for the round or roughly-round marks most
+  // brands use, measuring the real extent lets the artwork grow until it touches the circle instead
+  // of stopping at an imaginary square, which is the difference between a logo that fills its avatar
+  // and one marooned in white. Nothing is ever clipped either way.
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  let r2 = 0;
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      if (data[at(x, y) + 3] <= SHAPE_VISIBLE_ALPHA) continue;
+      const d = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+      if (d > r2) r2 = d;
+    }
+  }
+  // Back to natural pixels: the analysis was downscaled, but the avatar scales the full-size image.
+  return {
+    plate: '#ffffff',
+    box: {
+      nw, nh,
+      x: minX / scale, y: minY / scale, w: boxW / scale, h: boxH / scale,
+      r: Math.sqrt(r2) / scale
+    }
+  };
+}
+
+/** Measure a logo source's shape, from the cached bytes when present or by fetching them. Resolves
+ *  to the shape (`null` when unremarkable or unmeasurable) and memoises the answer. */
+export async function ensureLogoShape(url: string): Promise<LogoShape | null> {
+  if (!url) return null;
+  const key = imgCacheKey(url);
+  if (key in shapeCache) return shapeCache[key];
+  const pending = shapeInFlight.get(key);
+  if (pending) return pending;
+
+  const run = (async (): Promise<LogoShape | null> => {
+    try {
+      let dataUrl = url.startsWith('data:') ? url : imgCache[key];
+      if (!dataUrl) {
+        // Not cached yet (or caching is impossible here) — fetch the bytes for the analysis only.
+        // cacheLogoImage persists them separately; this deliberately doesn't, to keep the byte
+        // cache's size accounting and validation in one place.
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        if (!blob.type.startsWith('image/')) return null;
+        dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(blob);
+        });
+      }
+      if (!dataUrl.startsWith('data:image/')) return null;
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error('decode failed'));
+        el.src = dataUrl as string;
+      });
+      const shape = measure(img);
+      // An SVG decodes with no intrinsic size in some engines; measure() returns null and we cache
+      // that, which simply leaves the avatar on its previous behaviour for that source.
+      shapeCache[key] = shape;
+      // Every production caller measures a remote URL, whose key is a few dozen bytes. A data: URL
+      // would key the entry by its entire base64 payload, so keep those in memory only rather than
+      // writing a megabyte of key into localStorage.
+      if (!key.startsWith('data:')) persistShapeCache();
+      return shape;
+    } catch {
+      // Offline, CORS-blocked, or a decode failure. Deliberately NOT cached as null: the next
+      // successful load should get another go at measuring.
+      return null;
+    } finally {
+      shapeInFlight.delete(key);
+    }
+  })();
+  shapeInFlight.set(key, run);
+  return run;
 }
 
 // Stocks key off the (stable) ticker; MFs off the scheme name.
