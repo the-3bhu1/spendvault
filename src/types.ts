@@ -263,7 +263,7 @@ export interface SplitEvent {
   currentCycleId?: string;   // ID of the currently active cycle
 }
 
-export type RecurringFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'custom';
+export type RecurringFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'half_yearly' | 'yearly' | 'custom';
 
 export interface DebtTransaction {
   id: string;

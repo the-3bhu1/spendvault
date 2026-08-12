@@ -29,6 +29,7 @@ const FREQUENCY_LABELS: Record<RecurringFrequency, string> = {
   weekly: 'Weekly',
   monthly: 'Monthly',
   quarterly: 'Quarterly',
+  half_yearly: 'Half-Yearly',
   yearly: 'Yearly',
   custom: 'Custom Days'
 };
@@ -71,6 +72,7 @@ export default function UpcomingBills() {
       case 'weekly': updatedDate = addDays(nextDate, 7); break;
       case 'monthly': updatedDate = addMonths(nextDate, 1); break;
       case 'quarterly': updatedDate = addMonths(nextDate, 3); break;
+      case 'half_yearly': updatedDate = addMonths(nextDate, 6); break;
       case 'yearly': updatedDate = addMonths(nextDate, 12); break;
       case 'custom': updatedDate = addDays(nextDate, bill.customDays || 1); break;
       default: updatedDate = addMonths(nextDate, 1);
@@ -92,6 +94,12 @@ export default function UpcomingBills() {
     isActive: true,
     type: 'debit'
   });
+
+  // Mirrors the amount as raw text so a trailing "." or "0" typed by the user isn't stripped by
+  // the numeric round-trip on every render (which would block entering decimals like "349.50") —
+  // same approach as the amount field in the Ledger transaction modal.
+  const toInputStr = (n?: number) => (n === 0 || n === undefined) ? '' : n.toString();
+  const [amountInput, setAmountInput] = useState('');
 
   const getDaysRemaining = (dateStr: string) => {
     const today = new Date();
@@ -119,6 +127,7 @@ export default function UpcomingBills() {
       isActive: true,
       type: 'debit'
     });
+    setAmountInput('');
     setEditingBillId(null);
   };
 
@@ -285,6 +294,7 @@ export default function UpcomingBills() {
                             style={{ width: '36px', height: '36px', minHeight: 'auto', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
                             onClick={() => {
                               setNewBill({ ...bill });
+                              setAmountInput(toInputStr(bill.amount));
                               setEditingBillId(bill.id);
                               setActiveView('add');
                             }}
@@ -435,10 +445,11 @@ export default function UpcomingBills() {
                   inputMode="decimal"
                   className="input-field"
                   placeholder="0.00"
-                  value={newBill.amount || ''}
+                  value={amountInput}
                   onChange={e => {
                     const val = e.target.value;
                     if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                      setAmountInput(val);
                       setNewBill({ ...newBill, amount: val === '' ? 0 : (val === '.' ? 0 : parseFloat(val)) });
                     }
                   }}

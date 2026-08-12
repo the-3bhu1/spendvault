@@ -193,7 +193,7 @@ only the account balance moves.
 
 # Bills
 Recurring bills — rent, utilities, subscriptions, credit card statements — with an amount, frequency
-(daily/weekly/monthly/quarterly/yearly/custom), and a next due date. Each bill offers LOG (create a
+(daily/weekly/monthly/quarterly/half-yearly/yearly/custom), and a next due date. Each bill offers LOG (create a
 new transaction and advance the due date), LINK (attach an existing transaction instead), or PAID
 (mark paid). Credit card statement dues appear here automatically from each card's due day.
 Any category can be picked for a bill, INCLUDING Mutual Funds — so a fund instalment can still be
