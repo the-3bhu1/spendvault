@@ -1223,6 +1223,14 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
               // Hide archived (deleted) accounts, but keep the one already on this transaction
               // so editing historical data doesn't blank the field (sorted to the end).
               if (acc.archived && acc.id !== newTx.accountId) return false;
+              // Whatever account the transaction is actually ON always stays selectable, even when
+              // the rules below wouldn't have offered it. Generalises the archived case above for
+              // the same reason: a picker holding a value that matches no option silently renders
+              // its placeholder, so a populated field reads as unset. That's what made the reward
+              // leg of a CC-Payment split show "Select an account" — the leg is a CC Payment DEBIT
+              // sitting on a `rewards` account, which the CC-Payment rule below narrows away to
+              // bank/e-wallet only. The account was never actually lost, just unrenderable.
+              if (acc.id === newTx.accountId) return true;
               if (isCCPayment) {
                 return newTx.type === 'debit' ? (acc.type === 'bank_account' || acc.type === 'e_wallet') : acc.type === 'credit_card';
               }

@@ -1075,8 +1075,34 @@ export default function Transactions() {
 
                                     const uncollapsedInGroup = group.filter(other => !collapsedTxIds.has(other.id));
                                     if (uncollapsedInGroup.length > 1) {
-                                      const debitParent = uncollapsedInGroup.find(other => other.type === 'debit');
-                                      const creditParent = uncollapsedInGroup.find(other => other.type === 'credit');
+                                      // A reward-redemption leg is never the parent row: it is derived
+                                      // from the anchor's `rewardUsed` and means nothing on its own.
+                                      // In a 2-leg split on an ordinary purchase BOTH entries are
+                                      // debits on the same date, so the plain `find(type === 'debit')`
+                                      // below just picked whichever sorted FIRST — letting display
+                                      // order decide which row means what. Real data: the ₹86 "Rewards
+                                      // applied to: Mobile Recharge(Maa)" leg carried order 3 against
+                                      // its ₹362 anchor's order 4, so the leg rendered as the parent
+                                      // and the actual purchase collapsed underneath it.
+                                      //
+                                      // Detected via the anchor's own fields, not `isRewardTransaction`
+                                      // — that flag is only set when the reward source is
+                                      // points-denominated, so a rupee wallet (CRED coins) leaves it
+                                      // false. The `p.id !== o.id` guard is load-bearing: a card
+                                      // redeeming its OWN points has leg.accountId === anchor.accountId,
+                                      // so without it the anchor would flag itself.
+                                      const isRewardLeg = (o: Transaction) => uncollapsedInGroup.some(p =>
+                                        p.id !== o.id
+                                        && !!p.rewardUsedAccountId
+                                        && p.rewardUsedAccountId === o.accountId
+                                        && (p.rewardUsed || 0) > 0
+                                      );
+                                      const eligible = uncollapsedInGroup.filter(other => !isRewardLeg(other));
+                                      // Never leave the group headless: if every member looks like a
+                                      // reward leg, fall back to the whole group rather than render nothing.
+                                      const pool = eligible.length ? eligible : uncollapsedInGroup;
+                                      const debitParent = pool.find(other => other.type === 'debit');
+                                      const creditParent = pool.find(other => other.type === 'credit');
                                       // Groups whose CREDIT leg is the one worth showing as the parent
                                       // row. Every investment qualifies: the holding account receiving
                                       // the units/shares/grams is the point of the entry, and the bank
@@ -1087,7 +1113,7 @@ export default function Transactions() {
                                         creditCategories.includes(other.category?.toLowerCase() ?? '')
                                         || isInvestmentCategory(other.category)
                                       );
-                                      const parent = isCreditParentGroup ? (creditParent || uncollapsedInGroup[0]) : (debitParent || uncollapsedInGroup[0]);
+                                      const parent = isCreditParentGroup ? (creditParent || pool[0]) : (debitParent || pool[0]);
                                       const counterpartsList = uncollapsedInGroup.filter(other => other.id !== parent.id);
 
                                       counterpartsList.forEach(cp => {
