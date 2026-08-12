@@ -85,7 +85,10 @@ Actions (Transactions tab):
     type alongside other categories leaves those other categories' transactions untouched.
 - Exclude from stats: this control appears in the editor only after you enable Settings → Smart
   Features → Passive Logs. You can exclude a transaction fully, or a partial amount; Dashboard and
-  Insights then skip that amount.
+  Insights then skip that amount. The two boxes (Excluded Amount / Active Share) always add up to what
+  the entry charges the chosen account — so on a reward split that is the primary-account portion, not
+  the full price: a ₹448 purchase paid with ₹86 of rewards can exclude at most ₹362, because ₹362 is
+  what the account paid.
 - Tag: in the editor, type a #tag. There are two tag types:
   - **Active tags** (shown by default in the tag picker dropdown) — for recurring tags like #food or #worktrip.
   - **Event / One-off tags** (hidden from the dropdown by default, but searchable when typing) — for

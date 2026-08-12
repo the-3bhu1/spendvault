@@ -58,12 +58,17 @@ export default function Cashback() {
     const isDelayed = tx.rewardEarnedType === 'delayed' || (!tx.rewardEarnedType && (tx.expectedCashback || 0) > 0);
 
     if (isDelayed && tx.type === 'debit' && tx.category !== 'Transfer' && tx.category !== 'CC Payment' && tx.category !== 'NCMC Travel Recharge' && !tx.isTravelTransaction) {
-      let expected = tx.rewardEarned || tx.expectedCashback || 0;
-      if (expected === 0 && account) {
-        const rate = account.defaultCashbackRate || 0;
-        expected = (tx.amount * rate) / 100;
-        if (account.roundOffCashback) expected = Math.floor(expected);
-      }
+      // The expectation is whatever the editor computed and stored — never re-derived here. handleSave
+      // applies the chosen Cashback Mode's rate (a named level, or the card default) and deliberately
+      // computes ZERO when no mode is chosen, so a 0 here means "this spend earns nothing", not
+      // "nobody worked it out yet".
+      //
+      // This used to fall back to the card's defaultCashbackRate whenever expected was 0, which
+      // manufactured an estimate the editor had explicitly declined: a ₹362 recharge on a 5% card
+      // showed 18 Jewels pending while its own Cashback Mode read "None". The fallback never did serve
+      // the legacy rows it was written for either — those qualify through the `!rewardEarnedType &&
+      // expectedCashback > 0` clause above, so expected is already non-zero for them.
+      const expected = tx.rewardEarned || tx.expectedCashback || 0;
 
       if (expected > 0) {
         statements[tx.id] = {
