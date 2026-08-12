@@ -19,6 +19,7 @@ import {
   isCountableTransaction,
   getInvestmentAccountStats,
   isPointsDenominated,
+  affectsRupeeBalance,
 } from '../utils';
 import { format, parseISO, addMonths, subMonths } from 'date-fns';
 import { calculateEPFProjection } from '../utils/epfEngine';
@@ -163,6 +164,9 @@ function buildSummary(data: FinanceData): string {
       let billed = 0, unbilled = 0;
       data.transactions.forEach(t => {
         if (t.accountId !== cc.id) return;
+        // Mirrors the Dashboard: a points redemption isn't a charge on the credit line, so quoting it
+        // as part of the dues would overstate them (and disagree with the card balance).
+        if (!affectsRupeeBalance(t)) return;
         const cyc = t.appliedBillingCycleYearMonth || getBillingCycleForDate(t.date, statementDay);
         if (cyc === unbilledCycle) unbilled += t.type === 'debit' ? t.amount : -t.amount;
         else if (cyc === billedCycle) billed += t.type === 'debit' ? t.amount : -t.amount;

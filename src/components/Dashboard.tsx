@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useFinance } from '../FinanceContext';
-import { getCurrentMonthStr, formatCurrency, getOrdinalSuffix, getBillingCycleForDate, getLatestBilledCycle, isStatsExcludedCategory, CATEGORY_PALETTE, ACCOUNT_PALETTE, getDistinctChartColors } from '../utils';
+import { getCurrentMonthStr, formatCurrency, getOrdinalSuffix, getBillingCycleForDate, getLatestBilledCycle, isStatsExcludedCategory, CATEGORY_PALETTE, ACCOUNT_PALETTE, getDistinctChartColors, affectsRupeeBalance } from '../utils';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import RollingNumber from './RollingNumber';
 import type { Account } from '../types';
@@ -45,9 +45,11 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
       let unbilled = 0;
       
       data.transactions.forEach(t => {
-        if (t.accountId === cc.id) {
+        // A points redemption draws on the reward wallet, not the credit line, so it is not part of
+        // what's due. Skipping it here keeps these dues equal to the card balance shown in Accounts.
+        if (t.accountId === cc.id && affectsRupeeBalance(t)) {
           const txCycle = t.appliedBillingCycleYearMonth || getBillingCycleForDate(t.date, statementDay);
-          
+
           if (txCycle === unbilledCycle) {
             unbilled += t.type === 'debit' ? t.amount : -t.amount;
           } else if (txCycle === billedCycle) {

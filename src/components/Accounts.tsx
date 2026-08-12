@@ -10,7 +10,7 @@ import CustomDatePicker from './CustomDatePicker';
 import { getAccountEmoji } from './transactionIcons';
 import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardNetwork } from '../types';
-import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, calculateCycleBalanceForCycle, getBillingCycleForDate, getOrdinalSuffix } from '../utils';
+import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, calculateCycleBalanceForCycle, getBillingCycleForDate, getOrdinalSuffix, affectsRupeeBalance } from '../utils';
 import { scrollToFirstError } from '../utils/formErrors';
 import { CardNetworkLogo } from './CardNetworkLogo';
 import { ViewCardOverlay } from './ViewCardOverlay';
@@ -372,13 +372,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
         const currentMonthTransactions = data.transactions.filter(t => {
           if (t.accountId !== editId) return false;
           const tMonth = t.date.slice(0, 7);
-          return tMonth === month && !t.isTravelTransaction && !t.isRewardTransaction;
+          return tMonth === month && affectsRupeeBalance(t);
         });
         const standardChange = currentMonthTransactions.reduce((acc, t) => {
-          let effectiveAmount = t.amount;
-          if (t.type === 'debit' && t.rewardUsed && t.rewardUsed > 0 && t.rewardUsedAccountId) {
-            effectiveAmount = t.amount - t.rewardUsed;
-          }
+          // Already net of any reward split — see the same note in calculateBalance. This block mirrors
+          // it so a re-entered opening balance derives the same figure the account displays.
+          const effectiveAmount = t.amount;
           if (originalAcc.type === 'credit_card') {
             return t.type === 'debit' ? acc + effectiveAmount : acc - effectiveAmount;
           } else {

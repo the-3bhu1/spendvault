@@ -260,6 +260,10 @@ export const calculateCycleBalanceForCycle = (
       if (t.type === 'credit' && t.appliedBillingCycleYearMonth) {
         return t.appliedBillingCycleYearMonth === cycle;
       }
+      // A points redemption isn't a charge on the card's credit line, so it must not enter the
+      // statement cycle. Without this a card redeeming its own points counted the redemption leg as a
+      // second debit alongside the reduced purchase, and reported the FULL price as outstanding.
+      if (!affectsRupeeBalance(t)) return false;
       return getBillingCycleForDate(t.date, statementDay) === cycle;
     })
     .reduce((sum, t) => sum + (t.type === 'debit' ? t.amount : -t.amount), 0);
@@ -310,6 +314,19 @@ export const rewardPointsToRupees = (points: number, account?: Account) =>
 /** Rupee value -> the points it costs. ₹86 at 5/₹1 -> 430 Jewels. */
 export const rupeesToRewardPoints = (rupees: number, account?: Account) =>
   Math.round((rupees * rewardPointsRate(account)) * 100) / 100;
+
+// Does this transaction move the account's own RUPEE balance? An account can carry up to three
+// separate balances — its money, an NCMC travel purse, and a reward-points wallet — and a leg belongs
+// to exactly one. A redemption leg in particular is NOT a rupee charge: it draws on points, which is
+// why it's counted (at the conversion rate) by the isRewardPoints branch of calculateBalance instead.
+//
+// This exists because that rule was previously spelled out inline in some sums and simply missing from
+// others, which was invisible until reward splits opened up beyond CC Payments. A card redeeming its
+// OWN points then puts both legs on the same account, and every sum that forgot the rule started
+// counting the redemption as a second charge: a ₹448 purchase paid with ₹362 of credit and ₹86 of
+// Jewels reported ₹448 of card outstanding. One predicate, so a new sum can't quietly omit it.
+export const affectsRupeeBalance = (t: Transaction) =>
+  !t.isTravelTransaction && !t.isRewardTransaction;
 
 export const calculateBalance = (
   account: Account,
@@ -389,16 +406,17 @@ export const calculateBalance = (
       if (isTravel) {
         return !!t.isTravelTransaction;
       }
-      return !t.isTravelTransaction && !t.isRewardTransaction;
+      return affectsRupeeBalance(t);
     });
 
     change = relevantTransactions.reduce((acc, t) => {
-      let effectiveAmount = t.amount;
-
-      // For standard split expenses, the primary account only pays the out-of-pocket amount
-      if (t.type === 'debit' && t.rewardUsed && t.rewardUsed > 0 && t.rewardUsedAccountId) {
-        effectiveAmount = t.amount - t.rewardUsed;
-      }
+      // `amount` is already the out-of-pocket figure on a split anchor: handleSave stores
+      // `total − rewardUsed` for a debit (see docs/LINKED_TRANSACTIONS.md), and the redemption is a
+      // separate leg. Subtracting rewardUsed again here took it off twice — a ₹448 purchase split with
+      // ₹60 of rewards stored ₹388 and reported only ₹328 spent, leaving the funding account ₹60 richer
+      // than it is. Unreachable while splits were CC-Payment-only: that anchor is the card CREDIT, and
+      // the guard was on debits.
+      const effectiveAmount = t.amount;
 
       if (account.type === 'credit_card') {
         // Credit card logic: debit means spending (adds to balance), credit means payment (reduces balance)
