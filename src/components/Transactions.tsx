@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account, InvestmentKind } from '../types';
@@ -8,6 +8,26 @@ import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
 import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, getInvestmentKindIcon } from './transactionIcons';
 import { LogTransactionForm } from './LogTransactionForm';
+
+// The anchor a reward-redemption leg belongs to, or null if `tx` isn't one. A leg carries no editable
+// identity of its own — its amount IS the anchor's `rewardUsed`, its account IS the anchor's
+// `rewardUsedAccountId`, and description/category/date are derived and propagated down — so tapping
+// one has to edit the anchor instead. Matched on the anchor's own fields rather than
+// `isRewardTransaction`, which is only set when the reward source is points-denominated (a rupee
+// wallet like CRED coins leaves it false). The `p.id !== tx.id` guard is load-bearing: a card
+// redeeming its OWN points has leg.accountId === anchor.accountId, so without it the anchor, whose
+// linkedTransactionIds point back at the leg, would resolve to itself.
+function rewardSplitAnchorOf(tx: Transaction, transactions: Transaction[]): Transaction | null {
+  const linkedIds = tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []);
+  if (!linkedIds.length) return null;
+  return transactions.find(p =>
+    p.id !== tx.id
+    && linkedIds.includes(p.id)
+    && !!p.rewardUsedAccountId
+    && p.rewardUsedAccountId === tx.accountId
+    && (p.rewardUsed || 0) > 0
+  ) || null;
+}
 
 
 function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, blockLen, counterparts }: {
@@ -331,6 +351,19 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                 ? 'Hide linked entry'
                 : (() => {
                     const cats = counterparts!.map(c => c.tx.category.toLowerCase());
+                    // A hidden reward redemption outranks the category-derived wording below: it's
+                    // the one leg the category can't hint at, and "Paid from funding account" was
+                    // actively misleading for a 3-leg split, describing only the bank leg while a
+                    // rewards leg sat hidden beside it. Reward splits never coexist with the
+                    // investment / transfer / NCMC groups below, so checking first costs nothing.
+                    const hidesRewardLeg = (tx.rewardUsed || 0) > 0
+                      && !!tx.rewardUsedAccountId
+                      && counterparts!.some(c => c.tx.accountId === tx.rewardUsedAccountId);
+                    if (hidesRewardLeg) {
+                      return cats.includes('cc payment')
+                        ? 'Paid from funding account + rewards'
+                        : 'Part-paid with rewards';
+                    }
                     // Investment legs all share one category, so the wording comes from the leg's kind.
                     const invKinds = counterparts!.filter(c => isInvestmentCategory(c.tx.category)).map(c => c.tx.investmentKind);
                     if (invKinds.includes('mutual_funds')) return 'Mutual fund auto-debited from bank';
@@ -339,8 +372,9 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                     if (invKinds.length > 0) return 'Investment auto-logged from funding account';
                     if (cats.includes('transfer')) return 'Transfer entry on destination account';
                     // The grouping below always parents a CC Payment pair on the card's credit leg
-                    // (creditParent || uncollapsedInGroup[0], and the credit leg is always present) —
-                    // so the hidden counterpart here is always the funding/debit side, never the card.
+                    // (creditParent || pool[0], and the credit leg is always present) — so the hidden
+                    // counterpart here is always the funding/debit side, never the card. A reward leg
+                    // among them is handled above.
                     if (cats.includes('cc payment')) return 'Paid from funding account';
                     if (cats.includes('ncmc travel recharge')) return 'Travel wallet top-up entry';
                     return 'Linked entry';
@@ -507,21 +541,40 @@ export default function Transactions() {
 
 
 
+  // Set when a tap on a reward leg was redirected to its anchor, so the form can scroll to the split.
+  const [focusSplitOnOpen, setFocusSplitOnOpen] = useState(false);
+
   const openAddModal = () => {
     setEditId(null);
     setModalPrefill(undefined);
     setModalPaySrc('');
+    setFocusSplitOnOpen(false);
     setIsModalOpen(true);
   };
 
+  // A reward-redemption leg has no editable identity of its own: its amount IS the anchor's
+  // `rewardUsed`, its account IS the anchor's `rewardUsedAccountId`, and its description, category
+  // and date are all derived and propagated down. Every control in an editor for it would therefore
+  // be a no-op, a restatement, or a back-door into the anchor — which is what the reconstruct-then-
+  // strip machinery in updateTransaction exists to paper over. So tapping one edits the ANCHOR, where
+  // the redemption sits next to the total it came out of ("₹448 total, ₹86 rewards, ₹362 from the
+  // card") — a relationship the leg can't show alone. Deleting the leg is untouched and still
+  // un-splits the payment.
+  //
+  // Deliberately NOT applied to the bank leg of a 3-leg split: that one is real money leaving a real
+  // account, is independently meaningful, and keeps its Option-B rebalance (docs/LINKED_TRANSACTIONS).
   // The form reconstructs the whole edit context (split anchor, counterpart account, billing-cycle
   // target) from the id, so opening only has to say which transaction.
-  const openEditModal = (tx: Transaction) => {
-    setEditId(tx.id);
+  const openEditModal = useCallback((tx: Transaction) => {
+    const anchor = rewardSplitAnchorOf(tx, data.transactions);
+    setEditId((anchor || tx).id);
     setModalPrefill(undefined);
     setModalPaySrc('');
+    // The anchor carries rewardUsed > 0, so the form already opens with the split panel expanded;
+    // this only asks it to scroll there, so the redemption is what you land on.
+    setFocusSplitOnOpen(!!anchor);
     setIsModalOpen(true);
-  };
+  }, [data.transactions]);
 
   const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>({
     [format(new Date(), 'yyyy-MM')]: true
@@ -583,7 +636,9 @@ export default function Transactions() {
       window.removeEventListener('tour-open-edit', handleTourEdit);
       window.removeEventListener('tour-close-edit', handleTourCloseEdit);
     };
-  }, [filteredTransactions]);
+    // openEditModal is a dependency now that it resolves a reward leg's anchor out of
+    // data.transactions — it is no longer just a setter call, so it can go stale.
+  }, [filteredTransactions, openEditModal]);
 
   // The investment-kind picker only shows while an investment category is being filtered on, so a
   // stale kind must still count as active — otherwise switching category away from Investments would
@@ -1211,6 +1266,7 @@ export default function Transactions() {
           editId={transferPrefill ? null : editId}
           initialData={transferPrefill ?? modalPrefill}
           initialPaymentSourceAccountId={pendingTransfer ? pendingTransfer.fromAccountId : modalPaySrc}
+          focusSplit={focusSplitOnOpen}
           sms={{ processing: processingSms, onDiscard: () => removeFromSmsQueue(0) }}
           onClose={() => {
             setIsModalOpen(false);

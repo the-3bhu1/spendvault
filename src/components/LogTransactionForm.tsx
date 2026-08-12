@@ -27,6 +27,9 @@ export interface LogTransactionFormProps {
   initialData?: Partial<Transaction>;
   /** Preselects the counterpart ("auto-debit/auto-credit") account. */
   initialPaymentSourceAccountId?: string;
+  /** Scroll to the reward-split panel once seeded. Set when a tap on a reward leg was redirected
+   *  here, to its anchor — the redemption is what the user meant to reach. */
+  focusSplit?: boolean;
   /** Ledger-only SMS queue integration. Omitted (Bills) means the form never touches the queue. */
   sms?: { processing: boolean; onDiscard: () => void };
   onSuccess?: () => void;
@@ -63,6 +66,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   editId = null,
   initialData,
   initialPaymentSourceAccountId = '',
+  focusSplit = false,
   sms,
   onSuccess
 }) => {
@@ -220,6 +224,16 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     setPaymentSourceAccountId(initialPaymentSourceAccountId || initialData?.paymentSourceAccountId || '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Land on the split panel when a reward-leg tap was redirected to this anchor. Deferred a frame
+  // past seeding: the panel only exists once `showRewardSplit` is true, which the seed above sets.
+  useEffect(() => {
+    if (!focusSplit) return;
+    const t = window.setTimeout(() => {
+      rewardSplitRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [focusSplit]);
 
   const resolveCcPaymentCycle = (date: string, statementDay?: number) => {
     const safeStatementDay = statementDay || 1;

@@ -56,7 +56,7 @@ reconstruct `paymentSourceAccountId` — they reciprocate via the reverse cashba
 | Link type | Edit parent → child | Edit child → parent | Delete (either side) |
 |---|---|---|---|
 | **Instant Cashback** | ✅ | ✅ child amount → parent `rewardEarned` (+ account) | ✅ deleting child resets parent `rewardEarned`; deleting parent removes child |
-| **Reward Split** (CC-Payment, 3-leg) | ✅ (card = anchor; bank leg absorbs) | ✅ **Option B** — edit reward or bank leg; card credit stays fixed, the other funding leg rebalances | ✅ delete **reward leg** → payment kept, un-split to fully bank-funded (bank = card total, split cleared). Delete **bank leg** or **card** → whole payment removed |
+| **Reward Split** (CC-Payment, 3-leg) | ✅ (card = anchor; bank leg absorbs) | ✅ **Option B** — bank leg is editable and rebalances the reward leg; the reward leg has **no editor of its own** (tapping it opens the anchor) | ✅ delete **reward leg** → payment kept, un-split to fully bank-funded (bank = card total, split cleared). Delete **bank leg** or **card** → whole payment removed |
 | **Transfer** | ✅ | ✅ 1:1 amount + date + account + description | ✅ deletes both legs |
 | **CC Payment** | ✅ (incl. reward-split bank portion) | ✅ | ✅ deletes both legs |
 | **Mutual Funds** | ✅ | ✅ allotted/charges/shares/amount/description | ✅ deletes both legs |
@@ -105,6 +105,25 @@ reconstruct `paymentSourceAccountId` — they reciprocate via the reverse cashba
   both directions produce an identical star (card = hub), so edit reconstruction
   (`openEditModal`) and the Option-B rebalance below always see `card.amount` as the total.
   Without it, Debit POV would anchor on the bank leg (partial ₹148) and corrupt the rebalance.
+- **The reward leg is never a parent row, and has no editor of its own.** Two consequences of it
+  being purely derived (amount = anchor's `rewardUsed`, account = anchor's `rewardUsedAccountId`,
+  description/category/date propagated down):
+  1. **Ledger grouping** must not choose it as the group's parent row. Parent selection used to be
+     `find(type === 'debit')`, which is ambiguous for a 2-leg split where both entries are debits on
+     the same date — it resolved to whichever sorted first, so a leg with a lower `order` headed the
+     group and the actual purchase collapsed underneath it. Reward legs are now filtered out of the
+     candidate pool before the credit/debit preference is applied.
+  2. **Tapping it opens the anchor** (`rewardSplitAnchorOf` in `Transactions.tsx`), scrolled to the
+     split panel, where the redemption sits beside the total it came out of. An editor on the leg
+     itself could only offer no-ops, restatements, or back-doors into the anchor — and it was the
+     source of a real bug: as a CC-Payment DEBIT on a `rewards` account it fell outside the
+     CC-Payment account filter, so its populated Account picker rendered as "Select an account".
+     The **bank leg keeps its editor** — that one is real money leaving a real account.
+  Both tests key off the anchor's own fields, NOT `isRewardTransaction`, which is only set when the
+  reward source is points-denominated (a rupee wallet like CRED coins leaves it false). Both need the
+  `p.id !== tx.id` guard: a card redeeming its OWN points has `leg.accountId === anchor.accountId`.
+  `updateTransaction`'s reverse-propagation branch for reward-leg edits is deliberately left in
+  place — unreachable from the UI now, but it is the safety net for any other caller.
 - **Reward-split amount semantics (Option B):** the **card credit (`parent.amount`) is the
   fixed anchor** — it's a real fact (you paid the card that amount), so the two funding legs
   must always sum to it. Editing the **reward leg** rebalances the **bank leg**

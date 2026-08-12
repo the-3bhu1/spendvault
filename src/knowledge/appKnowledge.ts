@@ -129,6 +129,11 @@ a bill, a recharge) as long as a reward account can fund it. Investments are the
 - Redeeming more than the wallet holds is refused on save, and the message names what IS available in
   that account's own unit (e.g. "Only 432 Jewels available"). Editing an existing split can always be
   re-saved or lowered — its own already-recorded redemption counts as available.
+- In the ledger the SPEND is the row you see, with the reward redemption collapsed under it as a
+  linked entry ("Part-paid with rewards", or "Paid from funding account + rewards" on a CC Payment).
+  Tapping that redemption opens the spend it belongs to, with the split panel in view — the amount
+  redeemed is edited there, next to the full price. Deleting it un-splits instead: the payment stays
+  and the primary account absorbs the reward portion.
 - Reward points are always tracked in the account's own unit, while the ledger, spending totals and
   Insights charts count the RUPEE value of what the points paid for. So a ₹448 purchase split with 430
   Jewels still shows as ₹448 of spending, and the Jewels balance drops by 430.
