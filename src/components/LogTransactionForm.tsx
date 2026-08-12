@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, InvestmentKind } from '../types';
-import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind } from '../utils';
-import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown } from 'lucide-react';
+import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints } from '../utils';
+import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, getInvestmentKindIcon, sortByAccountType } from './transactionIcons';
@@ -31,6 +31,10 @@ export interface LogTransactionFormProps {
   sms?: { processing: boolean; onDiscard: () => void };
   onSuccess?: () => void;
 }
+
+// The unit toggle and the remove button sit side by side in the split panel's header, so their
+// height comes from one place — eyeballed padding on each drifted by a pixel or two.
+const SPLIT_CONTROL_HEIGHT = '28px';
 
 const blankTx = (): Partial<Transaction> => ({
   date: format(new Date(), 'yyyy-MM-dd'),
@@ -75,11 +79,22 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   const [cashbackPercentMode, setCashbackPercentMode] = useState(false);
   const [cashbackPercentStr, setCashbackPercentStr] = useState('');
   const [showRewardSplit, setShowRewardSplit] = useState(false);
+  // Which unit the "Rewards Used" field is typed in. Defaults to points: redeeming from a card's
+  // own balance is something you do in that card's own units ("I spent 430 Jewels"), and the rupee
+  // value is the derived quantity. newTx.rewardUsed always holds the RUPEE value regardless, since
+  // that is what every consumer of the field does arithmetic with.
+  const [rewardUnitMode, setRewardUnitMode] = useState<'points' | 'rupee'>('points');
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
   const [newTagTargetType, setNewTagTargetType] = useState<'active' | 'event'>('active');
   const [tempCreatedActiveTags, setTempCreatedActiveTags] = useState<string[]>([]);
   const [tempCreatedEventTags, setTempCreatedEventTags] = useState<string[]>([]);
+  // What this split had already redeemed when the form opened, and from which account. Needed by the
+  // balance check on an edit: the existing leg is already subtracted from the account's balance, so
+  // without adding it back a ₹60 redemption from a now-empty wallet would look like an overdraw and
+  // the transaction could never be re-saved — or even reduced. Read from the anchor at seed time
+  // rather than from the live field, which by then holds whatever the user has typed.
+  const committedRewardRef = useRef<{ rupees: number; accountId: string }>({ rupees: 0, accountId: '' });
   const rewardSplitRef = useRef<HTMLDivElement>(null);
   const passiveLogRef = useRef<HTMLDivElement>(null);
   const modalBodyRef = useRef<HTMLDivElement>(null);
@@ -127,6 +142,21 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       sanitizedTx.rewardUsedAccountId = rewardSplitAnchor.rewardUsedAccountId;
     }
 
+    // A split on an ordinary purchase (as opposed to a CC Payment) stores the REDUCED figure on the
+    // account it charged — handleSave writes `total − rewardUsed` for a debit — while the form's
+    // Amount field means the full price the split is taken out of. So add the reward back when
+    // reopening one, or the "Primary Account Debit" line reads ₹276 on a ₹448 purchase and re-saving
+    // subtracts the reward a second time. CC Payments don't need this: their anchor is the card leg,
+    // which is a credit and keeps the full bill. Only reachable since splits were opened up beyond
+    // CC Payment, which is why it went unnoticed.
+    const isPlainSplitAnchor = tx.type === 'debit'
+      && tx.category?.toLowerCase() !== 'cc payment'
+      && (tx.rewardUsed || 0) > 0
+      && !!tx.rewardUsedAccountId;
+    if (isPlainSplitAnchor) {
+      sanitizedTx.amount = (tx.amount || 0) + (tx.rewardUsed || 0);
+    }
+
     const isRewardChild = linkedTxs.some(p => p.rewardUsedAccountId && p.rewardUsedAccountId === tx.accountId);
     let paySrc = '';
     if ((isSplitBankLeg || isSplitRewardLeg) && rewardSplitAnchor) {
@@ -157,6 +187,18 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     setShowRewardSplit(isSplitBankLeg || (tx.rewardUsed || 0) > 0);
     setNewTx(sanitizedTx);
     syncInputStrings(sanitizedTx);
+    // rewardUsed is stored in rupees, but the field defaults to the points unit — so re-render it in
+    // points when the source is a card's own balance, or the form would show ₹86 under a "(Jewels)"
+    // label. buildInputStrings can't do this itself: it has no view of which account was used.
+    committedRewardRef.current = {
+      rupees: Number(sanitizedTx.rewardUsed) || 0,
+      accountId: sanitizedTx.rewardUsedAccountId || ''
+    };
+    const seedRewardSrc = data.accounts.find(a => a.id === sanitizedTx.rewardUsedAccountId);
+    if (isPointsDenominated(seedRewardSrc) && (sanitizedTx.rewardUsed || 0) > 0) {
+      const pts = rupeesToRewardPoints(sanitizedTx.rewardUsed || 0, seedRewardSrc);
+      setInputStrings(prev => ({ ...prev, rewardUsed: String(pts) }));
+    }
     setTempCreatedActiveTags([]);
     setTempCreatedEventTags([]);
   };
@@ -436,6 +478,22 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     if (showRewardSplit && newTx.rewardUsedAccountId && (Number(newTx.rewardUsed) || 0) <= 0) {
       newErrors.rewardUsed = 'Reward amount is required when reward account is selected';
     }
+    // Can't redeem more than the account holds. Compared in the account's own unit, and the message
+    // names the figure because the collapsed picker shows only the account name.
+    if (showRewardSplit && newTx.rewardUsedAccountId && rewardRupees > 0) {
+      // On an edit, this split's own existing leg has already been taken out of the balance — hand it
+      // back before comparing, or re-saving (or even lowering) an untouched redemption would fail.
+      // Only when the source account is unchanged: money spent from the old account is no help
+      // against a different one's balance.
+      const reusable = committedRewardRef.current.accountId === newTx.rewardUsedAccountId
+        ? committedRewardRef.current.rupees
+        : 0;
+      const available = rewardBalance + (isPointsSource ? rupeesToRewardPoints(reusable, rewardSourceAcc) : reusable);
+      const needed = isPointsSource ? rewardPoints : rewardRupees;
+      if (needed - available > 0.001) {
+        newErrors.rewardUsed = `Only ${formatRewardBalance(available)} available`;
+      }
+    }
 
     if (newTx.accountId && newTx.type === 'debit' && !newTx.isTravelTransaction && newTx.category?.toLowerCase() === 'ncmc travel recharge') {
       const account = data.accounts.find(a => a.id === newTx.accountId);
@@ -540,9 +598,22 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     // so we move the anchor onto it and keep the bank main tx as a plain funding child. Without this,
     // the anchor would sit on the bank leg (partial amount ₹148) and both openEditModal reconstruction
     // and updateTransaction's Option-B rebalance would use the wrong total.
-    const isCcRewardSplit = isCCPayment && showRewardSplit && (Number(newTx.rewardUsed) || 0) > 0 && !!newTx.rewardUsedAccountId && !editId;
+    // Any split about to be created needs an id for its reward leg — including a 2-leg split on an
+    // ordinary purchase. This used to be generated only for the CC-Payment case, so a plain split
+    // pushed `null` onto the parent's linkedTransactionIds: the leg pointed back at the parent but
+    // the parent never pointed at the leg, which broke every sync that walks that list (editing the
+    // amount left the leg stranded at its old figure, so the reward account stayed over-debited).
+    // Unreachable while splits were CC-Payment-only.
+    const willCreateRewardLeg = showRewardSplit && (Number(newTx.rewardUsed) || 0) > 0 && !!newTx.rewardUsedAccountId && !editId;
+    const rewardCounterpartId = willCreateRewardLeg ? generateId() : null;
+    // Anchoring, by contrast, IS CC-specific: a reward split anchors on the CARD leg (whose amount is
+    // the full bill), per docs/LINKED_TRANSACTIONS.md. Logged from Credit POV the card IS the main tx,
+    // so it holds the anchor (rewardUsed + the reward leg) naturally. Logged from Debit POV the card is
+    // the counterpart, so we move the anchor onto it and keep the bank main tx as a plain funding
+    // child. Without this the anchor would sit on the bank leg (partial amount ₹148) and both
+    // openEditModal reconstruction and updateTransaction's Option-B rebalance would use the wrong total.
+    const isCcRewardSplit = isCCPayment && willCreateRewardLeg;
     const anchorOnCounterpart = isCcRewardSplit && newTx.type === 'debit';
-    const rewardCounterpartId = isCcRewardSplit ? generateId() : null;
     let cardAnchorId: string | null = null;
 
     if (isStocks && paymentSourceAccountId && !hasStocksLeg) {
@@ -658,7 +729,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       // (the card is the hub). Credit POV: the main tx IS the card, so link to it as before.
       if (!anchorOnCounterpart) currentLinkedIds.push(rewardLegId);
       const rewardsSourceAcc = data.accounts.find(a => a.id === newTx.rewardUsedAccountId);
-      const isInternalPoints = !!(rewardsSourceAcc?.isCashbackEnabled && rewardsSourceAcc?.rewardType === 'points');
+      const isInternalPoints = isPointsDenominated(rewardsSourceAcc);
       // The rewards pay down the CARD's bill, not the funding bank. The card is the main account
       // when logged as a Credit (Receive), or the paymentSourceAccountId ("Pay To Card") when logged
       // as a Debit (Spend) — mirror the targetCardName logic used for the bank leg above.
@@ -669,6 +740,9 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         description: isCCPayment ? `Rewards used for ${paidCardName || account?.name || 'CC'}` : `Rewards applied to: ${newTx.description}`,
         accountId: newTx.rewardUsedAccountId,
         type: 'debit',
+        // Rupees, like every other amount in the ledger — a points figure here would be summed as
+        // money by the day totals and spend stats. calculateBalance applies the rate when it reads
+        // this leg into the points balance. See docs/LINKED_TRANSACTIONS.md.
         amount: rewardUsed,
         category: isCCPayment ? 'CC Payment' : (newTx.category as string),
         isRecurring: false,
@@ -897,6 +971,26 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   const canSplitWithRewards = !isInvestmentCategory(newTx.category)
     && (isCCPayment || newTx.type === 'debit')
     && splitSourceAccounts.length > 0;
+
+  // The chosen reward source decides whether points apply at all: a card's own balance is counted in
+  // its own unit, a plain rupee wallet (CRED coins, super.money) is already money. With no account
+  // picked yet there's no rate to convert with, so the field stays plain rupees.
+  const rewardSourceAcc = data.accounts.find(a => a.id === newTx.rewardUsedAccountId);
+  const isPointsSource = isPointsDenominated(rewardSourceAcc);
+  const rewardUnitLabel = rewardSourceAcc?.rewardUnit || 'Points';
+  // A rupee wallet has nothing to toggle, so it stays pinned to rupees whatever the mode last was.
+  const activeRewardUnit: 'points' | 'rupee' = isPointsSource ? rewardUnitMode : 'rupee';
+  const rewardRupees = Number(newTx.rewardUsed) || 0;
+  const rewardPoints = rupeesToRewardPoints(rewardRupees, rewardSourceAcc);
+  // The balance the picker shows for this account. Reused by the shortfall message, which has to
+  // name the figure itself: the collapsed trigger deliberately shows only the account name.
+  const rewardBalance = rewardSourceAcc
+    ? calculateBalance(rewardSourceAcc, data.transactions, getCurrentMonthStr(), false, isPointsSource, data.cashbackStatements)
+    : 0;
+  const formatRewardBalance = (v: number) => isPointsSource ? `${v} ${rewardUnitLabel}` : formatCurrency(v);
+  // Typed value -> canonical rupees. Points divide by the rate; rupees pass straight through.
+  const rewardInputToRupees = (n: number) =>
+    activeRewardUnit === 'points' ? rewardPointsToRupees(n, rewardSourceAcc) : n;
 
   return (
   <div className="modal-overlay">
@@ -1621,28 +1715,46 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                   </div>
                 ) : (
                   <div className="flex-col gap-1">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      className={`input-field ${errors.rewardEarned ? 'border-danger' : ''}`}
-                      value={inputStrings.rewardEarned}
-                      onChange={e => {
-                        const val = e.target.value;
-                        if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                          setInputStrings(prev => ({ ...prev, rewardEarned: val }));
-                          const numVal = parseFloat(val);
-                          setNewTx({
-                            ...newTx,
-                            rewardEarned: isNaN(numVal) ? 0 : numVal,
-                            rewardEarnedType: 'instant'
-                          });
-                          if (errors.rewardEarned && !isNaN(numVal) && numVal > 0) {
-                            setErrors(prev => ({ ...prev, rewardEarned: '' }));
+                    {/* The unit marker sits in the same spot in both modes — it tells you which unit
+                        you are typing in, so it has to be findable at a glance when you flip the
+                        toggle. Hence ₹ trailing here rather than leading, mirroring the % opposite. */}
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className={`input-field ${errors.rewardEarned ? 'border-danger' : ''}`}
+                        value={inputStrings.rewardEarned}
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                            setInputStrings(prev => ({ ...prev, rewardEarned: val }));
+                            const numVal = parseFloat(val);
+                            setNewTx({
+                              ...newTx,
+                              rewardEarned: isNaN(numVal) ? 0 : numVal,
+                              rewardEarnedType: 'instant'
+                            });
+                            if (errors.rewardEarned && !isNaN(numVal) && numVal > 0) {
+                              setErrors(prev => ({ ...prev, rewardEarned: '' }));
+                            }
                           }
-                        }
-                      }}
-                      placeholder="0.00"
-                    />
+                        }}
+                        placeholder="0.00"
+                        style={{ width: '100%', paddingRight: '1.75rem' }}
+                      />
+                      <span className="text-muted text-mono font-bold" style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>₹</span>
+                    </div>
+                    {/* Mirror of the percent mode's "= ₹x" line: whichever unit you type, the other is
+                        shown underneath. Rendered unconditionally, exactly as that one is — it reads
+                        "= ₹0" with nothing filled in, so this must read "= 0%" rather than vanish, or
+                        the panel gains and loses a row as you flip between the two modes. With no
+                        amount yet there is nothing to take a percentage of, hence the 0 fallback
+                        instead of a division by zero. */}
+                    <span className="text-xs text-muted text-mono" style={{ opacity: 0.8 }}>
+                      = {(Number(newTx.amount) || 0) > 0
+                        ? Math.round(((Number(newTx.rewardEarned) || 0) / Number(newTx.amount)) * 100 * 100) / 100
+                        : 0}%
+                    </span>
                     {errors.rewardEarned && <span className="text-xs text-danger" style={{ marginTop: '0.1rem' }}>{errors.rewardEarned}</span>}
                   </div>
                 )}
@@ -1712,28 +1824,76 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
           >
             <div className="flex justify-between align-center col-span-2">
               <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>Split Payment</span>
-              {showRewardSplit && (
+              <div className="flex align-center" style={{ gap: '0.6rem' }}>
+                {/* Only a points account has two units to switch between. 'PTS' rather than the
+                    account's own unit name because that name is free text with no length limit
+                    ("Reward Points" would not fit), and rather than a glyph because none of the
+                    bundled font subsets carry one — a diamond or star would fall back to a system
+                    font and sit at a different size than the ₹ beside it. */}
+                {isPointsSource && (
+                  <div className="flex" style={{ border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden', height: SPLIT_CONTROL_HEIGHT, boxSizing: 'border-box' }}>
+                    {(['rupee', 'points'] as const).map(mode => {
+                      const active = mode === activeRewardUnit;
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          className="text-mono text-xs font-bold"
+                          style={{
+                            padding: '0 0.7rem',
+                            height: '100%',
+                            minHeight: 'auto',
+                            border: 'none',
+                            cursor: 'pointer',
+                            background: active ? 'var(--accent)' : 'transparent',
+                            color: active ? '#ffffff' : 'var(--text-secondary)'
+                          }}
+                          onClick={() => {
+                            if (mode === activeRewardUnit) return;
+                            // Lossless switch: the rupee value is canonical, so re-render the field
+                            // from it in the new unit rather than reinterpreting the typed digits.
+                            const shown = mode === 'points'
+                              ? rupeesToRewardPoints(rewardRupees, rewardSourceAcc)
+                              : rewardRupees;
+                            setInputStrings(prev => ({ ...prev, rewardUsed: shown === 0 ? '' : String(shown) }));
+                            setRewardUnitMode(mode);
+                          }}
+                        >
+                          {mode === 'points' ? 'PTS' : '₹'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 <button
-                  className="btn btn-danger flex align-center gap-1"
+                  className="btn btn-danger flex-center"
+                  title="Remove split"
+                  aria-label="Remove split"
                   style={{
-                    fontSize: '0.75rem',
-                    padding: '0.25rem 0.6rem',
+                    width: SPLIT_CONTROL_HEIGHT,
+                    height: SPLIT_CONTROL_HEIGHT,
+                    padding: 0,
                     minHeight: 'auto',
+                    boxSizing: 'border-box',
                     boxShadow: '2px 2px 0 #000'
                   }}
                   onClick={() => {
                     setShowRewardSplit(false);
+                    setInputStrings(prev => ({ ...prev, rewardUsed: '' }));
                     setNewTx({ ...newTx, rewardUsed: 0, rewardUsedAccountId: '' });
                     if (errors.rewardUsedAccountId) setErrors(prev => ({ ...prev, rewardUsedAccountId: '' }));
                     if (errors.rewardUsed) setErrors(prev => ({ ...prev, rewardUsed: '' }));
                   }}
                 >
-                  ✕ Remove Split
+                  <X size={14} strokeWidth={3} />
                 </button>
-              )}
+              </div>
             </div>
             <div className="input-group">
-              <label>Rewards Used <span className="text-muted" style={{ fontWeight: 400 }}>(Optional)</span></label>
+              <label>
+                Rewards Used{activeRewardUnit === 'points' ? ` (${rewardUnitLabel})` : ''}{' '}
+                <span className="text-muted" style={{ fontWeight: 400 }}>(Optional)</span>
+              </label>
               <input
                 type="text"
                 inputMode="decimal"
@@ -1744,7 +1904,9 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                   if (val === '' || /^\d*\.?\d*$/.test(val)) {
                     setInputStrings(prev => ({ ...prev, rewardUsed: val }));
                     const numVal = parseFloat(val);
-                    setNewTx({ ...newTx, rewardUsed: isNaN(numVal) ? 0 : numVal });
+                    // Store rupees, always — utils' balance math and FinanceContext's leg rebalance
+                    // both treat rewardUsed as money. The points figure is derived on save.
+                    setNewTx({ ...newTx, rewardUsed: isNaN(numVal) ? 0 : rewardInputToRupees(numVal) });
                     if (errors.rewardUsed && !isNaN(numVal) && numVal > 0) {
                       setErrors(prev => ({ ...prev, rewardUsed: '' }));
                     }
@@ -1753,8 +1915,16 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                     }
                   }
                 }}
-                placeholder="0.00"
+                placeholder={activeRewardUnit === 'points' ? '0' : '0.00'}
               />
+              {/* The counterpart value, same treatment as the instant-cashback percent hint. */}
+              {isPointsSource && rewardRupees > 0 && (
+                <span className="text-xs text-muted text-mono" style={{ marginTop: '0.25rem', opacity: 0.8 }}>
+                  {activeRewardUnit === 'points'
+                    ? `= ${formatCurrency(rewardRupees)}`
+                    : `= ${rewardPoints} ${rewardUnitLabel}`}
+                </span>
+              )}
               {errors.rewardUsed && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.rewardUsed}</span>}
             </div>
             <CustomPicker
@@ -1774,6 +1944,13 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                 }))
               ]}
               onChange={val => {
+                // Accounts can differ in unit and rate, so the typed digits would change meaning on
+                // a switch. Hold the rupee value steady and re-render the field for the new account:
+                // 430 Jewels (₹86) picked over to a rupee wallet shows 86, still ₹86.
+                const nextAcc = data.accounts.find(a => a.id === val);
+                const nextUnit = isPointsDenominated(nextAcc) ? rewardUnitMode : 'rupee';
+                const shown = nextUnit === 'points' ? rupeesToRewardPoints(rewardRupees, nextAcc) : rewardRupees;
+                setInputStrings(prev => ({ ...prev, rewardUsed: shown === 0 ? '' : String(shown) }));
                 setNewTx({
                   ...newTx,
                   rewardUsedAccountId: val,

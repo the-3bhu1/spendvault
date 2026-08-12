@@ -284,6 +284,33 @@ export const getLatestBilledCycle = (statementDay: number): string => {
 
 import { calculateEPFProjection } from './utils/epfEngine';
 
+// ---- Reward points <-> rupees --------------------------------------------------------------
+// A card's own points balance (Jupiter's Jewels, Edge Miles) is denominated in POINTS: its opening
+// figure, the realized amounts on confirmed cashback statements, and the redemption legs subtracted
+// from it are all point counts. Rupee amounts — what a purchase actually cost, what a bill's
+// remaining balance is — are not. `pointsConversionRate` bridges the two, and reads as "how many
+// points equal ₹1" (5 Jewels = ₹1), the same direction Cashback.tsx uses.
+//
+// The predicate below is deliberately the exact condition that sets `isRewardTransaction` on a
+// redemption leg, because that flag is what routes the leg's amount into the points balance rather
+// than the money balance. Tying the two together is what keeps the arithmetic homogeneous: an
+// account is points-denominated for conversion purposes precisely when its legs land in the points
+// ledger. A plain rupee reward wallet (CRED coins, super.money) fails the predicate and gets a rate
+// of 1, so every call site can convert unconditionally and rupee wallets pass through untouched.
+export const isPointsDenominated = (account?: Account) =>
+  !!(account?.isCashbackEnabled && account?.rewardType === 'points');
+
+export const rewardPointsRate = (account?: Account) =>
+  isPointsDenominated(account) ? (account?.pointsConversionRate || 1) : 1;
+
+/** Points spent -> the rupee value they paid off. 430 Jewels at 5/₹1 -> ₹86. */
+export const rewardPointsToRupees = (points: number, account?: Account) =>
+  Math.round((points / rewardPointsRate(account)) * 100) / 100;
+
+/** Rupee value -> the points it costs. ₹86 at 5/₹1 -> 430 Jewels. */
+export const rupeesToRewardPoints = (rupees: number, account?: Account) =>
+  Math.round((rupees * rewardPointsRate(account)) * 100) / 100;
+
 export const calculateBalance = (
   account: Account,
   transactions: Transaction[],
@@ -319,7 +346,13 @@ export const calculateBalance = (
       if (tMonth > monthStr) return false;
       return true;
     });
-    const debitsTotal = rewardDebits.reduce((sum, t) => sum + t.amount, 0);
+    // Redemption legs are stored in RUPEES, like every other transaction amount in the app — that is
+    // what keeps them summable by the ledger's day totals, the spend stats and the Insights charts,
+    // none of which know about points. This balance is the one place denominated in points (its
+    // opening figure and the statement realizations below are point counts), so the rate is applied
+    // here, at the single boundary, rather than by storing a point count on the transaction. It also
+    // means splits logged before this conversion existed are read correctly without a migration.
+    const debitsTotal = rewardDebits.reduce((sum, t) => sum + rupeesToRewardPoints(t.amount, account), 0);
 
     // 2. Confirmed cashbacks (realized points) from cashbackStatements
     const confirmedCredits = cashbackStatements.filter(s => {

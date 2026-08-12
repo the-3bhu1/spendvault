@@ -69,11 +69,33 @@ reconstruct `paymentSourceAccountId` — they reciprocate via the reverse cashba
 - **Debt ↔ Ledger** only propagates **date** and **deletion** between the ledger
   transaction and the debt-ledger entry. Amount is intentionally **not** kept in sync —
   this is a deliberate design choice, not a bug. Do not "fix" it.
-- **Reward split is CC-Payment-only and always 3-leg.** The "Split with Rewards?" UI only
-  appears for `isCCPayment && paymentSourceAccountId && hasRewardsOrWallet`, so a split
-  always produces: **card credit (parent)** + **bank debit** + **reward debit**. The
-  creation code is generic enough to support other categories / a 2-leg shape, but no UI
-  path triggers that today.
+- **Reward split covers any debit or CC Payment, so it is 3-leg *or* 2-leg.** "Split with
+  Rewards?" appears whenever `canSplitWithRewards` holds — not an investment, either a CC
+  Payment (from either POV) or an ordinary debit, and at least one reward account able to
+  fund it. A CC Payment produces the 3-leg star (**card credit (parent)** + **bank debit** +
+  **reward debit**); an ordinary purchase produces a 2-leg pair (**account debit (parent)** +
+  **reward debit**), which the creation code always supported but no UI reached before.
+- **A 2-leg split stores the reduced amount on its parent.** `handleSave` writes
+  `total − rewardUsed` for a debit, so a ₹448 purchase split with ₹86 of rewards stores ₹362.
+  The form's Amount field means the *full* price, so `openEditModal` adds `rewardUsed` back
+  when reopening one (`isPlainSplitAnchor`). Without that, the panel reads back ₹276 and an
+  untouched re-save subtracts the reward a second time. CC Payments are exempt: their anchor
+  is the card leg, a credit, which already holds the full bill.
+- **Points vs rupees: the leg is always rupees; the rate is applied when reading the points
+  balance.** A card's own reward balance (Jupiter's Jewels, Edge Miles) is denominated in
+  points — its opening figure and the `realized` amounts on confirmed cashback statements are
+  point counts. A redemption leg is *not*: it is stored in rupees like every other transaction
+  amount, because the ledger's day totals, the spend stats and the Insights charts all sum
+  `amount` as money and know nothing about points. `calculateBalance`'s `isRewardPoints`
+  branch converts at the single read boundary (`rupeesToRewardPoints`, keyed on
+  `pointsConversionRate` — "how many points equal ₹1"). Storing a point count on the leg
+  instead would make a ₹448 purchase show a ₹792 day total, and would require every
+  aggregation in the app to learn about units. It also means splits logged before the
+  conversion existed are read correctly with no migration.
+  The **"Rewards Used" field** can be typed in either unit via the `₹ | PTS` toggle
+  (points-denominated sources only — a rupee wallet like CRED coins has nothing to convert),
+  but `newTx.rewardUsed` is always the rupee value, since that is what `utils`' balance math
+  and the Option-B rebalance below both operate on.
 - **The card leg is always the anchor, regardless of logging direction.** Logged from
   Credit POV the card credit *is* the main tx, so it naturally holds `rewardUsed` /
   `rewardUsedAccountId` and links to both funding legs. Logged from Debit POV the card is the

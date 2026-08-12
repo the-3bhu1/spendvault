@@ -3,7 +3,7 @@ import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitE
 import { BUILT_IN_ACCOUNT_TYPES } from './types';
 import { classifySmsIsTransaction } from './services/GeminiService';
 import { clearChatHistory } from './services/ChatHistoryService';
-import { INVESTMENT_CATEGORY, isInvestmentCategory, inferInvestmentKind, getInvestmentKind } from './utils';
+import { INVESTMENT_CATEGORY, isInvestmentCategory, inferInvestmentKind, getInvestmentKind, isPointsDenominated } from './utils';
 
 export interface PendingTransfer {
   fromAccountId: string;
@@ -1301,11 +1301,12 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
             } 
             // Check if this linked transaction is a Reward Split counterpart
             else if (updatedTransaction.rewardUsedAccountId && t.accountId === updatedTransaction.rewardUsedAccountId) {
+              const rewardsSourceAcc = prev.accounts.find(a => a.id === updatedTransaction.rewardUsedAccountId);
+              // Both sides are rupees (the points conversion lives in calculateBalance), so this is a copy.
               updated.amount = Number(updatedTransaction.rewardUsed) || 0;
               const isCCPayment = updatedTransaction.category?.toLowerCase() === 'cc payment';
               updated.description = isCCPayment ? t.description : `Rewards applied to: ${updatedTransaction.description}`;
-              const rewardsSourceAcc = prev.accounts.find(a => a.id === updatedTransaction.rewardUsedAccountId);
-              updated.isRewardTransaction = !!(rewardsSourceAcc?.isCashbackEnabled && rewardsSourceAcc?.rewardType === 'points');
+              updated.isRewardTransaction = isPointsDenominated(rewardsSourceAcc);
             } 
             // Otherwise it's a Transfer counterpart, Mutual Funds, or CC payment bank portion
             else {
@@ -1437,6 +1438,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           const lt = prev.transactions.find(t => t.id === id);
           return !!lt && lt.accountId === rewardAcct;
         });
+
         updatedTxs = updatedTxs.map(t => {
           if (t.id === bankLegParent.id) {
             return { ...t, rewardUsed: newReward, date: updatedTransaction.date };
