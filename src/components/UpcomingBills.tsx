@@ -19,7 +19,7 @@ import type { RecurringBill, RecurringFrequency } from '../types';
 import { SubviewWrapper } from './SubviewWrapper';
 import { CustomPicker } from './CustomPicker';
 import { TransactionSelector } from './TransactionSelector';
-import { TransactionModal } from './TransactionModal';
+import { LogTransactionForm } from './LogTransactionForm';
 import { getCategoryIcon } from './transactionIcons';
 import CustomDatePicker from './CustomDatePicker';
 import { calculateTotalSpendPerCycle, getLatestBilledCycle } from '../utils';
@@ -514,21 +514,27 @@ export default function UpcomingBills() {
         </SubviewWrapper>
       )}
 
-      <TransactionModal
-        isOpen={isLogModalOpen}
-        onClose={() => {
-          setIsLogModalOpen(false);
-          setSelectedBill(null);
-        }}
-        initialData={selectedBill ? {
-          description: 'isCC' in selectedBill ? 'CC Bill Payment' : selectedBill.name,
-          amount: selectedBill.amount,
-          category: 'isCC' in selectedBill ? 'CC Payment' : (selectedBill.category || 'Bills'),
-          accountId: selectedBill.accountId || data.accounts.find(a => !a.archived)?.id || '',
-          type: 'isCC' in selectedBill ? 'credit' : (selectedBill.type || 'debit'),
-          recurringBillId: selectedBill.id
-        } : undefined}
-      />
+      {/* The same form the main Ledger uses — see LogTransactionForm.tsx. LOG only prefills it;
+          cashback, passive-log, NCMC and reward splits all behave exactly as they do in the Ledger. */}
+      {isLogModalOpen && selectedBill && (
+        <LogTransactionForm
+          initialData={{
+            description: 'isCC' in selectedBill ? 'CC Bill Payment' : selectedBill.name,
+            amount: selectedBill.amount,
+            category: 'isCC' in selectedBill ? 'CC Payment' : (selectedBill.category || 'Bills'),
+            accountId: selectedBill.accountId || data.accounts.find(a => !a.archived)?.id || '',
+            type: 'isCC' in selectedBill ? 'credit' : (selectedBill.type || 'debit'),
+            // Only a tracked bill has a real id to link back to and advance on save. A credit-card
+            // due date is synthesised per card ('cc-<accountId>'), so linking to it would persist a
+            // foreign key that matches no bill — the card's dues clear from the payment itself.
+            ...('isCC' in selectedBill ? {} : { recurringBillId: selectedBill.id })
+          }}
+          onClose={() => {
+            setIsLogModalOpen(false);
+            setSelectedBill(null);
+          }}
+        />
+      )}
 
       <TransactionSelector
         isOpen={isLinkModalOpen}
