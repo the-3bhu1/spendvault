@@ -79,6 +79,13 @@ export const STATS_EXCLUDED_CATEGORIES = new Set([
 export const isStatsExcludedCategory = (category: string) =>
   STATS_EXCLUDED_CATEGORIES.has((category || '').toLowerCase());
 
+// The part of a transaction's amount that counts toward Spends/Income. A Passive Log carves out
+// either the whole amount or a stated portion of it (see Settings' explainer), and every stats
+// surface has to apply the same carve-out or two screens will disagree about the same month.
+// Pairs with isStatsExcludedCategory: that one drops the row entirely, this one shrinks it.
+export const statsAmount = (tx: Pick<Transaction, 'amount' | 'excludedAmount' | 'excludeFromStats'>) =>
+  tx.amount - (tx.excludedAmount || (tx.excludeFromStats ? tx.amount : 0));
+
 // Determines whether a transaction is counted towards monthly transaction count totals.
 // System categories (transfers, cc payment, investments, etc.), cashback auto logs,
 // reward split legs, and fully passive transactions (where 100% of the amount is excluded)

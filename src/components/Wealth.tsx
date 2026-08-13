@@ -12,7 +12,7 @@ import { PortfolioBackdrop, AssetsBackdrop, RetirementBackdrop } from './WealthC
 import { LogoAvatar } from './LogoAvatar';
 import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
 import { calculateEPFProjection, getEPFInterestRate, getFinancialYearForDate } from '../utils/epfEngine';
-import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance } from '../utils';
+import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance, isStatsExcludedCategory, statsAmount } from '../utils';
 import { getCategoryIcon } from './transactionIcons';
 
 type HistoryDataPoint = { date: number; close: number };
@@ -24,6 +24,21 @@ type MFHistoryRange = '1m' | '6m' | '1y' | 'all';
 type BalanceRange = '1m' | '6m' | '1y' | 'all';
 const BALANCE_RANGE_MONTHS: Record<Exclude<BalanceRange, '1m'>, number> = { '6m': 6, '1y': 12, all: 120 };
 const DAILY_WINDOW_DAYS = 30;
+
+// Each chart's pill row, in display order — and by construction the range it opens at, because every
+// detail screen resets to its row's FIRST option (see openAssetDetail). Declared here rather than
+// inline at the pill rows so a row and its default can't drift apart: reorder a row and the default
+// follows it, with nothing to restate.
+const STOCK_RANGES: StockHistoryRange[] = ['1d', '5d', '1mo', '3mo', '1y', '5y'];
+const MF_RANGES: MFHistoryRange[] = ['1m', '6m', '1y', 'all'];
+const BALANCE_RANGES: BalanceRange[] = ['1m', '6m', '1y', 'all'];
+// A points wallet drops 1M: its balance also moves on confirmed cashback statements at a conversion
+// rate that only calculateBalance knows how to apply, so it can't be walked day by day. That makes
+// 6M the first pill in its row, and therefore its default.
+const POINTS_BALANCE_RANGES: BalanceRange[] = ['6m', '1y', 'all'];
+// 1D is sampled every 5 minutes and 5D hourly (see getYahooIntervalAndRange), so a date-only tooltip
+// label would repeat itself down the whole series. Only stocks offer these two.
+const INTRADAY_STOCK_RANGES = new Set<StockHistoryRange>(['1d', '5d']);
 
 // The three top-level Wealth categories. `null` = the category tree (main screen).
 type WealthCategory = 'portfolio' | 'assets' | 'retirement';
@@ -86,8 +101,19 @@ function StatRow({ label, value, color }: { label: string; value: ReactNode; col
   );
 }
 
+// The end padding the XAxis reserves inside the plot: without it the first and last points sit glued
+// to the container's edge. It means the graph's own visual edge — where the trend line and the area
+// fill start — is this far in from the box, which makes it the gutter every left-aligned row on a
+// detail screen has to match. A stat list at 1.25rem and a chart at 16px don't share a column; the
+// 4px difference reads as a misalignment rather than as breathing room.
+const CHART_END_PAD = 16;
+const DETAIL_GUTTER = `${CHART_END_PAD}px`;
+
 // How close the tooltip may come to the chart's edge before it stops following the point.
 const TOOLTIP_EDGE_PAD = 10;
+// How close the caret may come to the bubble's own corners: it has to sit on a flat stretch of the
+// bottom edge, clear of the rounded corners, or it reads as detached.
+const TOOLTIP_CARET_INSET = 12;
 
 type ChartTooltipProps = {
   active?: boolean;
@@ -133,7 +159,14 @@ function ChartTooltip({ active, payload, label, coordinate, color, formatDate, f
     const max = boxRect.right - TOOLTIP_EDGE_PAD - half;
     // A bubble wider than the chart can't be clamped into it — leave it centred rather than
     // wedging it against one side.
-    const next = max < min ? 0 : Math.min(Math.max(pointX, min), max) - pointX;
+    const wanted = max < min ? 0 : Math.min(Math.max(pointX, min), max) - pointX;
+    // The caret can only travel as far as its own inset from the bubble's corners, so the bubble
+    // may not travel further than that either: past it the caret stalls at the corner while the
+    // bubble keeps going, and the two stop meeting over the point. The edge pad is the softer of
+    // the two promises — a bubble that hugs the edge tighter than asked still reads fine, a caret
+    // sitting a dozen pixels off its dotted line does not.
+    const reach = Math.max(0, half - TOOLTIP_CARET_INSET);
+    const next = Math.min(Math.max(wanted, -reach), reach);
     // Guarded so a sub-pixel difference can't ping-pong the effect.
     setShift(prev => (Math.abs(prev - next) < 0.5 ? prev : next));
   }, [coordinate?.x, valueText, dateText]);
@@ -164,9 +197,10 @@ function ChartTooltip({ active, payload, label, coordinate, color, formatDate, f
       <div style={{
         position: 'absolute',
         bottom: '-5px',
-        // Undoes the bubble's shift so the caret stays over the data point, but never leaves the
-        // bubble's own corners — at a hard-clamped edge the caret parks 12px in.
-        left: `max(12px, min(calc(100% - 12px), calc(50% - ${shift}px)))`,
+        // Undoes the bubble's shift, exactly, so the caret stays over the data point. No clamp is
+        // needed here: the shift is already capped to the caret's reach, which keeps this within
+        // TOOLTIP_CARET_INSET of both corners.
+        left: `calc(50% - ${shift}px)`,
         transform: 'translateX(-50%) rotate(45deg)',
         width: '10px',
         height: '10px',
@@ -252,9 +286,9 @@ export function Wealth() {
   const scrollRef = useRef<{ tree: number; category: number }>({ tree: 0, category: 0 });
   const [historyData, setHistoryData] = useState<HistoryDataPoint[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [stockRange, setStockRange] = useState<StockHistoryRange>('1mo');
-  const [mfRange, setMFRange] = useState<MFHistoryRange>('1y');
-  const [balanceRange, setBalanceRange] = useState<BalanceRange>('6m');
+  const [stockRange, setStockRange] = useState<StockHistoryRange>(STOCK_RANGES[0]);
+  const [mfRange, setMFRange] = useState<MFHistoryRange>(MF_RANGES[0]);
+  const [balanceRange, setBalanceRange] = useState<BalanceRange>(BALANCE_RANGES[0]);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [portfolioFilter, setPortfolioFilter] = useState<PortfolioFilter>('all');
   const [assetsFilter, setAssetsFilter] = useState<AssetsFilter>('all');
@@ -681,10 +715,17 @@ export function Wealth() {
 
   // Both list types enter a detail screen the same way: remember where the list was scrolled to, and
   // start the detail's own view state fresh rather than inheriting the last account's.
+  //
+  // All three ranges are reset, not just the balance one. Only balanceRange used to be, so a stock
+  // detail silently inherited whatever window you had left on a different holding while a bank
+  // account never did — one pill row, two behaviours. Each goes back to the first pill in its own
+  // row, so the lit pill on entry is always the leading one.
   const openAssetDetail = (account: Account) => {
     const appRoot = document.querySelector('.app-root');
     scrollRef.current.category = appRoot?.scrollTop ?? 0;
-    setBalanceRange('6m');
+    setBalanceRange((isPointsDenominated(account) ? POINTS_BALANCE_RANGES : BALANCE_RANGES)[0]);
+    setStockRange(STOCK_RANGES[0]);
+    setMFRange(MF_RANGES[0]);
     setSelectedAsset(account);
   };
 
@@ -1152,9 +1193,11 @@ export function Wealth() {
   // LABEL · count · rule — the heading over every list on this screen. One definition on purpose:
   // the asset detail's "Recent Activity" heading used to hand-roll the same markup and had drifted a
   // gap step tighter, so the count sat almost against its label and read as a different system.
+  // `null` drops the count entirely — for a heading over a list the user can't collapse or filter,
+  // where the number says nothing they can't see in the rows right below it.
   const renderSectionHeading = (
     label: string,
-    count: number,
+    count: number | null,
     opts: { trailing?: ReactNode; chevron?: ReactNode; onClick?: () => void; marginBottom?: string | number } = {}
   ) => (
     <div
@@ -1171,9 +1214,11 @@ export function Wealth() {
       <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px', whiteSpace: 'nowrap' }}>
         {label}
       </span>
-      <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
-        {count}
-      </span>
+      {count !== null && (
+        <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
+          {count}
+        </span>
+      )}
       {/* minWidth keeps the rule from collapsing to nothing when a long label and the cycler
         share the row on a narrow phone — it shrinks, but stays a visible connector. */}
       <div style={{ flex: 1, minWidth: '10px', height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
@@ -1225,17 +1270,34 @@ export function Wealth() {
 
   const metricDivider = <div style={{ width: '1px', background: 'var(--border-color)' }} />;
 
-  const metricStrip = (children: ReactNode) => (
+  // The category screens keep the 1.5rem gutter their section headings use. A detail screen passes
+  // DETAIL_GUTTER instead, so the strip's rules end where the chart above it does — its top and
+  // bottom borders are the widest horizontal lines on that screen, and a border that stops 8px short
+  // of the trend line is the most visible mismatch of the lot.
+  //
+  // `heading` names the window the figures cover. It sits INSIDE the top rule rather than above it:
+  // a caption stranded between the range pills and the strip's border reads as a footnote to the
+  // pills, and giving it a rule of its own would put two lines a few pixels apart.
+  const metricStrip = (children: ReactNode, opts: { gutter?: string; heading?: string } = {}) => (
     <div style={{
-      margin: '0 1.5rem',
+      margin: `0 ${opts.gutter ?? '1.5rem'}`,
       padding: '1.25rem 0',
       borderTop: '1px solid var(--border-color)',
       borderBottom: '1px solid var(--border-color)',
-      display: 'flex',
-      justifyContent: 'space-between',
-      gap: '0.5rem'
     }}>
-      {children}
+      {opts.heading && (
+        // Centred, like the cells it labels: left-aligned it read as a heading for the whole screen
+        // rather than a caption on this one strip.
+        <div className="text-mono uppercase" style={{
+          fontSize: '0.66rem', fontWeight: 800, letterSpacing: '1.5px',
+          color: 'var(--text-muted)', marginBottom: '0.9rem', textAlign: 'center'
+        }}>
+          {opts.heading}
+        </div>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+        {children}
+      </div>
     </div>
   );
 
@@ -1354,20 +1416,35 @@ export function Wealth() {
       || account.type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
     const ledger = data.transactions.filter(liquidLedgerFilter(account));
-    const monthTxs = ledger.filter(t => t.date.slice(0, 7) === currentMonth);
-    const inflow = monthTxs.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
-    const outflow = monthTxs.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0);
+    // In and Out are money earned and spent this month, NOT every rupee that crossed the account.
+    // A transfer to another of the user's own accounts, a card bill payment, an SIP debit or a loan
+    // repaid is the same money changing pockets, and a Passive Log is movement the user has told us
+    // not to count — counting any of them inflates both figures without saying anything about the
+    // month. Same rule as the Income / Spends pair on the Transactions screen, so filtering that
+    // screen to this account and this month now agrees with this strip.
+    const monthTxs = ledger.filter(t =>
+      t.date.slice(0, 7) === currentMonth && !isStatsExcludedCategory(t.category));
+    const flow = (type: Transaction['type']) =>
+      monthTxs.filter(t => t.type === type).reduce((s, t) => s + statsAmount(t), 0);
+    const inflow = flow('credit');
+    const outflow = flow('debit');
+    // Named, not "This month": the hero already owns that phrase for a figure these two don't add up
+    // to, so repeating it would tie them together again. The month itself is also the more useful
+    // label — it stays true in a screenshot.
+    const monthLabel = new Date(monthTimestamp(currentMonth))
+      .toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
     const shown = [...ledger]
       .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
       .slice(0, 5);
 
-    // 1M needs a rupee ledger to walk day by day. A points wallet's balance also moves on confirmed
-    // cashback statements at a conversion rate, which only calculateBalance knows how to apply — so
-    // it's offered the monthly windows only, the same way the metric cycler drops a stop a class
-    // can't answer.
-    const ranges: BalanceRange[] = points ? ['6m', '1y', 'all'] : ['1m', '6m', '1y', 'all'];
-    const range = ranges.includes(balanceRange) ? balanceRange : '6m';
+    // 1M needs a rupee ledger to walk day by day, which is why a points wallet is offered the monthly
+    // windows only — the same way the metric cycler drops a stop a class can't answer.
+    const ranges = points ? POINTS_BALANCE_RANGES : BALANCE_RANGES;
+    // Falls back to this row's own first pill, matching what openAssetDetail would have set. Still
+    // needed as a guard: the pill row shrinks for a points wallet, so a 1M left over from a rupee
+    // account — mid-session, before any reset — would name a range this screen doesn't offer.
+    const range = ranges.includes(balanceRange) ? balanceRange : ranges[0];
     const daily = range === '1m';
     // Tested inline rather than through `daily` so the else branch narrows '1m' out of `range` —
     // buildBalanceSeries only accepts the month-counted windows.
@@ -1438,10 +1515,10 @@ export function Wealth() {
                       below zero, so an overdrawn month isn't clipped off the bottom. */}
                     <YAxis domain={[(dataMin: number) => Math.min(0, dataMin), 'dataMax']} hide />
                     {/* Hidden, not removed: the axis still defines the horizontal scale and the
-                      16px end padding. Its labels are dropped because recharts thins them to
-                      whatever fits, which lands them at uneven intervals — and the tooltip names
-                      the date of whatever point you touch anyway. */}
-                    <XAxis dataKey="date" hide padding={{ left: 16, right: 16 }} />
+                      end padding that sets this screen's gutter. Its labels are dropped because
+                      recharts thins them to whatever fits, which lands them at uneven intervals —
+                      and the tooltip names the date of whatever point you touch anyway. */}
+                    <XAxis dataKey="date" hide padding={{ left: CHART_END_PAD, right: CHART_END_PAD }} />
                     <Tooltip
                       position={{ y: 6 }}
                       offset={0}
@@ -1483,7 +1560,10 @@ export function Wealth() {
               </div>
             </div>
 
-            <div style={{ padding: '0.75rem 1rem 0.5rem', boxSizing: 'border-box', borderBottom: '1px solid var(--border-color)' }}>
+            {/* No bottom rule here, unlike the holding screen's copy: the Income/Spends strip that
+              follows opens with one of its own a few pixels below, and two parallel lines that close
+              nothing between them just look like a mistake. */}
+            <div style={{ padding: `0.75rem ${DETAIL_GUTTER} 0.5rem`, boxSizing: 'border-box' }}>
               <div className="no-scrollbar" style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', gap: '0.25rem' }}>
                 {ranges.map(r => {
                   const isActive = range === r;
@@ -1514,20 +1594,28 @@ export function Wealth() {
           </>
         )}
 
-        {/* In and Out only — the net of the two is the hero's "this month" figure, and the Portfolio
-          strip sets the precedent of not repeating what the headline already says. */}
+        {/* Two cells, no Net. It used to be left out because the net WAS the hero's "this month"
+          figure; now it's left out because it isn't — the hero tracks the balance, which every
+          transfer and passive log moves, while these two count only real income and spending. A third
+          cell showing the difference would sit right below the hero inviting exactly that false
+          comparison.
+
+          Named Income/Spends, not In/Out: those two read as raw cash movement, which is what they
+          used to be and why they once reconciled with the hero. Borrowing the Transactions screen's
+          own words is what tells the user these are the stats figures, exclusions already applied.
+          A points wallet earns and redeems rather than earning and spending, so it says so. */}
         <div style={{ marginTop: series.length > 1 ? '0.5rem' : '1rem' }}>
           {metricStrip(<>
-            {metricCell('In', fmt(inflow), inflow > 0 ? 'var(--success)' : undefined)}
+            {metricCell(points ? 'Earned' : 'Income', fmt(inflow), inflow > 0 ? 'var(--success)' : undefined)}
             {metricDivider}
-            {metricCell('Out', fmt(outflow), outflow > 0 ? '#ef4444' : undefined)}
-          </>)}
+            {metricCell(points ? 'Redeemed' : 'Spends', fmt(outflow), outflow > 0 ? '#ef4444' : undefined)}
+          </>, { gutter: DETAIL_GUTTER, heading: monthLabel })}
         </div>
 
-        <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
-          {/* Counts the rows below it, like every other section heading here — not the account's
-            lifetime total, which there's no longer any way to reach from this screen. */}
-          {renderSectionHeading('Recent Activity', shown.length)}
+        <div style={{ padding: `1.5rem ${DETAIL_GUTTER} 0.5rem` }}>
+          {/* No count: this list is neither collapsible nor filtered, so the number only ever
+            restated the rows immediately below it. */}
+          {renderSectionHeading('Recent Activity', null)}
 
           {shown.length === 0 ? (
             <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-muted)', letterSpacing: '0.5px', textAlign: 'center', padding: '2rem 0', lineHeight: 1.6 }}>
@@ -1984,6 +2072,20 @@ export function Wealth() {
             : getCacheFetchedAt(selectedAsset.marketSymbol);
         // Same condition the chart block below keys off — the header spacing depends on it.
         const hasPriceChart = selectedAsset.type !== 'commodity' && selectedAsset.type !== 'epf';
+        // On an intraday window every point falls on the same day (1D) or repeats each day seven-odd
+        // times (5D), so the tooltip names the time instead of restating the date. It matters more now
+        // that 1D is where a stock opens: a column of identical "13 Aug 26" labels was survivable when
+        // you had to go looking for it.
+        const intradayLabel = selectedAsset.type === 'stocks' && INTRADAY_STOCK_RANGES.has(stockRange);
+        const formatPointLabel = (ms: number) => {
+          const d = new Date(ms);
+          const time = () => d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+          if (!intradayLabel) return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' });
+          // 1D is one day by definition, so the date would be noise; 5D still needs it to place the point.
+          return stockRange === '1d'
+            ? time()
+            : `${d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}, ${time()}`;
+        };
         return (
           <div className="fade-in" style={{ boxSizing: 'border-box' }}>
             <div
@@ -2098,10 +2200,10 @@ export function Wealth() {
                           </defs>
                           <YAxis domain={['dataMin', 'dataMax']} hide />
                           {/* Hidden, not removed: the axis still defines the horizontal scale and
-                            the 16px end padding. Its labels are dropped because recharts thins them
-                            to whatever fits, which lands them at uneven intervals — and the tooltip
-                            names the date of whatever point you touch anyway. */}
-                          <XAxis dataKey="date" hide padding={{ left: 16, right: 16 }} />
+                            the end padding that sets this screen's gutter. Its labels are dropped
+                            because recharts thins them to whatever fits, which lands them at uneven
+                            intervals — and the tooltip names the date of whatever point you touch. */}
+                          <XAxis dataKey="date" hide padding={{ left: CHART_END_PAD, right: CHART_END_PAD }} />
                           <Tooltip
                             position={{ y: 6 }}
                             offset={0}
@@ -2113,7 +2215,7 @@ export function Wealth() {
                               <ChartTooltip
                                 {...props}
                                 color={lineColor}
-                                formatDate={ms => new Date(ms).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}
+                                formatDate={formatPointLabel}
                                 formatValue={v => `₹${v.toFixed(2)}`}
                               />
                             )}
@@ -2152,14 +2254,14 @@ export function Wealth() {
                 </div>
               )}
 
-              {/* Range Selector — below chart, CRED style */}
+              {/* Range Selector — below chart, CRED style. Margin rather than padding, so its rule
+                ends at the gutter instead of running the full width of the screen — every other line
+                here stops level with the chart. This screen keeps the rule, unlike the liquid detail's
+                copy: the stat rows below have no border of their own to open on. */}
               {selectedAsset.type !== 'commodity' && selectedAsset.type !== 'epf' && (
-                <div style={{ padding: '0.75rem 1rem 0.5rem', boxSizing: 'border-box', borderBottom: '1px solid var(--border-color)' }}>
+                <div style={{ margin: `0 ${DETAIL_GUTTER}`, padding: '0.75rem 0 0.5rem', boxSizing: 'border-box', borderBottom: '1px solid var(--border-color)' }}>
                   <div className="no-scrollbar" style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', gap: '0.25rem' }}>
-                    {(selectedAsset.type === 'stocks'
-                      ? ['1d', '5d', '1mo', '3mo', '1y', '5y']
-                      : ['1m', '6m', '1y', 'all']
-                    ).map(r => {
+                    {(selectedAsset.type === 'stocks' ? STOCK_RANGES : MF_RANGES).map(r => {
                       const isActive = selectedAsset.type === 'stocks' ? stockRange === r : mfRange === r;
                       return (
                         <button
@@ -2195,7 +2297,7 @@ export function Wealth() {
                 const monthlyCredit = epfProj.employeeContribution + epfProj.employerEPFContribution + epfProj.employerEPSContribution;
 
                 return (
-                  <div style={{ padding: '0.5rem 1.25rem 1.5rem', boxSizing: 'border-box' }}>
+                  <div style={{ padding: `0.5rem ${DETAIL_GUTTER} 1.5rem`, boxSizing: 'border-box' }}>
                     <StatRow
                       label="Monthly Credit"
                       value={formatFullCurrency(monthlyCredit)}
@@ -2241,7 +2343,7 @@ export function Wealth() {
                 );
               })() : (
                 /* Stats List for Stocks & Mutual Funds */
-                <div style={{ padding: '0.5rem 1.25rem 1.5rem', boxSizing: 'border-box' }}>
+                <div style={{ padding: `0.5rem ${DETAIL_GUTTER} 1.5rem`, boxSizing: 'border-box' }}>
                   <StatRow
                     label={selectedAsset.type === 'stocks' ? 'Shares' : selectedAsset.type === 'commodity' ? 'Grams' : 'Units'}
                     value={`${stats.totalUnits.toLocaleString('en-IN', { maximumFractionDigits: 4 })}${selectedAsset.type === 'commodity' ? ' g' : ''}`}
