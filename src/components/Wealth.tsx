@@ -1,11 +1,10 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { useFinance } from '../FinanceContext';
-import type { Account } from '../types';
+import type { Account, Transaction } from '../types';
 import { BUILT_IN_ACCOUNT_TYPES } from '../types';
 import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHistoryByRange, getLatestFetchedAt, getLatestCommodityFetchedAt, getCacheFetchedAt, fetchCommodityPriceINR, getCachedPrice, getCachedCommodityPriceINR, fetchPrevClosesForSymbols, getCachedPrevPrice, getCachedPrevCommodityPriceINR } from '../services/MarketDataService';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Text } from 'recharts';
-import type { XAxisTickContentProps } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, RotateCcw, ChevronLeft, ChevronRight, ChevronDown, Landmark, ShieldCheck } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
 import WealthBackdrop from './WealthBackdrop';
@@ -13,11 +12,18 @@ import { PortfolioBackdrop, AssetsBackdrop, RetirementBackdrop } from './WealthC
 import { LogoAvatar } from './LogoAvatar';
 import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
 import { calculateEPFProjection, getEPFInterestRate, getFinancialYearForDate } from '../utils/epfEngine';
-import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats } from '../utils';
+import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance } from '../utils';
+import { getCategoryIcon } from './transactionIcons';
 
 type HistoryDataPoint = { date: number; close: number };
 type StockHistoryRange = '1d' | '5d' | '1mo' | '3mo' | '1y' | '5y';
 type MFHistoryRange = '1m' | '6m' | '1y' | 'all';
+// A liquid account's longer windows are assembled from month-keyed opening balances, so they're
+// counts of months. 1M is the exception: a single month is one point at that granularity, so it's
+// built day by day from the ledger instead.
+type BalanceRange = '1m' | '6m' | '1y' | 'all';
+const BALANCE_RANGE_MONTHS: Record<Exclude<BalanceRange, '1m'>, number> = { '6m': 6, '1y': 12, all: 120 };
+const DAILY_WINDOW_DAYS = 30;
 
 // The three top-level Wealth categories. `null` = the category tree (main screen).
 type WealthCategory = 'portfolio' | 'assets' | 'retirement';
@@ -26,6 +32,18 @@ type PortfolioFilter = 'all' | 'mf' | 'stocks' | 'commodity';
 // "other" catches debit cards, rewards wallets and user-created custom account types — every
 // liquid type that isn't a bank account, cash or an e-wallet.
 type AssetsFilter = 'all' | 'bank' | 'cash' | 'ewallet' | 'other';
+
+// Which figure a holding row shows on its right. Cycled from a pill on the section header, so the
+// numbers a holding has are all reachable from the list instead of only inside its detail screen.
+// Only offered when the list is narrowed to ONE asset class — across mixed classes the rows would
+// be comparing figures that aren't comparable. Each class advertises only the stops it can answer:
+// Metals omit 'oneDay', having no dependable previous close.
+type HoldingMetric = 'value' | 'oneDay' | 'returns';
+const HOLDING_METRICS: { v: HoldingMetric; label: string }[] = [
+  { v: 'value', label: 'Current (Invested)' },
+  { v: 'oneDay', label: '1D Change' },
+  { v: 'returns', label: 'Returns' },
+];
 
 // The arrow and the amount are one unit, so they're set with a hair of margin rather than a space
 // character: in the mono face a space carries a full advance plus .text-mono's 0.05em tracking, which
@@ -68,18 +86,95 @@ function StatRow({ label, value, color }: { label: string; value: ReactNode; col
   );
 }
 
-// Recharts centres every x-axis label on its data point, then slides an outermost label inwards
-// when the centred text would spill out of the plot — which leaves the last date sitting past the
-// point it belongs to. Where it had to slide (tickCoord ≠ coordinate) we put the label back on its
-// point and anchor it to the edge it overflowed, so it ends/starts exactly where the line does.
-function ChartDateTick(props: XAxisTickContentProps) {
-  const { index, payload, tickFormatter } = props;
-  const slide = payload.tickCoord == null ? 0 : payload.tickCoord - payload.coordinate;
-  const anchor = slide < -0.5 ? 'end' : slide > 0.5 ? 'start' : 'middle';
+// How close the tooltip may come to the chart's edge before it stops following the point.
+const TOOLTIP_EDGE_PAD = 10;
+
+type ChartTooltipProps = {
+  active?: boolean;
+  payload?: readonly { value?: unknown }[];
+  label?: string | number;
+  coordinate?: { x?: number; y?: number };
+  color: string;
+  formatDate: (ms: number) => string;
+  formatValue: (n: number) => string;
+};
+
+// The tooltip shared by every chart on this screen.
+//
+// Recharts parks its wrapper on the data point and we centre the bubble over it with
+// translateX(-50%), which sends half the bubble off-screen at the first and last points. So: measure
+// the bubble, clamp its centre to stay inside the plot, and slide the caret the opposite way by the
+// same amount so it keeps pointing at the point the bubble is actually describing.
+function ChartTooltip({ active, payload, label, coordinate, color, formatDate, formatValue }: ChartTooltipProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [shift, setShift] = useState(0);
+
+  const raw = payload && payload.length ? Number(payload[0].value) : null;
+  const valueText = raw === null || Number.isNaN(raw) ? '' : formatValue(raw);
+  const dateText = label == null ? '' : formatDate(Number(label));
+
+  // The point comes from props, NOT from measuring the wrapper recharts positions us in: recharts
+  // writes that wrapper's transform in its own effect, which runs after this child's, so reading it
+  // here yields the PREVIOUS point and every clamp lands one hover behind. `coordinate.x` is
+  // plot-relative for the current render; only the container's box needs the DOM, and that's stable.
+  //
+  // Layout effect, not a plain one: the shift has to land in the same paint as the bubble, or it
+  // visibly jumps from off-screen to clamped on every hover. Depending on coordinate.x rather than
+  // the rendered text is what makes a dependency array safe here — two adjacent points can format
+  // identically, but they can't share an x.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const box = el?.closest('.wealth-chart');
+    if (!el || !box || coordinate?.x == null) return;
+    const half = el.offsetWidth / 2;
+    const boxRect = box.getBoundingClientRect();
+    const pointX = boxRect.left + coordinate.x;
+    const min = boxRect.left + TOOLTIP_EDGE_PAD + half;
+    const max = boxRect.right - TOOLTIP_EDGE_PAD - half;
+    // A bubble wider than the chart can't be clamped into it — leave it centred rather than
+    // wedging it against one side.
+    const next = max < min ? 0 : Math.min(Math.max(pointX, min), max) - pointX;
+    // Guarded so a sub-pixel difference can't ping-pong the effect.
+    setShift(prev => (Math.abs(prev - next) < 0.5 ? prev : next));
+  }, [coordinate?.x, valueText, dateText]);
+
+  if (!active || !payload || !payload.length) return null;
+
   return (
-    <Text {...props} x={payload.coordinate} textAnchor={anchor}>
-      {tickFormatter ? tickFormatter(payload.value, index) : payload.value}
-    </Text>
+    <div
+      ref={ref}
+      style={{
+        transform: `translateX(calc(-50% + ${shift}px))`,
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border-color)',
+        borderRadius: '0.6rem',
+        padding: '0.45rem 0.7rem',
+        position: 'relative',
+        whiteSpace: 'nowrap',
+        boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
+        pointerEvents: 'none'
+      }}
+    >
+      <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginBottom: '0.15rem' }}>
+        {dateText}
+      </div>
+      <div style={{ fontSize: '0.9rem', fontWeight: 700, color }}>
+        {valueText}
+      </div>
+      <div style={{
+        position: 'absolute',
+        bottom: '-5px',
+        // Undoes the bubble's shift so the caret stays over the data point, but never leaves the
+        // bubble's own corners — at a hard-clamped edge the caret parks 12px in.
+        left: `max(12px, min(calc(100% - 12px), calc(50% - ${shift}px)))`,
+        transform: 'translateX(-50%) rotate(45deg)',
+        width: '10px',
+        height: '10px',
+        background: 'var(--bg-card)',
+        borderRight: '1px solid var(--border-color)',
+        borderBottom: '1px solid var(--border-color)'
+      }} />
+    </div>
   );
 }
 
@@ -159,9 +254,13 @@ export function Wealth() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [stockRange, setStockRange] = useState<StockHistoryRange>('1mo');
   const [mfRange, setMFRange] = useState<MFHistoryRange>('1y');
+  const [balanceRange, setBalanceRange] = useState<BalanceRange>('6m');
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [portfolioFilter, setPortfolioFilter] = useState<PortfolioFilter>('all');
   const [assetsFilter, setAssetsFilter] = useState<AssetsFilter>('all');
+  // Reset to 'value' whenever the class filter changes or the category is re-entered — see those
+  // call sites. The cycler is a look at the current list, not a preference that follows you around.
+  const [holdingMetric, setHoldingMetric] = useState<HoldingMetric>('value');
   // Bumped when a background AI logo lookup resolves, so resolved logos appear without a reload.
   const [, setLogoTick] = useState(0);
 
@@ -580,17 +679,37 @@ export function Wealth() {
     !hasRetirement ? 'EPF' : null,
   ].filter(Boolean).join(' or ');
 
-  const renderHoldingRow = (account: Account) => {
+  // Both list types enter a detail screen the same way: remember where the list was scrolled to, and
+  // start the detail's own view state fresh rather than inheriting the last account's.
+  const openAssetDetail = (account: Account) => {
+    const appRoot = document.querySelector('.app-root');
+    scrollRef.current.category = appRoot?.scrollTop ?? 0;
+    setBalanceRange('6m');
+    setSelectedAsset(account);
+  };
+
+  const renderHoldingRow = (account: Account, metric: HoldingMetric = 'value') => {
     const stats = getAccountStats(account);
     const positive = stats.totalReturn >= 0;
+    // EPF is priceless in the literal sense — no market symbol, no invested basis — so its row stays
+    // a plain balance no matter where the cycler sits. It's also never in a cycler-bearing list.
+    const isEpf = account.type === 'epf';
+    // Reuses the same helper the hero totals use, so a row and the headline above it can never
+    // disagree about what "today" means. Null when there's no previous close to compare against.
+    const oneDay = !isEpf && metric === 'oneDay' ? oneDayReturnFor([account]) : null;
+    // Without a live price `currentValue` is 0, and the return would read as a total loss of money
+    // that hasn't gone anywhere — the same guard the Portfolio metric strip applies.
+    const priced = stats.currentValue > 0;
+    // The figure behind whichever change metric is active, or null when this holding can't answer
+    // it. `value` is the odd one out (two unsigned figures, not a change) and renders separately.
+    const change =
+      metric === 'oneDay' ? (oneDay && { amount: oneDay.amount, pct: oneDay.pct, up: oneDay.amount >= 0 })
+        : metric === 'returns' ? (priced ? { amount: stats.totalReturn, pct: stats.totalReturnPct, up: positive } : null)
+          : null;
     return (
       <div
         key={account.id}
-        onClick={() => {
-          const appRoot = document.querySelector('.app-root');
-          scrollRef.current.category = appRoot?.scrollTop ?? 0;
-          setSelectedAsset(account);
-        }}
+        onClick={() => openAssetDetail(account)}
         className="clickable"
         style={{
           padding: '1rem 0',
@@ -613,29 +732,49 @@ export function Wealth() {
           </div>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
-          <div style={{
-            fontSize: '0.95rem',
-            fontWeight: 700,
-            color: account.type === 'epf' ? 'var(--text-primary)' : (positive ? '#22c55e' : '#ef4444')
-          }}>
-            {formatCurrency(stats.currentValue)}
-          </div>
-          {account.type !== 'epf' && (
-            <div style={{
-              fontSize: '0.8rem',
-              color: 'var(--text-secondary)',
-              marginTop: '0.15rem'
-            }}>
-              {formatCurrency(stats.totalInvested)}
-            </div>
+          {/* Both change metrics read the same way — a signed rupee figure over its percentage — so
+            they share one renderer. No "1D" tag on the row: the pill on the section header already
+            names the metric, and repeating it on every line only crowds the number. */}
+          {!isEpf && change ? (
+            <>
+              <div style={{ fontSize: '0.95rem', fontWeight: 700, color: change.up ? '#22c55e' : '#ef4444' }}>
+                {signedAmount(change.up, formatCurrency(Math.abs(change.amount)))}
+              </div>
+              <div className="text-mono" style={{ fontSize: '0.7rem', fontWeight: 600, color: change.up ? '#22c55e' : '#ef4444', opacity: 0.9, marginTop: '0.15rem', letterSpacing: '0.5px' }}>
+                {Math.abs(change.pct).toFixed(2)}%
+              </div>
+            </>
+          ) : !isEpf && metric !== 'value' ? (
+            // Nothing to compare against: a holding whose previous close never arrived, or one with
+            // no live price at all. Better a dash than a ₹0 that reads as a genuinely flat day.
+            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-secondary)' }}>—</div>
+          ) : (
+            <>
+              <div style={{
+                fontSize: '0.95rem',
+                fontWeight: 700,
+                color: isEpf ? 'var(--text-primary)' : (positive ? '#22c55e' : '#ef4444')
+              }}>
+                {formatCurrency(stats.currentValue)}
+              </div>
+              {!isEpf && (
+                <div style={{
+                  fontSize: '0.8rem',
+                  color: 'var(--text-secondary)',
+                  marginTop: '0.15rem'
+                }}>
+                  {formatCurrency(stats.totalInvested)}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
     );
   };
 
-  // Liquid accounts have no market price, no invested basis and no detail chart, so their row is a
-  // plain balance — not clickable, unlike a holding.
+  // A liquid account has no market price and no invested basis, so its detail screen is built from
+  // its own ledger instead: a balance history, the month's flows, and recent activity.
   const ACCOUNT_TYPE_SUBTEXT: Record<string, string> = {
     bank_account: 'Bank Account',
     cash: 'Physical Wallet',
@@ -656,9 +795,12 @@ export function Wealth() {
     return (
       <div
         key={account.id}
+        onClick={() => openAssetDetail(account)}
+        className="clickable"
         style={{
           padding: '1rem 0',
           borderBottom: '1px solid var(--border-color)',
+          cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           gap: '0.9rem'
@@ -770,6 +912,14 @@ export function Wealth() {
     const appRoot = document.querySelector('.app-root');
     scrollRef.current.tree = appRoot?.scrollTop ?? 0;
     setCategory(next);
+    // Every sub-view opens in its resting state — All, showing Current (Invested) — rather than
+    // resuming whatever was selected on the last visit. The narrowed view is a thing you go and do,
+    // not a setting: re-entering to a filtered list reads as a screen missing half its holdings,
+    // and the total in the hero silently means something narrower than "Portfolio".
+    // Drilling into a holding and coming back is NOT this path, so that still keeps its filter.
+    setPortfolioFilter('all');
+    setAssetsFilter('all');
+    setHoldingMetric('value');
   };
 
   useEffect(() => {
@@ -952,6 +1102,86 @@ export function Wealth() {
     );
   };
 
+  // The metric cycler, rendered at the trailing end of a single-class section header. Tapping the
+  // label steps forward; the chevrons step either way, so a three-stop cycle never needs two taps
+  // to go back. Every tap stops propagation — the header row it sits in is itself a collapse toggle.
+  // `metrics` is the subset this class can actually answer, so a stop that would only ever read "—"
+  // is never cycled through rather than shown and then apologised for.
+  const renderMetricCycler = (metrics: { v: HoldingMetric; label: string }[], active: HoldingMetric) => {
+    const idx = Math.max(0, metrics.findIndex(m => m.v === active));
+    const step = (delta: number) =>
+      setHoldingMetric(metrics[(idx + delta + metrics.length) % metrics.length].v);
+    const chevron = (dir: -1 | 1) => (
+      <button
+        onClick={e => { e.stopPropagation(); step(dir); }}
+        aria-label={dir === 1 ? 'Next metric' : 'Previous metric'}
+        style={{
+          display: 'flex', alignItems: 'center', padding: 0, border: 'none',
+          background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer'
+        }}
+      >
+        {dir === 1 ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
+      </button>
+    );
+    return (
+      <div
+        onClick={e => { e.stopPropagation(); step(1); }}
+        className="clickable"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.25rem',
+          flexShrink: 0,
+          padding: '0.34rem 0.6rem',
+          borderRadius: '999px',
+          border: '1px solid var(--pill-track-border)',
+          background: 'var(--pill-track-bg)',
+          cursor: 'pointer',
+          userSelect: 'none'
+        }}
+      >
+        <span className="text-mono uppercase" style={{ fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.8px', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+          {metrics[idx].label}
+        </span>
+        {chevron(-1)}
+        {chevron(1)}
+      </div>
+    );
+  };
+
+  // LABEL · count · rule — the heading over every list on this screen. One definition on purpose:
+  // the asset detail's "Recent Activity" heading used to hand-roll the same markup and had drifted a
+  // gap step tighter, so the count sat almost against its label and read as a different system.
+  const renderSectionHeading = (
+    label: string,
+    count: number,
+    opts: { trailing?: ReactNode; chevron?: ReactNode; onClick?: () => void; marginBottom?: string | number } = {}
+  ) => (
+    <div
+      // Tighter gap only when something trails the rule: label + count + rule + pill is a lot for a
+      // narrow phone, and this row is the one place here that can't wrap.
+      className={`flex align-center ${opts.trailing ? 'gap-2' : 'gap-3'}`}
+      style={{
+        cursor: opts.onClick ? 'pointer' : 'default',
+        userSelect: 'none',
+        marginBottom: opts.marginBottom ?? '0.25rem',
+      }}
+      onClick={opts.onClick}
+    >
+      <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px', whiteSpace: 'nowrap' }}>
+        {label}
+      </span>
+      <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
+        {count}
+      </span>
+      {/* minWidth keeps the rule from collapsing to nothing when a long label and the cycler
+        share the row on a narrow phone — it shrinks, but stays a visible connector. */}
+      <div style={{ flex: 1, minWidth: '10px', height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
+      {opts.trailing}
+      {opts.chevron}
+    </div>
+  );
+
   // A collapsible, labelled group of rows. Collapsing is disabled when a filter has already
   // narrowed the list to this one class — there'd be nothing left on screen.
   const renderHoldingSection = (
@@ -960,26 +1190,26 @@ export function Wealth() {
     accounts: Account[],
     single: boolean,
     renderRow: (a: Account) => ReactNode,
-    tourClass = ''
+    tourClass = '',
+    // Sits at the trailing end of the header row, after the rule. Only the metric cycler uses it,
+    // and only on a section the filter has already narrowed to — so it never competes with the
+    // collapse chevron for that end of the row.
+    trailing?: ReactNode
   ) => {
     const isCollapsed = single ? false : collapsedSections.has(key);
     return (
       <div className={tourClass} style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
-        <div
-          className="flex align-center gap-3"
-          style={{ cursor: single ? 'default' : 'pointer', userSelect: 'none', marginBottom: isCollapsed ? 0 : '0.25rem' }}
-          onClick={single ? undefined : () => toggleSection(key)}
-        >
-          <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px' }}>
-            {label}
-          </span>
-          <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
-            {accounts.length}
-          </span>
-          <div style={{ flex: 1, height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
-          {!single && <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />}
-        </div>
-        {!isCollapsed && <div>{accounts.map(renderRow)}</div>}
+        {renderSectionHeading(label, accounts.length, {
+          trailing,
+          chevron: !single && (
+            <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
+          ),
+          onClick: single ? undefined : () => toggleSection(key),
+          marginBottom: isCollapsed ? 0 : '0.25rem',
+        })}
+        {/* Called with one argument on purpose: passing `renderRow` straight to map would feed it
+          the index too, which lands in renderHoldingRow's optional `metric` parameter. */}
+        {!isCollapsed && <div>{accounts.map(a => renderRow(a))}</div>}
       </div>
     );
   };
@@ -1008,6 +1238,331 @@ export function Wealth() {
       {children}
     </div>
   );
+
+  // ─────────────────── Liquid account detail (Assets → tap a row) ───────────────────
+
+  // Everything that isn't a market holding, EPF, or a credit card — i.e. exactly what the Assets
+  // sub-view lists. Typed by exclusion so a user-defined custom account type is covered too.
+  const isLiquidAccount = (a: Account) =>
+    a.type !== 'stocks' && a.type !== 'mutual_funds' && a.type !== 'commodity'
+    && a.type !== 'epf' && a.type !== 'credit_card';
+
+  // The ledger behind the balance this screen shows. A points wallet's balance moves on reward
+  // legs; every other account's moves on rupee legs. Travel legs are excluded for the same reason
+  // the hero shows the payments balance on its own: mixing the two wallets makes the flows below
+  // fail to reconcile with the figure above them.
+  const liquidLedgerFilter = (account: Account) => {
+    const points = isPointsDenominated(account);
+    return (t: Transaction) =>
+      t.accountId === account.id && (points ? !!t.isRewardTransaction : affectsRupeeBalance(t));
+  };
+
+  const liquidBalanceAt = (account: Account, month: string) =>
+    isPointsDenominated(account)
+      ? calculateBalance(account, data.transactions, month, false, true)
+      : calculateBalance(account, data.transactions, month);
+
+  const monthTimestamp = (month: string) => {
+    const [y, m] = month.split('-').map(Number);
+    return new Date(y, m - 1, 1).getTime();
+  };
+
+  // Month-by-month closing balances, oldest first. Walks backwards from the current month and stops
+  // at the account's first sign of life, so a three-month-old account draws three points rather than
+  // six, five of them a flat line at its opening balance.
+  const buildBalanceSeries = (account: Account, range: Exclude<BalanceRange, '1m'>): HistoryDataPoint[] => {
+    const openingKeys = Object.keys(
+      isPointsDenominated(account)
+        ? (account.rewardOpeningBalances || {})
+        : (account.openingBalances || {})
+    );
+    const txMonths = data.transactions
+      .filter(liquidLedgerFilter(account))
+      .map(t => t.date.slice(0, 7));
+    const earliest = [...openingKeys, ...txMonths].sort()[0] || currentMonth;
+
+    const months: string[] = [];
+    let m = currentMonth;
+    // The 'all' window is capped at BALANCE_RANGE_MONTHS rather than left unbounded: the loop is
+    // also the guard against a stray future-dated opening balance never reaching `earliest`.
+    while (months.length < BALANCE_RANGE_MONTHS[range]) {
+      months.unshift(m);
+      if (m <= earliest) break;
+      m = previousMonthStr(m);
+    }
+    return months.map(mm => ({ date: monthTimestamp(mm), close: liquidBalanceAt(account, mm) }));
+  };
+
+  const isoDay = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  // The last 30 days, one point per day. Built by walking backwards from the month-end balance and
+  // undoing each day's movement, rather than forwards from a baseline: calculateBalance owns all the
+  // opening-balance and adjustment logic, and re-deriving a start-of-window figure by hand would miss
+  // an opening balance keyed to the current month.
+  //
+  // The last point is today's true balance, so it can sit below the hero when the user has logged a
+  // transaction dated later this month. That's deliberate: the hero follows the app-wide month-end
+  // convention (as do the Assets rows and totals), but a point plotted at today's date must not
+  // include money that hasn't moved yet.
+  const buildDailyBalanceSeries = (account: Account): HistoryDataPoint[] => {
+    const deltas = new Map<string, number>();
+    for (const t of data.transactions.filter(liquidLedgerFilter(account))) {
+      deltas.set(t.date, (deltas.get(t.date) || 0) + (t.type === 'credit' ? t.amount : -t.amount));
+    }
+
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (DAILY_WINDOW_DAYS - 1));
+    const todayStr = isoDay(today);
+
+    // The month-end figure includes anything dated later this month, which hasn't happened yet as
+    // far as today's point is concerned — take it back off before walking.
+    let running = liquidBalanceAt(account, currentMonth);
+    deltas.forEach((v, d) => {
+      if (d.slice(0, 7) === currentMonth && d > todayStr) running -= v;
+    });
+
+    const out: HistoryDataPoint[] = [];
+    const cursor = new Date(today);
+    while (cursor.getTime() >= start.getTime()) {
+      out.unshift({ date: cursor.getTime(), close: running });
+      // Undo this day's movement to land on the previous day's closing balance.
+      running -= deltas.get(isoDay(cursor)) || 0;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    return out;
+  };
+
+  const renderLiquidDetail = (account: Account) => {
+    const points = isPointsDenominated(account);
+    const unit = account.rewardUnit || '';
+    // Points have no paise and no ₹ sign; everything else formats as money.
+    const fmt = (n: number) =>
+      points ? `${Math.round(n).toLocaleString('en-IN')} ${unit}` : formatCurrency(n);
+
+    const balance = liquidBalanceAt(account, currentMonth);
+    const monthChange = balance - liquidBalanceAt(account, previousMonthStr(currentMonth));
+    // Sub-paise drift is rounding noise, not a movement — same threshold as the Assets strip.
+    const flat = Math.abs(monthChange) < 0.005;
+    // An NCMC card's travel wallet is real money but a separate purse, so it's stated beside the
+    // payments balance rather than folded into it.
+    const travelBal = account.isNcmcEnabled
+      ? calculateBalance(account, data.transactions, currentMonth, true)
+      : null;
+    const subtext = ACCOUNT_TYPE_SUBTEXT[account.type]
+      || account.type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+    const ledger = data.transactions.filter(liquidLedgerFilter(account));
+    const monthTxs = ledger.filter(t => t.date.slice(0, 7) === currentMonth);
+    const inflow = monthTxs.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
+    const outflow = monthTxs.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0);
+
+    const shown = [...ledger]
+      .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
+      .slice(0, 5);
+
+    // 1M needs a rupee ledger to walk day by day. A points wallet's balance also moves on confirmed
+    // cashback statements at a conversion rate, which only calculateBalance knows how to apply — so
+    // it's offered the monthly windows only, the same way the metric cycler drops a stop a class
+    // can't answer.
+    const ranges: BalanceRange[] = points ? ['6m', '1y', 'all'] : ['1m', '6m', '1y', 'all'];
+    const range = ranges.includes(balanceRange) ? balanceRange : '6m';
+    const daily = range === '1m';
+    // Tested inline rather than through `daily` so the else branch narrows '1m' out of `range` —
+    // buildBalanceSeries only accepts the month-counted windows.
+    const series = range === '1m' ? buildDailyBalanceSeries(account) : buildBalanceSeries(account, range);
+    const up = series.length > 1 && series[series.length - 1].close >= series[0].close;
+    const lineColor = up ? '#22c55e' : '#ef4444';
+
+    return (
+      <div className="fade-in" style={{ boxSizing: 'border-box' }}>
+        {renderSubviewHeader(category ? CATEGORY_LABELS[category] : 'Wealth', () => setSelectedAsset(null), '', true)}
+
+        {/* Identity block — deliberately the same shape as a holding's, down to the -28px pull over
+          the back button's row, so the two detail screens read as the same screen. */}
+        <div style={{ padding: '0 1.5rem 0.5rem', marginTop: '-28px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <div style={{ marginBottom: '1rem' }}>
+            <LogoAvatar name={account.name} logoUrl={getLiquidLogoUrl(account)} size={60} accountType={account.type} />
+          </div>
+
+          <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.35, maxWidth: '90%' }}>
+            {account.name}
+          </div>
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
+            {subtext}
+          </div>
+
+          <div className="text-serif" style={{ fontSize: '3rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '1.25rem', lineHeight: 1 }}>
+            {fmt(balance)}
+          </div>
+
+          {/* Where a holding puts its 1-day change. A balance has no market to move it, so the
+            honest equivalent is what the month did to it. */}
+          <div style={{ fontSize: '1rem', fontWeight: 600, marginTop: '0.75rem', color: flat ? 'var(--text-secondary)' : monthChange > 0 ? '#22c55e' : '#ef4444' }}>
+            {flat ? fmt(0) : signedAmount(monthChange > 0, fmt(Math.abs(monthChange)))}
+          </div>
+          <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.2rem', letterSpacing: '0.5px' }}>
+            This month
+          </div>
+
+          {travelBal !== null && (
+            <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.6rem', letterSpacing: '0.5px' }}>
+              + {formatCurrency(travelBal)} travel wallet
+            </div>
+          )}
+          {points && (
+            <div className="text-mono uppercase" style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: '0.6rem', letterSpacing: '0.5px' }}>
+              Not counted in the Assets total
+            </div>
+          )}
+        </div>
+
+        {/* A single point is a dot, not a trend — below two months the chart is simply omitted. */}
+        {series.length > 1 && (
+          <>
+            <div style={{ padding: '0 0 0.5rem', width: '100%', boxSizing: 'border-box' }}>
+              {/* 220: 70px of it is the tooltip's reserve, and with no date axis below there's no
+                30px axis strip to pay for either. The flows strip and activity list want the room. */}
+              <div className="wealth-chart" style={{ width: '100%', height: '220px' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={series} margin={{ top: 70, right: 0, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="liquidChartFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={lineColor} stopOpacity={0.22} />
+                        <stop offset="100%" stopColor={lineColor} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    {/* Balances belong on a zero baseline: a ₹8,100→₹8,400 month auto-scaled to
+                      dataMin/dataMax would draw a cliff out of a 4% move. The floor follows the data
+                      below zero, so an overdrawn month isn't clipped off the bottom. */}
+                    <YAxis domain={[(dataMin: number) => Math.min(0, dataMin), 'dataMax']} hide />
+                    {/* Hidden, not removed: the axis still defines the horizontal scale and the
+                      16px end padding. Its labels are dropped because recharts thins them to
+                      whatever fits, which lands them at uneven intervals — and the tooltip names
+                      the date of whatever point you touch anyway. */}
+                    <XAxis dataKey="date" hide padding={{ left: 16, right: 16 }} />
+                    <Tooltip
+                      position={{ y: 6 }}
+                      offset={0}
+                      // Recharts must place the wrapper exactly on the point, without clamping of
+                      // its own — ChartTooltip does the clamping, and it knows about the centring
+                      // transform that recharts' own edge maths can't see.
+                      allowEscapeViewBox={{ x: true }}
+                      cursor={false}
+                      content={props => (
+                        <ChartTooltip
+                          {...props}
+                          color={lineColor}
+                          formatDate={ms => new Date(ms).toLocaleDateString('en-IN',
+                            daily ? { day: 'numeric', month: 'short', year: '2-digit' } : { month: 'short', year: 'numeric' })}
+                          formatValue={fmt}
+                        />
+                      )}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="close"
+                      stroke={lineColor}
+                      strokeWidth={1.5}
+                      fill="url(#liquidChartFill)"
+                      dot={false}
+                      activeDot={({ cx, cy }: { cx?: number; cy?: number }) => {
+                        if (cx == null || cy == null) return <g />;
+                        return (
+                          <g>
+                            {/* Meets the tooltip caret's tip: tooltip top y=6 plus its height. */}
+                            <line x1={cx} y1={cy} x2={cx} y2={64} stroke={lineColor} strokeWidth={1.25} strokeDasharray="5 4" strokeOpacity={0.4} />
+                            <circle cx={cx} cy={cy} r={3.5} fill={lineColor} />
+                          </g>
+                        );
+                      }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div style={{ padding: '0.75rem 1rem 0.5rem', boxSizing: 'border-box', borderBottom: '1px solid var(--border-color)' }}>
+              <div className="no-scrollbar" style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', gap: '0.25rem' }}>
+                {ranges.map(r => {
+                  const isActive = range === r;
+                  return (
+                    <button
+                      key={r}
+                      onClick={() => setBalanceRange(r)}
+                      style={{
+                        padding: '0.4rem 0.9rem',
+                        border: `1px solid ${isActive ? 'var(--border-color)' : 'transparent'}`,
+                        background: isActive ? 'var(--bg-hover)' : 'transparent',
+                        color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        borderRadius: '999px',
+                        cursor: 'pointer',
+                        fontSize: '0.82rem',
+                        fontWeight: isActive ? 700 : 500,
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {r.toUpperCase()}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* In and Out only — the net of the two is the hero's "this month" figure, and the Portfolio
+          strip sets the precedent of not repeating what the headline already says. */}
+        <div style={{ marginTop: series.length > 1 ? '0.5rem' : '1rem' }}>
+          {metricStrip(<>
+            {metricCell('In', fmt(inflow), inflow > 0 ? 'var(--success)' : undefined)}
+            {metricDivider}
+            {metricCell('Out', fmt(outflow), outflow > 0 ? '#ef4444' : undefined)}
+          </>)}
+        </div>
+
+        <div style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
+          {/* Counts the rows below it, like every other section heading here — not the account's
+            lifetime total, which there's no longer any way to reach from this screen. */}
+          {renderSectionHeading('Recent Activity', shown.length)}
+
+          {shown.length === 0 ? (
+            <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-muted)', letterSpacing: '0.5px', textAlign: 'center', padding: '2rem 0', lineHeight: 1.6 }}>
+              No transactions on this account yet
+            </div>
+          ) : (
+            <>
+              {shown.map(t => {
+                const credit = t.type === 'credit';
+                const [y, mo, d] = t.date.split('-').map(Number);
+                return (
+                  <div key={t.id} style={{ padding: '0.85rem 0', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '0.9rem' }}>
+                    <div className="flex-center" style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--bg-hover)', color: 'var(--text-secondary)', flexShrink: 0 }}>
+                      {getCategoryIcon(t.category, 17)}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {t.description}
+                      </div>
+                      <div className="text-mono uppercase" style={{ fontSize: '0.6rem', color: 'var(--text-secondary)', marginTop: '0.2rem', letterSpacing: '0.5px' }}>
+                        {new Date(y, mo - 1, d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} · {t.category}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 700, flexShrink: 0, color: credit ? '#22c55e' : 'var(--text-primary)' }}>
+                      {credit ? '+' : '−'} {fmt(t.amount)}
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div style={{ background: 'var(--bg-primary)', paddingBottom: '100px' }}>
@@ -1168,6 +1723,24 @@ export function Wealth() {
           tabs.length === 0 || tabs.some(t => t.v === portfolioFilter) ? portfolioFilter : 'all';
         const s = portfolioStats[activeFilter];
         const oneDay = filteredPortfolioOneDayReturn;
+        // Any single class gets the cycler; "All" doesn't, because its rows would be comparing
+        // figures across classes that aren't comparable.
+        const showMetricCycler = activeFilter !== 'all';
+        // Metals drop the 1D stop: a metal priced by an hourly AI estimate — or by hand — has no
+        // dependable previous close, which is the same reason the hero hides their "today".
+        const metrics = activeFilter === 'commodity'
+          ? HOLDING_METRICS.filter(m => m.v !== 'oneDay')
+          : HOLDING_METRICS;
+        // Belt-and-braces: switching class already resets to 'value', so a metric this class can't
+        // answer shouldn't be reachable — but deriving it here means a future change to that reset
+        // can't leave Metals asking for a 1D figure that doesn't exist.
+        const metric = metrics.some(m => m.v === holdingMetric) ? holdingMetric : 'value';
+        // With the cycler hidden the rows fall back to their default Current (Invested), so a mixed
+        // "All" list never inherits a metric the user picked while a single class was showing.
+        const rowRenderer = showMetricCycler
+          ? (a: Account) => renderHoldingRow(a, metric)
+          : renderHoldingRow;
+        const cycler = showMetricCycler ? renderMetricCycler(metrics, metric) : undefined;
         return (
           <div className="fade-in">
             {renderSubviewHeader('Portfolio', () => setCategory(null), 'tour-wealth-back', true)}
@@ -1222,7 +1795,10 @@ export function Wealth() {
                 </div>
               )}
 
-              {renderFilterPills(tabs, activeFilter, setPortfolioFilter, {
+              {/* Changing class resets the row metric: each class is a fresh list, and Current
+                (Invested) is the figure that always makes sense on one. Carrying the previous
+                choice over meant landing on Stocks already showing a metric you picked for MF. */}
+              {renderFilterPills(tabs, activeFilter, v => { setPortfolioFilter(v); setHoldingMetric('value'); }, {
                 marginTop: displayRefreshedAt ? '1.5rem' : '2.2rem',
               })}
             </>)}
@@ -1270,14 +1846,17 @@ export function Wealth() {
                   </div>
                 )}
 
+                {/* The cycler rides the section header. `cycler` is non-null only when a single-class
+                  filter is active, and that filter leaves exactly one section on screen — so passing
+                  it to all three can't put a pill on more than one header. */}
                 {mfAccounts.length > 0 && (activeFilter === 'all' || activeFilter === 'mf') &&
-                  renderHoldingSection('mf', 'Mutual Funds', mfAccounts, activeFilter !== 'all', renderHoldingRow, 'tour-wealth-holdings')}
+                  renderHoldingSection('mf', 'Mutual Funds', mfAccounts, activeFilter !== 'all', rowRenderer, 'tour-wealth-holdings', cycler)}
 
                 {stockAccounts.length > 0 && (activeFilter === 'all' || activeFilter === 'stocks') &&
-                  renderHoldingSection('stocks', 'Stocks', stockAccounts, activeFilter !== 'all', renderHoldingRow, 'tour-wealth-holdings')}
+                  renderHoldingSection('stocks', 'Stocks', stockAccounts, activeFilter !== 'all', rowRenderer, 'tour-wealth-holdings', cycler)}
 
                 {commodityAccounts.length > 0 && (activeFilter === 'all' || activeFilter === 'commodity') &&
-                  renderHoldingSection('commodity', 'Commodities', commodityAccounts, activeFilter !== 'all', renderHoldingRow, 'tour-wealth-holdings')}
+                  renderHoldingSection('commodity', 'Commodities', commodityAccounts, activeFilter !== 'all', rowRenderer, 'tour-wealth-holdings', cycler)}
               </div>
             </div>
           </div>
@@ -1389,7 +1968,11 @@ export function Wealth() {
         </div>
       )}
 
-      {selectedAsset && (() => {
+      {/* A liquid account takes its own branch rather than falling through below: getAccountStats is
+        built on invested-vs-current, which a bank balance has no version of. */}
+      {selectedAsset && isLiquidAccount(selectedAsset) && renderLiquidDetail(selectedAsset)}
+
+      {selectedAsset && !isLiquidAccount(selectedAsset) && (() => {
         const stats = getAccountStats(selectedAsset);
         const oneDay = getOneDayReturn(selectedAsset);
         // This holding's OWN last fetch time, not the Portfolio-wide max shown in the sub-view header.
@@ -1399,6 +1982,8 @@ export function Wealth() {
           : selectedAsset.type === 'commodity'
             ? getLatestCommodityFetchedAt([selectedAsset.marketSymbol])
             : getCacheFetchedAt(selectedAsset.marketSymbol);
+        // Same condition the chart block below keys off — the header spacing depends on it.
+        const hasPriceChart = selectedAsset.type !== 'commodity' && selectedAsset.type !== 'epf';
         return (
           <div className="fade-in" style={{ boxSizing: 'border-box' }}>
             <div
@@ -1413,7 +1998,10 @@ export function Wealth() {
               {/* Asset identity — centered, CRED style. Pulled up over the back button's row, same as
                 renderCategoryHero: that row is dead space once its title is hidden — just a small,
                 left-aligned chevron — so it can overlap this centered content without collision. */}
-              <div style={{ padding: '0 1.5rem 1.5rem', marginTop: '-28px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+              {/* Tighter bottom padding when a chart follows: the chart already reserves 70px above its
+                plot for the tooltip pill, so the full 1.5rem stacked on top of that read as dead space
+                between "Last refresh at" and the pill. Commodity/EPF have no chart, so they keep it. */}
+              <div style={{ padding: `0 1.5rem ${hasPriceChart ? '0.5rem' : '1.5rem'}`, marginTop: '-28px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
                 <div style={{ marginBottom: '1rem' }}>
                   <LogoAvatar name={selectedAsset.name} logoUrl={getAssetLogoUrl(selectedAsset)} size={60} metal={selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'silver' : 'gold') : undefined} isEpf={selectedAsset.type === 'epf'} />
                 </div>
@@ -1475,10 +2063,12 @@ export function Wealth() {
               </div>
 
               {/* Chart — CRED style: auto-scaled, no axes/grid clutter, thin trend line */}
-              {selectedAsset.type === 'commodity' || selectedAsset.type === 'epf' ? null : historyLoading ? (
-                <div style={{ padding: '0.5rem 0 0.5rem', width: '100%', boxSizing: 'border-box' }}>
-                  {/* Skeleton mirrors the real chart's box: 280px tall, 70px top / 30px axis padding */}
-                  <div style={{ width: '100%', height: '280px', padding: '70px 0 30px', boxSizing: 'border-box' }}>
+              {!hasPriceChart ? null : historyLoading ? (
+                <div style={{ padding: '0 0 0.5rem', width: '100%', boxSizing: 'border-box' }}>
+                  {/* Mirrors the real chart's box: 250px tall, 70px of tooltip reserve on top. The
+                    row of stub bars that used to stand in for date labels went with the axis —
+                    a skeleton promising labels that never arrive is a layout shift. */}
+                  <div style={{ width: '100%', height: '250px', padding: '70px 0 0', boxSizing: 'border-box' }}>
                     <div
                       className="skeleton-bar"
                       style={{
@@ -1489,20 +2079,16 @@ export function Wealth() {
                       }}
                     />
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0 16px' }}>
-                    {[0, 1, 2, 3, 4].map(i => (
-                      <div key={i} className="skeleton-bar" style={{ width: '38px', height: '10px' }} />
-                    ))}
-                  </div>
                 </div>
               ) : historyData.length > 0 ? (() => {
                 const up = historyData[historyData.length - 1].close >= historyData[0].close;
                 const lineColor = up ? '#22c55e' : '#ef4444';
                 return (
-                  <div style={{ padding: '0.5rem 0 0.5rem', width: '100%', boxSizing: 'border-box' }}>
-                    <div className="wealth-chart" style={{ width: '100%', height: '280px' }}>
+                  <div style={{ padding: '0 0 0.5rem', width: '100%', boxSizing: 'border-box' }}>
+                    {/* 250, down from 280: a hidden axis reserves no space, so keeping 280 would just
+                      have handed the plot the 30px the date labels used to occupy. */}
+                    <div className="wealth-chart" style={{ width: '100%', height: '250px' }}>
                       <ResponsiveContainer width="100%" height="100%">
-                        {/* plot bottom baseline: container 280 - x-axis height 30 */}
                         <AreaChart data={historyData} margin={{ top: 70, right: 0, left: 0, bottom: 0 }}>
                           <defs>
                             <linearGradient id="wealthChartFill" x1="0" y1="0" x2="0" y2="1">
@@ -1511,58 +2097,26 @@ export function Wealth() {
                             </linearGradient>
                           </defs>
                           <YAxis domain={['dataMin', 'dataMax']} hide />
-                          <XAxis
-                            dataKey="date"
-                            height={30}
-                            tick={ChartDateTick}
-                            fontSize={11}
-                            stroke="var(--text-secondary)"
-                            tickFormatter={d => new Date(d).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}
-                            minTickGap={50}
-                            axisLine={false}
-                            tickLine={false}
-                            padding={{ left: 16, right: 16 }}
-                          />
+                          {/* Hidden, not removed: the axis still defines the horizontal scale and
+                            the 16px end padding. Its labels are dropped because recharts thins them
+                            to whatever fits, which lands them at uneven intervals — and the tooltip
+                            names the date of whatever point you touch anyway. */}
+                          <XAxis dataKey="date" hide padding={{ left: 16, right: 16 }} />
                           <Tooltip
                             position={{ y: 6 }}
                             offset={0}
+                            // See the Assets chart's copy: ChartTooltip owns the edge clamping, so
+                            // recharts must place the wrapper on the point and not clamp it itself.
                             allowEscapeViewBox={{ x: true }}
                             cursor={false}
-                            content={({ active, payload, label }: any) => {
-                              if (!active || !payload || !payload.length) return null;
-                              const val = payload[0].value as number;
-                              return (
-                                <div style={{
-                                  transform: 'translateX(-50%)',
-                                  background: 'var(--bg-card)',
-                                  border: '1px solid var(--border-color)',
-                                  borderRadius: '0.6rem',
-                                  padding: '0.45rem 0.7rem',
-                                  position: 'relative',
-                                  whiteSpace: 'nowrap',
-                                  boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
-                                  pointerEvents: 'none'
-                                }}>
-                                  <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginBottom: '0.15rem' }}>
-                                    {new Date(label as number).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}
-                                  </div>
-                                  <div style={{ fontSize: '0.9rem', fontWeight: 700, color: lineColor }}>
-                                    ₹{val.toFixed(2)}
-                                  </div>
-                                  <div style={{
-                                    position: 'absolute',
-                                    bottom: '-5px',
-                                    left: '50%',
-                                    transform: 'translateX(-50%) rotate(45deg)',
-                                    width: '10px',
-                                    height: '10px',
-                                    background: 'var(--bg-card)',
-                                    borderRight: '1px solid var(--border-color)',
-                                    borderBottom: '1px solid var(--border-color)'
-                                  }} />
-                                </div>
-                              );
-                            }}
+                            content={props => (
+                              <ChartTooltip
+                                {...props}
+                                color={lineColor}
+                                formatDate={ms => new Date(ms).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}
+                                formatValue={v => `₹${v.toFixed(2)}`}
+                              />
+                            )}
                           />
                           <Area
                             type="monotone"

@@ -26,7 +26,7 @@ Rupees (₹). The app is also packaged for Android/iOS via Capacitor.
 # Navigation
 - Bottom nav (4 icons): Home (Dashboard), Wallet (Accounts), Receipts (Transactions), Profile (Settings).
 - Top bar: "Ask Vault" (this assistant) and the Hub (grid) button.
-- The Hub opens: Group Splits, Lending & Borrowing, Bills, Rewards & Offers (cashback),
+- The Hub opens: Group Splits, Lending & Borrowing, Bills, Rewards (cashback & reward points),
   Wealth (investments & EPF), and Smart Insights.
 - Feature tours: the first time you open each Hub feature (and at first launch) a one-time guided tour
   runs using temporary sample data, which is then cleared. Tours can't currently be replayed.
@@ -158,7 +158,7 @@ a bill, a recharge) as long as a reward account can fund it. Investments are the
     and switching type clears any account or quantity that no longer applies.
 - Cashback (instant): on a debit with instant cashback, an extra credit posts to the chosen rewards
   account (category "Cashback").
-- Cashback (delayed): see Rewards & Offers — confirming realized cashback posts a "Cashback" credit
+- Cashback (delayed): see Rewards — confirming realized cashback posts a "Cashback" credit
   into the chosen account.
 - NCMC Travel Recharge: on an NCMC-enabled debit card, moves money from the card's payments balance
   into its separate travel balance (and travel purchases draw it back down).
@@ -190,11 +190,11 @@ A card has a statement day and a due day.
   spend does. So a refund dated the 12th appears on the statement covering the 12th.
 The Dashboard shows billed, unbilled, and total dues per card.
 
-# Cashback / Rewards & Offers
+# Cashback / Rewards
 Cards can earn cashback at a default rate or per-mode rates (e.g. UPI, swipe). The app tracks expected
 vs. realized cashback per card per billing cycle. Cashback can be instant or delayed, credited in the
 same cycle or the next, as rupees or as reward points, and deposited into a chosen account. In the
-Rewards & Offers screen the user confirms realized cashback, which posts a consolidated "Cashback"
+Rewards screen the user confirms realized cashback, which posts a consolidated "Cashback"
 credit into that account. Before confirming you can tap the pencil to edit a cycle's cashback amount;
 you can also undo a confirmed cashback, or consolidate several confirmed entries into one credit. When
 a cycle has two or more pending cashbacks, a "Confirm All" button in that cycle's header confirms them
@@ -267,15 +267,23 @@ what's missing and points to the Accounts tab. A user with nothing at all sees a
 Invested vs. current value with gain/loss, today's gain/loss, a "Refresh prices" button and a "Last
 refresh at" timestamp. Prices: stocks/funds are fetched online; gold/silver are AI-estimated via the
 optional Gemini integration or set manually (₹/gram). Filter pills (All / MF / Stocks / Metals) appear
-only for the asset classes the user actually holds, and only when there's more than one. Each class
+only for the asset classes the user actually holds, and only when there's more than one. With a single
+class selected, a pill on that section's header cycles what every row shows on its right — Current
+(Invested), 1D Change, or Returns — tap the label to step forward or the ‹ › chevrons to move either
+way. Metals offer only Current (Invested) and Returns, having no dependable previous close; on All the
+pill is hidden and rows show Current (Invested). Each class
 can be expanded/collapsed, and tapping a holding opens its performance chart, range selector,
 allocation and transactions. An individual holding can also be refreshed from its account card in the
 Accounts tab.
 
 ## Assets sub-view
 Total cash and funds available, with filter pills (All / Bank / Cash / Wallets / Other) shown only for
-the groups present. Each row shows the account's running balance and its type. These rows are not
-tappable — liquid accounts have no price history; manage them from the Accounts tab.
+the groups present. Each row shows the account's running balance and its type. Tapping a row opens
+that account's detail screen: its balance, what the month did to it, a balance trend (1M / 6M / 1Y /
+ALL — 1M is day by day, the longer windows month by month), the month's money In and Out, and the five
+most recent transactions. An NCMC card also shows its travel wallet, and a points wallet reads in
+points, is excluded from the Assets total, and has no 1M window. To see every transaction on an
+account, or to edit one, use the Transactions and Accounts tabs.
 
 ## Retirement sub-view
 Total EPF running balance and interest earned this financial year, plus the monthly credit breakdown

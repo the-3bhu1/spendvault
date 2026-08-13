@@ -386,8 +386,8 @@ function App() {
                     <Gift size={22} />
                   </div>
                   <div className="flex-col flex-1">
-                    <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Rewards & Offers</span>
-                    <span className="text-xs text-muted">Cashback & Credit Card Perks</span>
+                    <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Rewards</span>
+                    <span className="text-xs text-muted">Cashback & Reward Points</span>
                   </div>
                   <ChevronRight size={18} className="text-muted" />
                 </div>
