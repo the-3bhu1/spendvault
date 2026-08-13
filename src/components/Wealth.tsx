@@ -10,6 +10,7 @@ import ProfileAvatar from './ProfileAvatar';
 import WealthBackdrop from './WealthBackdrop';
 import { PortfolioBackdrop, AssetsBackdrop, RetirementBackdrop } from './WealthCategoryBackdrops';
 import { LogoAvatar } from './LogoAvatar';
+import { DetailHeroBand, DetailHeroSeal, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
 import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
 import { calculateEPFProjection, getEPFInterestRate, getFinancialYearForDate } from '../utils/epfEngine';
 import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance, isStatsExcludedCategory, statsAmount } from '../utils';
@@ -1021,6 +1022,25 @@ export function Wealth() {
     </div>
   );
 
+  // The account's mark as the device impressed in the hero's wax seal. The wrapper is sized to the
+  // avatar and nothing more on purpose: the seal centres itself on its parent, so the parent IS the
+  // registration mark (see COMPOSITION in DetailHeroBackdrop). The mark is lifted over the wax, which
+  // is what makes it read as pressed into the seal rather than sitting behind it.
+  //
+  // Only valid inside an identity block that follows a DetailHeroBand and lifts itself by
+  // DETAIL_HERO_LIFT — that pairing is what puts this box inside the panel.
+  const renderSealedMark = (logo: ReactNode) => (
+    <div style={{
+      position: 'relative',
+      width: `${DETAIL_HERO_AVATAR}px`,
+      height: `${DETAIL_HERO_AVATAR}px`,
+      marginBottom: '1rem',
+    }}>
+      <DetailHeroSeal />
+      <div style={{ position: 'relative', zIndex: 1 }}>{logo}</div>
+    </div>
+  );
+
   // The illustrated hero each category screen opens with: that category's own bas-relief engraving,
   // the user's avatar and "<Name>'s <Category>" over it, then the figures the category leads with.
   // Same treatment as the tree screen's hero, and for the same reason — position/overflow because
@@ -1456,12 +1476,15 @@ export function Wealth() {
       <div className="fade-in" style={{ boxSizing: 'border-box' }}>
         {renderSubviewHeader(category ? CATEGORY_LABELS[category] : 'Wealth', () => setSelectedAsset(null), '', true)}
 
-        {/* Identity block — deliberately the same shape as a holding's, down to the -28px pull over
-          the back button's row, so the two detail screens read as the same screen. */}
-        <div style={{ padding: '0 1.5rem 0.5rem', marginTop: '-28px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-          <div style={{ marginBottom: '1rem' }}>
-            <LogoAvatar name={account.name} logoUrl={getLiquidLogoUrl(account)} size={60} accountType={account.type} />
-          </div>
+        <DetailHeroBand />
+
+        {/* Identity block — deliberately the same shape as a holding's, down to the lift that sets the
+          mark into the panel above, so the two detail screens read as the same screen. The lift
+          replaces the old -28px pull over the back button's row: the panel now covers that row. */}
+        <div style={{ padding: '0 1.5rem 0.5rem', marginTop: `-${DETAIL_HERO_LIFT}px`, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          {renderSealedMark(
+            <LogoAvatar name={account.name} logoUrl={getLiquidLogoUrl(account)} size={DETAIL_HERO_AVATAR} accountType={account.type} />
+          )}
 
           <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.35, maxWidth: '90%' }}>
             {account.name}
@@ -2103,10 +2126,13 @@ export function Wealth() {
               {/* Tighter bottom padding when a chart follows: the chart already reserves 70px above its
                 plot for the tooltip pill, so the full 1.5rem stacked on top of that read as dead space
                 between "Last refresh at" and the pill. Commodity/EPF have no chart, so they keep it. */}
-              <div style={{ padding: `0 1.5rem ${hasPriceChart ? '0.5rem' : '1.5rem'}`, marginTop: '-28px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
-                <div style={{ marginBottom: '1rem' }}>
-                  <LogoAvatar name={selectedAsset.name} logoUrl={getAssetLogoUrl(selectedAsset)} size={60} metal={selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'silver' : 'gold') : undefined} isEpf={selectedAsset.type === 'epf'} />
-                </div>
+              <DetailHeroBand />
+
+              {/* Lifted into the panel above, as on the liquid detail — see renderSealedMark. */}
+              <div style={{ padding: `0 1.5rem ${hasPriceChart ? '0.5rem' : '1.5rem'}`, marginTop: `-${DETAIL_HERO_LIFT}px`, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                {renderSealedMark(
+                  <LogoAvatar name={selectedAsset.name} logoUrl={getAssetLogoUrl(selectedAsset)} size={DETAIL_HERO_AVATAR} metal={selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'silver' : 'gold') : undefined} isEpf={selectedAsset.type === 'epf'} />
+                )}
 
                 <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.35, maxWidth: '90%' }}>
                   {selectedAsset.name}

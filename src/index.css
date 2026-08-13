@@ -1570,6 +1570,30 @@ tr:hover td {
   display: none;
 }
 
+/* Full-bleed hero panel on the two Wealth detail screens. Two jobs, both of which depend on the
+   breakpoint, which is why this is a class and not an inline style:
+
+   - cancels .container's horizontal padding so the panel runs edge to edge. Negative margins rather
+     than width:100vw, which overflows by the width of a desktop scrollbar;
+   - pulls up over the back-button row and the container's own top padding, so the panel starts flush
+     under the navbar with no sliver of page showing above it.
+
+   38px is the back-button row: a 20px chevron in a button with 0.5rem of padding and a 1px border.
+   The two padding figures must stay in step with .container. */
+.detail-hero-bleed {
+  margin-left: -2rem;
+  margin-right: -2rem;
+  margin-top: calc(-38px - 2rem);
+}
+
+@media (max-width: 768px) {
+  .detail-hero-bleed {
+    margin-left: -0.5rem;
+    margin-right: -0.5rem;
+    margin-top: calc(-38px - 0.5rem);
+  }
+}
+
 /* Force hide Recharts chart cursors and focus outlines globally */
 .recharts-tooltip-cursor,
 .recharts-bar-cursor,
