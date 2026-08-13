@@ -273,17 +273,25 @@ class selected, a pill on that section's header cycles what every row shows on i
 way. Metals offer only Current (Invested) and Returns, having no dependable previous close; on All the
 pill is hidden and rows show Current (Invested). Each class
 can be expanded/collapsed, and tapping a holding opens its performance chart, range selector,
-allocation and transactions. An individual holding can also be refreshed from its account card in the
-Accounts tab.
+allocation and transactions. A stock's ranges are 1D / 5D / 1MO / 3MO / 1Y / 5Y (1D and 5D are
+intraday, so the chart's tooltip names a time rather than a date); a fund's are 1M / 6M / 1Y / ALL.
+Every chart opens on the leftmost range in its own row and does not remember the last one you picked
+— reopening any holding or account starts fresh. An individual holding can also be refreshed from its
+account card in the Accounts tab.
 
 ## Assets sub-view
 Total cash and funds available, with filter pills (All / Bank / Cash / Wallets / Other) shown only for
 the groups present. Each row shows the account's running balance and its type. Tapping a row opens
 that account's detail screen: its balance, what the month did to it, a balance trend (1M / 6M / 1Y /
-ALL — 1M is day by day, the longer windows month by month), the month's money In and Out, and the five
-most recent transactions. An NCMC card also shows its travel wallet, and a points wallet reads in
-points, is excluded from the Assets total, and has no 1M window. To see every transaction on an
-account, or to edit one, use the Transactions and Accounts tabs.
+ALL — 1M is day by day, the longer windows month by month), the month's Income and Spends, and the
+five most recent transactions. Income and Spends there follow the same rule as the Transactions
+screen's: transfers, card bill payments, investment legs, lending & borrowing, NCMC recharges and
+Passive Logs are excluded, so the two figures state money genuinely earned and spent through that
+account rather than every rupee that crossed it — which is also why they do NOT add up to the balance
+change stated above them (that one counts every movement). A points wallet says Earned and Redeemed
+instead, reads in points, is excluded from the Assets total, and has no 1M window; an NCMC card also
+shows its travel wallet. To see every transaction on an account, or to edit one, use the Transactions
+and Accounts tabs.
 
 ## Retirement sub-view
 Total EPF running balance and interest earned this financial year, plus the monthly credit breakdown

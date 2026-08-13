@@ -45,11 +45,15 @@ interface MonthStats {
   count: number;
   byCategory: Record<string, number>;
   byAccount: Record<string, number>;
+  // Credits per account, the counterpart to byAccount's debits. Needed because a liquid account's
+  // detail screen now states its month's Income as well as its Spends, so "how much came into
+  // Canara this month" is a question the UI invites — and one this context couldn't answer.
+  incomeByAccount: Record<string, number>;
   byTag: Record<string, number>;
 }
 
 function monthStats(data: FinanceData, month: string): MonthStats {
-  const stats: MonthStats = { spend: 0, income: 0, count: 0, byCategory: {}, byAccount: {}, byTag: {} };
+  const stats: MonthStats = { spend: 0, income: 0, count: 0, byCategory: {}, byAccount: {}, incomeByAccount: {}, byTag: {} };
   data.transactions.filter(t => t.date.startsWith(month)).forEach(t => {
     // Insights headlines a transaction count, so quote the same number it does — the shared
     // rule drops system categories, cashback/reward auto-logs and fully passive rows.
@@ -69,7 +73,10 @@ function monthStats(data: FinanceData, month: string): MonthStats {
         stats.byTag[tag] = (stats.byTag[tag] || 0) + amt;
       });
     } else if (t.type === 'credit') {
+      if (amt <= 0) return;
       stats.income += amt;
+      const acc = data.accounts.find(a => a.id === t.accountId);
+      stats.incomeByAccount[acc?.name || 'Unknown'] = (stats.incomeByAccount[acc?.name || 'Unknown'] || 0) + amt;
     }
   });
   return stats;
@@ -187,8 +194,14 @@ function buildSummary(data: FinanceData): string {
     out.push('  By category:');
     out.push(topEntries(s.byCategory));
     if (offset === 0) {
-      out.push('  By account:');
+      // Labelled by direction now that both are here — a bare "By account" over debit-only figures
+      // read as the account's whole month.
+      out.push('  Spends by account:');
       out.push(topEntries(s.byAccount));
+      if (Object.keys(s.incomeByAccount).length) {
+        out.push('  Income by account:');
+        out.push(topEntries(s.incomeByAccount));
+      }
       if (Object.keys(s.byTag).length) {
         out.push('  By tag (a transaction can carry several, so these may overlap):');
         out.push(topEntries(s.byTag));

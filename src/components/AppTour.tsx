@@ -242,7 +242,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       },
       {
         title: "Three Categories",
-        description: "Your wealth is split into Portfolio (stocks, funds, metals), Assets (bank, cash, e-wallets) and Retirement (EPF). Tap any category to open it — you'll find live prices, filters and per-holding charts inside. Categories you don't use yet stay hidden.",
+        description: "Your wealth is split into Portfolio (stocks, funds, metals), Assets (bank, cash, e-wallets) and Retirement (EPF). Tap any category to open it — then tap any row for its own detail screen, with a price or balance chart, its figures for the month, and its recent activity. Categories you don't use yet stay hidden.",
         selector: ".tour-wealth-categories",
         cardPosition: 'top',
         icon: Sparkles
