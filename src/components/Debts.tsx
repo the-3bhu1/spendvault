@@ -28,12 +28,26 @@ import { CustomPicker } from './CustomPicker';
 import { TransactionSelector } from './TransactionSelector';
 import { SubviewWrapper } from './SubviewWrapper';
 
+// Signed effect of one entry on the net balance: positive means they owe you.
+const txEffect = (t: Pick<DebtTransaction, 'type' | 'amount'>) => {
+  if (t.type === 'lent' || t.type === 'repayment_sent') return t.amount;
+  if (t.type === 'borrowed' || t.type === 'repayment_received') return -t.amount;
+  return 0;
+};
+
+// Chronological order matching the transaction log (which renders this reversed):
+// by date, ties broken by the order entries were added.
+const chronological = (transactions: DebtTransaction[]) =>
+  transactions
+    .map((t, idx) => ({ t, idx }))
+    .sort((a, b) => {
+      const timeDiff = new Date(a.t.date).getTime() - new Date(b.t.date).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return a.idx - b.idx;
+    });
+
 const calcDebtBalance = (transactions: DebtTransaction[]) =>
-  transactions.reduce((sum, t) => {
-    if (t.type === 'lent' || t.type === 'repayment_sent') return sum + t.amount;
-    if (t.type === 'borrowed' || t.type === 'repayment_received') return sum - t.amount;
-    return sum;
-  }, 0);
+  transactions.reduce((sum, t) => sum + txEffect(t), 0);
 
 export default function Debts() {
   const { data, addDebt, updateDebt, deleteDebt, addTransaction, updateTransaction } = useFinance();
@@ -732,6 +746,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
           type={showActionModal}
           personName={debt.personName}
           currentBalance={netBalance}
+          transactions={debt.transactions}
           hasLent={hasLent}
           hasBorrowed={hasBorrowed}
           accounts={data.accounts}
@@ -746,6 +761,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
           type={editingTx.type.includes('repayment') ? 'repayment' : (editingTx.type === 'lent' ? 'lent' : 'borrowed')}
           personName={debt.personName}
           currentBalance={netBalance}
+          transactions={debt.transactions}
           accounts={data.accounts}
           onAdd={(amt, type, desc, date, accountId, _logInLedger, linkedTxId) => {
             // Sync with ledger if linked
@@ -1136,11 +1152,12 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
   );
 }
 
-function DebtTransactionModal({ initialTx, type, personName, currentBalance, hasLent, hasBorrowed, accounts, onAdd, onClose }: {
+function DebtTransactionModal({ initialTx, type, personName, currentBalance, transactions, hasLent, hasBorrowed, accounts, onAdd, onClose }: {
   initialTx?: DebtTransaction,
   type: 'lent' | 'borrowed' | 'repayment',
   personName: string,
   currentBalance: number,
+  transactions: DebtTransaction[],
   hasLent?: boolean,
   hasBorrowed?: boolean,
   accounts: Account[],
@@ -1194,29 +1211,47 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
       }));
   }, [accounts, data.transactions]);
 
+  const pendingType: DebtTransaction['type'] = type === 'repayment'
+    ? (repaymentType === 'received' ? 'repayment_received' : 'repayment_sent')
+    : type;
+
   const handleAdd = () => {
     const numAmt = parseFloat(amount) || 0;
     if (numAmt <= 0) return;
 
-    let txType: DebtTransaction['type'] = type as any;
-    if (type === 'repayment') {
-      txType = repaymentType === 'received' ? 'repayment_received' : 'repayment_sent';
-    }
     const defaultDesc = type === 'lent' ? 'Lent' : (type === 'borrowed' ? 'Borrowed' : 'Repayment');
-    onAdd(numAmt, txType, desc || defaultDesc, date, accountId, logInLedger, linkedTxId || undefined);
+    onAdd(numAmt, pendingType, desc || defaultDesc, date, accountId, logInLedger, linkedTxId || undefined);
   };
 
-  const newBalance = useMemo(() => {
-    const numAmt = parseFloat(amount) || 0;
-    const baseBalance = initialTx
-      ? (initialTx.type === 'lent' || initialTx.type === 'repayment_sent' ? currentBalance - initialTx.amount : currentBalance + initialTx.amount)
-      : currentBalance;
-
-    if (type === 'repayment') {
-      return repaymentType === 'received' ? baseBalance - numAmt : baseBalance + numAmt;
-    }
-    return type === 'lent' ? baseBalance + numAmt : baseBalance - numAmt;
-  }, [type, repaymentType, currentBalance, amount, initialTx]);
+  // Balance as of this entry's own place in the timeline, not the debt's final net — so
+  // editing the 2nd of 10 entries shows what the running balance was back then. Recomputed
+  // against `date` so moving an entry re-slots it and the figures follow.
+  const { priorBalance, newBalance, finalBalance } = useMemo(() => {
+    const draft: DebtTransaction = {
+      ...(initialTx ?? { id: '__draft__', description: '' }),
+      amount: parseFloat(amount) || 0,
+      type: pendingType,
+      date
+    };
+    // Filter after sorting so each entry keeps its original insertion index for tie-breaks.
+    const ordered = chronological(transactions).filter(e => e.t.id !== initialTx?.id);
+    // Ties fall to the entry's own insertion slot, matching how the log stacks them.
+    const draftIdx = initialTx
+      ? transactions.findIndex(t => t.id === initialTx.id)
+      : transactions.length;
+    const at = ordered.findIndex(e =>
+      new Date(e.t.date).getTime() > new Date(draft.date).getTime() ||
+      (new Date(e.t.date).getTime() === new Date(draft.date).getTime() && e.idx > draftIdx)
+    );
+    const before = at === -1 ? ordered : ordered.slice(0, at);
+    const prior = before.reduce((sum, e) => sum + txEffect(e.t), 0);
+    const rest = (at === -1 ? [] : ordered.slice(at)).reduce((sum, e) => sum + txEffect(e.t), 0);
+    return {
+      priorBalance: prior,
+      newBalance: prior + txEffect(draft),
+      finalBalance: prior + txEffect(draft) + rest
+    };
+  }, [transactions, initialTx, amount, date, pendingType]);
 
   return (
     <>
@@ -1233,7 +1268,7 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
               <div className="input-group">
                 <label>Repayment Direction</label>
                 <div className="flex gap-3 w-100">
-                  {(hasLent || currentBalance > 0 || (initialTx?.type === 'repayment_received')) && (
+                  {(!!initialTx || hasLent || currentBalance > 0) && (
                     <button
                       className="flex-col align-center justify-center gap-1"
                       style={{
@@ -1260,7 +1295,7 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
                       <span className="text-mono font-bold uppercase" style={{ fontSize: '9px', letterSpacing: '1px' }}>I Received</span>
                     </button>
                   )}
-                  {(hasBorrowed || currentBalance < 0 || (initialTx?.type === 'repayment_sent')) && (
+                  {(!!initialTx || hasBorrowed || currentBalance < 0) && (
                     <button
                       className="flex-col align-center justify-center gap-1"
                       style={{
@@ -1288,24 +1323,31 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, has
                     </button>
                   )}
                 </div>
-
-                <div className="flex-col gap-1" style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px dashed var(--border-color)' }}>
-                  <span className="text-xs text-muted" style={{ fontStyle: 'italic' }}>
-                    {repaymentType === 'received'
-                      ? `${personName} is paying you. This reduces their debt.`
-                      : `You are paying ${personName}. This reduces your debt.`
-                    }
-                  </span>
-                  <div className="flex align-center gap-2" style={{ marginTop: '0.25rem' }}>
-                    <span className="text-xs font-bold text-mono">{formatCurrency(currentBalance)}</span>
-                    <ChevronRight size={10} className="text-muted" />
-                    <span className="text-xs font-bold text-mono" style={{ color: newBalance === 0 ? 'var(--text-primary)' : (newBalance > 0 ? 'var(--success)' : 'var(--danger)') }}>
-                      {formatCurrency(newBalance)}
-                    </span>
-                  </div>
-                </div>
               </div>
             )}
+
+            <div className="flex-col gap-1" style={{ padding: '0.75rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px dashed var(--border-color)' }}>
+              <span className="text-xs text-muted" style={{ fontStyle: 'italic' }}>
+                {pendingType === 'repayment_received' ? `${personName} is paying you. This reduces their debt.`
+                  : pendingType === 'repayment_sent' ? `You are paying ${personName}. This reduces your debt.`
+                  : pendingType === 'lent' ? `You are lending to ${personName}. This increases their debt.`
+                  : `${personName} is lending to you. This increases your debt.`
+                }
+              </span>
+              <div className="flex align-center gap-2" style={{ marginTop: '0.25rem' }}>
+                <span className="text-xs font-bold text-mono">{formatCurrency(priorBalance)}</span>
+                <ChevronRight size={10} className="text-muted" />
+                <span className="text-xs font-bold text-mono" style={{ color: newBalance === 0 ? 'var(--text-primary)' : (newBalance > 0 ? 'var(--success)' : 'var(--danger)') }}>
+                  {formatCurrency(newBalance)}
+                </span>
+                <span className="text-xs text-muted" style={{ fontSize: '10px' }}>as of this date</span>
+              </div>
+              {finalBalance !== newBalance && (
+                <span className="text-xs text-muted" style={{ fontSize: '10px' }}>
+                  Net after all entries: {formatCurrency(finalBalance)}
+                </span>
+              )}
+            </div>
 
             {initialTx ? (
               ledgerTx ? (
