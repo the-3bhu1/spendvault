@@ -751,9 +751,15 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
             // Sync with ledger if linked
             const ledgerTx = data.transactions.find(t => t.linkedTransactionIds?.includes(editingTx.id));
             if (ledgerTx) {
+              // An auto-created mirror takes its debit/credit from the debt direction, so a
+              // retype has to flip it too. A manually linked real transaction keeps its own.
+              const isMirror = ledgerTx.category === 'Lending & Borrowing';
               updateTransaction({
                 ...ledgerTx,
                 // Keep ledger amount and description as they are
+                type: isMirror
+                  ? ((type === 'lent' || type === 'repayment_sent') ? 'debit' : 'credit')
+                  : ledgerTx.type,
                 date,
                 accountId
               });
