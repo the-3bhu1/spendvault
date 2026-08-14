@@ -5,7 +5,7 @@ import {
   Train, ShoppingBag, Utensils, Car, Zap, HeartPulse, Film, BadgeIndianRupee, Banknote,
   CreditCard, ArrowRightLeft, Home, Handshake, Gift, ChartNoAxesCombined, ChartCandlestick,
   Gem, HandCoins, MoreHorizontal, Coins, Landmark, WalletCards, WalletMinimal, BarChart3,
-  TrendingUp, Medal, Wallet, ShieldUser, ChartLine, ArchiveX, Fuel
+  TrendingUp, Medal, Wallet, ShieldUser, ChartLine, ArchiveX, Fuel, PiggyBank
 } from 'lucide-react';
 
 export const getCategoryIcon = (category: string, size = 17) => {
@@ -27,6 +27,9 @@ export const getCategoryIcon = (category: string, size = 17) => {
   if (cat.includes('cashback')) return <Gift size={size} />;
   if (cat.includes('invest') || cat.includes('mutual fund') || cat.includes('sip') || cat.includes('stock') || cat.includes('commodity')) return <TrendingUp size={size} />;
   if (cat.includes('lend') || cat.includes('borrow')) return <HandCoins size={size} />;
+  // Must stay BELOW the investments line: "Mutual Funds" contains "fund", and old transactions can
+  // still carry that category text even though it's no longer in the categories list.
+  if (cat.includes('fund')) return <PiggyBank size={size} />;
   if (cat.includes('miscellaneous') || cat.includes('other')) return <MoreHorizontal size={size} />;
   return <Coins size={size} />;
 };

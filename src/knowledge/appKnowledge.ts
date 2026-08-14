@@ -170,6 +170,12 @@ category in the Insights screen (not Settings), which shows actual-vs-budget pro
 category leaves existing transactions with their old category text.
 "Fuel" is a standard spend category (with its own fuel-pump icon) and is auto-added just after "Rent"
 for existing users on upgrade, so it may appear without you creating it.
+"Fund" is a standard spend category (piggy-bank icon), auto-added just above "Fuel" on upgrade. It is
+for contributions to a pooled/committee fund — a real spend, NOT stats-excluded, so it counts toward
+Spends and can carry a monthly budget. Use it when a contribution is settled by offsetting someone's
+debt instead of paying cash: log the offset as a repayment in the Debt ledger (which moves the account
+balance but counts as neither Spend nor Income) plus a Fund debit on the same account and date, so the
+account nets to zero and the contribution still shows in that month's Spends.
 System categories (internal bookkeeping, EXCLUDED from spend totals so transfers/payments/investments
 don't look like spending): Transfer, CC Payment, NCMC Travel Recharge, Investments, and
 Lending & Borrowing. Lending & Borrowing is auto-excluded from both Spends and Income everywhere
