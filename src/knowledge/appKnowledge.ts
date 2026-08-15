@@ -233,6 +233,15 @@ entries yourself settles it too. It only works one way — to re-open a settled 
 A debt whose net balance reaches zero settles on its own, with all its entries marked done. Entries logged to the main ledger use the
 "Lending & Borrowing" category, so they never count toward Spends or Income (see Categories & Budgets) —
 only the account balance moves.
+The add/edit entry form previews the balance AS OF THAT ENTRY'S OWN DATE — the running balance just
+before it, then after it — not the debt's final net. So editing the 2nd of 10 entries shows what the
+balance was back then, and changing the date re-slots the entry and updates the figures. When that
+differs from the final net, the form also shows "Net after all entries".
+When editing an entry you can switch its direction (e.g. a repayment received becomes a repayment
+sent, or lent becomes borrowed) — both direction options stay available while editing, even if the
+debt has no history in that direction. If the entry auto-created a mirror transaction in the main
+ledger, retyping flips that transaction between debit and credit to match. A transaction you linked
+manually keeps its own debit/credit.
 
 # Bills
 Recurring bills — rent, utilities, subscriptions, credit card statements — with an amount, frequency
