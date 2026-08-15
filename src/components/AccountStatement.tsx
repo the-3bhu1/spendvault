@@ -196,15 +196,19 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
           </div>
         </div>
 
+        {/* 400px, not 360: the hero card is 340 wide and a real card is 1.586:1, so
+            it needs 214px of height. At 360 the flex column had only ~174px left
+            after the heading and padding, and the card was being silently shrunk to
+            a 1.94 ratio — visibly wider than any physical card. */}
         <div style={{
-          height: showAllTransactions ? '0px' : '360px',
+          height: showAllTransactions ? '0px' : '400px',
           overflow: 'hidden',
           transition: showAllTransactions
             ? 'height 1.2s cubic-bezier(0.76, 0, 0.24, 1) 0.3s'
             : 'height 1.2s cubic-bezier(0.76, 0, 0.24, 1)'
         }}>
           <div style={{
-            height: '360px',
+            height: '400px',
             background: 'linear-gradient(180deg, var(--bg-hover) 0%, var(--bg-color) 80%, var(--bg-color) 100%)',
             display: 'flex',
             flexDirection: 'column',
@@ -234,8 +238,8 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
               style={{
                 marginTop: '2rem',
                 width: '340px',
-                height: '210px',
-                borderRadius: '16px',
+                // Without this the flex column shrinks the card off its aspect ratio.
+                flexShrink: 0,
                 perspective: '800px',
                 transform: showAllTransactions
                   ? 'rotateX(70deg) translateY(-60px) scale(0.85)'
@@ -278,8 +282,8 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
                       fontSize: '14px',
                       color: 'rgba(var(--card-ink), 0.9)',
                       textTransform: 'uppercase',
-                      letterSpacing: '1.5px',
-                      textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+                      letterSpacing: '0.15em',
+                      textShadow: '0 -1px 0 rgba(255,255,255,0.14), 0 1px 1px rgba(0,0,0,0.55)',
                     }}>
                       {acc.cardDetails.cardholderName || 'CARDHOLDER NAME'}
                     </span>

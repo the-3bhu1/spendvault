@@ -4,7 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import type { Account } from '../types';
 import { CardNetworkLogo } from './CardNetworkLogo';
-import { CardSurface } from './CardSurface';
+import { CardSurface, CARD_ASPECT_RATIO } from './CardSurface';
 import { CardChip } from './CardChip';
 import { getCardGradients } from '../utils';
 import { useFinance } from '../FinanceContext';
@@ -151,11 +151,14 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
       }}
       onClick={handleBackdropClick}
     >
-      <div 
+      <div
         style={{
           width: '100%',
           maxWidth: '360px',
-          height: '230px',
+          // Height follows the card ratio instead of a fixed 230px, which was
+          // only correct at exactly 360px wide — on a narrower phone the card
+          // was stretching.
+          aspectRatio: String(CARD_ASPECT_RATIO),
           perspective: '1000px',
           position: 'relative'
         }}
@@ -182,7 +185,6 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
               height: '100%',
               backfaceVisibility: 'hidden',
               WebkitBackfaceVisibility: 'hidden',
-              borderRadius: '16px',
               border: '1px solid rgba(var(--card-ink), 0.1)',
               // Two shadows, not one: a tight contact shadow for edge definition
               // plus a wide ambient one for lift. A single blur reads as a UI card.
@@ -217,8 +219,11 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
                   fontSize: '14px', 
                   color: 'rgba(var(--card-ink), 0.9)',
                   textTransform: 'uppercase',
-                  letterSpacing: '1.5px',
-                  textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+                  letterSpacing: '0.15em',
+                  // Embossed, not drop-shadowed: a highlight on the upper edge and
+                  // a shadow under the lower one, as if the letters are raised out
+                  // of the plastic under the same top-left light as the sheen.
+                  textShadow: '0 -1px 0 rgba(255,255,255,0.14), 0 1px 1px rgba(0,0,0,0.55)',
                 }}>
                   {cardDetails?.cardholderName || 'CARDHOLDER NAME'}
                 </span>
@@ -239,7 +244,6 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
               height: '100%',
               backfaceVisibility: 'hidden',
               WebkitBackfaceVisibility: 'hidden',
-              borderRadius: '16px',
               border: '1px solid rgba(var(--card-ink), 0.1)',
               // Two shadows, not one: a tight contact shadow for edge definition
               // plus a wide ambient one for lift. A single blur reads as a UI card.

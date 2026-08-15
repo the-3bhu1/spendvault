@@ -99,6 +99,24 @@ const SHEEN =
 const EDGE_HIGHLIGHT =
   'inset 0 1px 0 rgba(255,255,255,.22), inset 0 -1px 0 rgba(0,0,0,.25)';
 
+/**
+ * ISO/IEC 7810 ID-1 — the ratio every physical payment card is cut to. Exported
+ * because the flip card sets it on its perspective wrapper rather than on the
+ * surface itself, and both need to agree.
+ */
+export const CARD_ASPECT_RATIO = 1.586;
+
+/**
+ * Corner radius as a share of the card's width (~3.7% is the real ID-1 radius),
+ * so it scales instead of staying 16px on every size.
+ *
+ * The two values are deliberate: a single percentage resolves horizontally
+ * against width and vertically against height, which on a 1.586 box gives
+ * *elliptical* corners. Scaling the vertical figure by the aspect ratio
+ * (3.7 x 1.586) makes them circular again at any width.
+ */
+export const CARD_RADIUS = '3.7% / 5.87%';
+
 interface CardSurfaceProps {
   /** Omit for the no-card placeholder — renders flat, with no texture or sheen. */
   skin?: CardSkin;
@@ -128,6 +146,8 @@ export function CardSurface({
   const surfaceStyle = {
     position: 'relative',
     overflow: 'hidden',
+    aspectRatio: String(CARD_ASPECT_RATIO),
+    borderRadius: CARD_RADIUS,
     background: skin ? skin[face] : 'var(--bg-card)',
     '--card-ink': ink,
     ...style,
