@@ -196,19 +196,26 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
           </div>
         </div>
 
-        {/* 400px, not 360: the hero card is 340 wide and a real card is 1.586:1, so
-            it needs 214px of height. At 360 the flex column had only ~174px left
-            after the heading and padding, and the card was being silently shrunk to
-            a 1.94 ratio — visibly wider than any physical card. */}
+        {/* 380px — 20 over the original 360, down from the 400 a flat card needed.
+            The card is a true 340x214 at the ID-1 ratio, and raking it back on the X
+            axis reclaims some of that: projected height measures 205 against a 214
+            layout box.
+
+            Only *some*, though. Perspective enlarges the near edge by nearly as much
+            as the tilt foreshortens the far one, so the rake is worth about 9px, not
+            the 40 it looks like it should be. Don't rake it further expecting to get
+            the band back to 360 — past this angle the near edge grows faster than the
+            card shrinks, and it starts overflowing this overflow:hidden band bottom-
+            first (the projected box sits ~8px below the layout box at 26deg). */}
         <div style={{
-          height: showAllTransactions ? '0px' : '400px',
+          height: showAllTransactions ? '0px' : '380px',
           overflow: 'hidden',
           transition: showAllTransactions
             ? 'height 1.2s cubic-bezier(0.76, 0, 0.24, 1) 0.3s'
             : 'height 1.2s cubic-bezier(0.76, 0, 0.24, 1)'
         }}>
           <div style={{
-            height: '400px',
+            height: '380px',
             background: 'linear-gradient(180deg, var(--bg-hover) 0%, var(--bg-color) 80%, var(--bg-color) 100%)',
             display: 'flex',
             flexDirection: 'column',
@@ -236,17 +243,20 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
                 ? getCardGradients(themeIndex, account.cardDetails.network, account.name)
                 : undefined}
               style={{
-                marginTop: '2rem',
+                marginTop: '0.75rem',
+                marginBottom: '0px',
                 width: '340px',
                 // Without this the flex column shrinks the card off its aspect ratio.
                 flexShrink: 0,
                 perspective: '800px',
                 transform: showAllTransactions
                   ? 'rotateX(70deg) translateY(-60px) scale(0.85)'
-                  : 'perspective(800px) rotateY(-4deg) rotateX(3deg) rotateZ(-1deg)',
+                  : 'perspective(900px) rotateX(26deg) rotateY(-6deg) rotateZ(-1deg) scale(0.96)',
                 boxShadow: showAllTransactions
                   ? '0 0px 10px rgba(0,0,0,0.1)'
-                  : '12px 16px 0 #000000',
+                  // The old 12/16px hard offset shadow was drawn for a near-flat
+                  // card; once raked it detaches into a slab behind the corner.
+                  : '0 26px 34px -14px rgba(0,0,0,0.75)',
                 opacity: showAllTransactions ? 0 : 1,
                 border: '1px solid rgba(255,255,255,0.1)',
                 transition: showAllTransactions
