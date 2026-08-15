@@ -1,5 +1,5 @@
 import React from 'react';
-import type { CardSkin, CardTexture } from '../utils';
+import type { CardSkin, CardTexture, CardGeometry } from '../utils';
 
 /**
  * The card *material* — base gradient, texture, geometry, sheen, edge highlight.
@@ -52,6 +52,47 @@ const TEXTURES: Record<Exclude<CardTexture, 'none'>, { image: string; size?: str
   },
 };
 
+/**
+ * The large, low-opacity shapes that stop a gradient reading as a flat div. Drawn
+ * at the card's own 1.586 ratio and stretched with preserveAspectRatio="none", so
+ * one shape set works at every card size.
+ *
+ * Filled with currentColor, and the <svg> takes its color from --card-ink, so the
+ * shapes lighten a dark card and darken a light one without a second shape set.
+ */
+const GEOMETRY: Record<Exclude<CardGeometry, 'none'>, React.ReactNode> = {
+  // Faceted planes sweeping in from the right — the Axis/Flipkart family.
+  chevron: (
+    <>
+      <polygon points="100,0 100,63 52,63 79,31.5 52,0" fill="currentColor" opacity="0.06" />
+      <polygon points="74,0 99,31.5 74,63 58,63 83,31.5 58,0" fill="currentColor" opacity="0.04" />
+    </>
+  ),
+  // Thin diagonal cuts across the whole face — the CSB/Jupiter look.
+  slash: (
+    <>
+      <polygon points="2,63 34,0 41,0 9,63" fill="currentColor" opacity="0.05" />
+      <polygon points="48,63 84,0 88,0 52,63" fill="currentColor" opacity="0.035" />
+      <polygon points="88,63 100,40 100,52 95,63" fill="currentColor" opacity="0.05" />
+    </>
+  ),
+  // Two broad folded planes — reads like light breaking across a flat surface.
+  facet: (
+    <>
+      <polygon points="0,0 100,0 100,18 0,46" fill="currentColor" opacity="0.05" />
+      <polygon points="0,63 100,33 100,63" fill="currentColor" opacity="0.035" />
+    </>
+  ),
+  // Soft circles bleeding off the corners. Absorbs the radial blob the statement
+  // header used to draw by hand.
+  arc: (
+    <>
+      <circle cx="88" cy="-6" r="42" fill="currentColor" opacity="0.05" />
+      <circle cx="10" cy="72" r="30" fill="currentColor" opacity="0.03" />
+    </>
+  ),
+};
+
 const SHEEN =
   'linear-gradient(118deg, rgba(255,255,255,.14) 0%, rgba(255,255,255,.04) 34%, transparent 58%)';
 
@@ -77,6 +118,7 @@ export function CardSurface({
   children,
 }: CardSurfaceProps) {
   const texture = skin && skin.texture !== 'none' ? TEXTURES[skin.texture] : undefined;
+  const geometry = skin && skin.geometry !== 'none' ? GEOMETRY[skin.geometry] : undefined;
   const sheen = skin?.sheen ?? 0;
 
   // The only knowledge that crosses the material/content boundary: content reads
@@ -97,8 +139,15 @@ export function CardSurface({
         <div style={{ ...FILL, backgroundImage: texture.image, backgroundSize: texture.size }} />
       )}
 
-      {/* geometry layer — the large low-opacity shapes that break up the gradient */}
-      {/* TODO(phase 2): render skin.geometry here, still below content. */}
+      {geometry && (
+        <svg
+          viewBox="0 0 100 63"
+          preserveAspectRatio="none"
+          style={{ ...FILL, width: '100%', height: '100%', color: 'rgb(var(--card-ink))' }}
+        >
+          {geometry}
+        </svg>
+      )}
 
       {children}
 
