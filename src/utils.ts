@@ -513,7 +513,8 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
   if (name.includes('supermoney')) {
     return defineSkin(
       'linear-gradient(135deg, #0a0f1d 0%, #151d33 50%, #0d2e2b 100%)',
-      'linear-gradient(135deg, #151d33 0%, #0d2e2b 100%)'
+      'linear-gradient(135deg, #151d33 0%, #0d2e2b 100%)',
+      { texture: 'hairline', sheen: 0.55 }
     );
   }
 
@@ -521,7 +522,8 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
   if (name.includes('swiggy')) {
     return defineSkin(
       'linear-gradient(135deg, #1c092b 0%, #3b1459 55%, #fc8019 100%)',
-      'linear-gradient(135deg, #3b1459 0%, #fc8019 100%)'
+      'linear-gradient(135deg, #3b1459 0%, #fc8019 100%)',
+      { texture: 'weave', sheen: 0.7 }
     );
   }
 
@@ -529,7 +531,8 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
   if (name.includes('amazon')) {
     return defineSkin(
       'linear-gradient(135deg, #0d131f 0%, #1a2332 60%, #ff9900 100%)',
-      'linear-gradient(135deg, #1a2332 0%, #ff9900 100%)'
+      'linear-gradient(135deg, #1a2332 0%, #ff9900 100%)',
+      { texture: 'hairline', sheen: 0.6 }
     );
   }
 
@@ -537,7 +540,8 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
   if (name.includes('flipkart')) {
     return defineSkin(
       'linear-gradient(135deg, #07152b 0%, #0f2952 65%, #2874f0 100%)',
-      'linear-gradient(135deg, #0f2952 0%, #2874f0 100%)'
+      'linear-gradient(135deg, #0f2952 0%, #2874f0 100%)',
+      { texture: 'weave', sheen: 0.6 }
     );
   }
 
@@ -545,7 +549,9 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
   if (name.includes('onecard') || name.includes('one card')) {
     return defineSkin(
       'linear-gradient(135deg, #141414 0%, #1f1f1f 50%, #050505 100%)',
-      'linear-gradient(135deg, #1f1f1f 0%, #050505 100%)'
+      'linear-gradient(135deg, #1f1f1f 0%, #050505 100%)',
+      // OneCard ships as a metal card — smooth, so a fine grain and a restrained gloss.
+      { texture: 'hairline', sheen: 0.45 }
     );
   }
 
@@ -553,7 +559,8 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
   if (name.includes('scapia')) {
     return defineSkin(
       'linear-gradient(135deg, #022c22 0%, #0d9488 60%, #14b8a6 100%)',
-      'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)'
+      'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)',
+      { texture: 'guilloche', sheen: 0.6 }
     );
   }
 
@@ -561,7 +568,8 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
   if (name.includes('tata neu') || name.includes('neu')) {
     return defineSkin(
       'linear-gradient(135deg, #1a0026 0%, #36004d 60%, #c026d3 100%)',
-      'linear-gradient(135deg, #36004d 0%, #c026d3 100%)'
+      'linear-gradient(135deg, #36004d 0%, #c026d3 100%)',
+      { texture: 'weave', sheen: 0.65 }
     );
   }
 
@@ -569,7 +577,8 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
   if (name.includes('sbi')) {
     return defineSkin(
       'linear-gradient(135deg, #0c2340 0%, #0284c7 65%, #38bdf8 100%)',
-      'linear-gradient(135deg, #0284c7 0%, #38bdf8 100%)'
+      'linear-gradient(135deg, #0284c7 0%, #38bdf8 100%)',
+      { texture: 'guilloche', sheen: 0.6 }
     );
   }
 
@@ -577,28 +586,31 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
   if (name.includes('infinia') || name.includes('regalia') || name.includes('millennia') || name.includes('gold')) {
     return defineSkin(
       'linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #ca8a04 100%)',
-      'linear-gradient(135deg, #1e293b 0%, #ca8a04 100%)'
+      'linear-gradient(135deg, #1e293b 0%, #ca8a04 100%)',
+      // Premium metal tier — brushed grain, strongest gloss of the set.
+      { texture: 'hairline', sheen: 0.75 }
     );
   }
 
   if (network === 'amex') {
     return defineSkin(
       'linear-gradient(135deg, #1f2937 0%, #111827 100%)',
-      'linear-gradient(135deg, #111827 0%, #0f131a 100%)'
+      'linear-gradient(135deg, #111827 0%, #0f131a 100%)',
+      { texture: 'dots', sheen: 0.5 }
     );
   }
 
   const themes: CardSkin[] = [
-    defineSkin('linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', 'linear-gradient(135deg, #16213e 0%, #0f3460 100%)'), // Blue
-    defineSkin('linear-gradient(135deg, #2b0f19 0%, #3d1524 50%, #4a1528 100%)', 'linear-gradient(135deg, #3d1524 0%, #4a1528 100%)'), // Burgundy
-    defineSkin('linear-gradient(135deg, #0f2b26 0%, #133b34 50%, #164a41 100%)', 'linear-gradient(135deg, #133b34 0%, #164a41 100%)'), // Emerald
-    defineSkin('linear-gradient(135deg, #1b1338 0%, #24194a 50%, #2d205c 100%)', 'linear-gradient(135deg, #24194a 0%, #2d205c 100%)'), // Indigo
-    defineSkin('linear-gradient(135deg, #1f1f1f 0%, #141414 50%, #0a0a0a 100%)', 'linear-gradient(135deg, #141414 0%, #0a0a0a 100%)'), // Onyx
-    defineSkin('linear-gradient(135deg, #2c3e50 0%, #000000 100%)', 'linear-gradient(135deg, #1c2833 0%, #000000 100%)'), // Charcoal
-    defineSkin('linear-gradient(135deg, #1a2a6c 0%, #b21f1f 50%, #fdbb2d 100%)', 'linear-gradient(135deg, #1a2a6c 0%, #b21f1f 100%)'), // Sunset
-    defineSkin('linear-gradient(135deg, #301934 0%, #1e0d21 100%)', 'linear-gradient(135deg, #1e0d21 0%, #000000 100%)'), // Deep Purple
-    defineSkin('linear-gradient(135deg, #010c1e 0%, #001f3f 100%)', 'linear-gradient(135deg, #001f3f 0%, #000000 100%)'), // Midnight Navy
-    defineSkin('linear-gradient(135deg, #0b1e0b 0%, #1e3a1e 100%)', 'linear-gradient(135deg, #1e3a1e 0%, #000000 100%)'), // Forest Green
+    defineSkin('linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', 'linear-gradient(135deg, #16213e 0%, #0f3460 100%)', { texture: 'weave', sheen: 0.55 }), // Blue
+    defineSkin('linear-gradient(135deg, #2b0f19 0%, #3d1524 50%, #4a1528 100%)', 'linear-gradient(135deg, #3d1524 0%, #4a1528 100%)', { texture: 'guilloche', sheen: 0.5 }), // Burgundy
+    defineSkin('linear-gradient(135deg, #0f2b26 0%, #133b34 50%, #164a41 100%)', 'linear-gradient(135deg, #133b34 0%, #164a41 100%)', { texture: 'hairline', sheen: 0.55 }), // Emerald
+    defineSkin('linear-gradient(135deg, #1b1338 0%, #24194a 50%, #2d205c 100%)', 'linear-gradient(135deg, #24194a 0%, #2d205c 100%)', { texture: 'weave', sheen: 0.55 }), // Indigo
+    defineSkin('linear-gradient(135deg, #1f1f1f 0%, #141414 50%, #0a0a0a 100%)', 'linear-gradient(135deg, #141414 0%, #0a0a0a 100%)', { texture: 'hairline', sheen: 0.4 }), // Onyx
+    defineSkin('linear-gradient(135deg, #2c3e50 0%, #000000 100%)', 'linear-gradient(135deg, #1c2833 0%, #000000 100%)', { texture: 'dots', sheen: 0.45 }), // Charcoal
+    defineSkin('linear-gradient(135deg, #1a2a6c 0%, #b21f1f 50%, #fdbb2d 100%)', 'linear-gradient(135deg, #1a2a6c 0%, #b21f1f 100%)', { texture: 'weave', sheen: 0.6 }), // Sunset
+    defineSkin('linear-gradient(135deg, #301934 0%, #1e0d21 100%)', 'linear-gradient(135deg, #1e0d21 0%, #000000 100%)', { texture: 'guilloche', sheen: 0.5 }), // Deep Purple
+    defineSkin('linear-gradient(135deg, #010c1e 0%, #001f3f 100%)', 'linear-gradient(135deg, #001f3f 0%, #000000 100%)', { texture: 'hairline', sheen: 0.5 }), // Midnight Navy
+    defineSkin('linear-gradient(135deg, #0b1e0b 0%, #1e3a1e 100%)', 'linear-gradient(135deg, #1e3a1e 0%, #000000 100%)', { texture: 'weave', sheen: 0.5 }), // Forest Green
   ];
 
   const index = Math.abs(themeIndex) % themes.length;

@@ -285,9 +285,10 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
                     </span>
                   </div>
 
-                  {/* Decorative radial overlay */}
+                  {/* Decorative radial overlay — phase 2 folds this into the skin's
+                      geometry layer. The sheen that used to sit alongside it is gone:
+                      CardSurface owns that now, and the two would stack. */}
                   <div style={{ position: 'absolute', top: 0, right: 0, width: '180px', height: '180px', background: 'white', opacity: 0.03, borderRadius: '50%', transform: 'translate(30%, -30%)' }} />
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.04) 0%, transparent 60%)', pointerEvents: 'none' }} />
                 </>
               ) : (
                 /* ── Placeholder card ── */

@@ -184,7 +184,9 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
               WebkitBackfaceVisibility: 'hidden',
               borderRadius: '16px',
               border: '1px solid rgba(var(--card-ink), 0.1)',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+              // Two shadows, not one: a tight contact shadow for edge definition
+              // plus a wide ambient one for lift. A single blur reads as a UI card.
+              boxShadow: '0 2px 4px rgba(0,0,0,0.35), 0 24px 48px -12px rgba(0,0,0,0.65)',
               padding: '24px',
               display: 'flex',
               flexDirection: 'column',
@@ -239,7 +241,9 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
               WebkitBackfaceVisibility: 'hidden',
               borderRadius: '16px',
               border: '1px solid rgba(var(--card-ink), 0.1)',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+              // Two shadows, not one: a tight contact shadow for edge definition
+              // plus a wide ambient one for lift. A single blur reads as a UI card.
+              boxShadow: '0 2px 4px rgba(0,0,0,0.35), 0 24px 48px -12px rgba(0,0,0,0.65)',
               transform: 'rotateY(180deg)',
               display: 'flex',
               flexDirection: 'column'

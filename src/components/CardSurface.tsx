@@ -102,9 +102,11 @@ export function CardSurface({
 
       {children}
 
-      {sheen > 0 && (
-        <div style={{ ...FILL, background: SHEEN, opacity: sheen, boxShadow: EDGE_HIGHLIGHT }} />
-      )}
+      {sheen > 0 && <div style={{ ...FILL, background: SHEEN, opacity: sheen }} />}
+
+      {/* Kept off the sheen layer so per-skin sheen opacity doesn't dim the edge:
+          the lit top edge is the card's geometry catching light, not the gloss. */}
+      {skin && <div style={{ ...FILL, boxShadow: EDGE_HIGHLIGHT }} />}
     </div>
   );
 }
