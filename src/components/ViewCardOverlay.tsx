@@ -7,7 +7,7 @@ import { CardNetworkLogo } from './CardNetworkLogo';
 import { CardSurface, CARD_ASPECT_RATIO } from './CardSurface';
 import { CardChip } from './CardChip';
 import { CardBrandLogo } from './CardBrandLogo';
-import { getCardGradients } from '../utils';
+import { getCardGradients, resolveCardIssuer } from '../utils';
 import { useFinance } from '../FinanceContext';
 
 interface ViewCardOverlayProps {
@@ -37,6 +37,7 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
   const allAccounts = context ? [...context.data.accounts].sort((a, b) => a.id.localeCompare(b.id)) : [];
   const accountIndex = allAccounts.findIndex(acc => acc.id === id);
   const gradients = getCardGradients(accountIndex >= 0 ? accountIndex : 0, cardDetails?.network, name);
+  const issuer = resolveCardIssuer(name, cardDetails);
 
   const expiryFormatted = cardDetails?.expiryMonth && cardDetails?.expiryYear
     ? `${String(cardDetails.expiryMonth).padStart(2, '0')}/${String(cardDetails.expiryYear).slice(-2)}`
@@ -199,7 +200,7 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
             {/* Top Section: SIM Chip & issuing bank */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <CardChip width={42} />
-              {gradients.issuer && <CardBrandLogo brand={gradients.issuer} height={20} />}
+              {issuer && <CardBrandLogo brand={issuer} height={20} />}
             </div>
 
             {/* Network logo bottom-right, Names bottom-left */}

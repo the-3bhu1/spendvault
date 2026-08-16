@@ -75,6 +75,13 @@ export interface CardDetails {
   expiryMonth?: number;   // 1–12
   expiryYear?: number;    // 2-digit, e.g. 27
   network?: CardNetwork;
+  /**
+   * Issuing bank, chosen explicitly. Optional: resolveCardIssuer() infers one
+   * from the card's name when it safely can, and this overrides that. Set it for
+   * a card whose name doesn't say which bank issued it — Jupiter ships on both
+   * CSB and Federal, so "Jupiter" alone is unresolvable but "Jupiter CSB" isn't.
+   */
+  issuer?: BrandKey;
 }
 
 export interface BalanceEditEntry {

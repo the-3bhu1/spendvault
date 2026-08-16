@@ -43,7 +43,7 @@ export const KEY_MAP: Record<string, string> = {
   cashbackCreditCycle: 'cc', travelOpeningBalances: 'tob', statementRounding: 'sr',
   isCashbackEnabled: 'ice',
   cardDetails: 'D', cardholderName: 'ch', cardNumber: 'cn', rate: 'rt',
-  expiryMonth: 'em', expiryYear: 'ey', cvv: 'cv', network: 'nt',
+  expiryMonth: 'em', expiryYear: 'ey', cvv: 'cv', network: 'nt', issuer: 'isr',
   // Hub / SplitEvent / SplitItem keys
   people: 'pp', items: 'it', involvedPeople: 'ip', includeMe: 'im',
   splitType: 'st', paidBy: 'pb', shares: 'sh', customDays: 'cd',

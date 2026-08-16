@@ -9,7 +9,9 @@ import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import { getAccountEmoji } from './transactionIcons';
 import ConfirmDialog from './ConfirmDialog';
-import type { Account, AccountType, CardDetails, CardNetwork } from '../types';
+import type { Account, AccountType, CardDetails, CardNetwork, BrandKey } from '../types';
+import { CardBrandLogo } from './CardBrandLogo';
+import { resolveCardIssuer } from '../utils';
 import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, calculateCycleBalanceForCycle, getBillingCycleForDate, getOrdinalSuffix, affectsRupeeBalance } from '../utils';
 import { scrollToFirstError } from '../utils/formErrors';
 import { CardNetworkLogo } from './CardNetworkLogo';
@@ -166,6 +168,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
   const [editingCashbackRateId, setEditingCashbackRateId] = useState<string | null>(null);
   const [isEditingCardDetails, setIsEditingCardDetails] = useState(false);
+
+  // Banks a card can be attributed to. Co-brand keys (swiggy, jupiter, ...) and
+  // 'axismark' are deliberately absent — those aren't issuers.
+  const ISSUER_OPTIONS: BrandKey[] = ['hdfc', 'axis', 'icici', 'sbi', 'csb', 'federal', 'idfc', 'indusind', 'tide'];
+  // What the name alone would give, ignoring any explicit choice — used to tell
+  // the user whether the mark they see is inferred or one they set.
+  const detectedIssuer = resolveCardIssuer(newAccount.name, undefined);
+  const effectiveIssuer = resolveCardIssuer(newAccount.name, newAccount.cardDetails);
   const [collapsedTypes, setCollapsedTypes] = useState<Set<string>>(new Set());
   // Archived accounts are tucked away collapsed by default — they're history, not everyday accounts.
   const [archivedCollapsed, setArchivedCollapsed] = useState(true);
@@ -2285,6 +2295,73 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                   <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>N/A</span>
                                 )}
                               </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex-col gap-1">
+                          <label className="text-xs text-muted font-bold">ISSUING BANK</label>
+                          {isEditingCardDetails ? (
+                            <>
+                              <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+                                {ISSUER_OPTIONS.map(bank => {
+                                  const isSelected = newAccount.cardDetails?.issuer === bank;
+                                  return (
+                                    <button
+                                      key={bank}
+                                      onClick={() => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, issuer: isSelected ? undefined : bank } as CardDetails })}
+                                      style={{
+                                        width: '74px',
+                                        height: '36px',
+                                        padding: '7px 9px',
+                                        borderRadius: '10px',
+                                        border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border-color)'}`,
+                                        background: isSelected ? 'rgba(var(--accent-rgb, 20,184,166), 0.12)' : 'var(--bg-color)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s',
+                                        boxShadow: isSelected ? '0 0 0 1px var(--accent)' : 'none',
+                                        // The plate marks (HDFC, IDFC) carry their own colour; the
+                                        // rest inherit, so give them something readable on this chip.
+                                        ['--card-ink' as string]: isSelected ? '235, 240, 248' : '150, 160, 176',
+                                      }}
+                                    >
+                                      <CardBrandLogo brand={bank} fit />
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              <span className="text-xs text-muted" style={{ opacity: 0.65, marginTop: '0.35rem' }}>
+                                {newAccount.cardDetails?.issuer
+                                  ? 'Set explicitly.'
+                                  : detectedIssuer
+                                    ? 'Detected from the card name. Pick one to override.'
+                                    : "Not set — the card's name doesn't say which bank issued it."}
+                              </span>
+                            </>
+                          ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              {effectiveIssuer ? (
+                                <div
+                                  style={{
+                                    width: '74px',
+                                    height: '36px',
+                                    padding: '7px 9px',
+                                    borderRadius: '10px',
+                                    border: '1px solid var(--border-color)',
+                                    background: 'var(--bg-color)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    ['--card-ink' as string]: '150, 160, 176',
+                                  }}
+                                >
+                                  <CardBrandLogo brand={effectiveIssuer} fit />
+                                </div>
+                              ) : (
+                                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>N/A</span>
+                              )}
                             </div>
                           )}
                         </div>

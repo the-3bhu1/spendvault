@@ -4,7 +4,7 @@ import { CreditCard, Calendar, ChevronLeft } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import { getCategoryIcon } from './transactionIcons';
 import RollingNumber from './RollingNumber';
-import { getBillingCycleForDate, getCardGradients, formatBillingCycleRange, affectsRupeeBalance } from '../utils';
+import { getBillingCycleForDate, getCardGradients, formatBillingCycleRange, affectsRupeeBalance, resolveCardIssuer } from '../utils';
 import { CardSurface } from './CardSurface';
 import { CardChip } from './CardChip';
 import { CardBrandLogo } from './CardBrandLogo';
@@ -274,10 +274,10 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
                       mark used to sit here; it moves to the bottom-right corner so
                       the two views of the same card agree on where things go. */}
                   {(() => {
-                    const skin = getCardGradients(themeIndex, acc.cardDetails.network, acc.name);
-                    return skin.issuer ? (
+                    const issuer = resolveCardIssuer(acc.name, acc.cardDetails);
+                    return issuer ? (
                       <div style={{ position: 'absolute', top: '18px', right: '20px' }}>
-                        <CardBrandLogo brand={skin.issuer} height={17} />
+                        <CardBrandLogo brand={issuer} height={17} />
                       </div>
                     ) : null;
                   })()}

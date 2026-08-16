@@ -522,9 +522,11 @@ export interface CardSkin {
   geometry: CardGeometry;
   sheen: number;          // 0–1 — opacity of the specular highlight layer
   ink: 'light' | 'dark';
-  /** Issuing bank, printed on the front. Omitted when the skin can't name one. */
-  issuer?: BrandKey;
-  /** Co-brand programme, printed on the back. */
+  /**
+   * Co-brand programme, printed on the back. This one IS a skin property: the
+   * programme is what the skin depicts, so a card matching the swiggy skin is a
+   * Swiggy card by definition. The issuing bank is not — see resolveCardIssuer.
+   */
   coBrand?: BrandKey;
   /**
    * A brand symbol blown up as the front's background motif, in place of the
@@ -534,7 +536,64 @@ export interface CardSkin {
   watermark?: BrandKey;
 }
 
-type CardMaterial = Partial<Pick<CardSkin, 'texture' | 'geometry' | 'sheen' | 'ink' | 'issuer' | 'coBrand' | 'watermark'>>;
+type CardMaterial = Partial<Pick<CardSkin, 'texture' | 'geometry' | 'sheen' | 'ink' | 'coBrand' | 'watermark'>>;
+
+/** Bank names as they appear inside a card's name. Longest first — 'indusind'
+ *  must be tested before any shorter substring of it could match. */
+const BANK_IN_NAME: ReadonlyArray<readonly [string, BrandKey]> = [
+  ['indusind', 'indusind'],
+  ['federal', 'federal'],
+  ['icici', 'icici'],
+  ['hdfc', 'hdfc'],
+  ['axis', 'axis'],
+  ['idfc', 'idfc'],
+  ['csb', 'csb'],
+  ['sbi', 'sbi'],
+  ['tide', 'tide'],
+];
+
+/** Products issued by exactly one bank, so the bank is safe to infer when the
+ *  name doesn't say it. Anything issued by more than one bank stays out:
+ *  Jupiter ships on CSB *and* Federal, OneCard on BOB/Federal/SBM/IDFC. Naming
+ *  a bank for those would be a guess, and the wrong logo is worse than none. */
+const SINGLE_ISSUER_PRODUCT: ReadonlyArray<readonly [string, BrandKey]> = [
+  ['swiggy', 'hdfc'],
+  ['tata neu', 'hdfc'],
+  ['infinia', 'hdfc'],
+  ['regalia', 'hdfc'],
+  ['millennia', 'hdfc'],
+  ['amazon', 'icici'],
+  ['flipkart', 'axis'],
+  ['supermoney', 'axis'],
+  ['scapia', 'federal'],
+];
+
+/**
+ * Which bank's mark to print on a card, or none.
+ *
+ * In order: what the user set explicitly, then a bank named in the card's own
+ * name, then a product only one bank issues. Note that 'gold' is deliberately
+ * absent from both tables even though it shares a skin with Infinia and Regalia
+ * — those are HDFC products, but "gold" is a tier every bank sells, and an Axis
+ * Gold card must not end up wearing an HDFC logo.
+ */
+export const resolveCardIssuer = (
+  cardName?: string,
+  cardDetails?: { issuer?: BrandKey }
+): BrandKey | undefined => {
+  if (cardDetails?.issuer) return cardDetails.issuer;
+
+  const name = (cardName || '').toLowerCase();
+  if (!name) return undefined;
+
+  for (const [needle, brand] of BANK_IN_NAME) {
+    if (name.includes(needle)) return brand;
+  }
+  for (const [needle, brand] of SINGLE_ISSUER_PRODUCT) {
+    if (name.includes(needle)) return brand;
+  }
+  return undefined;
+};
 
 const defineSkin = (front: string, back: string, material: CardMaterial = {}): CardSkin => ({
   front,
@@ -555,7 +614,7 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
       'linear-gradient(135deg, #0a0f1d 0%, #151d33 50%, #0d2e2b 100%)',
       'linear-gradient(135deg, #151d33 0%, #0d2e2b 100%)',
       // No geometry: the Axis 'A' is the background motif, as on the real card.
-      { geometry: 'none', texture: 'hairline', sheen: 0.55, issuer: 'axis', coBrand: 'supermoney', watermark: 'axismark' }
+      { geometry: 'none', texture: 'hairline', sheen: 0.55, coBrand: 'supermoney', watermark: 'axismark' }
     );
   }
 
@@ -564,7 +623,7 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
     return defineSkin(
       'linear-gradient(135deg, #1a1f6b 0%, #2d3192 55%, #3f46b8 100%)',
       'linear-gradient(135deg, #2d3192 0%, #3f46b8 100%)',
-      { geometry: 'slash', texture: 'hairline', sheen: 0.6, issuer: 'csb', coBrand: 'jupiter' }
+      { geometry: 'slash', texture: 'hairline', sheen: 0.6, coBrand: 'jupiter' }
     );
   }
 
@@ -578,7 +637,7 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
       // puts purple under the mark, and reads correctly anyway: turning a card over
       // mirrors it, so its gradient should run the other way.
       'linear-gradient(135deg, #fc8019 0%, #3b1459 100%)',
-      { geometry: 'arc', texture: 'weave', sheen: 0.7, issuer: 'hdfc', coBrand: 'swiggy' }
+      { geometry: 'arc', texture: 'weave', sheen: 0.7, coBrand: 'swiggy' }
     );
   }
 
@@ -592,7 +651,7 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
     return defineSkin(
       'linear-gradient(135deg, #170f2b 0%, #3a2063 55%, #6b3fae 100%)',
       'linear-gradient(135deg, #6b3fae 0%, #3a2063 100%)',
-      { geometry: 'facet', texture: 'guilloche', sheen: 0.55, issuer: 'tide' }
+      { geometry: 'facet', texture: 'guilloche', sheen: 0.55 }
     );
   }
 

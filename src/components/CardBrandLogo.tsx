@@ -417,10 +417,37 @@ export function CardBrandWatermark({
   );
 }
 
-export function CardBrandLogo({ brand, height = 22 }: { brand: BrandKey; height?: number }) {
+export function CardBrandLogo({
+  brand,
+  height = 22,
+  fit = false,
+}: {
+  brand: BrandKey;
+  height?: number;
+  /**
+   * Scale to fill the container instead of sizing by optical height. The optical
+   * multipliers exist to give marks equal PRESENCE on a card face, which makes
+   * the wide wordmarks small — right there, wrong in a picker, where every option
+   * has to be readable at the same glance. Controls want this; cards don't.
+   */
+  fit?: boolean;
+}) {
   const b = BRANDS[brand];
   if (!b) return null;
   const h = height * b.optical;
+  if (fit) {
+    return (
+      <svg
+        viewBox={b.viewBox}
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-label={b.label}
+        style={{ display: 'block', width: '100%', height: '100%', color: 'rgb(var(--card-ink))' }}
+      >
+        {b.art}
+      </svg>
+    );
+  }
   return (
     <svg
       viewBox={b.viewBox}
