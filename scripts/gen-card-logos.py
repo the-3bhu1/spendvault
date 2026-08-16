@@ -25,7 +25,29 @@ LOGOS = [
     ('swiggy',     'scripts/brand-svgs/issuers/swiggy.svg',      'original', 'Swiggy'),
     ('supermoney', 'scripts/brand-svgs/issuers/super.money.svg', 'white',    'super.money'),
     ('jupiter',    'scripts/brand-svgs/issuers/jupiter(1).svg',  'white',    'Jupiter'),
+    # Standalone Axis 'A', no wordmark — used as a background watermark, not a mark.
+    ('axismark',   'scripts/brand-svgs/issuers/axis(2).svg',     'white',    'Axis'),
 ]
+
+# Content bounds, measured with getBBox in a headless browser (scratchpad/bbox.mjs).
+#
+# A file's viewBox describes the canvas it was drawn on, not the ink on it, and
+# for two of these that gap is large. CSB's viewBox is its *plate's* bounds, so
+# once 'reversed' drops the plate the wordmark occupies 87 of 214 units and
+# renders at 40% of the height it was asked for — which is why it looked tiny
+# next to RuPay at the same nominal size. Sizing every mark by its own ink is
+# what makes one optical height mean the same thing across all of them.
+TIGHT_VIEWBOX = {
+    'hdfc':       '1.07 1.08 287.14 47.85',
+    'axis':       '6.34 10.47 981.77 233.33',
+    'axismark':   '0 0 105.42 91.38',
+    'csb':        '64.50 63.68 590.67 87.44',     # x2.44 vs the plate viewBox
+    'tide':       '0 0 127.90 53.00',
+    'swiggy':     '0 0.63 158.64 48.00',
+    'supermoney': '3.17 0.01 128.40 48.64',
+    'jupiter':    '-148.90 -7.50 418.71 125.40',
+    'rupay':      '0.02 0.02 71.83 18.88',
+}
 
 DROP_NS = ('sodipodi', 'inkscape', 'ns_extend', 'ns_ai', 'ns_graphs', 'ns_sfw')
 DROP_TAGS = {'metadata', 'namedview', 'title', 'desc', 'style'}
@@ -206,6 +228,7 @@ def convert(key, path, policy):
 
     out_ids = {}
     body = ''.join(to_jsx(c, css, key, policy, out_ids, 1, vb_nums, plate_fill) for c in root)
+    vb = TIGHT_VIEWBOX.get(key, vb)
     # rewrite url(#id) and href="#id" to the namespaced ids
     for old, new in out_ids.items():
         body = body.replace(f'url(#{old})', f'url(#{new})')
@@ -258,7 +281,43 @@ tsx = header
 tsx += 'const BRANDS: Record<BrandKey, { label: string; viewBox: string; ratio: number; art: React.ReactNode }> = {\n'
 tsx += '\n'.join(blocks)
 tsx += '\n};\n\n'
-tsx += '''export function CardBrandLogo({ brand, height = 22 }: { brand: BrandKey; height?: number }) {
+tsx += '''/**
+ * The same artwork blown up as a background motif — the issuer's own symbol
+ * doing the work a generic geometry layer would otherwise do. Sized in % of the
+ * card so it scales with it, and deliberately allowed to run off the right edge:
+ * a mark cropped by the card reads as printed into it, a mark that fits reads as
+ * a sticker.
+ */
+export function CardBrandWatermark({
+  brand,
+  scale = 1.8,
+  nudge = '20%',
+}: {
+  brand: BrandKey;
+  scale?: number;
+  nudge?: string;
+}) {
+  const b = BRANDS[brand];
+  if (!b) return null;
+  return (
+    <svg
+      viewBox={b.viewBox}
+      preserveAspectRatio="xMidYMid meet"
+      aria-hidden="true"
+      focusable="false"
+      style={{
+        height: `${scale * 100}%`,
+        width: 'auto',
+        transform: `translateX(${nudge})`,
+        flexShrink: 0,
+      }}
+    >
+      {b.art}
+    </svg>
+  );
+}
+
+export function CardBrandLogo({ brand, height = 22 }: { brand: BrandKey; height?: number }) {
   const b = BRANDS[brand];
   if (!b) return null;
   return (

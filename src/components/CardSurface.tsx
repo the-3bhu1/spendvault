@@ -1,5 +1,6 @@
 import React from 'react';
 import type { CardSkin, CardTexture, CardGeometry } from '../utils';
+import { CardBrandWatermark } from './CardBrandLogo';
 
 /**
  * The card *material* — base gradient, texture, geometry, sheen, edge highlight.
@@ -167,6 +168,24 @@ export function CardSurface({
         >
           {geometry}
         </svg>
+      )}
+
+      {/* The issuer's own symbol standing in for the geometry layer. Same slot,
+          same job — below content, above texture. */}
+      {skin?.watermark && face === 'front' && (
+        <div
+          style={{
+            ...FILL,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            overflow: 'hidden',
+            color: 'rgb(var(--card-ink))',
+            opacity: 0.09,
+          }}
+        >
+          <CardBrandWatermark brand={skin.watermark} />
+        </div>
       )}
 
       {children}

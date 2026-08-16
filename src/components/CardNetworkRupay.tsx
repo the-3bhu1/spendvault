@@ -12,9 +12,9 @@
 export function RupayMark({ height = 19 }: { height?: number }) {
   return (
     <svg
-      viewBox="0 0 71.866997 18.905001"
+      viewBox="0.02 0.02 71.83 18.88"
       height={height}
-      width={height * 3.8015}
+      width={height * 3.8046}
       role="img"
       aria-label="RuPay"
       style={{ display: 'block', color: 'currentColor' }}

@@ -64,7 +64,8 @@ export type CardNetwork = 'visa' | 'mastercard' | 'rupay' | 'amex' | 'diners';
  */
 export type BrandKey =
   | 'hdfc' | 'axis' | 'csb' | 'tide'          // issuers
-  | 'swiggy' | 'supermoney' | 'jupiter';      // co-brands
+  | 'swiggy' | 'supermoney' | 'jupiter'       // co-brands
+  | 'axismark';                               // symbol only, for watermarks
 
 export interface CardDetails {
   cardholderName?: string;

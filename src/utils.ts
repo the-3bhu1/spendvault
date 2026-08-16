@@ -526,9 +526,15 @@ export interface CardSkin {
   issuer?: BrandKey;
   /** Co-brand programme, printed on the back. */
   coBrand?: BrandKey;
+  /**
+   * A brand symbol blown up as the front's background motif, in place of the
+   * generic geometry layer. Set one or the other, not both — they occupy the
+   * same visual role and fight for the same space.
+   */
+  watermark?: BrandKey;
 }
 
-type CardMaterial = Partial<Pick<CardSkin, 'texture' | 'geometry' | 'sheen' | 'ink' | 'issuer' | 'coBrand'>>;
+type CardMaterial = Partial<Pick<CardSkin, 'texture' | 'geometry' | 'sheen' | 'ink' | 'issuer' | 'coBrand' | 'watermark'>>;
 
 const defineSkin = (front: string, back: string, material: CardMaterial = {}): CardSkin => ({
   front,
@@ -548,7 +554,8 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
     return defineSkin(
       'linear-gradient(135deg, #0a0f1d 0%, #151d33 50%, #0d2e2b 100%)',
       'linear-gradient(135deg, #151d33 0%, #0d2e2b 100%)',
-      { geometry: 'facet', texture: 'hairline', sheen: 0.55, issuer: 'axis', coBrand: 'supermoney' }
+      // No geometry: the Axis 'A' is the background motif, as on the real card.
+      { geometry: 'none', texture: 'hairline', sheen: 0.55, issuer: 'axis', coBrand: 'supermoney', watermark: 'axismark' }
     );
   }
 
