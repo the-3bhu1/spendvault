@@ -382,6 +382,30 @@ const BRANDS: Record<BrandKey, { label: string; viewBox: string; ratio: number; 
 };
 
 /**
+ * The brand's name in words. A mark is unmistakable once you see it but is not
+ * something you can type, so anywhere a brand is searched for rather than
+ * pointed at needs the name too.
+ */
+export const brandLabel = (brand: BrandKey): string => BRANDS[brand]?.label ?? brand;
+
+/**
+ * Each mark's own colour as an R, G, B triplet, ready for --card-ink. Gets the
+ * real brand instead of a silhouette — but only over a light plate: these are the
+ * colours a bank prints on white, and most of them vanish against a dark sheet.
+ */
+export const BRAND_INK: Partial<Record<BrandKey, string>> = {
+  axis: '174, 40, 93',            // #ae285d
+  axismark: '128, 0, 0',          // #800000
+  csb: '3, 66, 142',              // #03428e
+  federal: '0, 76, 190',          // #004cbe
+  icici: '0, 74, 128',            // #004a80
+  indusind: '152, 39, 42',        // #98272a
+  sbi: '41, 32, 117',             // #292075
+  supermoney: '36, 43, 61',       // #242b3d
+  tide: '64, 80, 251',            // #4050fb
+};
+
+/**
  * The same artwork blown up as a background motif — the issuer's own symbol
  * doing the work a generic geometry layer would otherwise do. Sized in % of the
  * card so it scales with it. Sized to sit whole rather than bleed off the edge —

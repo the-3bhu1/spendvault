@@ -10,11 +10,11 @@ import CustomDatePicker from './CustomDatePicker';
 import { getAccountEmoji } from './transactionIcons';
 import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardNetwork, BrandKey, RoundingRule } from '../types';
-import { CardBrandLogo } from './CardBrandLogo';
+import { CardBrandLogo, brandLabel, BRAND_INK } from './CardBrandLogo';
 import { resolveCardIssuer } from '../utils';
 import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, calculateCycleBalanceForCycle, getBillingCycleForDate, getOrdinalSuffix, affectsRupeeBalance } from '../utils';
 import { scrollToFirstError } from '../utils/formErrors';
-import { CardNetworkLogo } from './CardNetworkLogo';
+import { CardNetworkLogo, NETWORK_LABELS } from './CardNetworkLogo';
 import { ViewCardOverlay } from './ViewCardOverlay';
 
 import { EPFDetailsView } from './EPFDetailsModal';
@@ -168,10 +168,49 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
   const [editingCashbackRateId, setEditingCashbackRateId] = useState<string | null>(null);
   const [isEditingCardDetails, setIsEditingCardDetails] = useState(false);
+  const [issuerQuery, setIssuerQuery] = useState('');
+  const [issuerDropdownOpen, setIssuerDropdownOpen] = useState(false);
 
   // Banks a card can be attributed to. Co-brand keys (swiggy, jupiter, ...) and
   // 'axismark' are deliberately absent — those aren't issuers.
   const ISSUER_OPTIONS: BrandKey[] = ['hdfc', 'axis', 'icici', 'sbi', 'csb', 'federal', 'idfc', 'indusind', 'tide'];
+  // What people call a bank when it isn't what the mark says. Searching by the
+  // name in your head has to work, or the list may as well not be searchable.
+  const ISSUER_ALIASES: Partial<Record<BrandKey, string[]>> = {
+    sbi: ['state bank of india'],
+    idfc: ['idfc first'],
+    csb: ['catholic syrian bank'],
+    indusind: ['indus ind'],
+  };
+  const selectedIssuer = newAccount.cardDetails?.issuer;
+  // A field reading "HDFC Bank" shouldn't narrow the list to HDFC the moment
+  // it's focused — you open it precisely to see what else is on offer.
+  const issuerFilter = selectedIssuer && issuerQuery === brandLabel(selectedIssuer)
+    ? ''
+    : issuerQuery.trim().toLowerCase();
+  const issuerSuggestions = ISSUER_OPTIONS.filter(bank =>
+    !issuerFilter ||
+    [bank, brandLabel(bank).toLowerCase(), ...(ISSUER_ALIASES[bank] || [])].some(s => s.includes(issuerFilter))
+  );
+  // Brand marks are drawn to sit on white, and the single-tint ones (Axis, SBI,
+  // Federal, IndusInd, CSB) are pure currentColor — over the dark sheet they can
+  // only ever be grey silhouettes. A light plate is what lets every bank show its
+  // own colours, so a row is recognisable before you've read the name.
+  const issuerPlate = (bank: BrandKey) => ({
+    background: '#f7f8fa',
+    borderRadius: '6px',
+    padding: '4px 7px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    ['--card-ink' as string]: BRAND_INK[bank] ?? '17, 24, 39',
+  });
+  const chooseIssuer = (bank: BrandKey) => {
+    setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, issuer: bank } as CardDetails });
+    setIssuerQuery(brandLabel(bank));
+    setIssuerDropdownOpen(false);
+  };
   // What the name alone would give, ignoring any explicit choice — used to tell
   // the user whether the mark they see is inferred or one they set.
   const detectedIssuer = resolveCardIssuer(newAccount.name, undefined);
@@ -239,6 +278,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setTravelOpeningBalanceInput('');
     setRewardOpeningBalanceInput('');
     setExpiryInput('');
+    setIssuerQuery('');
+    setIssuerDropdownOpen(false);
     setShowCvv(false);
     setErrors({});
     setSymbolInput('');
@@ -277,6 +318,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     } else {
       setExpiryInput('');
     }
+    setIssuerQuery(cd?.issuer ? brandLabel(cd.issuer) : '');
+    setIssuerDropdownOpen(false);
     setShowCvv(false);
     setSymbolInput(acc.marketSymbol || '');
     setSymbolResults([]);
@@ -341,15 +384,57 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       }
     }
 
+    // Card details are optional as a block, and a partly-filled one is a
+    // legitimate record: plenty of people will keep a number and a name but not
+    // a CVV, and demanding the full set only ever buys a made-up CVV. So nothing
+    // here is required — each field is checked only once it has something in it,
+    // for being filled in *wrong*. Expiry is the one exception: month and year
+    // are a single value split across two boxes, so half of it means nothing.
+    const cd = newAccount.cardDetails;
+    if (cd) {
+      const isAmex = cd.network === 'amex';
+      const digits = (cd.cardNumber || '').replace(/\D/g, '');
+      if (digits && digits.length !== (isAmex ? 15 : 16) && !(!cd.network && digits.length === 15)) {
+        newErrors.cardNumber = isAmex
+          ? 'An Amex card number is 15 digits'
+          : cd.network
+            ? 'Card Number must be 16 digits'
+            : 'Card Number must be 15 or 16 digits';
+      }
+      const expiryDigits = expiryInput.replace(/\D/g, '');
+      if ((expiryDigits.length > 0 && expiryDigits.length < 4) || (cd.expiryMonth === undefined) !== (cd.expiryYear === undefined)) {
+        newErrors.expiry = 'Enter the full expiry as MM/YY';
+      } else if (cd.expiryMonth !== undefined && (cd.expiryMonth < 1 || cd.expiryMonth > 12)) {
+        newErrors.expiry = 'Expiry month must be 01–12';
+      }
+      if (cd.cvv && cd.cvv.length !== (isAmex ? 4 : 3) && !(!cd.network && cd.cvv.length === 4)) {
+        newErrors.cvv = isAmex
+          ? 'An Amex CVV is 4 digits'
+          : cd.network
+            ? 'CVV must be 3 digits'
+            : 'CVV must be 3 or 4 digits';
+      }
+    }
+
     setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    return newErrors;
   };
 
+  /** Errors that live inside the card block, which is collapsed to a read-only
+   *  view most of the time — see handleSave. */
+  const CARD_ERROR_KEYS = ['cardNumber', 'expiry', 'cvv'];
+
   const handleSave = () => {
-    if (!validate()) {
+    const failures = validate();
+    if (Object.keys(failures).length > 0) {
       // This form is long and its required fields are spread across every section, so a failure on a
       // field that happens to be scrolled out of view read as "Save does nothing at all" — no close,
       // no message, no clue which field.
+      //
+      // A card-detail failure can be worse than out of view: once the block is
+      // collapsed to its read-only rows there is no input to mark at all, so
+      // reopen it before pointing at the offending field.
+      if (CARD_ERROR_KEYS.some(k => k in failures)) setIsEditingCardDetails(true);
       scrollToFirstError(modalBodyRef.current);
       return;
     }
@@ -2067,6 +2152,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                 } else {
                                   setExpiryInput('');
                                 }
+                                setIssuerQuery(newAccount.cardDetails?.issuer ? brandLabel(newAccount.cardDetails.issuer) : '');
+                                setIssuerDropdownOpen(false);
                               }}
                               title="Edit Details"
                             >
@@ -2113,6 +2200,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                             setNewAccount({ ...newAccount, cardDetails: {} });
                             setIsEditingCardDetails(true);
                             setExpiryInput('');
+                            setIssuerQuery('');
+                            setIssuerDropdownOpen(false);
                             setTimeout(() => {
                               cardDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                             }, 100);
@@ -2148,20 +2237,24 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         <div className="flex-col gap-1">
                           <label className="text-xs text-muted font-bold">CARD NUMBER</label>
                           {isEditingCardDetails ? (
-                            <input
-                              className="input-field"
-                              placeholder="1234 5678 9012 3456"
-                              inputMode="numeric"
-                              maxLength={19}
-                              value={newAccount.cardDetails.cardNumber
-                                ? newAccount.cardDetails.cardNumber.replace(/\D/g, '').replace(/(\d{4})/g, '$1 ').trim()
-                                : ''}
-                              onChange={e => {
-                                const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
-                                setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cardNumber: digits } as CardDetails });
-                              }}
-                              style={{ fontFamily: "'Overpass Mono', monospace", letterSpacing: '3px', height: '48px', fontWeight: 'normal' }}
-                            />
+                            <>
+                              <input
+                                className={`input-field ${errors.cardNumber ? 'border-danger' : ''}`}
+                                placeholder="1234 5678 9012 3456"
+                                inputMode="numeric"
+                                maxLength={19}
+                                value={newAccount.cardDetails.cardNumber
+                                  ? newAccount.cardDetails.cardNumber.replace(/\D/g, '').replace(/(\d{4})/g, '$1 ').trim()
+                                  : ''}
+                                onChange={e => {
+                                  const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
+                                  setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cardNumber: digits } as CardDetails });
+                                  if (errors.cardNumber) setErrors(prev => ({ ...prev, cardNumber: '' }));
+                                }}
+                                style={{ fontFamily: "'Overpass Mono', monospace", letterSpacing: '3px', height: '48px', fontWeight: 'normal' }}
+                              />
+                              {errors.cardNumber && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.cardNumber}</span>}
+                            </>
                           ) : (
                             <div style={{ padding: '0.85rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '4px', fontFamily: "'Overpass Mono', monospace", letterSpacing: '3px', fontSize: '1rem', lineHeight: '1.5', color: 'var(--text-primary)', boxShadow: 'inset 3px 3px 0 rgba(0, 0, 0, 0.4)', height: '48px', display: 'flex', alignItems: 'center' }}>
                               {newAccount.cardDetails.cardNumber
@@ -2171,66 +2264,57 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           )}
                         </div>
 
-                        <div className="flex gap-2">
-                          <div className="flex-col gap-1" style={{ width: '90px' }}>
-                            <label className="text-xs text-muted font-bold">EXPIRY</label>
-                            {isEditingCardDetails ? (
-                              <input
-                                className="input-field"
-                                placeholder="MM/YY"
-                                inputMode="numeric"
-                                maxLength={5}
-                                value={expiryInput}
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  const digits = val.replace(/\D/g, '');
-                                  let formatted = digits.slice(0, 4);
-                                  if (formatted.length > 2) {
-                                    formatted = formatted.slice(0, 2) + '/' + formatted.slice(2);
-                                  }
-                                  setExpiryInput(formatted);
-                                  const mm = digits.length >= 2 ? parseInt(digits.slice(0, 2)) || undefined : undefined;
-                                  const yy = digits.length >= 4 ? parseInt(digits.slice(2, 4)) || undefined : undefined;
-                                  setNewAccount(prev => ({ ...prev, cardDetails: { ...prev.cardDetails, expiryMonth: mm, expiryYear: yy } as CardDetails }));
-                                }}
-                                style={{ fontFamily: "'Overpass Mono', monospace", letterSpacing: '2px', height: '48px', fontWeight: 'normal' }}
-                              />
-                            ) : (
-                              <div style={{ padding: '0.85rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '4px', fontFamily: "'Overpass Mono', monospace", letterSpacing: '2px', fontSize: '1rem', lineHeight: '1.5', color: 'var(--text-primary)', boxShadow: 'inset 3px 3px 0 rgba(0, 0, 0, 0.4)', height: '48px', display: 'flex', alignItems: 'center' }}>
-                                {newAccount.cardDetails.expiryMonth && newAccount.cardDetails.expiryYear
-                                  ? `${newAccount.cardDetails.expiryMonth.toString().padStart(2, '0')}/${newAccount.cardDetails.expiryYear.toString().padStart(2, '0')}`
-                                  : 'MM/YY'}
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex-col gap-1" style={{ flex: 1, position: 'relative' }}>
-                            <label className="text-xs text-muted font-bold">CVV</label>
-                            {isEditingCardDetails ? (
-                              <div style={{ position: 'relative' }}>
+                        <div className="flex-col gap-1">
+                          <div className="flex gap-2">
+                            <div className="flex-col gap-1" style={{ width: '90px' }}>
+                              <label className="text-xs text-muted font-bold">EXPIRY</label>
+                              {isEditingCardDetails ? (
                                 <input
-                                  className="input-field"
-                                  placeholder="•••"
-                                  type={showCvv ? 'text' : 'password'}
+                                  className={`input-field ${errors.expiry ? 'border-danger' : ''}`}
+                                  placeholder="MM/YY"
                                   inputMode="numeric"
-                                  maxLength={4}
-                                  value={newAccount.cardDetails.cvv || ''}
-                                  onChange={e => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cvv: e.target.value.replace(/\D/g, '') } as CardDetails })}
-                                  style={{ fontFamily: "'Overpass Mono', monospace", letterSpacing: '4px', width: '100%', paddingRight: '2.5rem', height: '48px', fontWeight: 'normal' }}
+                                  maxLength={5}
+                                  value={expiryInput}
+                                  onChange={e => {
+                                    if (errors.expiry) setErrors(prev => ({ ...prev, expiry: '' }));
+                                    const val = e.target.value;
+                                    const digits = val.replace(/\D/g, '');
+                                    let formatted = digits.slice(0, 4);
+                                    if (formatted.length > 2) {
+                                      formatted = formatted.slice(0, 2) + '/' + formatted.slice(2);
+                                    }
+                                    setExpiryInput(formatted);
+                                    const mm = digits.length >= 2 ? parseInt(digits.slice(0, 2)) || undefined : undefined;
+                                    const yy = digits.length >= 4 ? parseInt(digits.slice(2, 4)) || undefined : undefined;
+                                    setNewAccount(prev => ({ ...prev, cardDetails: { ...prev.cardDetails, expiryMonth: mm, expiryYear: yy } as CardDetails }));
+                                  }}
+                                  style={{ fontFamily: "'Overpass Mono', monospace", letterSpacing: '2px', height: '48px', fontWeight: 'normal' }}
                                 />
-                                <button
-                                  onClick={() => setShowCvv(v => !v)}
-                                  style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.5, fontSize: '0.75rem', cursor: 'pointer' }}
-                                  title={showCvv ? 'Hide CVV' : 'Show CVV'}
-                                >
-                                  {showCvv ? '🙈' : '👁️'}
-                                </button>
-                              </div>
-                            ) : (
-                              <div style={{ position: 'relative' }}>
-                                <div style={{ padding: '0.85rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '4px', fontFamily: "'Overpass Mono', monospace", letterSpacing: '4px', fontSize: '1rem', lineHeight: '1.5', color: 'var(--text-primary)', width: '100%', boxShadow: 'inset 3px 3px 0 rgba(0, 0, 0, 0.4)', paddingRight: '2.5rem', height: '48px', display: 'flex', alignItems: 'center' }}>
-                                  {newAccount.cardDetails.cvv ? (showCvv ? newAccount.cardDetails.cvv : '•••') : 'N/A'}
+                              ) : (
+                                <div style={{ padding: '0.85rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '4px', fontFamily: "'Overpass Mono', monospace", letterSpacing: '2px', fontSize: '1rem', lineHeight: '1.5', color: 'var(--text-primary)', boxShadow: 'inset 3px 3px 0 rgba(0, 0, 0, 0.4)', height: '48px', display: 'flex', alignItems: 'center' }}>
+                                  {newAccount.cardDetails.expiryMonth && newAccount.cardDetails.expiryYear
+                                    ? `${newAccount.cardDetails.expiryMonth.toString().padStart(2, '0')}/${newAccount.cardDetails.expiryYear.toString().padStart(2, '0')}`
+                                    : 'MM/YY'}
                                 </div>
-                                {newAccount.cardDetails.cvv && (
+                              )}
+                            </div>
+                            <div className="flex-col gap-1" style={{ flex: 1, position: 'relative' }}>
+                              <label className="text-xs text-muted font-bold">CVV</label>
+                              {isEditingCardDetails ? (
+                                <div style={{ position: 'relative' }}>
+                                  <input
+                                    className={`input-field ${errors.cvv ? 'border-danger' : ''}`}
+                                    placeholder="•••"
+                                    type={showCvv ? 'text' : 'password'}
+                                    inputMode="numeric"
+                                    maxLength={4}
+                                    value={newAccount.cardDetails.cvv || ''}
+                                    onChange={e => {
+                                      setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cvv: e.target.value.replace(/\D/g, '') } as CardDetails });
+                                      if (errors.cvv) setErrors(prev => ({ ...prev, cvv: '' }));
+                                    }}
+                                    style={{ fontFamily: "'Overpass Mono', monospace", letterSpacing: '4px', width: '100%', paddingRight: '2.5rem', height: '48px', fontWeight: 'normal' }}
+                                  />
                                   <button
                                     onClick={() => setShowCvv(v => !v)}
                                     style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.5, fontSize: '0.75rem', cursor: 'pointer' }}
@@ -2238,26 +2322,47 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                   >
                                     {showCvv ? '🙈' : '👁️'}
                                   </button>
-                                )}
-                              </div>
-                            )}
+                                </div>
+                              ) : (
+                                <div style={{ position: 'relative' }}>
+                                  <div style={{ padding: '0.85rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '4px', fontFamily: "'Overpass Mono', monospace", letterSpacing: '4px', fontSize: '1rem', lineHeight: '1.5', color: 'var(--text-primary)', width: '100%', boxShadow: 'inset 3px 3px 0 rgba(0, 0, 0, 0.4)', paddingRight: '2.5rem', height: '48px', display: 'flex', alignItems: 'center' }}>
+                                    {newAccount.cardDetails.cvv ? (showCvv ? newAccount.cardDetails.cvv : '•••') : 'N/A'}
+                                  </div>
+                                  {newAccount.cardDetails.cvv && (
+                                    <button
+                                      onClick={() => setShowCvv(v => !v)}
+                                      style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.5, fontSize: '0.75rem', cursor: 'pointer' }}
+                                      title={showCvv ? 'Hide CVV' : 'Show CVV'}
+                                    >
+                                      {showCvv ? '🙈' : '👁️'}
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
+                          {(errors.expiry || errors.cvv) && (
+                            <span className="text-xs text-danger">{[errors.expiry, errors.cvv].filter(Boolean).join(" · ")}</span>
+                          )}
                         </div>
 
                         <div className="flex-col gap-1">
                           <label className="text-xs text-muted font-bold">NETWORK</label>
                           {isEditingCardDetails ? (
-                            <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+                            // Five equal columns, always one row: the whole set fits the narrowest
+                            // phone, so choosing never means reading across a wrap.
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.4rem' }}>
                               {(['visa', 'mastercard', 'rupay', 'amex', 'diners'] as CardNetwork[]).map(net => {
                                 const isSelected = newAccount.cardDetails?.network === net;
                                 return (
                                   <button
                                     key={net}
+                                    title={NETWORK_LABELS[net]}
+                                    aria-label={NETWORK_LABELS[net]}
                                     onClick={() => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, network: isSelected ? undefined : net } as CardDetails })}
                                     style={{
-                                      width: '56px',
-                                      height: '32px',
-                                      padding: 0,
+                                      height: '48px',
+                                      padding: '0.35rem',
                                       borderRadius: '10px',
                                       border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border-color)'}`,
                                       background: isSelected ? 'rgba(var(--accent-rgb, 20,184,166), 0.12)' : 'var(--bg-color)',
@@ -2270,7 +2375,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                       color: isSelected ? 'var(--accent)' : 'var(--text-muted)',
                                     }}
                                   >
-                                    <CardNetworkLogo network={net} size="sm" />
+                                    <CardNetworkLogo network={net} size="fit" />
                                   </button>
                                 );
                               })}
@@ -2278,21 +2383,24 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           ) : (
                             <div style={{ display: 'flex' }}>
                               <div
+                                title={newAccount.cardDetails.network ? NETWORK_LABELS[newAccount.cardDetails.network] : undefined}
                                 style={{
-                                  width: '56px',
-                                  height: '32px',
+                                  width: '72px',
+                                  height: '48px',
+                                  padding: '0.35rem',
                                   borderRadius: '10px',
                                   border: '1px solid var(--border-color)',
                                   background: 'var(--bg-color)',
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'center',
+                                  color: 'var(--text-muted)',
                                 }}
                               >
                                 {newAccount.cardDetails.network ? (
-                                  <CardNetworkLogo network={newAccount.cardDetails.network} size="sm" />
+                                  <CardNetworkLogo network={newAccount.cardDetails.network} size="fit" />
                                 ) : (
-                                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>N/A</span>
+                                  <span style={{ fontSize: '0.8rem' }}>N/A</span>
                                 )}
                               </div>
                             </div>
@@ -2303,41 +2411,118 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           <label className="text-xs text-muted font-bold">ISSUING BANK</label>
                           {isEditingCardDetails ? (
                             <>
-                              <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-                                {ISSUER_OPTIONS.map(bank => {
-                                  const isSelected = newAccount.cardDetails?.issuer === bank;
-                                  return (
-                                    <button
-                                      key={bank}
-                                      onClick={() => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, issuer: isSelected ? undefined : bank } as CardDetails })}
+                              {/* A search field rather than a wall of chips: the list of banks
+                                  only grows, and every one added would cost another row of the
+                                  form for an option almost nobody picks. */}
+                              <div style={{ position: 'relative' }}>
+                                <div style={{ position: 'relative' }}>
+                                  {selectedIssuer && (
+                                    <span
                                       style={{
-                                        width: '74px',
-                                        height: '36px',
-                                        padding: '7px 9px',
-                                        borderRadius: '10px',
-                                        border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border-color)'}`,
-                                        background: isSelected ? 'rgba(var(--accent-rgb, 20,184,166), 0.12)' : 'var(--bg-color)',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.2s',
-                                        boxShadow: isSelected ? '0 0 0 1px var(--accent)' : 'none',
-                                        // The plate marks (HDFC, IDFC) carry their own colour; the
-                                        // rest inherit, so give them something readable on this chip.
-                                        ['--card-ink' as string]: isSelected ? '235, 240, 248' : '150, 160, 176',
+                                        ...issuerPlate(selectedIssuer),
+                                        position: 'absolute',
+                                        left: '0.5rem',
+                                        top: '50%',
+                                        transform: 'translateY(-50%)',
+                                        width: '72px',
+                                        height: '28px',
+                                        pointerEvents: 'none',
                                       }}
                                     >
-                                      <CardBrandLogo brand={bank} fit />
+                                      <CardBrandLogo brand={selectedIssuer} fit />
+                                    </span>
+                                  )}
+                                  <input
+                                    className="input-field"
+                                    placeholder="Search bank — e.g. HDFC"
+                                    value={issuerQuery}
+                                    autoComplete="off"
+                                    onChange={e => {
+                                      setIssuerQuery(e.target.value);
+                                      setIssuerDropdownOpen(true);
+                                      // The field and the stored issuer can't be allowed to
+                                      // disagree — typing over a pick unmakes it.
+                                      if (selectedIssuer) {
+                                        setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, issuer: undefined } as CardDetails });
+                                      }
+                                    }}
+                                    onFocus={() => setIssuerDropdownOpen(true)}
+                                    onBlur={() => setIssuerDropdownOpen(false)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter' && issuerDropdownOpen && issuerSuggestions.length > 0) {
+                                        e.preventDefault();
+                                        chooseIssuer(issuerSuggestions[0]);
+                                      } else if (e.key === 'Escape') {
+                                        setIssuerDropdownOpen(false);
+                                      }
+                                    }}
+                                    style={{
+                                      width: '100%',
+                                      boxSizing: 'border-box',
+                                      height: '48px',
+                                      fontWeight: 'normal',
+                                      paddingLeft: selectedIssuer ? 'calc(72px + 1.1rem)' : undefined,
+                                      paddingRight: issuerQuery ? '2.3rem' : undefined,
+                                    }}
+                                  />
+                                  {issuerQuery && (
+                                    <button
+                                      onMouseDown={e => e.preventDefault()}
+                                      onClick={() => {
+                                        setIssuerQuery('');
+                                        setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, issuer: undefined } as CardDetails });
+                                      }}
+                                      style={{ position: 'absolute', right: '0.5rem', top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', padding: '0.35rem', opacity: 0.5, cursor: 'pointer', color: 'var(--text-muted)' }}
+                                      title="Clear issuing bank"
+                                    >
+                                      <X size={14} />
                                     </button>
-                                  );
-                                })}
+                                  )}
+                                </div>
+                                {issuerDropdownOpen && (
+                                  // Opens upward: this is the last field in the form, so a list
+                                  // hung below it is clipped by the modal no matter how far you scroll.
+                                  <div style={{
+                                    position: 'absolute', bottom: 'calc(100% + 4px)', left: 0, right: 0,
+                                    background: '#1c1f26', border: '1px solid rgba(255,255,255,0.1)',
+                                    borderRadius: '0.625rem', zIndex: 200,
+                                    maxHeight: '13rem', overflowY: 'auto',
+                                    boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                                  }}>
+                                    {issuerSuggestions.length === 0 ? (
+                                      <div style={{ padding: '0.7rem 0.85rem', fontSize: '0.78rem', color: 'rgba(255,255,255,0.45)' }}>
+                                        No bank matches “{issuerQuery.trim()}”.
+                                      </div>
+                                    ) : issuerSuggestions.map((bank, idx) => (
+                                      <div
+                                        key={bank}
+                                        // Selecting has to survive the input's blur, which fires first.
+                                        onMouseDown={e => e.preventDefault()}
+                                        onClick={() => chooseIssuer(bank)}
+                                        style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'space-between',
+                                          gap: '0.75rem',
+                                          padding: '0.5rem 0.75rem',
+                                          borderBottom: idx < issuerSuggestions.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        <span style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.9)' }}>{brandLabel(bank)}</span>
+                                        <span style={{ ...issuerPlate(bank), width: '92px', height: '30px' }}>
+                                          <CardBrandLogo brand={bank} fit />
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
                               <span className="text-xs text-muted" style={{ opacity: 0.65, marginTop: '0.35rem' }}>
-                                {newAccount.cardDetails?.issuer
+                                {selectedIssuer
                                   ? 'Set explicitly.'
                                   : detectedIssuer
-                                    ? 'Detected from the card name. Pick one to override.'
+                                    ? 'Detected from the card name. Search to override.'
                                     : "Not set — the card's name doesn't say which bank issued it."}
                               </span>
                             </>
@@ -2345,17 +2530,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                               {effectiveIssuer ? (
                                 <div
-                                  style={{
-                                    width: '74px',
-                                    height: '36px',
-                                    padding: '7px 9px',
-                                    borderRadius: '10px',
-                                    border: '1px solid var(--border-color)',
-                                    background: 'var(--bg-color)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    ['--card-ink' as string]: '150, 160, 176',
-                                  }}
+                                  title={brandLabel(effectiveIssuer)}
+                                  style={{ ...issuerPlate(effectiveIssuer), width: '92px', height: '32px' }}
                                 >
                                   <CardBrandLogo brand={effectiveIssuer} fit />
                                 </div>
