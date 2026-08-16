@@ -171,11 +171,11 @@ export default function UpcomingBills() {
     const ccBills = data.accounts
       .filter(acc => acc.type === 'credit_card' && acc.dueDay)
       .map(acc => {
-        let dueDay = acc.dueDay!;
-        let dueDate = new Date(today.getFullYear(), today.getMonth(), dueDay);
+        const dueDay = acc.dueDay!;
+        const dueDate = new Date(today.getFullYear(), today.getMonth(), dueDay);
 
-        let statementDay = acc.statementDay || 1;
-        let lastStatementDate = new Date(today.getFullYear(), today.getMonth(), statementDay);
+        const statementDay = acc.statementDay || 1;
+        const lastStatementDate = new Date(today.getFullYear(), today.getMonth(), statementDay);
         if (today.getDate() < statementDay) {
           lastStatementDate.setMonth(lastStatementDate.getMonth() - 1);
         }

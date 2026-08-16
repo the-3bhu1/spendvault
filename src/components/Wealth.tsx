@@ -474,7 +474,7 @@ export function Wealth() {
       setPrevPrices(prev => ({ ...prev, ...newPrevPrices }));
       // Mark that we've done a full refresh today, so the next same-day load shows the cached
       // 1-day return immediately instead of hiding it.
-      try { localStorage.setItem(WEALTH_REFRESH_DAY_KEY, currentDayStr()); } catch { }
+      try { localStorage.setItem(WEALTH_REFRESH_DAY_KEY, currentDayStr()); } catch { /* ignore */ }
     } catch (e: any) {
       console.error('Failed to refresh prices:', e);
       setError(`Price refresh failed: ${e?.message || 'Unknown error'}`);

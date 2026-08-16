@@ -314,7 +314,7 @@ type AccountLike = { type: string; name: string; marketSymbol?: string };
 // funds, 'l:' liquid accounts — so a bank and a fund house sharing a name can't collide.
 const DOMAIN_CACHE_KEY = 'logo_domain_cache';
 const DOMAIN_CACHE_MIGRATION_KEY = 'logo_domain_cache_v2';
-let domainCache: Record<string, string> = (() => {
+const domainCache: Record<string, string> = (() => {
   try {
     const raw = localStorage.getItem(DOMAIN_CACHE_KEY);
     const parsed: Record<string, string> = raw ? JSON.parse(raw) : {};

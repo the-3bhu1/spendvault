@@ -30,21 +30,21 @@ interface HistoryEntry {
 type PriceCache = Record<string, CacheEntry>;
 type HistoryCache = Record<string, HistoryEntry>;
 
-let mem: PriceCache = (() => {
+const mem: PriceCache = (() => {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     return raw ? JSON.parse(raw) : {};
   } catch { return {}; }
 })();
 
-let historyMem: HistoryCache = (() => {
+const historyMem: HistoryCache = (() => {
   try {
     const raw = localStorage.getItem(HISTORY_CACHE_KEY);
     return raw ? JSON.parse(raw) : {};
   } catch { return {}; }
 })();
 
-let prevMem: Record<string, number> = (() => {
+const prevMem: Record<string, number> = (() => {
   try {
     const raw = localStorage.getItem(PREV_CACHE_KEY);
     return raw ? JSON.parse(raw) : {};

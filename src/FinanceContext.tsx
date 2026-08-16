@@ -1066,7 +1066,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     newTx: Transaction
   ): { updatedDebts: Debt[]; updatedTx: Transaction } => {
     let updatedDebts = [...prevDebts];
-    let updatedTx = { ...newTx };
+    const updatedTx = { ...newTx };
 
     const oldMatch = oldTx ? parseDebtDescription(oldTx.description, oldTx.category || '', oldTx.type) : null;
     const newMatch = parseDebtDescription(updatedTx.description, updatedTx.category || '', updatedTx.type);
@@ -1298,7 +1298,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         updatedTxs = updatedTxs.map(t => {
           if (allLinkedIds.includes(t.id)) {
             // Propagate date ALWAYS
-            let updated = { ...t, date: updatedTransaction.date };
+            const updated = { ...t, date: updatedTransaction.date };
             
             // Check if this linked transaction is a Cashback counterpart
             if (t.category === 'Cashback') {
@@ -1637,7 +1637,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         if (intersection.length === 0) return t;
 
         const newLinkedIds = (t.linkedTransactionIds || []).filter(lid => !transactionsToDelete.includes(lid));
-        let updated = { ...t, linkedTransactionIds: newLinkedIds };
+        const updated = { ...t, linkedTransactionIds: newLinkedIds };
 
         // If any of the deleted transactions was a cashback counterpart
         const wasCashbackDeleted = prev.transactions.some(del => intersection.includes(del.id) && del.category === 'Cashback');

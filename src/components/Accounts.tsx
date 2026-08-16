@@ -355,14 +355,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     }
     const month = getCurrentMonthStr();
 
-    let updatedOpeningBalances = { ...(newAccount.openingBalances || {}) };
-    let updatedBalanceAdjustments = { ...(newAccount.balanceAdjustments || {}) };
-    let updatedTravelOpeningBalances = newAccount.isNcmcEnabled ? { ...(newAccount.travelOpeningBalances || {}) } : undefined;
+    const updatedOpeningBalances = { ...(newAccount.openingBalances || {}) };
+    const updatedBalanceAdjustments = { ...(newAccount.balanceAdjustments || {}) };
+    const updatedTravelOpeningBalances = newAccount.isNcmcEnabled ? { ...(newAccount.travelOpeningBalances || {}) } : undefined;
     let updatedTravelBalanceAdjustments = newAccount.isNcmcEnabled ? { ...(newAccount.travelBalanceAdjustments || {}) } : undefined;
-    let updatedBalanceEditHistory = [...(newAccount.balanceEditHistory || [])];
+    const updatedBalanceEditHistory = [...(newAccount.balanceEditHistory || [])];
 
     const hasInternalRewards = (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.isCashbackEnabled && newAccount.rewardType === 'points';
-    let updatedRewardOpeningBalances = hasInternalRewards ? { ...(newAccount.rewardOpeningBalances || {}) } : undefined;
+    const updatedRewardOpeningBalances = hasInternalRewards ? { ...(newAccount.rewardOpeningBalances || {}) } : undefined;
     let updatedRewardBalanceAdjustments = hasInternalRewards ? { ...(newAccount.rewardBalanceAdjustments || {}) } : undefined;
 
     if (editId && newAccount.type !== 'mutual_funds' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity') {
@@ -2182,7 +2182,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                 maxLength={5}
                                 value={expiryInput}
                                 onChange={e => {
-                                  let val = e.target.value;
+                                  const val = e.target.value;
                                   const digits = val.replace(/\D/g, '');
                                   let formatted = digits.slice(0, 4);
                                   if (formatted.length > 2) {
