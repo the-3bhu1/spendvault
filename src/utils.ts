@@ -757,14 +757,17 @@ export function getInvestmentAccountStats(
   transactions: Transaction[],
   currentPrice: number = 0
 ) {
+  // No annotations on these callbacks: `transactions` is already Transaction[], so
+  // the parameters infer. They used to be `(t: any)`, which threw that away and
+  // turned every field access below into an unchecked one.
   const totalUnits = Number(account.numberOfShares ?? 0) +
     transactions
-      .filter((t: any) => t.accountId === account.id && t.numberOfShares !== undefined)
-      .reduce((sum: number, t: any) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0);
+      .filter((t) => t.accountId === account.id && t.numberOfShares !== undefined)
+      .reduce((sum, t) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0);
 
   const txInvested = transactions
-    .filter((t: any) => t.accountId === account.id && !t.isTravelTransaction && !t.isRewardTransaction)
-    .reduce((sum: number, t: any) => t.type === 'credit' ? sum + t.amount : sum - t.amount, 0);
+    .filter((t) => t.accountId === account.id && !t.isTravelTransaction && !t.isRewardTransaction)
+    .reduce((sum, t) => t.type === 'credit' ? sum + t.amount : sum - t.amount, 0);
 
   const totalInvested = account.investedValue !== undefined
     ? account.investedValue + txInvested
