@@ -254,7 +254,11 @@ function buildSummary(data: FinanceData): string {
   if (bills.length) {
     out.push('\n## Upcoming bills');
     bills.forEach(b => {
-      out.push(`  - ${b.name}: ${formatCurrency(b.amount)} (${b.frequency}), next due ${b.nextDueDate}`);
+      // Overdue is stated outright rather than left to be inferred from the date. It is a
+      // first-class state on the Bills screen now — a bill only leaves it when LOG/LINK/PAID
+      // rolls the cycle — and "which bills are overdue" is the obvious question about it.
+      const overdue = b.nextDueDate < today ? ' (OVERDUE — not yet recorded as paid)' : '';
+      out.push(`  - ${b.name}: ${formatCurrency(b.amount)} (${b.frequency}), next due ${b.nextDueDate}${overdue}`);
     });
   }
 

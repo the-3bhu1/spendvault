@@ -176,7 +176,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       },
       {
         title: "Bill Actions",
-        description: "Each tracked bill gives you quick actions: log a fresh payment, link an existing ledger transaction, or mark the obligation as paid for this cycle.",
+        description: "Each tracked bill gives you quick actions: LOG a fresh payment, LINK an existing ledger transaction, or tap PAID. All three roll the bill to its next cycle — a recurring bill is never 'done', it just becomes due again.",
         selector: ".tour-demo-bill-actions",
         icon: Sparkles
       },
