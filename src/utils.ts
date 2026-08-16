@@ -572,8 +572,22 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
   if (name.includes('swiggy')) {
     return defineSkin(
       'linear-gradient(135deg, #1c092b 0%, #3b1459 55%, #fc8019 100%)',
-      'linear-gradient(135deg, #3b1459 0%, #fc8019 100%)',
+      // Back runs orange-to-purple, opposite the front. The Swiggy mark is orange
+      // and sits bottom-right, which is exactly where the front's gradient ends up
+      // orange — the logo was disappearing into it. Flipping the back's direction
+      // puts purple under the mark, and reads correctly anyway: turning a card over
+      // mirrors it, so its gradient should run the other way.
+      'linear-gradient(135deg, #fc8019 0%, #3b1459 100%)',
       { geometry: 'arc', texture: 'weave', sheen: 0.7, issuer: 'hdfc', coBrand: 'swiggy' }
+    );
+  }
+
+  // Tide (debit)
+  if (name.includes('tide')) {
+    return defineSkin(
+      'linear-gradient(135deg, #070b24 0%, #1b2270 55%, #4050fb 100%)',
+      'linear-gradient(135deg, #4050fb 0%, #1b2270 100%)',
+      { geometry: 'slash', texture: 'hairline', sheen: 0.6, issuer: 'tide' }
     );
   }
 
