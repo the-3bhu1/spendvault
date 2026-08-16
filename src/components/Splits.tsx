@@ -7,7 +7,7 @@ import { Share } from '@capacitor/share';
 import ConfirmDialog from './ConfirmDialog';
 import { useFinance } from '../FinanceContext';
 import type { SplitEvent, SplitItem } from '../types';
-import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, formatDateString } from '../utils';
+import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, formatDateString, errorMessage } from '../utils';
 import { scrollToFirstError } from '../utils/formErrors';
 import { buildSplitShareImages, blobToBase64 } from '../services/splitImage';
 import { SubviewWrapper } from './SubviewWrapper.tsx';
@@ -182,8 +182,8 @@ export default function Splits() {
           });
         }
       }
-    } catch (err: any) {
-      if (String(err?.message ?? err).toLowerCase().includes('cancel')) return;
+    } catch (err) {
+      if (String(errorMessage(err) ?? err).toLowerCase().includes('cancel')) return;
       console.error('Share image failed', err);
     } finally {
       sharingImageRef.current = false;

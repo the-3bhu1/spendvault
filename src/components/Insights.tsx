@@ -468,7 +468,7 @@ export default function Insights() {
                 gridAutoFlow: 'column', // Fill column by column to resemble github graphs
                 direction: 'ltr'
               }}>
-              {insights.streakDays.map((d: any, i: number) => (
+              {insights.streakDays.map((d, i) => (
                 <div 
                   key={i} 
                   title={`Day ${d.day}: ${formatCurrency(d.spend)}`}
@@ -598,9 +598,12 @@ export default function Insights() {
                       barSize={40}
                       activeBar={false}
                       style={{ cursor: 'pointer' }}
-                      onClick={(data: any) => {
-                        if (data && data.originalMonth) {
-                          setHighlightedBarMonth(data.originalMonth);
+                      onClick={data => {
+                        // Recharts merges the row's own fields onto the click payload, so
+                        // originalMonth is there at runtime without being in its types.
+                        const { originalMonth } = data as { originalMonth?: string };
+                        if (originalMonth) {
+                          setHighlightedBarMonth(originalMonth);
                         }
                       }}
                     >

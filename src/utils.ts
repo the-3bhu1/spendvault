@@ -2,6 +2,25 @@ import { format, parseISO, addMonths, subMonths, addDays, setDate } from 'date-f
 import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitItem, InvestmentKind, RecurringBill, BrandKey } from './types';
 
 /**
+ * The message carried by a thrown value, if it has one.
+ *
+ * A `catch` binding is `unknown` — anything can be thrown. Real `Error`s carry a
+ * message, and so do the plain `{ message }` objects the Capacitor plugins and
+ * the Gemini fetch layer reject with, which is why this duck-types rather than
+ * testing `instanceof Error`. Returns undefined when there is no message to
+ * show, so callers keep supplying their own fallback copy:
+ *
+ *   setError(errorMessage(err) || 'Unknown error')
+ */
+export function errorMessage(err: unknown): string | undefined {
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === 'string') return message;
+  }
+  return undefined;
+}
+
+/**
  * Rolls a recurring bill to its next occurrence. A recurring bill has no settled state — every
  * way of satisfying one (the PAID button, LOG, or LINKing an existing transaction) advances the
  * due date instead, so the countdown is always the bill's status.

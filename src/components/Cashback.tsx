@@ -2,9 +2,32 @@ import { useState } from 'react';
 import { format, addMonths } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import { formatCurrency, generateId, formatDateString, getBillingCycleForDate, getBillingCycleDates, formatBillingCycleRange } from '../utils';
-import type { CashbackStatement, Transaction } from '../types';
+import type { Account, CashbackStatement, Transaction } from '../types';
 import { Info, Pencil, Check, X, ChevronDown, RotateCcw } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
+
+/**
+ * One reward-earning transaction together with the statement state tracked against it.
+ *
+ * Rebuilt from data.transactions on every render, then keyed by transaction id, grouped
+ * into billing-cycle buckets, and passed around by the confirm/consolidate handlers — which
+ * is why it is named rather than repeated inline at each of them.
+ */
+interface StatementRow {
+  expected: number;
+  realized: number;
+  confirmed: boolean;
+  statementId: string | null;
+  transaction: Transaction;
+  account: Account;
+  /**
+   * Where the reward was deposited. Absent on a freshly built row — the merge from
+   * data.cashbackStatements below copies realized/confirmed/statementId but not this — and
+   * grafted on in-place by the confirm handlers so consolidation can read back the target
+   * they just used without waiting for the next render.
+   */
+  realizedIntoAccountId?: string;
+}
 
 export default function Cashback() {
   const { data, addTransaction, updateCashbackStatement, deleteTransaction, updateTransaction } = useFinance();
@@ -15,10 +38,10 @@ export default function Cashback() {
   const [depositAccountId, setDepositAccountId] = useState('');
   const [showCreditedCycles, setShowCreditedCycles] = useState(false);
   // Bulk "Confirm All" for a cycle group whose account needs a manual deposit target.
-  const [bulkConfirm, setBulkConfirm] = useState<{ sts: any[]; accountId: string } | null>(null);
+  const [bulkConfirm, setBulkConfirm] = useState<{ sts: StatementRow[]; accountId: string } | null>(null);
   const [bulkDepositAccountId, setBulkDepositAccountId] = useState('');
 
-  const getRewardUnitAndRate = (account: any) => {
+  const getRewardUnitAndRate = (account: Account | undefined) => {
     if (!account) return { unit: '', rate: 1 };
     if (account.rewardUnit) {
       return { unit: account.rewardUnit, rate: account.pointsConversionRate || 1 };
@@ -32,7 +55,7 @@ export default function Cashback() {
     return { unit: '', rate: 1 };
   };
 
-  const formatCashback = (value: number, account: any) => {
+  const formatCashback = (value: number, account: Account | undefined) => {
     const { unit } = getRewardUnitAndRate(account);
     if (unit) {
       return `${Math.round(value * 100) / 100} ${unit.toLowerCase()}`;
@@ -49,10 +72,14 @@ export default function Cashback() {
     return formatBillingCycleRange(cycle, statementDay);
   };
 
-  const statements: Record<string, { expected: number, realized: number, confirmed: boolean, statementId: string | null, transaction: Transaction, account: any }> = {};
+  const statements: Record<string, StatementRow> = {};
 
   data.transactions.forEach(tx => {
     const account = data.accounts.find(a => a.id === tx.accountId);
+    // Deleting an account archives it rather than removing it, so a reward transaction should
+    // always resolve one. Skip the row if it somehow doesn't: every consumer below reads
+    // st.account.name/.id/.statementDay unguarded, so an orphan would blank the whole screen.
+    if (!account) return;
 
     // Only show "Delayed" rewards or legacy expectedCashback that isn't instant
     const isDelayed = tx.rewardEarnedType === 'delayed' || (!tx.rewardEarnedType && (tx.expectedCashback || 0) > 0);
@@ -92,7 +119,7 @@ export default function Cashback() {
     }
   });
 
-  const consolidateCycleGroup = (accId: string, sts: any[]) => {
+  const consolidateCycleGroup = (accId: string, sts: StatementRow[]) => {
     const confirmedSts = sts.filter(s => s.confirmed);
     const allStIds = sts.map(s => s.transaction.id);
 
@@ -284,7 +311,7 @@ export default function Cashback() {
   // Confirm every pending statement in a cycle group at its expected amount, then consolidate once.
   // Mirrors handleConfirmAction's per-item logic but applied across the whole group in one pass.
   // `depositAccountId` is only used for non-automatic accounts (rewards/e_wallet with no auto target).
-  const applyConfirmAll = (sts: any[], depositAccountId?: string) => {
+  const applyConfirmAll = (sts: StatementRow[], depositAccountId?: string) => {
     const pending = sts.filter(s => !s.confirmed);
     if (!pending.length) return;
     const account = pending[0].account;
@@ -314,7 +341,7 @@ export default function Cashback() {
     consolidateCycleGroup(account.id, updatedGroupSts);
   };
 
-  const handleConfirmAllClick = (sts: any[]) => {
+  const handleConfirmAllClick = (sts: StatementRow[]) => {
     const pending = sts.filter(s => !s.confirmed);
     if (!pending.length) return;
     const account = pending[0].account;
@@ -389,7 +416,7 @@ export default function Cashback() {
 
   const [consolidatedFeedback, setConsolidatedFeedback] = useState<string[]>([]);
 
-  const handleConsolidateClick = (accKey: string, accId: string, sts: any[]) => {
+  const handleConsolidateClick = (accKey: string, accId: string, sts: StatementRow[]) => {
     consolidateCycleGroup(accId, sts);
     setConsolidatedFeedback(prev => [...prev, accKey]);
     setTimeout(() => {
@@ -408,7 +435,7 @@ export default function Cashback() {
     return maxDateB - maxDateA;
   });
 
-  const cardsData: { cardName: string; cycles: Array<{ accKey: string; sts: any[] }> }[] = [];
+  const cardsData: { cardName: string; cycles: Array<{ accKey: string; sts: StatementRow[] }> }[] = [];
   sortedEntries.forEach(([accKey, sts]) => {
     const isFullyCredited = sts.every(st => st.confirmed);
     if (!showCreditedCycles && isFullyCredited) return;

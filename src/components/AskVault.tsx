@@ -8,6 +8,7 @@ import {
   getSessions, upsertSession, deleteSession, newSessionId, type ChatSession,
 } from '../services/ChatHistoryService';
 import { parseContractNote, allocateCharges, type AllocationResult } from '../services/ContractNoteService';
+import { errorMessage } from '../utils';
 import ContractNoteReview from './ContractNoteReview';
 
 type PendingReview =
@@ -201,12 +202,12 @@ export default function AskVault({ isOpen: _isOpen, onClose, onOpenSettings, isD
     try {
       const resp = await askVault(newMsgs.map(m => ({ role: m.role, text: m.text })), data);
       setMessages([...newMsgs, { role: 'model', text: resp }]);
-    } catch (err: any) {
+    } catch (err) {
       setMessages([
         ...newMsgs,
         {
           role: 'model',
-          text: err?.message || 'Failed to get a response. Please check your Gemini API key under Settings → AI Features.',
+          text: errorMessage(err) || 'Failed to get a response. Please check your Gemini API key under Settings → AI Features.',
           error: true,
         },
       ]);
@@ -240,11 +241,11 @@ export default function AskVault({ isOpen: _isOpen, onClose, onOpenSettings, isD
       }
       setPendingReview({ status: 'success', fileLabel, result });
       try { sessionStorage.setItem(PENDING_REVIEW_KEY, JSON.stringify({ result, fileLabel })); } catch { /* ignore */ }
-    } catch (err: any) {
+    } catch (err) {
       setPendingReview({
         status: 'error',
         fileLabel,
-        message: err?.message || "Couldn't process that file. Make sure it's a valid Zerodha/Groww contract note PDF or screenshot.",
+        message: errorMessage(err) || "Couldn't process that file. Make sure it's a valid Zerodha/Groww contract note PDF or screenshot.",
       });
     }
   };

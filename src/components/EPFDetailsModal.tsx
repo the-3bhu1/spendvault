@@ -7,6 +7,8 @@ import { Plus, Trash2, Edit2 } from 'lucide-react';
 
 import { SubviewWrapper } from './SubviewWrapper';
 
+type EPFTab = 'overview' | 'revisions' | 'corrections' | 'rates';
+
 interface EPFDetailsViewProps {
   account: Account;
   onClose: () => void;
@@ -18,7 +20,7 @@ export const EPFDetailsView: React.FC<EPFDetailsViewProps> = ({
   onClose,
   onUpdateAccount,
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'revisions' | 'corrections' | 'rates'>('overview');
+  const [activeTab, setActiveTab] = useState<EPFTab>('overview');
 
   // Form states for Salary Revisions
   const [isAddingRevision, setIsAddingRevision] = useState(false);
@@ -183,15 +185,15 @@ export const EPFDetailsView: React.FC<EPFDetailsViewProps> = ({
 
         {/* Navigation Tabs */}
         <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--border-color, #2a2e39)', paddingBottom: '0.5rem' }}>
-          {[
+          {([
             { id: 'overview', label: 'Overview & Projection' },
             { id: 'revisions', label: `Salary History (${(account.salaryRevisions || []).length})` },
             { id: 'corrections', label: `Corrections (${(account.epfBalanceAdjustments || []).length})` },
             { id: 'rates', label: 'Interest Rates' },
-          ].map(tab => (
+          ] as { id: EPFTab; label: string }[]).map(tab => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => setActiveTab(tab.id)}
               style={{
                 background: activeTab === tab.id ? 'var(--accent, #6366f1)' : 'transparent',
                 color: activeTab === tab.id ? '#fff' : 'var(--text-secondary, #8a8f9d)',

@@ -23,7 +23,22 @@ import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
 import { getAccountTypeIcon, getAccountGroupLabel, sortByAccountType } from './transactionIcons';
 import { generateId, formatCurrency, calculateBalance, getCurrentMonthStr } from '../utils';
-import type { Debt, DebtTransaction, Account } from '../types';
+import type { Debt, DebtTransaction, Account, Transaction } from '../types';
+
+/** Props for the shared confirmation dialog, held in state while it is open. */
+interface ConfirmConfig {
+  title: string;
+  message: string;
+  onConfirm: () => void;
+  /** Optional, and in practice unused: ConfirmDialog is rendered with its own onCancel
+   *  after this config is spread in, so that one always wins. */
+  onCancel?: () => void;
+  onThirdAction?: () => void;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  thirdLabel?: string;
+  isDanger?: boolean;
+}
 import { CustomPicker } from './CustomPicker';
 import { TransactionSelector } from './TransactionSelector';
 import { SubviewWrapper } from './SubviewWrapper';
@@ -54,17 +69,7 @@ export default function Debts() {
   const [activeDebtId, setActiveDebtId] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [confirmConfig, setConfirmConfig] = useState<{
-    title: string;
-    message: string;
-    onConfirm: () => void;
-    onCancel: () => void;
-    onThirdAction?: () => void;
-    confirmLabel?: string;
-    cancelLabel?: string;
-    thirdLabel?: string;
-    isDanger?: boolean;
-  } | null>(null);
+  const [confirmConfig, setConfirmConfig] = useState<ConfirmConfig | null>(null);
 
   const debts = data.debts || [];
 
@@ -159,7 +164,7 @@ export default function Debts() {
     };
 
     if (logInLedger && accountId) {
-      const ledgerTx = {
+      const ledgerTx: Transaction = {
         id: generateId(),
         accountId,
         amount,
@@ -167,9 +172,10 @@ export default function Debts() {
         category: 'Lending & Borrowing',
         description: `${trimmedName}: ${newTx.description}`,
         date: newTx.date,
+        isRecurring: false,
         linkedTransactionIds: [txId]
       };
-      addTransaction(ledgerTx as any);
+      addTransaction(ledgerTx);
     }
 
     const existingDebt = debts.find(d => d.personName.toLowerCase() === trimmedName.toLowerCase());
@@ -211,7 +217,7 @@ export default function Debts() {
     };
 
     if (logInLedger && accountId) {
-      const ledgerTx = {
+      const ledgerTx: Transaction = {
         id: generateId(),
         accountId,
         amount,
@@ -219,9 +225,10 @@ export default function Debts() {
         category: 'Lending & Borrowing',
         description: `${debt.personName}: ${newTx.description}`,
         date: newTx.date,
+        isRecurring: false,
         linkedTransactionIds: [txId]
       };
-      addTransaction(ledgerTx as any);
+      addTransaction(ledgerTx);
     } else if (linkedTxId) {
       // Link to an existing ledger transaction bidirectionally
       const existingTx = data.transactions.find(t => t.id === linkedTxId);
@@ -382,7 +389,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
   onAddTx: (amt: number, type: DebtTransaction['type'], desc: string, date: string, accountId: string, logInLedger: boolean, linkedTxId?: string) => void,
   onUpdateDebt: (debt: Debt) => void,
   onDelete: () => void,
-  setConfirmConfig: (config: any) => void,
+  setConfirmConfig: (config: ConfirmConfig | null) => void,
   existingNames: string[]
 }) {
   const { data, deleteTransaction, updateTransaction } = useFinance();

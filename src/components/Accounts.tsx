@@ -9,7 +9,7 @@ import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import { getAccountEmoji } from './transactionIcons';
 import ConfirmDialog from './ConfirmDialog';
-import type { Account, AccountType, CardDetails, CardNetwork, BrandKey } from '../types';
+import type { Account, AccountType, CardDetails, CardNetwork, BrandKey, RoundingRule } from '../types';
 import { CardBrandLogo } from './CardBrandLogo';
 import { resolveCardIssuer } from '../utils';
 import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, calculateCycleBalanceForCycle, getBillingCycleForDate, getOrdinalSuffix, affectsRupeeBalance } from '../utils';
@@ -41,7 +41,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const [failedSymbols, setFailedSymbols] = useState<Set<string>>(new Set());
 
   const setSymbolRefreshing = (sym: string, on: boolean) => {
-    setRefreshingSymbols(prev => { const s = new Set(prev); on ? s.add(sym) : s.delete(sym); return s; });
+    setRefreshingSymbols(prev => { const s = new Set(prev); if (on) s.add(sym); else s.delete(sym); return s; });
   };
 
   const markSymbolFailed = (sym: string) => {
@@ -189,7 +189,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const toggleCollapse = (type: string) => {
     setCollapsedTypes(prev => {
       const s = new Set(prev);
-      s.has(type) ? s.delete(type) : s.add(type);
+      if (s.has(type)) s.delete(type); else s.add(type);
       return s;
     });
   };
@@ -1767,7 +1767,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         { id: 'round', name: 'Nearest Integer', subtext: 'Round to Closest (e.g. 1539.00)' },
                         { id: 'ceil', name: 'Round Up (Ceil)', subtext: 'Always Round Up (e.g. 1539.00)' }
                       ]}
-                      onChange={val => setNewAccount({ ...newAccount, statementRounding: val as any })}
+                      onChange={val => setNewAccount({ ...newAccount, statementRounding: val as RoundingRule })}
                       iconGetter={id => {
                         if (id === 'none') return '🔢';
                         if (id === 'floor') return '⬇️';

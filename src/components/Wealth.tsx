@@ -13,7 +13,7 @@ import { LogoAvatar } from './LogoAvatar';
 import { DetailHeroBand, DetailHeroSeal, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
 import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
 import { calculateEPFProjection, getEPFInterestRate, getFinancialYearForDate } from '../utils/epfEngine';
-import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance, isStatsExcludedCategory, statsAmount } from '../utils';
+import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance, isStatsExcludedCategory, statsAmount, errorMessage } from '../utils';
 import { getCategoryIcon } from './transactionIcons';
 
 type HistoryDataPoint = { date: number; close: number };
@@ -302,7 +302,7 @@ export function Wealth() {
   const toggleSection = (key: string) =>
     setCollapsedSections(prev => {
       const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
+      if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
 
@@ -475,9 +475,9 @@ export function Wealth() {
       // Mark that we've done a full refresh today, so the next same-day load shows the cached
       // 1-day return immediately instead of hiding it.
       try { localStorage.setItem(WEALTH_REFRESH_DAY_KEY, currentDayStr()); } catch { /* ignore */ }
-    } catch (e: any) {
+    } catch (e) {
       console.error('Failed to refresh prices:', e);
-      setError(`Price refresh failed: ${e?.message || 'Unknown error'}`);
+      setError(`Price refresh failed: ${errorMessage(e) || 'Unknown error'}`);
     } finally {
       setIsRefreshing(false);
       setHasRefreshed(true);
@@ -529,8 +529,8 @@ export function Wealth() {
   const getTotalUnits = (account: Account) =>
     Number(account.numberOfShares ?? 0) +
     data.transactions
-      .filter((t: any) => t.accountId === account.id && t.numberOfShares !== undefined)
-      .reduce((sum: number, t: any) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0);
+      .filter(t => t.accountId === account.id && t.numberOfShares !== undefined)
+      .reduce((sum, t) => t.type === 'credit' ? sum + Number(t.numberOfShares ?? 0) : sum - Number(t.numberOfShares ?? 0), 0);
 
   const getAccountStats = (account: Account) => {
     if (account.type === 'epf') {
@@ -2253,7 +2253,7 @@ export function Wealth() {
                             strokeWidth={1.5}
                             fill="url(#wealthChartFill)"
                             dot={false}
-                            activeDot={(props: any) => {
+                            activeDot={(props: { cx?: number; cy?: number }) => {
                               const { cx, cy } = props;
                               if (cx == null || cy == null) return <g />;
                               const topAnchor = 64; // meet the tooltip caret tip (tooltip top y=6 + height)
