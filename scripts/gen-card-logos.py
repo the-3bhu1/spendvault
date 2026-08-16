@@ -27,6 +27,13 @@ LOGOS = [
     ('jupiter',    'scripts/brand-svgs/issuers/jupiter(1).svg',  'white',    'Jupiter'),
     # Standalone Axis 'A', no wordmark — used as a background watermark, not a mark.
     ('axismark',   'scripts/brand-svgs/issuers/axis(2).svg',     'white',    'Axis'),
+    # Not wired to any skin — no card held. Kept rendered and ready so adding one
+    # later is a one-line change on the skin rather than another round of this.
+    ('federal',    'scripts/brand-svgs/issuers/federal.svg',     'white',    'Federal Bank'),
+    ('icici',      'scripts/brand-svgs/issuers/icici.svg',       'white',    'ICICI Bank'),
+    ('idfc',       'scripts/brand-svgs/issuers/idfc.svg',        'original', 'IDFC First Bank'),
+    ('indusind',   'scripts/brand-svgs/issuers/indusind.svg',    'white',    'IndusInd Bank'),
+    ('sbi',        'scripts/brand-svgs/issuers/sbi(1).svg',      'white',    'SBI'),
 ]
 
 # Content bounds, measured with getBBox in a headless browser (scratchpad/bbox.mjs).
@@ -54,6 +61,13 @@ OPTICAL = {
     'supermoney': 1.00,
     'jupiter':    0.95,
     'axismark':   1.00,
+    # Unwired marks — no card held, so these are a first pass sized to a similar
+    # footprint rather than tuned against a real card the way the three above were.
+    'federal':    0.85,
+    'icici':      0.95,
+    'idfc':       1.00,
+    'indusind':   0.58,
+    'sbi':        1.10,
 }
 
 TIGHT_VIEWBOX = {
@@ -66,6 +80,11 @@ TIGHT_VIEWBOX = {
     'supermoney': '3.17 0.01 128.40 48.64',
     'jupiter':    '-148.90 -7.50 418.71 125.40',
     'rupay':      '0.02 0.02 71.83 18.88',
+    'federal':    '0 0 374.61 62.08',
+    'icici':      '0 0 311.29 59.49',
+    'idfc':       '0 0 235.00 83.00',
+    'indusind':   '1.87 1.77 423.01 44.14',
+    'sbi':        '0 0 100.00 34.26',
 }
 
 DROP_NS = ('sodipodi', 'inkscape', 'ns_extend', 'ns_ai', 'ns_graphs', 'ns_sfw')
@@ -376,6 +395,7 @@ assert 'currentColor' in body, 'rupay wordmark recolour did not match'
 assert '#008c44' in body and '#f47920' in body, 'rupay chevrons lost'
 
 x0, y0, w, h = [float(n) for n in re.split(r'[\s,]+', vb)]
+vb_rupay, body_rupay, ratio_rupay = vb, body, w / h
 rupay_tsx = f'''/**
  * Official RuPay mark. Replaces a hand-drawn stand-in that set the wordmark in
  * italic Arial Black and drew the chevrons as two triangles — it never matched,
@@ -404,3 +424,33 @@ export function RupayMark({{ height = 19 }}: {{ height?: number }}) {{
 out = os.path.join(REPO, 'src/components/CardNetworkRupay.tsx')
 open(out, 'w').write(rupay_tsx)
 print(f'wrote {out} ({len(rupay_tsx)/1024:.1f} KB)  ratio={w/h:.2f}')
+
+
+# Sidecar for previews rendered outside React (the review gallery). Same art,
+# same viewBox, same optical multiplier — generated here so a preview can never
+# drift from what the app actually draws.
+JSX_TO_HTML = {v: k for k, v in ATTR_MAP.items() if v}
+def to_html(markup):
+    for jsx, kebab in JSX_TO_HTML.items():
+        markup = markup.replace(f'{jsx}="', f'{kebab}="')
+    return markup
+
+import json
+sidecar = {
+    key: {
+        'label': label,
+        'viewBox': vb,
+        'ratio': round(ratio, 4),
+        'optical': OPTICAL.get(key, 1.0),
+        'policy': policy,
+        'svg': to_html(convert(key, dict((k, p) for k, p, _, _ in LOGOS)[key], policy)[1]),
+    }
+    for key, label, vb, ratio, policy in meta
+}
+sidecar['rupay'] = {
+    'label': 'RuPay', 'viewBox': vb_rupay, 'ratio': round(ratio_rupay, 4),
+    'optical': 1.0, 'policy': 'wordmark recoloured', 'svg': to_html(body_rupay),
+}
+with open(os.path.join(REPO, 'scripts/brand-marks.json'), 'w') as f:
+    json.dump(sidecar, f, indent=2)
+print(f'wrote scripts/brand-marks.json ({len(sidecar)} marks)')

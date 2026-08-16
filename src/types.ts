@@ -63,7 +63,8 @@ export type CardNetwork = 'visa' | 'mastercard' | 'rupay' | 'amex' | 'diners';
  * co-brand programme, printed on the back. Artwork lives in CardBrandLogo.
  */
 export type BrandKey =
-  | 'hdfc' | 'axis' | 'csb' | 'tide'          // issuers
+  | 'hdfc' | 'axis' | 'csb' | 'tide'          // issuers, cards held
+  | 'federal' | 'icici' | 'idfc' | 'indusind' | 'sbi'  // issuers, ready but unused
   | 'swiggy' | 'supermoney' | 'jupiter'       // co-brands
   | 'axismark';                               // symbol only, for watermarks
 
