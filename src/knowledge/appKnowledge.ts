@@ -245,9 +245,21 @@ manually keeps its own debit/credit.
 
 # Bills
 Recurring bills — rent, utilities, subscriptions, credit card statements — with an amount, frequency
-(daily/weekly/monthly/quarterly/half-yearly/yearly/custom), and a next due date. Each bill offers LOG (create a
-new transaction and advance the due date), LINK (attach an existing transaction instead), or PAID
-(mark paid). Credit card statement dues appear here automatically from each card's due day.
+(daily/weekly/monthly/quarterly/half-yearly/yearly/custom), and a next due date. Each bill offers LOG
+(create a new transaction), LINK (attach an existing transaction instead), or PAID (record it
+without a transaction). All three do the same thing to the bill: they roll it to its next
+occurrence.
+A recurring bill has no "paid" or "done" state — it is only ever due again. There is no tick to
+clear and no completed list; the countdown IS the status. Pay a 90-day recharge on its due date and
+it immediately reads "in 90 days" for the next cycle. A bill that has passed its due date reads as
+overdue and stays that way until LOG, LINK or PAID rolls it forward, so an overdue bill means the
+payment was never recorded against it — paying in real life is not enough on its own.
+The next due date advances from the OLD due date, not from the day it was recorded, so a cycle
+stays anchored even when paid early or late. LOG and LINK date the payment from the transaction;
+PAID dates it today.
+Credit card statement dues appear here automatically from each card's due day. Those DO settle —
+a statement genuinely closes — so a card with nothing outstanding shows "No Dues". Only credit
+cards ever show that; a manual bill never does.
 Any category can be picked for a bill, INCLUDING Mutual Funds — so a fund instalment can still be
 tracked here purely as a due-date reminder. What no longer exists is the dedicated SIP wiring: a bill
 can NOT be linked to a mutual fund account, and logging it does NOT auto-credit that account. A

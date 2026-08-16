@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, InvestmentKind } from '../types';
-import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints } from '../utils';
+import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle } from '../utils';
 import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
@@ -929,22 +929,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     if (!editId && finalTx.recurringBillId) {
       const bill = (data.recurringBills || []).find(b => b.id === finalTx.recurringBillId);
       if (bill) {
-        const currentDate = parseISO(bill.nextDueDate);
-        const nextDate = new Date(currentDate);
-        switch (bill.frequency) {
-          case 'daily': nextDate.setDate(currentDate.getDate() + 1); break;
-          case 'weekly': nextDate.setDate(currentDate.getDate() + 7); break;
-          case 'monthly': nextDate.setMonth(currentDate.getMonth() + 1); break;
-          case 'quarterly': nextDate.setMonth(currentDate.getMonth() + 3); break;
-          case 'half_yearly': nextDate.setMonth(currentDate.getMonth() + 6); break;
-          case 'yearly': nextDate.setFullYear(currentDate.getFullYear() + 1); break;
-          case 'custom': nextDate.setDate(currentDate.getDate() + (bill.customDays || 30)); break;
-        }
-        updateRecurringBill({
-          ...bill,
-          nextDueDate: format(nextDate, 'yyyy-MM-dd'),
-          lastPaidDate: format(new Date(), 'yyyy-MM-dd')
-        });
+        updateRecurringBill(advanceBillCycle(bill, parseISO(finalTx.date)));
       }
     }
 

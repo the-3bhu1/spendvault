@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from 'react';
-import { format, parseISO, addDays, addMonths } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import {
   Repeat,
   Link,
@@ -22,7 +22,7 @@ import { TransactionSelector } from './TransactionSelector';
 import { LogTransactionForm } from './LogTransactionForm';
 import { getCategoryIcon } from './transactionIcons';
 import CustomDatePicker from './CustomDatePicker';
-import { calculateTotalSpendPerCycle, getLatestBilledCycle } from '../utils';
+import { calculateTotalSpendPerCycle, getLatestBilledCycle, advanceBillCycle } from '../utils';
 import { scrollToFirstError } from '../utils/formErrors';
 
 const FREQUENCY_LABELS: Record<RecurringFrequency, string> = {
@@ -62,30 +62,18 @@ export default function UpcomingBills() {
       recurringBillId: selectedBill.id
     });
 
+    // ...and roll the bill forward, exactly as LOG and PAID do. Linking says "this payment
+    // settled the current cycle", so leaving the due date alone would strand the bill as
+    // overdue forever. lastPaidDate takes the transaction's date, not today's — the whole
+    // point of LINK is that the payment already happened.
+    updateRecurringBill(advanceBillCycle(selectedBill, parseISO(transaction.date)));
+
     setActiveView('main');
     setSelectedBill(null);
   };
 
   const handleMarkAsPaid = (bill: RecurringBill) => {
-    const nextDate = parseISO(bill.nextDueDate);
-    let updatedDate: Date;
-
-    switch (bill.frequency) {
-      case 'daily': updatedDate = addDays(nextDate, 1); break;
-      case 'weekly': updatedDate = addDays(nextDate, 7); break;
-      case 'monthly': updatedDate = addMonths(nextDate, 1); break;
-      case 'quarterly': updatedDate = addMonths(nextDate, 3); break;
-      case 'half_yearly': updatedDate = addMonths(nextDate, 6); break;
-      case 'yearly': updatedDate = addMonths(nextDate, 12); break;
-      case 'custom': updatedDate = addDays(nextDate, bill.customDays || 1); break;
-      default: updatedDate = addMonths(nextDate, 1);
-    }
-
-    updateRecurringBill({
-      ...bill,
-      nextDueDate: format(updatedDate, 'yyyy-MM-dd'),
-      lastPaidDate: format(new Date(), 'yyyy-MM-dd')
-    });
+    updateRecurringBill(advanceBillCycle(bill));
   };
 
   const [newBill, setNewBill] = useState<Partial<RecurringBill>>({
@@ -166,34 +154,17 @@ export default function UpcomingBills() {
     const today = new Date();
 
     // 1. Process Manual Bills
+    // A recurring bill has no settled state. Paying it rolls nextDueDate to the next occurrence
+    // (handleMarkAsPaid here, or the LOG flow in LogTransactionForm), so the countdown IS the
+    // status: pay the 90-day recharge on its due date and it reads "in 90 days", not "no dues".
+    // The old derived flag only ever mislabelled live bills — a "Mobile Recharge(Maa)" payment
+    // fuzzy-matched the separate "Mobile Recharge" bill and hid its actions for ten days.
     const manualBills = (data.recurringBills || []).map(bill => {
-      const isPaid = data.transactions.some(t => {
-        // Explicit link check first
-        if (t.recurringBillId === bill.id) {
-          const tDate = new Date(t.date);
-          const isSameMonth = tDate.getMonth() === today.getMonth() && tDate.getFullYear() === today.getFullYear();
-          if (bill.frequency === 'monthly') return isSameMonth;
-          return true; // For non-monthly, any recent link counts
-        }
-
-        // Fallback to fuzzy match
-        const tDate = new Date(t.date);
-        const isSameMonth = tDate.getMonth() === today.getMonth() && tDate.getFullYear() === today.getFullYear();
-        const isNameMatch = t.description.toLowerCase().includes(bill.name.toLowerCase()) || bill.name.toLowerCase().includes(t.description.toLowerCase());
-        const isCatMatch = t.category === bill.category;
-
-        if (bill.frequency === 'monthly') return isSameMonth && isNameMatch && isCatMatch;
-        const diffDays = Math.abs((tDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        return diffDays < 10 && isNameMatch && isCatMatch;
-      }) || (bill.lastPaidDate && (() => {
-        const lpDate = parseISO(bill.lastPaidDate);
-        const isSameMonth = lpDate.getMonth() === today.getMonth() && lpDate.getFullYear() === today.getFullYear();
-        if (bill.frequency === 'monthly') return isSameMonth;
-        const diffDays = Math.abs((lpDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        return diffDays < 7;
-      })());
-
-      return { ...bill, isPaid };
+      // Older builds spread the derived flag back onto the record on save, so stored bills can
+      // still carry a stale isPaid. Drop it on read; the next save writes the clean shape.
+      const clean: RecurringBill & { isPaid?: boolean } = { ...bill };
+      delete clean.isPaid;
+      return clean as RecurringBill;
     });
 
     // 2. Process Credit Card Bills
@@ -233,9 +204,11 @@ export default function UpcomingBills() {
       });
 
     return [...manualBills, ...ccBills].sort((a, b) => {
-      // 1. Pending (unpaid) first
-      if (a.isPaid !== b.isPaid) {
-        return a.isPaid ? 1 : -1;
+      // 1. Settled credit-card statements sink to the bottom. Manual bills never settle.
+      const aSettled = 'isCC' in a && a.isPaid;
+      const bSettled = 'isCC' in b && b.isPaid;
+      if (aSettled !== bSettled) {
+        return aSettled ? 1 : -1;
       }
       // 2. Then by date (closest first)
       return new Date(a.nextDueDate).getTime() - new Date(b.nextDueDate).getTime();
@@ -269,7 +242,8 @@ export default function UpcomingBills() {
                 const daysLeft = getDaysRemaining(bill.nextDueDate);
                 const isOverdue = daysLeft < 0;
                 const isUrgent = daysLeft <= 3;
-                const isPaidCC = ('isPaid' in bill && bill.isPaid);
+                // Credit cards only — a statement genuinely settles. Manual bills never reach here.
+                const isPaidCC = ('isCC' in bill && bill.isPaid);
 
                 return (
                   <div key={bill.id} className="card flex-col gap-5 tour-bill-card" style={{
