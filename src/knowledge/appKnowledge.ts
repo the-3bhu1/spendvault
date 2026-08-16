@@ -62,6 +62,13 @@ Actions (each account is a card on the Accounts tab):
 - View saved card details: the "Card" button flips the card to reveal number/expiry/CVV; tap a field to
   copy it. A Share button on that view copies the full details (card name, cardholder, number, expiry,
   CVV) to the clipboard AND opens the OS share sheet, so they can be sent to any app.
+- Save or change card details: in the account's add/edit form, the "Card Details (Optional)" block —
+  "+" to start, pencil to edit, ✓ to save, trash to remove. It holds cardholder name, card number,
+  expiry, CVV, network (Visa/Mastercard/RuPay/Amex/Diners) and issuing bank; the bank is a search
+  field, and if left blank it is inferred from the card's name. Stored on-device, behind the app PIN.
+- No card field is required and a partial card is fine (e.g. number and name but no CVV), but a field
+  that IS filled must be valid: a 16-digit number (15 for Amex), a 3-digit CVV (4 for Amex), and an
+  expiry with BOTH month and year, month 01–12. Saving is blocked until a filled field is valid.
 - Send to Bank: rewards and e-wallet accounts have a "Send to Bank" button that transfers their full
   balance to a bank account.
 - Refresh a holding's price: stock/fund/commodity cards have a per-holding Fetch/Refresh button.
@@ -188,7 +195,9 @@ A card has a statement day and a due day.
   into NEXT month's statement; before it, it stays in the CURRENT one.
 - Billed = the most recently generated statement (what's due). Unbilled = the cycle in progress.
 - Due day: shown for reference (when payment is due); it does not lock anything.
-- Rounding rule (round/floor/ceil/none) can be applied to the billed amount.
+- Rounding rule (round/floor/ceil/none) is applied to what is LEFT after payments and credits, not to
+  the billed total. So a cycle paid to the rupee can still show ₹1 outstanding when the raw figure had
+  paise on it — e.g. 92 paise left over rounds up to ₹1.
 - Which statement a credit lands on: only a CC PAYMENT gets to choose. Logging one shows "Apply
   Payment To" — Previous Statement (reduce already-billed dues) or Current Open Cycle (an early
   payment against the cycle in progress). Every OTHER credit on a card — a merchant refund, a
@@ -354,7 +363,8 @@ transaction. So the count can be lower than the number of rows you see on the Le
 On Android the app can read bank SMS on-device and create transactions automatically (opt-in:
 autoLogSms). OTPs and personal messages are excluded on-device and never sent anywhere. Paired bank
 messages (e.g. a payment and its confirmation) are de-duplicated. An optional AI second filter
-(Gemini, opt-in) drops EMI offers, promos, and reward-point "credits" before logging; if it errors it
+(Settings → AI Features → "Smarter SMS Filter"; Gemini, opt-in) drops EMI offers, promos, and
+reward-point "credits" before logging; if it errors it
 fails open (keeps the SMS). New SMS appear as a preview queue to confirm before adding. The merchant
 name parsed out of the SMS becomes the transaction's description (kept in the bank's original casing).
 That preview queue is saved on-device so it survives closing/restarting the app, but it is device-local
