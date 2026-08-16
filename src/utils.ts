@@ -1,5 +1,35 @@
 import { format, parseISO, addMonths, subMonths, addDays, setDate } from 'date-fns';
-import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitItem, InvestmentKind } from './types';
+import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitItem, InvestmentKind, RecurringBill } from './types';
+
+/**
+ * Rolls a recurring bill to its next occurrence. A recurring bill has no settled state — every
+ * way of satisfying one (the PAID button, LOG, or LINKing an existing transaction) advances the
+ * due date instead, so the countdown is always the bill's status.
+ *
+ * Advances from nextDueDate, not from today: paying the 90-day recharge on its Aug 30 due date
+ * lands on Nov 28, keeping the cycle anchored even when the payment is early or late.
+ */
+export function advanceBillCycle(bill: RecurringBill, paidOn: Date = new Date()): RecurringBill {
+  const due = parseISO(bill.nextDueDate);
+  let next: Date;
+
+  switch (bill.frequency) {
+    case 'daily': next = addDays(due, 1); break;
+    case 'weekly': next = addDays(due, 7); break;
+    case 'monthly': next = addMonths(due, 1); break;
+    case 'quarterly': next = addMonths(due, 3); break;
+    case 'half_yearly': next = addMonths(due, 6); break;
+    case 'yearly': next = addMonths(due, 12); break;
+    case 'custom': next = addDays(due, bill.customDays || 1); break;
+    default: next = addMonths(due, 1);
+  }
+
+  return {
+    ...bill,
+    nextDueDate: format(next, 'yyyy-MM-dd'),
+    lastPaidDate: format(paidOn, 'yyyy-MM-dd')
+  };
+}
 
 // The canonical investment category name. Investment transactions (mutual funds, stocks,
 // commodities, SIPs) are consolidated under "Investments". Stored data is migrated on load
