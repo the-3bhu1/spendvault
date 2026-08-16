@@ -273,13 +273,26 @@ export const formatAmount = (amount: number, account?: Account) => {
 export const getCurrentMonthStr = () => format(new Date(), 'yyyy-MM'); // "2023-10"
 
 // Function to calculate credit card billing cycle for a given date
-// A statement closes on statementDay (e.g. 13th), so transactions through statementDay
-// belong to the current cycle. Transactions after statementDay (14th onwards) fall into next cycle.
+//
+// A statement closes ON statementDay, and the cut is exclusive: a transaction dated
+// the 13th belongs to the NEXT cycle, not the one the 13th's statement bills.
+//
+// This isn't the convention the banks print — most describe the cycle as ending on
+// the statement date — but it is what they do, for two reasons that hold at every
+// issuer. The statement is generated at a moment on that day, usually overnight, so
+// anything transacted afterwards is on the far side of the line. And statements bill
+// by POSTING date: a swipe is an authorisation that posts a day or two later when the
+// merchant submits its batch, so a same-day purchase has almost never posted by the
+// time the statement is cut. Verified against a real Axis statement — a purchase on
+// its 16th landed in the following cycle, and matching that took ₹210 out of a total
+// that was otherwise ₹210 above the bank's.
+//
+// If an issuer ever turns out to differ, this is the line to make per-account.
 export const getBillingCycleForDate = (dateStr: string, statementDay: number): string => {
   const date = parseISO(dateStr);
   const transDay = date.getDate();
 
-  if (transDay > statementDay) {
+  if (transDay >= statementDay) {
     // Falls into the next month's statement
     return format(addMonths(date, 1), 'yyyy-MM');
   }
@@ -288,10 +301,12 @@ export const getBillingCycleForDate = (dateStr: string, statementDay: number): s
 };
 
 // Start Date and End Date for a cycle string 'yyyy-MM' and statementDay.
-// Example for cycle 2026-08 & statementDay 13: 14 Jul 2026 to 13 Aug 2026.
+// The window closes the day BEFORE the statement is cut — see getBillingCycleForDate.
+// Example for cycle 2026-08 & statementDay 13: 13 Jul 2026 to 12 Aug 2026.
 export const getBillingCycleDates = (cycle: string, statementDay: number) => {
-  const endDate = setDate(parseISO(`${cycle}-01`), statementDay);
-  const startDate = addDays(addMonths(endDate, -1), 1);
+  const statementDate = setDate(parseISO(`${cycle}-01`), statementDay);
+  const endDate = addDays(statementDate, -1);
+  const startDate = addMonths(statementDate, -1);
   return { startDate, endDate };
 };
 
