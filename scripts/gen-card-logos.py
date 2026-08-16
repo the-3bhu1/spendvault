@@ -13,6 +13,11 @@ SVG = 'http://www.w3.org/2000/svg'
 
 # 'white'    -> every fill becomes currentColor (single-colour lockups)
 # 'original' -> keep brand colours (plate logos whose text is knocked out)
+# 'recolor'  -> whiten only the listed fills (see RECOLOR) and leave the rest.
+#               For marks whose wordmark is a flat colour but whose SYMBOL relies
+#               on a white knockout: flattening those makes the knockout vanish
+#               into the shape around it — ICICI's 'i' disappears into its ellipse,
+#               RuPay loses its chevrons.
 # 'reversed' -> drop the full-bleed background plate, then whiten what's left.
 #               Only works where the plate is its own element (CSB has a
 #               <rect>); HDFC's plate is a path among paths, so it stays
@@ -30,7 +35,7 @@ LOGOS = [
     # Not wired to any skin — no card held. Kept rendered and ready so adding one
     # later is a one-line change on the skin rather than another round of this.
     ('federal',    'scripts/brand-svgs/issuers/federal.svg',     'white',    'Federal Bank'),
-    ('icici',      'scripts/brand-svgs/issuers/icici.svg',       'white',    'ICICI Bank'),
+    ('icici',      'scripts/brand-svgs/issuers/icici.svg',       'recolor',  'ICICI Bank'),
     ('idfc',       'scripts/brand-svgs/issuers/idfc.svg',        'original', 'IDFC First Bank'),
     ('indusind',   'scripts/brand-svgs/issuers/indusind.svg',    'white',    'IndusInd Bank'),
     ('sbi',        'scripts/brand-svgs/issuers/sbi(1).svg',      'white',    'SBI'),
@@ -52,6 +57,12 @@ LOGOS = [
 # shared height CSB rendered 135px wide against Axis's 78px. These bring the three
 # to a comparable footprint on the card; tuned by eye against the real cards, which
 # is the only way this ever gets settled.
+# Fills that 'recolor' turns into currentColor. Everything else keeps its colour.
+RECOLOR = {
+    'icici': ['#004a80'],   # wordmark; the orange/red ellipse and its white 'i' stay
+    'rupay': ['#1b3281'],   # wordmark; the green and orange chevrons stay
+}
+
 OPTICAL = {
     'hdfc':       0.95,
     'axis':       1.18,
@@ -266,6 +277,14 @@ def convert(key, path, policy):
 
     out_ids = {}
     body = ''.join(to_jsx(c, css, key, policy, out_ids, 1, vb_nums, plate_fill) for c in root)
+
+    if policy == 'recolor':
+        before = body
+        for fill in RECOLOR.get(key, []):
+            body = body.replace(f'fill="{fill}"', 'fill="currentColor"')
+        if body == before:
+            sys.exit(f'{key}: recolor policy matched no fills — did the source change?')
+
     vb = TIGHT_VIEWBOX.get(key, vb)
     # rewrite url(#id) and href="#id" to the namespaced ids
     for old, new in out_ids.items():
@@ -387,10 +406,7 @@ for k, label, vb, ratio, policy in meta:
 # wordmark paths are #1b3281 navy and the two chevrons are green/orange; only the
 # wordmark becomes currentColor so the chevrons keep their brand colour on a dark
 # card, which is exactly how the mark appears on a real RuPay card face.
-RUPAY_WORDMARK = '#1b3281'
-
-vb, body = convert('rupay', 'scripts/brand-svgs/networks/rupay.svg', 'original')
-body = body.replace(f'fill="{RUPAY_WORDMARK}"', 'fill="currentColor"')
+vb, body = convert('rupay', 'scripts/brand-svgs/networks/rupay.svg', 'recolor')
 assert 'currentColor' in body, 'rupay wordmark recolour did not match'
 assert '#008c44' in body and '#f47920' in body, 'rupay chevrons lost'
 
@@ -449,7 +465,7 @@ sidecar = {
 }
 sidecar['rupay'] = {
     'label': 'RuPay', 'viewBox': vb_rupay, 'ratio': round(ratio_rupay, 4),
-    'optical': 1.0, 'policy': 'wordmark recoloured', 'svg': to_html(body_rupay),
+    'optical': 1.0, 'policy': 'recolor', 'svg': to_html(body_rupay),
 }
 with open(os.path.join(REPO, 'scripts/brand-marks.json'), 'w') as f:
     json.dump(sidecar, f, indent=2)
