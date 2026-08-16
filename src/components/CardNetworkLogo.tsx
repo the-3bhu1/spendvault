@@ -1,4 +1,5 @@
 import type { CardNetwork } from '../types';
+import { RupayMark } from './CardNetworkRupay';
 
 /**
  * Inline SVG reproductions of card network logos.
@@ -39,19 +40,7 @@ function CardNetworkLogoMd({ network }: { network: CardNetwork }) {
       );
 
     case 'rupay':
-      return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2px', paddingBottom: '2px' }}>
-          <span style={{ fontFamily: 'Arial, sans-serif', fontWeight: 900, fontSize: '20px', color: 'white', fontStyle: 'italic', letterSpacing: '-0.5px', lineHeight: 1 }}>
-            RuPay
-          </span>
-          <svg width="22" height="24" viewBox="0 0 22 24" fill="none" style={{ marginTop: '2px' }}>
-            {/* Green chevron arrow (right, drawn first so it's underneath) */}
-            <polygon points="8,4 18,12 8,20" fill="#009A44" />
-            {/* Orange chevron arrow (left, drawn second so it overlaps) */}
-            <polygon points="0,4 10,12 0,20" fill="#F4831F" />
-          </svg>
-        </div>
-      );
+      return <RupayMark height={19} />;
 
     case 'amex':
       return (
@@ -71,8 +60,8 @@ function CardNetworkLogoMd({ network }: { network: CardNetwork }) {
             <path d="M16.506 11.982a6.026 6.026 0 0 0-3.866-5.618V17.6a6.025 6.025 0 0 0 3.866-5.618zM8.33 17.598V6.365a6.03 6.03 0 0 0-3.863 5.617 6.028 6.028 0 0 0 3.863 5.616zm2.156-15.113A9.497 9.497 0 0 0 .99 11.982a9.495 9.495 0 0 0 9.495 9.494c5.245 0 9.495-4.25 9.496-9.494a9.499 9.499 0 0 0-9.496-9.497Zm-.023 19.888C4.723 22.4 0 17.75 0 12.09 0 5.905 4.723 1.626 10.463 1.627h2.69C18.822 1.627 24 5.903 24 12.09c0 5.658-5.176 10.283-10.848 10.283" />
           </svg>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ fontFamily: 'Arial, sans-serif', fontWeight: 700, fontSize: '10px', fill: 'white', letterSpacing: '0.5px', lineHeight: 1 }}>DINERS</span>
-            <span style={{ fontFamily: 'Arial, sans-serif', fontWeight: 700, fontSize: '10px', fill: 'white', letterSpacing: '0.5px', lineHeight: 1.1 }}>CLUB</span>
+            <span style={{ fontFamily: 'Arial, sans-serif', fontWeight: 700, fontSize: '10px', color: 'white', letterSpacing: '0.5px', lineHeight: 1 }}>DINERS</span>
+            <span style={{ fontFamily: 'Arial, sans-serif', fontWeight: 700, fontSize: '10px', color: 'white', letterSpacing: '0.5px', lineHeight: 1.1 }}>CLUB</span>
           </div>
         </div>
       );
@@ -104,19 +93,7 @@ function CardNetworkLogoSm({ network }: { network: CardNetwork }) {
       );
 
     case 'rupay':
-      return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1px' }}>
-          <span style={{ fontFamily: 'Arial, sans-serif', fontWeight: 900, fontSize: '10px', fontStyle: 'italic', letterSpacing: '-0.25px', lineHeight: 1 }}>
-            RuPay
-          </span>
-          <svg width="10" height="10" viewBox="0 0 14 14" fill="none" style={{ marginTop: '1px' }}>
-            {/* Green chevron (drawn first) */}
-            <polygon points="5,2 11,7 5,12" fill="#009A44" />
-            {/* Orange chevron (drawn second, on top) */}
-            <polygon points="0,2 6,7 0,12" fill="#F4831F" />
-          </svg>
-        </div>
-      );
+      return <RupayMark height={11} />;
 
     case 'amex':
       return (

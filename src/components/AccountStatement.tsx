@@ -7,6 +7,7 @@ import RollingNumber from './RollingNumber';
 import { getBillingCycleForDate, getCardGradients, formatBillingCycleRange, affectsRupeeBalance } from '../utils';
 import { CardSurface } from './CardSurface';
 import { CardChip } from './CardChip';
+import { CardBrandLogo } from './CardBrandLogo';
 import type { Account, Transaction } from '../types';
 import { CardNetworkLogo } from './CardNetworkLogo';
 import { useFinance } from '../FinanceContext';
@@ -269,15 +270,27 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
               {acc.cardDetails ? (
                 /* ── Real card details ── */
                 <>
-                  {/* Network logo top-right */}
-                  <div style={{ position: 'absolute', top: '14px', right: '14px', overflow: 'visible' }}>
+                  {/* Issuing bank top-right, matching the flip card. The network
+                      mark used to sit here; it moves to the bottom-right corner so
+                      the two views of the same card agree on where things go. */}
+                  {(() => {
+                    const skin = getCardGradients(themeIndex, acc.cardDetails.network, acc.name);
+                    return skin.issuer ? (
+                      <div style={{ position: 'absolute', top: '18px', right: '20px' }}>
+                        <CardBrandLogo brand={skin.issuer} height={17} />
+                      </div>
+                    ) : null;
+                  })()}
+
+                  {/* Network logo bottom-right */}
+                  <div style={{ position: 'absolute', bottom: '20px', right: '20px', overflow: 'visible' }}>
                     {acc.cardDetails.network
                       ? <CardNetworkLogo network={acc.cardDetails.network} size="md" />
-                      : <CreditCard size={20} style={{ opacity: 0.3, color: 'white' }} />}
+                      : <CreditCard size={20} style={{ opacity: 0.3, color: 'rgb(var(--card-ink))' }} />}
                   </div>
 
                   {/* Account Name + Cardholder name row */}
-                  <div style={{ position: 'absolute', bottom: '24px', left: '24px', right: '24px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div style={{ position: 'absolute', bottom: '24px', left: '24px', right: '110px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <span style={{
                       fontFamily: 'var(--font-family)',
                       fontSize: '10px',

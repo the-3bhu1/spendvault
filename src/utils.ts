@@ -1,5 +1,5 @@
 import { format, parseISO, addMonths, subMonths, addDays, setDate } from 'date-fns';
-import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitItem, InvestmentKind, RecurringBill } from './types';
+import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitItem, InvestmentKind, RecurringBill, BrandKey } from './types';
 
 /**
  * Rolls a recurring bill to its next occurrence. A recurring bill has no settled state — every
@@ -522,9 +522,13 @@ export interface CardSkin {
   geometry: CardGeometry;
   sheen: number;          // 0–1 — opacity of the specular highlight layer
   ink: 'light' | 'dark';
+  /** Issuing bank, printed on the front. Omitted when the skin can't name one. */
+  issuer?: BrandKey;
+  /** Co-brand programme, printed on the back. */
+  coBrand?: BrandKey;
 }
 
-type CardMaterial = Partial<Pick<CardSkin, 'texture' | 'geometry' | 'sheen' | 'ink'>>;
+type CardMaterial = Partial<Pick<CardSkin, 'texture' | 'geometry' | 'sheen' | 'ink' | 'issuer' | 'coBrand'>>;
 
 const defineSkin = (front: string, back: string, material: CardMaterial = {}): CardSkin => ({
   front,
@@ -544,7 +548,16 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
     return defineSkin(
       'linear-gradient(135deg, #0a0f1d 0%, #151d33 50%, #0d2e2b 100%)',
       'linear-gradient(135deg, #151d33 0%, #0d2e2b 100%)',
-      { geometry: 'facet', texture: 'hairline', sheen: 0.55 }
+      { geometry: 'facet', texture: 'hairline', sheen: 0.55, issuer: 'axis', coBrand: 'supermoney' }
+    );
+  }
+
+  // Jupiter x CSB
+  if (name.includes('jupiter') || name.includes('csb')) {
+    return defineSkin(
+      'linear-gradient(135deg, #1a1f6b 0%, #2d3192 55%, #3f46b8 100%)',
+      'linear-gradient(135deg, #2d3192 0%, #3f46b8 100%)',
+      { geometry: 'slash', texture: 'hairline', sheen: 0.6, issuer: 'csb', coBrand: 'jupiter' }
     );
   }
 
@@ -553,7 +566,7 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
     return defineSkin(
       'linear-gradient(135deg, #1c092b 0%, #3b1459 55%, #fc8019 100%)',
       'linear-gradient(135deg, #3b1459 0%, #fc8019 100%)',
-      { geometry: 'arc', texture: 'weave', sheen: 0.7 }
+      { geometry: 'arc', texture: 'weave', sheen: 0.7, issuer: 'hdfc', coBrand: 'swiggy' }
     );
   }
 

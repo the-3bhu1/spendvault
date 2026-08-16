@@ -6,6 +6,7 @@ import type { Account } from '../types';
 import { CardNetworkLogo } from './CardNetworkLogo';
 import { CardSurface, CARD_ASPECT_RATIO } from './CardSurface';
 import { CardChip } from './CardChip';
+import { CardBrandLogo } from './CardBrandLogo';
 import { getCardGradients } from '../utils';
 import { useFinance } from '../FinanceContext';
 
@@ -195,9 +196,10 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
               justifyContent: 'space-between'
             }}
           >
-            {/* Top Section: SIM Chip & Network Logo */}
+            {/* Top Section: SIM Chip & issuing bank */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <CardChip width={42} />
+              {gradients.issuer && <CardBrandLogo brand={gradients.issuer} height={20} />}
             </div>
 
             {/* Network logo bottom-right, Names bottom-left */}
@@ -309,8 +311,10 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
                 </div>
               </div>
 
-              {/* Full Number & Expiry */}
-              <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {/* Full Number & Expiry, with the co-brand mark filling the empty
+                  block to their right — the one genuinely free region on the back. */}
+              <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '12px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <div 
                   style={{ display: 'flex', flexDirection: 'column', gap: '2px', cursor: 'copy', width: 'fit-content' }}
                   onClick={(e) => handleCopy(cardDetails?.cardNumber || '', e)}
@@ -331,11 +335,11 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
                   </span>
                 </div>
               </div>
-            </div>
-            
-            {/* Tiny contact text at bottom */}
-            <div style={{ padding: '8px 20px', fontSize: '7px', color: 'rgba(var(--card-ink), 0.3)', textAlign: 'center', lineHeight: 1.2 }}>
-              This card is non-transferable. Use of this card is subject to the terms and conditions of the issuer. Found cards should be destroyed immediately.
+
+                {cardDetails && gradients.coBrand && (
+                  <CardBrandLogo brand={gradients.coBrand} height={20} />
+                )}
+              </div>
             </div>
           </CardSurface>
         </div>

@@ -58,6 +58,14 @@ export interface CashbackRate {
 
 export type CardNetwork = 'visa' | 'mastercard' | 'rupay' | 'amex' | 'diners';
 
+/**
+ * Brand marks a card can carry: the issuing bank, printed on the front, and the
+ * co-brand programme, printed on the back. Artwork lives in CardBrandLogo.
+ */
+export type BrandKey =
+  | 'hdfc' | 'axis' | 'csb' | 'tide'          // issuers
+  | 'swiggy' | 'supermoney' | 'jupiter';      // co-brands
+
 export interface CardDetails {
   cardholderName?: string;
   cardNumber?: string;    // Full card number (stored locally, app is PIN-protected)
