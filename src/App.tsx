@@ -23,7 +23,7 @@ import AppTour from './components/AppTour';
 import BillAlertBanner from './components/BillAlertBanner';
 import type { Account } from './types';
 import SmsReader from './services/SmsService';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 
 export type Tab = 'dashboard' | 'accounts' | 'transactions' | 'cashback' | 'insights' | 'settings' | 'splits' | 'bills' | 'debts' | 'wealth';
@@ -142,7 +142,7 @@ function App() {
     });
 
     return () => {
-      listener.then((l: any) => l.remove());
+      listener.then((l: PluginListenerHandle) => l.remove());
     };
   }, [data.user?.pinHash, isAuthenticated, showSplash]);
 
@@ -222,7 +222,7 @@ function App() {
 
     const listener = CapApp.addListener('backButton', handleBackButton);
     return () => {
-      listener.then((l: any) => l.remove());
+      listener.then((l: PluginListenerHandle) => l.remove());
     };
   }, [isAskVaultOpen, isHubOpen, selectedAccountForStatement, activeTab, backPressCount]);
 

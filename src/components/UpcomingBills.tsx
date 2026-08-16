@@ -15,7 +15,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { useFinance } from '../FinanceContext';
-import type { RecurringBill, RecurringFrequency } from '../types';
+import type { RecurringBill, RecurringFrequency, Transaction } from '../types';
 import { SubviewWrapper } from './SubviewWrapper';
 import { CustomPicker } from './CustomPicker';
 import { TransactionSelector } from './TransactionSelector';
@@ -53,7 +53,7 @@ export default function UpcomingBills() {
   // A Mutual Funds bill is just a plain bill; LOG opens the normal investment form in the Ledger
   // modal, where the user picks the funding and fund accounts themselves.
 
-  const handleLinkTransaction = (transaction: any) => {
+  const handleLinkTransaction = (transaction: Transaction) => {
     if (!selectedBill) return;
 
     // Link the transaction to the bill

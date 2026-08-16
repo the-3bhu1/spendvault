@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { useFinance } from '../FinanceContext';
-import { Sparkles, ArrowRight, ArrowLeft, X, ShieldCheck, Eye, Smartphone, Zap, Gift, TrendingUp, MessageSquare } from 'lucide-react';
+import { Sparkles, ArrowRight, ArrowLeft, X, ShieldCheck, Eye, Smartphone, Zap, Gift, TrendingUp, MessageSquare, type LucideIcon } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import type { Tab } from '../App';
 
@@ -23,7 +23,7 @@ interface TourStep {
   selector?: string;
   tab?: Tab;
   actionBefore?: () => void;
-  icon?: any;
+  icon?: LucideIcon;
   cardPosition?: 'bottom' | 'top';
 }
 
