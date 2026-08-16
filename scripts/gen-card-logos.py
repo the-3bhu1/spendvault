@@ -37,6 +37,25 @@ LOGOS = [
 # renders at 40% of the height it was asked for — which is why it looked tiny
 # next to RuPay at the same nominal size. Sizing every mark by its own ink is
 # what makes one optical height mean the same thing across all of them.
+# Per-mark optical multiplier on the requested height.
+#
+# Tight viewBoxes made one height mean "this much ink", which still isn't equal
+# presence: CSB's ink is pure wordmark, so 20px of it is 20px of cap-height and a
+# very wide mark, while HDFC's 20px is a plate with ~11px of text inside it. At a
+# shared height CSB rendered 135px wide against Axis's 78px. These bring the three
+# to a comparable footprint on the card; tuned by eye against the real cards, which
+# is the only way this ever gets settled.
+OPTICAL = {
+    'hdfc':       0.95,
+    'axis':       1.18,
+    'csb':        0.70,
+    'tide':       1.00,
+    'swiggy':     1.00,
+    'supermoney': 1.00,
+    'jupiter':    0.95,
+    'axismark':   1.00,
+}
+
 TIGHT_VIEWBOX = {
     'hdfc':       '1.07 1.08 287.14 47.85',
     'axis':       '6.34 10.47 981.77 233.33',
@@ -245,6 +264,7 @@ for key, path, policy, label in LOGOS:
     label: '{label}',
     viewBox: '{vb}',
     ratio: {w / h:.4f},
+    optical: {OPTICAL.get(key, 1.0)},
     art: (<>{body}
     </>),
   }},""")
@@ -278,20 +298,20 @@ import type { BrandKey } from '../types';
 '''
 
 tsx = header
-tsx += 'const BRANDS: Record<BrandKey, { label: string; viewBox: string; ratio: number; art: React.ReactNode }> = {\n'
+tsx += 'const BRANDS: Record<BrandKey, { label: string; viewBox: string; ratio: number; optical: number; art: React.ReactNode }> = {\n'
 tsx += '\n'.join(blocks)
 tsx += '\n};\n\n'
 tsx += '''/**
  * The same artwork blown up as a background motif — the issuer's own symbol
  * doing the work a generic geometry layer would otherwise do. Sized in % of the
- * card so it scales with it, and deliberately allowed to run off the right edge:
- * a mark cropped by the card reads as printed into it, a mark that fits reads as
- * a sticker.
+ * card so it scales with it. Sized to sit whole rather than bleed off the edge —
+ * the symbol is the whole point of using it instead of a generic shape, and a
+ * cropped one just reads as an accident in the texture.
  */
 export function CardBrandWatermark({
   brand,
-  scale = 1.8,
-  nudge = '20%',
+  scale = 0.82,
+  nudge = '0%',
 }: {
   brand: BrandKey;
   scale?: number;
@@ -320,11 +340,12 @@ export function CardBrandWatermark({
 export function CardBrandLogo({ brand, height = 22 }: { brand: BrandKey; height?: number }) {
   const b = BRANDS[brand];
   if (!b) return null;
+  const h = height * b.optical;
   return (
     <svg
       viewBox={b.viewBox}
-      height={height}
-      width={height * b.ratio}
+      height={h}
+      width={h * b.ratio}
       role="img"
       aria-label={b.label}
       style={{ display: 'block', color: 'rgb(var(--card-ink))', overflow: 'visible' }}

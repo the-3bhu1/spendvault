@@ -171,7 +171,9 @@ export function CardSurface({
       )}
 
       {/* The issuer's own symbol standing in for the geometry layer. Same slot,
-          same job — below content, above texture. */}
+          same job — below content, above texture.
+          Sized to sit whole on the card rather than bleeding off it: the symbol
+          is the point, and a cropped one reads as a texture accident. */}
       {skin?.watermark && face === 'front' && (
         <div
           style={{
@@ -179,9 +181,10 @@ export function CardSurface({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'flex-end',
+            paddingRight: '7%',
             overflow: 'hidden',
             color: 'rgb(var(--card-ink))',
-            opacity: 0.09,
+            opacity: 0.1,
           }}
         >
           <CardBrandWatermark brand={skin.watermark} />
