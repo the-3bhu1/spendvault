@@ -582,12 +582,17 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
     );
   }
 
-  // Tide (debit)
+  // Tide (debit). Tide's own blue is #4050fb, which lands almost exactly on the
+  // Jupiter x CSB skin — and both were slash + hairline, so the two cards were
+  // near-indistinguishable in a list. Telling your own cards apart at a glance
+  // beats matching a brand colour you can already see on the plastic, so this one
+  // moves to violet and takes a different geometry and texture as well. Hue alone
+  // wouldn't have been enough; they were the same material.
   if (name.includes('tide')) {
     return defineSkin(
-      'linear-gradient(135deg, #070b24 0%, #1b2270 55%, #4050fb 100%)',
-      'linear-gradient(135deg, #4050fb 0%, #1b2270 100%)',
-      { geometry: 'slash', texture: 'hairline', sheen: 0.6, issuer: 'tide' }
+      'linear-gradient(135deg, #170f2b 0%, #3a2063 55%, #6b3fae 100%)',
+      'linear-gradient(135deg, #6b3fae 0%, #3a2063 100%)',
+      { geometry: 'facet', texture: 'guilloche', sheen: 0.55, issuer: 'tide' }
     );
   }
 
