@@ -549,15 +549,33 @@ export function Wealth() {
     return getInvestmentAccountStats(account, data.transactions, currentPrice);
   };
 
+  // Today's move for one holding: the live quote against the day's previous close. This is the
+  // single place that pairing is made — the Portfolio total (oneDayReturnFor) folds over it, and
+  // buildVaultContext quotes the same two cached numbers for Ask Vault.
+  //
+  // It deliberately does NOT read historyData. That array is re-fetched per chart range at a
+  // different interval each time (5m / 1h / 1d / 1wk / 1mo), so its last two points measure "the
+  // last bucket of the selected range", not "one day": switching the chart to 1Y silently turned
+  // this into a week-on-week change, and 5D into an hour-on-hour one. It also read closes while
+  // the price above it read the live quote, so the headline and its delta came from two sources.
+  //
+  // Null when there's no previous close to quote against — commodities (the Gemini source is a
+  // single lagging estimate, so getCachedPrevCommodityPriceINR is null by design) and EPF (no
+  // symbol at all). Both callers fall back to total return.
   const getOneDayReturn = (account: Account) => {
-    if (historyData.length < 2) return null;
+    const symbol = account.marketSymbol || '';
+    const currentPrice = account.manualPricePerGram ?? prices[symbol] ?? 0;
+    const prevPrice = prevPrices[symbol];
+    if (!prevPrice || currentPrice === 0) return null;
     const totalUnits = getTotalUnits(account);
-    const latest = historyData[historyData.length - 1].close;
-    const prev = historyData[historyData.length - 2].close;
-    const perUnitChange = latest - prev;
-    const amount = perUnitChange * totalUnits;
-    const pct = prev > 0 ? (perUnitChange / prev) * 100 : 0;
-    return { amount, pct, perUnitChange };
+    const perUnitChange = currentPrice - prevPrice;
+    return {
+      amount: perUnitChange * totalUnits,
+      pct: (perUnitChange / prevPrice) * 100,
+      perUnitChange,
+      // The denominator an aggregate needs: this holding's value at yesterday's close.
+      prevValue: prevPrice * totalUnits,
+    };
   };
 
   const formatFullCurrency = (value: number) =>
@@ -619,17 +637,17 @@ export function Wealth() {
   // credit-card outstanding and tracked debts are NOT subtracted.
   const totalWealth = portfolioStats.all.current + liquidTotals.all + retirementTotals.balance;
 
+  // Weighted across the group, not an average of percentages: each holding contributes its own
+  // rupee move over the group's total value at yesterday's close. Holdings with no previous close
+  // (commodities) drop out of both sides rather than dragging the percentage toward zero.
   const oneDayReturnFor = (accounts: Account[]) => {
     let amount = 0;
     let prevTotal = 0;
     for (const acc of accounts) {
-      const symbol = acc.marketSymbol || '';
-      const currentPrice = acc.manualPricePerGram ?? prices[symbol] ?? 0;
-      const prevPrice = prevPrices[symbol];
-      if (!prevPrice || currentPrice === 0) continue;
-      const units = getTotalUnits(acc);
-      amount += (currentPrice - prevPrice) * units;
-      prevTotal += prevPrice * units;
+      const one = getOneDayReturn(acc);
+      if (!one) continue;
+      amount += one.amount;
+      prevTotal += one.prevValue;
     }
     if (prevTotal === 0) return null;
     return { amount, pct: (amount / prevTotal) * 100 };
@@ -953,6 +971,12 @@ export function Wealth() {
   const openCategory = (next: WealthCategory) => {
     const appRoot = document.querySelector('.app-root');
     scrollRef.current.tree = appRoot?.scrollTop ?? 0;
+    // Drop the sub-view's remembered scroll, so entering from the tree always starts at the top.
+    // That position belongs to one visit: it exists so backing out of a holding detail lands where
+    // you left the list. Left standing, it also applied on the NEXT entry from the tree, dropping
+    // you into the middle of a list you had just opened fresh — with the hero and the filter pills
+    // (reset just below) scrolled off. Down one level and back is the only path that restores it.
+    scrollRef.current.category = 0;
     setCategory(next);
     // Every sub-view opens in its resting state — All, showing Current (Invested) — rather than
     // resuming whatever was selected on the last visit. The narrowed view is a thing you go and do,
