@@ -1,0 +1,52 @@
+# Release-APK builder.
+#
+# Deliberately separate from ./Dockerfile, which is a Vite dev server on node:22-alpine. This image
+# carries a JDK and the whole Android SDK and runs to a couple of gigabytes; nothing needs both, and
+# making the dev container pay for the SDK would be a bad trade.
+#
+# The point of it is that the Android toolchain stops being a property of your laptop. Any machine
+# with Docker can produce the same APK — see docs/RELEASE.md. The signing key is the one thing this
+# cannot supply: it is mounted at run time, never baked in.
+FROM eclipse-temurin:21-jdk-jammy
+
+# Kept in step with the project: android/variables.gradle pins compileSdk/targetSdk 35, the Gradle
+# wrapper pins 8.13, and ./Dockerfile uses Node 22. Bump these together with those.
+ARG NODE_MAJOR=22
+ARG ANDROID_PLATFORM=35
+ARG BUILD_TOOLS=35.0.0
+# Google's command-line tools bundle. Only used to run sdkmanager; bump when you need a newer one.
+ARG CMDLINE_TOOLS=11076708
+
+ENV ANDROID_HOME=/opt/android-sdk \
+    ANDROID_SDK_ROOT=/opt/android-sdk \
+    DEBIAN_FRONTEND=noninteractive \
+    GRADLE_USER_HOME=/root/.gradle
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl unzip git ca-certificates \
+ && curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p "${ANDROID_HOME}/cmdline-tools" \
+ && curl -fsSL -o /tmp/cmdline-tools.zip \
+      "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS}_latest.zip" \
+ && unzip -q /tmp/cmdline-tools.zip -d "${ANDROID_HOME}/cmdline-tools" \
+ && mv "${ANDROID_HOME}/cmdline-tools/cmdline-tools" "${ANDROID_HOME}/cmdline-tools/latest" \
+ && rm /tmp/cmdline-tools.zip
+
+ENV PATH="${PATH}:${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools"
+
+# Licences are accepted at image-build time so a release build never stops to ask.
+RUN yes | sdkmanager --licenses > /dev/null 2>&1 \
+ && sdkmanager --install \
+      "platform-tools" \
+      "platforms;android-${ANDROID_PLATFORM}" \
+      "build-tools;${BUILD_TOOLS}" > /dev/null
+
+WORKDIR /app
+
+# The script is read from the MOUNTED repo rather than copied in, so editing it doesn't mean
+# rebuilding a two-gigabyte image. That also keeps this image a pure toolchain with no project code.
+CMD ["bash", "scripts/build-apk.sh"]

@@ -31,6 +31,10 @@ android/key.properties
 
 # Keystores, builds, and temporary patches
 *.jks
+*.keystore
+# Default mount point for the release keystore (see docs/RELEASE.md). Never commit its contents:
+# losing control of that key is worse than losing the key, and losing the key is already bad.
+.keys/
 *.apk
 *.patch
 patch_transactions.cjs

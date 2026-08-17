@@ -14,3 +14,36 @@ services:
 
     stdin_open: true
     tty: true
+
+  # Release-APK builder. Not part of the dev stack — start it explicitly, one run at a time:
+  #
+  #   docker compose run --rm spendvault-apk
+  #
+  # It exits when the build finishes. Setup and keystore handling: docs/RELEASE.md
+  spendvault-apk:
+
+    build:
+      context: .
+      dockerfile: Dockerfile.android
+
+    volumes:
+      - .:/app
+      # Anonymous volume, same trick as the dev service: the host's node_modules is built for the
+      # host OS, and letting it show through would hand the Linux build the wrong native binaries.
+      - /app/node_modules
+      # Gradle downloads ~hundreds of MB of dependencies on a cold run. Keeping them in a named
+      # volume makes every later build minutes rather than tens of minutes.
+      - gradle-cache:/root/.gradle
+      # Your keystore, read-only, from wherever you keep it on this machine. Defaults to ./.keys
+      # (gitignored) so the service still starts unconfigured — it just builds unsigned.
+      - ${SV_KEYSTORE_DIR:-./.keys}:/keys:ro
+
+    environment:
+      # Path INSIDE the container, so it starts with /keys — e.g. /keys/spendvault.jks
+      SV_KEYSTORE_FILE: ${SV_KEYSTORE_FILE:-}
+      SV_KEYSTORE_PASSWORD: ${SV_KEYSTORE_PASSWORD:-}
+      SV_KEY_ALIAS: ${SV_KEY_ALIAS:-}
+      SV_KEY_PASSWORD: ${SV_KEY_PASSWORD:-}
+
+volumes:
+  gradle-cache:

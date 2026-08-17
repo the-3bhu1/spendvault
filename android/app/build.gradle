@@ -1,6 +1,18 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 
+// Release signing is read from ONE of two sources, in this order:
+//
+//   1. android/key.properties — the local desktop setup. Gitignored, so it exists only on the
+//      machine that created it and never travels with a clone.
+//   2. SV_KEYSTORE_* environment variables — for container and CI builds. A bind-mounted working
+//      tree makes writing key.properties a bad idea: it would leave credentials and container-only
+//      paths behind on the host after the build. See docs/RELEASE.md.
+//
+// With NEITHER present the release build still succeeds, but produces an UNSIGNED apk that Android
+// refuses to install over an existing install. That used to happen silently; it now warns loudly
+// below, because for this app a reinstall means wiping localStorage — which is where all the user's
+// data lives.
 def keystorePropertiesFile = rootProject.file('key.properties')
 def keystoreProperties = new Properties()
 def hasKeystoreProperties = keystorePropertiesFile.exists()
@@ -9,16 +21,34 @@ if (hasKeystoreProperties) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
 
+def envStoreFile = System.getenv('SV_KEYSTORE_FILE')
+def hasEnvKeystore = !hasKeystoreProperties && envStoreFile != null && !envStoreFile.trim().isEmpty()
+def hasSigning = hasKeystoreProperties || hasEnvKeystore
+
+def signingStoreFile = hasEnvKeystore ? envStoreFile : keystoreProperties['storeFile']
+def signingStorePassword = hasEnvKeystore ? System.getenv('SV_KEYSTORE_PASSWORD') : keystoreProperties['storePassword']
+def signingKeyAlias = hasEnvKeystore ? System.getenv('SV_KEY_ALIAS') : keystoreProperties['keyAlias']
+def signingKeyPassword = hasEnvKeystore ? System.getenv('SV_KEY_PASSWORD') : keystoreProperties['keyPassword']
+
+if (!hasSigning) {
+    logger.warn('')
+    logger.warn('*** NO RELEASE SIGNING CONFIGURED ***')
+    logger.warn('    Neither android/key.properties nor SV_KEYSTORE_FILE was found.')
+    logger.warn('    assembleRelease will emit app-release-UNSIGNED.apk, which cannot be installed')
+    logger.warn('    over an existing SpendVault install. See docs/RELEASE.md.')
+    logger.warn('')
+}
+
 android {
     namespace "com.spendvault.app"
     compileSdk rootProject.ext.compileSdkVersion
     signingConfigs {
-        if (hasKeystoreProperties) {
+        if (hasSigning) {
             release {
-                keyAlias keystoreProperties['keyAlias']
-                keyPassword keystoreProperties['keyPassword']
-                storeFile file(keystoreProperties['storeFile'])
-                storePassword keystoreProperties['storePassword']
+                keyAlias signingKeyAlias
+                keyPassword signingKeyPassword
+                storeFile file(signingStoreFile)
+                storePassword signingStorePassword
             }
         }
     }
@@ -39,7 +69,7 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            if (hasKeystoreProperties) {
+            if (hasSigning) {
                 signingConfig signingConfigs.release
             }
         }

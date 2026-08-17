@@ -77,10 +77,24 @@ Unless told otherwise for this run, `build-ver-2.1` is always the target branch 
 
 ## 5. Build the release APK
 
-- `npm run build` (runs `tsc -b && vite build`) to produce `dist/`.
-- `npx cap sync android` to copy the web build into the native Android project.
-- `cd android && ./gradlew assembleRelease` — output lands at
-  `android/app/build/outputs/apk/release/app-release.apk`.
+Two routes. Check which one this machine can actually do BEFORE starting — a machine with no Android
+SDK fails on the first gradle invocation, and a machine with no keystore builds an APK that cannot be
+installed over an existing SpendVault. `docs/RELEASE.md` covers both in full.
+
+- **Local toolchain** — needs the Android SDK (`ANDROID_HOME` set, or `sdk.dir` in
+  `android/local.properties`; note `local.properties` is gitignored so it never arrives with a clone)
+  and `android/key.properties` for signing:
+  - `npm run build` (runs `tsc -b && vite build`) to produce `dist/`.
+  - `npx cap sync android` to copy the web build into the native Android project.
+  - `cd android && ./gradlew assembleRelease`.
+- **Docker** — needs only Docker plus a copy of the keystore, and works from a fresh clone on any
+  machine: `docker compose run --rm spendvault-apk` (see `docs/RELEASE.md` §3 for the `.env` it
+  reads). Runs the same four commands inside `Dockerfile.android`.
+
+Either way the output lands at `android/app/build/outputs/apk/release/app-release.apk`. If you get
+`app-release-unsigned.apk` instead, signing was not configured — report that as a failure, not a
+successful build. It cannot upgrade an installed app, and reinstalling wipes localStorage, which is
+where all user data lives.
 - Do NOT bump `versionCode` (currently `1`) or `versionName` in `android/app/build.gradle`, and
   do NOT bump `APP_VERSION` in `src/utils.ts` (currently `'v2.1.0'`) — unless the user explicitly
   asks for a version bump in this run.
