@@ -58,7 +58,8 @@ Actions (each account is a card on the Accounts tab):
 - Restore an archived account: Accounts tab → the "Archived" section at the bottom of the list → Restore.
 - View statement (credit cards): the "Statement" button on the card, or tap the card's row in the
   Dashboard's Outstanding Dues list. In the statement, a cycle picker switches between past and current
-  billing cycles.
+  billing cycles, and long-pressing a spend moves it to the neighbouring statement — see
+  "Credit cards & billing cycles" for when to use that.
 - View saved card details: the "Card" button flips the card to reveal number/expiry/CVV; tap a field to
   copy it. A Share button on that view copies the full details (card name, cardholder, number, expiry,
   CVV) to the clipboard AND opens the OS share sheet, so they can be sent to any app.
@@ -203,6 +204,24 @@ A card has a statement day and a due day.
   payment against the cycle in progress). Every OTHER credit on a card — a merchant refund, a
   reversal, a cashback credit — simply falls in the cycle its own date belongs to, exactly like a
   spend does. So a refund dated the 12th appears on the statement covering the 12th.
+- Settlement lag (an entry near the cut landing on the NEXT statement): banks bill by POSTING date,
+  not the date you spent. A card swipe is an authorisation; the charge posts when the merchant
+  submits its batch, often 1–3 days later, and e-commerce is the slowest (an Amazon order can post
+  on dispatch). Refunds are slower still — the merchant raises one, then the network settles it. So
+  an entry a day or two before the statement day may be billed a month later than the app assumes —
+  the real statement shows it as "yet to be settled".
+  - The app flags this instead of guessing: on the statement screen, an entry dated within 3 days of
+    the cut carries a dashed "MAY SETTLE NEXT" tag.
+  - To correct it: LONG-PRESS that entry in the statement's transaction list. A sheet offers "Move
+    to <next month> statement", "Move to <previous month> statement", and (once moved) "Reset to
+    transaction date". An undo appears for a few seconds after each move.
+  - Spends AND refunds/reversals can be moved, but only to the month either side of the one their
+    own date puts them in — moving repeatedly cannot push an entry further than one month out.
+  - Two kinds are excluded — not long-pressable, and never tagged — because their cycle is decided
+    rather than observed: CC PAYMENTS (which choose theirs through "Apply Payment To" when logged)
+    and CASHBACK credits (generated to the card's own same-cycle/next-cycle policy).
+  - A moved entry is tagged "FROM <month>" on the statement it lands on, and the move applies
+    everywhere at once: the statement, the card's outstanding balance, and the bill reminder.
 The Dashboard shows billed, unbilled, and total dues per card.
 
 # Cashback / Rewards
@@ -211,9 +230,12 @@ vs. realized cashback per card per billing cycle. Cashback can be instant or del
 same cycle or the next, as rupees or as reward points, and deposited into a chosen account. In the
 Rewards screen the user confirms realized cashback, which posts a consolidated "Cashback"
 credit into that account. Before confirming you can tap the pencil to edit a cycle's cashback amount;
-you can also undo a confirmed cashback, or consolidate several confirmed entries into one credit. When
-a cycle has two or more pending cashbacks, a "Confirm All" button in that cycle's header confirms them
-all at once (at their expected amounts).
+you can also undo a confirmed cashback. When a cycle has two or more pending cashbacks, a "Confirm
+All" button in that cycle's header confirms them all at once (at their expected amounts).
+Confirming already merges a cycle's cashbacks into one credit automatically. A "Merge Credits" button
+appears only on a FULLY confirmed cycle whose credited entries aren't covered by a single credit —
+that means something went wrong (the confirmed amounts totalled zero, or the data came from an
+import), and tapping it repairs them. It is always safe to press; it never shows mid-confirmation.
 
 # Group Splits
 Split shared expenses among people. Create an event with a name and people. Each item can be split
@@ -395,9 +417,15 @@ can tap "Restore from backup" on the first step to import an existing backup fil
   "Wipe & Reset" to erase everything if the key is lost.
 
 # Backup, restore & data
-- Export: Settings → Export Data. "Save to Downloads" writes the backup file, "Share Directly" sends
-  it via the OS share sheet, or (Advanced) copy it to the clipboard as a compressed code. Field names
-  are minified to shrink the file.
+- Export: Settings → Export Data, with two different outcomes:
+  - "Save to Documents" writes the backup file into the device's Documents folder — a real file that
+    stays there. The screen then confirms "Backup saved!" and offers "Share File".
+  - "Share Directly" only hands the file to the OS share sheet. NOTHING is saved to the device:
+    whether a copy survives depends on the app picked (Files or a cloud app keeps one, a messaging
+    app just sends it). The screen says "Backup shared!" and offers "Save to Device".
+  - (Advanced) copy it to the clipboard as a compressed code.
+  - If the direct save fails, the app says so and falls back to the share sheet.
+  Field names are minified to shrink the file.
 - Import: Settings → Import Data — restore from a backup file or by pasting a copied code. Importing
   OVERWRITES current data.
 - Demo data can be loaded to explore the app and cleared without touching real data.

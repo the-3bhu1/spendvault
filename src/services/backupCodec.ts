@@ -27,7 +27,7 @@ export const KEY_MAP: Record<string, string> = {
   rewardEarned: 're', rewardEarnedType: 'ret', rewardEarnedAccountId: 'rea',
   order: 'or', linkedTransactionId: 'lt', linkedTransactionIds: 'lts',
   cashbackLevelId: 'cl', linkedTxId: 'lx',
-  appliedBillingCycleYearMonth: 'abc', recurringBillId: 'rbid',
+  appliedBillingCycleYearMonth: 'abc', cycleMovedManually: 'cmm', recurringBillId: 'rbid',
   paymentSourceAccountId: 'psid', ccPaymentCycleTarget: 'ctar', isCCPaymentRecord: 'iscr',
   isRecurring: 'isrc', transactionId: 'txid', expectedCashback: 'exc',
   name: 'n', isNcmcEnabled: 'z',

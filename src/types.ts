@@ -169,6 +169,13 @@ export interface Transaction {
   category: string;
   isRecurring: boolean;
   appliedBillingCycleYearMonth?: string;
+  /** Set only when appliedBillingCycleYearMonth was chosen deliberately by a statement-screen
+   *  long-press. It exists to tell that apart from the SAME field written by an old build, which
+   *  stamped every card credit with the "Apply Payment To" default even though the picker was never
+   *  shown — see the note in LogTransactionForm's handleSave. Both look identical by value, so
+   *  without this flag the log form cannot know whether to preserve the cycle on save or clear it.
+   *  Absent means legacy (or never moved), which is why it needs no migration. */
+  cycleMovedManually?: boolean;
 
   // Specific to rewards and linking
   expectedCashback?: number; // Kept for backward compatibility, mapped to rewardEarned

@@ -1,4 +1,4 @@
-import { format, parseISO, addMonths, subMonths, addDays, setDate } from 'date-fns';
+import { format, parseISO, addMonths, subMonths, addDays, setDate, differenceInCalendarDays } from 'date-fns';
 import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitItem, InvestmentKind, RecurringBill, BrandKey } from './types';
 
 /**
@@ -318,6 +318,52 @@ export const formatBillingCycleRange = (cycle: string, statementDay: number = 1)
   return `${startFmt} – ${endFmt}`;
 };
 
+// ---- Settlement lag: which statement a charge actually lands on ------------------------------
+//
+// getBillingCycleForDate bills by TRANSACTION date. Banks bill by POSTING date — a swipe is an
+// authorisation, and the charge posts when the merchant submits its batch, typically 0–3 days
+// later (e-commerce and travel are the slowest; a recharge or a UPI tap posts same-day). The
+// exclusive cut absorbs one day of that, which is why a purchase ON the statement day rolls
+// forward. It cannot absorb more, and no single lag figure would be right for every merchant:
+// a 15 Aug Amazon order can miss a 17th cut while a 16 Aug recharge makes it.
+//
+// So the app doesn't guess. It flags the charges near enough to the cut for the question to be
+// live, and lets the statement screen record what the bank actually did — see
+// appliedBillingCycleYearMonth and the long-press move in AccountStatement.
+
+// How close to the cut a charge has to fall to be worth flagging. Three days covers the common
+// e-commerce batch lag without lighting up half the statement.
+export const SETTLEMENT_BOUNDARY_DAYS = 3;
+
+// The cycle a transaction's DATE alone puts it in — where it would be billed if it settled
+// instantly. This is the anchor a manual move is measured against, NOT wherever it currently
+// sits: clamping to natural ±1 is what stops repeated moves from ratcheting a charge arbitrarily
+// far from the month it was actually made.
+export const getNaturalBillingCycle = (tx: Transaction, statementDay: number): string =>
+  getBillingCycleForDate(tx.date, statementDay);
+
+// The cycle a transaction is actually BILLED in: the manual override if one was set, otherwise
+// its date's cycle. Every cycle sum reads through this, so the statement, the card's outstanding
+// balance and the bill reminder cannot disagree about which month a charge belongs to.
+export const getAppliedBillingCycle = (tx: Transaction, statementDay: number): string =>
+  tx.appliedBillingCycleYearMonth || getBillingCycleForDate(tx.date, statementDay);
+
+// Shift a 'yyyy-MM' cycle by whole months.
+export const shiftBillingCycle = (cycle: string, delta: number): string =>
+  format(addMonths(parseISO(`${cycle}-01`), delta), 'yyyy-MM');
+
+// Days from a transaction's date to the last day its natural cycle covers — 0 means the statement
+// is cut tomorrow. Never negative: the date is what picks the cycle, so it always falls inside it.
+export const daysToStatementCut = (dateStr: string, statementDay: number): number => {
+  const cycle = getBillingCycleForDate(dateStr, statementDay);
+  const { endDate } = getBillingCycleDates(cycle, statementDay);
+  return differenceInCalendarDays(endDate, parseISO(dateStr));
+};
+
+// Close enough to the cut that the bank may well post it after the statement is generated.
+export const isNearStatementCut = (dateStr: string, statementDay: number): boolean =>
+  daysToStatementCut(dateStr, statementDay) < SETTLEMENT_BOUNDARY_DAYS;
+
 
 export const calculateCycleBalanceForCycle = (
   account: Account,
@@ -328,14 +374,21 @@ export const calculateCycleBalanceForCycle = (
   return transactions
     .filter(t => {
       if (t.accountId !== account.id) return false;
-      if (t.type === 'credit' && t.appliedBillingCycleYearMonth) {
-        return t.appliedBillingCycleYearMonth === cycle;
-      }
       // A points redemption isn't a charge on the card's credit line, so it must not enter the
       // statement cycle. Without this a card redeeming its own points counted the redemption leg as a
       // second debit alongside the reduced purchase, and reported the FULL price as outstanding.
+      //
+      // This runs FIRST, before any cycle test. A credit carrying an explicit cycle used to return
+      // above this line, so a reward- or travel-flagged credit with one would have been counted as a
+      // rupee credit and knocked its amount off the card's outstanding — points paid off money.
+      // Nothing constructs that combination today, but the field is now writable from a second
+      // place, and an unconditional guard is the point of having one predicate.
       if (!affectsRupeeBalance(t)) return false;
-      return getBillingCycleForDate(t.date, statementDay) === cycle;
+      // Honours the override for DEBITS as well as payments — a charge near the cut may post after
+      // the statement is generated, and the statement screen lets that be recorded. The credit-only
+      // branch that used to sit above became redundant once this moved below the guard:
+      // getAppliedBillingCycle already returns the override when a transaction carries one.
+      return getAppliedBillingCycle(t, statementDay) === cycle;
     })
     .reduce((sum, t) => sum + (t.type === 'debit' ? t.amount : -t.amount), 0);
 };
@@ -517,7 +570,7 @@ export const calculateTotalSpendPerCycle = (transactions: Transaction[], account
   let payment = 0;
 
   ccTransactions.forEach(t => {
-    const tCycle = t.appliedBillingCycleYearMonth || getBillingCycleForDate(t.date, statementDay);
+    const tCycle = getAppliedBillingCycle(t, statementDay);
     if (tCycle === cycle) {
       if (t.type === 'debit') spend += t.amount;
       if (t.type === 'credit') payment += t.amount;

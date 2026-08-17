@@ -587,11 +587,20 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     // This used to fire for EVERY card credit while the picker rendered only for CC Payment, so those
     // credits silently inherited the picker's default of 'previous_statement' with no UI ever shown and
     // no way to change it: a 569 refund dated 12 Aug was filed against the JULY statement and vanished
-    // from the August one it belonged to. Leaving it undefined makes every consumer fall back to
-    // getBillingCycleForDate, which is what the debit side has always done.
+    // from the August one it belonged to. Records written by that build are still out there — they
+    // only heal when the row is next saved through this form, which is exactly what clearing does.
+    //
+    // Anything else keeps its cycle ONLY if cycleMovedManually says a human set it from the
+    // statement screen (a refund settles late just like a purchase, so it can be moved there). That
+    // flag is the whole point: a legacy stamp and a deliberate move are byte-identical in
+    // appliedBillingCycleYearMonth, so preserving the field unconditionally would have made every
+    // one of those old bad stamps permanent — turning the self-healing clear above into a no-op.
+    const manualCycleKept = !isCCPayment
+      && !!newTx.cycleMovedManually
+      && !!newTx.appliedBillingCycleYearMonth;
     const ccPaymentAppliedCycle = isCCPayment && account?.type === 'credit_card' && newTx.type === 'credit'
       ? resolveCcPaymentCycle(newTx.date as string, account.statementDay)
-      : undefined;
+      : (manualCycleKept ? newTx.appliedBillingCycleYearMonth : undefined);
 
     let finalCategory = newTx.category;
     const mainTxId = editId || generateId();
@@ -892,6 +901,17 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       recurringBillId: newTx.recurringBillId,
       isRecurring: newTx.isRecurring || !!newTx.recurringBillId,
       appliedBillingCycleYearMonth: ccPaymentAppliedCycle,
+      cycleMovedManually: manualCycleKept || undefined,
+      // Carried across the edit, like isTravelTransaction below. Omitting it dropped the flag on
+      // every save, and the flag is what keeps a leg OUT of the rupee ledger (affectsRupeeBalance):
+      // a points cashback credit that lost it stopped being Jewels and started reducing the card's
+      // real outstanding — the exact double-count the predicate exists to prevent.
+      //
+      // Re-tested against the CURRENT account rather than trusted blindly, because the flag is only
+      // ever set when the destination is points-denominated. isTravelTransaction can be preserved
+      // as-is since the account picker already clears it when the new account isn't NCMC-enabled;
+      // nothing does that for this one, so a row moved to a rupee account would keep a stale true.
+      isRewardTransaction: (newTx.isRewardTransaction && isPointsDenominated(account)) || undefined,
       rewardEarned: finalRewardEarned,
       rewardEarnedType: newTx.rewardEarnedType,
       rewardEarnedAccountId: newTx.rewardEarnedAccountId,
@@ -1047,7 +1067,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     <div className="modal-content">
       <div className="modal-header">
         <h3>{editId ? 'Edit Transaction' : 'Log Transaction'}</h3>
-        <button onClick={onClose}>✕</button>
+        <button onClick={onClose}><X /></button>
       </div>
       <div className="modal-body" ref={modalBodyRef}>
         <div className="input-group" onClick={() => setIsDatePickerOpen(true)}>

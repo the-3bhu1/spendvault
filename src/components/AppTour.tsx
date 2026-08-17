@@ -199,8 +199,8 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
         icon: Sparkles
       },
       {
-        title: "Consolidate & Log",
-        description: "Once confirmed, use Consolidate to automatically log the cashback credit back into your ledger. SpendVault handles the date and category for you — instantly.",
+        title: "Logged Automatically",
+        description: "Confirming is all it takes — SpendVault merges a cycle's cashback into a single credit and logs it into your ledger, handling the date and category for you. A \"Merge Credits\" button appears only in the rare case that needs repairing.",
         selector: ".cashback-tab-root",
         icon: Sparkles
       },

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { format, addMonths } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import { formatCurrency, generateId, formatDateString, getBillingCycleForDate, getBillingCycleDates, formatBillingCycleRange } from '../utils';
+import { formatCurrency, generateId, formatDateString, getAppliedBillingCycle, getBillingCycleDates, formatBillingCycleRange } from '../utils';
 import type { Account, CashbackStatement, Transaction } from '../types';
 import { Info, Pencil, Check, X, ChevronDown, RotateCcw } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
@@ -63,13 +63,17 @@ export default function Cashback() {
     return formatCurrency(value);
   };
 
-  const getBillingCycleLabel = (txDateStr: string, statementDay?: number) => {
+  // Takes the whole transaction, not just its date, so it reads the BILLED cycle rather than the
+  // dated one — a spend moved between statements (long-press on the statement screen) groups here
+  // under the statement that actually bills it. Cashback is earned on what a statement bills, so
+  // the vault and the statement have to name the same cycle for the same spend, or the card's own
+  // two screens disagree about which month a purchase belongs to.
+  const getBillingCycleLabel = (tx: Transaction, statementDay?: number) => {
     if (!statementDay) {
-      const d = new Date(txDateStr);
+      const d = new Date(tx.date);
       return d.toLocaleString('default', { month: 'long', year: 'numeric' });
     }
-    const cycle = getBillingCycleForDate(txDateStr, statementDay);
-    return formatBillingCycleRange(cycle, statementDay);
+    return formatBillingCycleRange(getAppliedBillingCycle(tx, statementDay), statementDay);
   };
 
   const statements: Record<string, StatementRow> = {};
@@ -163,7 +167,10 @@ export default function Cashback() {
     }
 
     if (isCC && acc.statementDay && isStatementCredit) {
-      const originalCycle = getBillingCycleForDate(first.transaction.date, acc.statementDay);
+      // The BILLED cycle, matching how the group was bucketed above: a spend moved to the next
+      // statement earns its cashback on that statement, so the credit is dated off that cycle's
+      // close rather than the one the spend's own date falls in.
+      const originalCycle = getAppliedBillingCycle(first.transaction, acc.statementDay);
       const { endDate } = getBillingCycleDates(originalCycle, acc.statementDay);
 
       if (acc.cashbackCreditCycle === 'same_cycle') {
@@ -292,7 +299,7 @@ export default function Cashback() {
 
     // After updating the statement, we trigger the consolidation for the entire group
     // We pass the current cycle's statements to ensure we merge everything correctly
-    const cycleLabel = getBillingCycleLabel(st.transaction.date, st.account.statementDay);
+    const cycleLabel = getBillingCycleLabel(st.transaction, st.account.statementDay);
     const accKey = `${st.account.name} — ${cycleLabel}`;
 
     // Prepare the list for consolidation (including the fresh update)
@@ -379,7 +386,7 @@ export default function Cashback() {
     updateCashbackStatement(updatedStatement);
 
     // Recalculate consolidation for this group
-    const cycleLabel = getBillingCycleLabel(st.transaction.date, st.account.statementDay);
+    const cycleLabel = getBillingCycleLabel(st.transaction, st.account.statementDay);
     const accKey = `${st.account.name} — ${cycleLabel}`;
     const currentGroupSts = groupedStatements[accKey] || [];
     const updatedGroupSts = currentGroupSts.map(gs =>
@@ -394,7 +401,7 @@ export default function Cashback() {
   );
 
   const groupedStatements = statementArray.reduce((acc, st) => {
-    const cycleLabel = getBillingCycleLabel(st.transaction.date, st.account.statementDay);
+    const cycleLabel = getBillingCycleLabel(st.transaction, st.account.statementDay);
     const accKey = `${st.account.name} — ${cycleLabel}`;
     if (!acc[accKey]) acc[accKey] = [];
     acc[accKey].push(st);
@@ -572,7 +579,19 @@ export default function Cashback() {
                   const cardNameOnly = accName.split(' — ')[0];
                   const cycleRangeOnly = accName.split(' — ').slice(1).join(' — ');
                   const showCardNameRow = !showCreditedCycles; // in "Showing All" the card name lives in the card header
-                  const showConsolidate = confirmedSts.length > 1 && !isPerfectlyConsolidated && !isInternalRewards;
+                  // Only offered once the cycle is FULLY confirmed. Consolidation already runs after
+                  // every confirm, so while rows are still pending this said "the merge is
+                  // incomplete" about a cycle that was mid-confirmation — a diagnosis dressed as a
+                  // chore, in the one view (FILTER: PENDING) where you always have pending rows.
+                  // Confirming the rest fixes it on its own.
+                  //
+                  // Once nothing is pending, a missing covering credit is a real fault rather than a
+                  // half-finished job: the confirmed rows totalled zero so no credit was ever
+                  // written (see the `mainAmount > 0` guard in consolidateCycleGroup), the total
+                  // dropped to zero and the credit was deleted, or the data arrived from an import.
+                  // Then the button is the repair, and seeing it means you want it.
+                  const showConsolidate = confirmedSts.length > 1 && pendingSts.length === 0
+                    && !isPerfectlyConsolidated && !isInternalRewards;
                   const showConfirmAll = pendingSts.length >= 2;
 
                   const isLastCycle = cycleIndex === card.cycles.length - 1;
@@ -674,7 +693,11 @@ export default function Cashback() {
                                         <Check size={10} /> DONE
                                       </>
                                     ) : (
-                                      'CONSOLIDATE'
+                                      // Names the fault, not the function: these rows are credited
+                                      // but aren't covered by one credit entry. "CONSOLIDATE" said
+                                      // what the code does, which told you nothing about whether to
+                                      // press it.
+                                      'MERGE CREDITS'
                                     )}
                                   </button>
                                 )}
@@ -811,7 +834,7 @@ export default function Cashback() {
             <div className="modal-content">
               <div className="modal-header">
                 <h3>Realize Cashback</h3>
-                <button onClick={() => setConfirmingStatement(null)}>✕</button>
+                <button onClick={() => setConfirmingStatement(null)}><X /></button>
               </div>
               <div className="modal-body flex-col gap-4">
                 {isAutomatic ? (
@@ -861,7 +884,7 @@ export default function Cashback() {
             <div className="modal-content">
               <div className="modal-header">
                 <h3>Confirm All Cashback</h3>
-                <button onClick={() => setBulkConfirm(null)}>✕</button>
+                <button onClick={() => setBulkConfirm(null)}><X /></button>
               </div>
               <div className="modal-body flex-col gap-4">
                 <p className="text-sm text-muted">
@@ -894,7 +917,7 @@ export default function Cashback() {
           <div className="modal-content">
             <div className="modal-header">
               <h3>Transaction Details</h3>
-              <button onClick={() => setSelectedTx(null)}>✕</button>
+              <button onClick={() => setSelectedTx(null)}><X /></button>
             </div>
             <div className="modal-body flex-col gap-4 text-sm" style={{ paddingBottom: '1rem' }}>
               <div className="flex justify-between" style={{ paddingBottom: '0.75rem', borderBottom: '1px dashed var(--border-color)', gap: '1.5rem' }}>

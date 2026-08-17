@@ -896,6 +896,25 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         parsed.categories = trimArr(parsed.categories);
         parsed.customAccountTypes = trimArr(parsed.customAccountTypes);
 
+        // Drop billing-cycle stamps left by an older build that wrote appliedBillingCycleYearMonth
+        // onto EVERY card credit, handing them the "Apply Payment To" picker's 'previous_statement'
+        // default even though that picker only ever rendered for CC Payments. A cashback or a refund
+        // caught by it bills a cycle early and stays that way — the form stopped writing them, but
+        // existing records keep the stamp until they happen to be saved again.
+        //
+        // Runs on every load, like the migrations above, and is safe doing so. The two legitimate
+        // owners of this field are both excluded: a CC Payment's cycle is written by the form on
+        // purpose, and a cycle chosen from the statement screen carries cycleMovedManually. Once the
+        // stale stamps are cleared this matches nothing, so it cannot creep.
+        parsed.transactions = (parsed.transactions || []).map((t: Transaction) => {
+          if (!t.appliedBillingCycleYearMonth) return t;
+          if (t.cycleMovedManually) return t;
+          if ((t.category || '').toLowerCase() === 'cc payment') return t;
+          const cleaned = { ...t };
+          delete cleaned.appliedBillingCycleYearMonth;
+          return cleaned;
+        });
+
         parsed.transactions = normalizeTransactionOrders(parsed.transactions || []);
         return parsed;
       } catch (e) {

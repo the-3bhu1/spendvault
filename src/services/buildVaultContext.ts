@@ -13,7 +13,7 @@ import {
   calculateBalance,
   formatCurrency,
   getCurrentMonthStr,
-  getBillingCycleForDate,
+  getAppliedBillingCycle,
   getLatestBilledCycle,
   isStatsExcludedCategory,
   isCountableTransaction,
@@ -174,7 +174,7 @@ function buildSummary(data: FinanceData): string {
         // Mirrors the Dashboard: a points redemption isn't a charge on the credit line, so quoting it
         // as part of the dues would overstate them (and disagree with the card balance).
         if (!affectsRupeeBalance(t)) return;
-        const cyc = t.appliedBillingCycleYearMonth || getBillingCycleForDate(t.date, statementDay);
+        const cyc = getAppliedBillingCycle(t, statementDay);
         if (cyc === unbilledCycle) unbilled += t.type === 'debit' ? t.amount : -t.amount;
         else if (cyc === billedCycle) billed += t.type === 'debit' ? t.amount : -t.amount;
       });

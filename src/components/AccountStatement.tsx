@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { format, parseISO } from 'date-fns';
-import { CreditCard, Calendar, ChevronLeft } from 'lucide-react';
+import { format, parseISO, differenceInCalendarMonths } from 'date-fns';
+import { CreditCard, Calendar, ChevronLeft, ArrowDown, ArrowUp, RotateCcw, Undo2, X } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import { getCategoryIcon } from './transactionIcons';
 import RollingNumber from './RollingNumber';
-import { getBillingCycleForDate, getCardGradients, formatBillingCycleRange, affectsRupeeBalance, resolveCardIssuer } from '../utils';
+import {
+  getBillingCycleForDate, getCardGradients, formatBillingCycleRange, affectsRupeeBalance, resolveCardIssuer,
+  getAppliedBillingCycle, getNaturalBillingCycle, shiftBillingCycle, isNearStatementCut,
+} from '../utils';
+import { hapticTap } from '../utils/haptics';
 import { CardSurface } from './CardSurface';
 import { CardChip } from './CardChip';
 import { CardBrandLogo } from './CardBrandLogo';
@@ -58,12 +62,14 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
   const acc = account;
   const statementDay = acc.statementDay || 1;
   const currentCycle = getBillingCycleForDate(format(new Date(), 'yyyy-MM-dd'), statementDay);
-  const getTransactionCycle = (tx: Transaction) => {
-    if (tx.type === 'credit' && tx.appliedBillingCycleYearMonth) {
-      return tx.appliedBillingCycleYearMonth;
-    }
-    return getBillingCycleForDate(tx.date, statementDay);
-  };
+  // Reads the manual override for debits as well as payments — see getAppliedBillingCycle. The
+  // card's outstanding balance (calculateCycleBalanceForCycle) and the bill reminder
+  // (calculateTotalSpendPerCycle) go through the same helper, so a charge moved here moves
+  // everywhere at once rather than leaving this screen disagreeing with the card it belongs to.
+  const getTransactionCycle = (tx: Transaction) => getAppliedBillingCycle(tx, statementDay);
+
+  // Declared up here rather than beside the other view state below: cycleOptions reads it.
+  const [selectedCycle, setSelectedCycle] = useState(currentCycle);
   // This is only ever opened for credit_card accounts (see Accounts.tsx's onViewStatement gating), so
   // no CATEGORY is excluded from the due calculation — a prior version dropped
   // 'transfer'/'ncmc travel recharge'/'mutual funds' (borrowed from a spend-analytics pattern meant for
@@ -77,8 +83,12 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
   // the two must agree or the statement contradicts the card. Redemptions are a reward-wallet ledger
   // and want their own surface, not a line in the card's bill.
   const relevantAccountTransactions = transactions.filter(t => t.accountId === acc.id && affectsRupeeBalance(t));
+  // selectedCycle is in the set so the cycle you are LOOKING at always has an option to point at.
+  // Moving the last charge off a past cycle empties it, which would otherwise drop it from this
+  // list while the picker still names it, leaving the trigger blank on the screen that caused it.
   const cycleOptions = Array.from(new Set([
     currentCycle,
+    selectedCycle,
     ...relevantAccountTransactions.map(getTransactionCycle)
   ]))
     .sort((a, b) => b.localeCompare(a))
@@ -98,12 +108,103 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
       };
     });
 
-  const [selectedCycle, setSelectedCycle] = useState(currentCycle);
   const [showAllTransactions, setShowAllTransactions] = useState(false);
   const [isTransactionsClipped, setIsTransactionsClipped] = useState(false);
 
   const selectedDate = parseISO(`${selectedCycle}-01`);
   const selectedMonthName = format(selectedDate, 'MMMM');
+
+  // ---- Long-press a charge to move it between cycles ------------------------------------------
+  //
+  // Long-press, not swipe. Swipe-right on a transaction row already means DELETE everywhere else
+  // in the app (Transactions.tsx, and the tour teaches it), and borrowing a destructive gesture
+  // for a reversible one is the worst trade available. Long-press's other meaning — drag to
+  // reorder — doesn't exist on this screen, so there's nothing here to confuse it with.
+  //
+  // Movable: purchases, refunds, reversals — anything whose cycle depends on when the bank got
+  // round to POSTING it. Two categories are excluded, and neither is long-pressable nor tagged,
+  // because for both the cycle is decided rather than observed:
+  //
+  // - CC Payment: you choose the statement it reduces when you log it ("Apply Payment To"). The log
+  //   form also re-derives the field on every save, so a move here would be overwritten anyway.
+  // - Cashback: generated to the card's own policy — same cycle or next, per cashbackCreditCycle —
+  //   and Cashback.tsx dates the credit off that rule. A bank that pays in the following cycle pays
+  //   in the following cycle; it doesn't slip to a third one the way a merchant's batch can.
+  const FIXED_CYCLE_CATEGORIES = new Set(['cc payment', 'cashback']);
+  const canMoveCycle = (tx: Transaction) =>
+    !FIXED_CYCLE_CATEGORIES.has((tx.category || '').toLowerCase());
+
+  const LONG_PRESS_MS = 450;
+  const PRESS_CANCEL_PX = 10;
+  const pressTimer = useRef<number | null>(null);
+  const pressOrigin = useRef<{ x: number; y: number } | null>(null);
+  const undoTimer = useRef<number | null>(null);
+  const [moveTarget, setMoveTarget] = useState<Transaction | null>(null);
+  const [undoState, setUndoState] = useState<{ tx: Transaction; message: string } | null>(null);
+  const updateTransaction = context?.updateTransaction;
+
+  const cancelPress = () => {
+    if (pressTimer.current !== null) {
+      clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+    pressOrigin.current = null;
+  };
+
+  const startPress = (tx: Transaction, x: number, y: number) => {
+    if (!canMoveCycle(tx) || !updateTransaction) return;
+    cancelPress();
+    pressOrigin.current = { x, y };
+    pressTimer.current = window.setTimeout(() => {
+      pressTimer.current = null;
+      hapticTap();
+      setMoveTarget(tx);
+    }, LONG_PRESS_MS);
+  };
+
+  // A press that turns into a scroll is a scroll. The rows sit in a scrollable viewport once the
+  // list is expanded, and a finger flicking it starts out identical to a press being held.
+  const trackPress = (x: number, y: number) => {
+    if (!pressOrigin.current) return;
+    if (Math.hypot(x - pressOrigin.current.x, y - pressOrigin.current.y) > PRESS_CANCEL_PX) cancelPress();
+  };
+
+  useEffect(() => () => {
+    if (pressTimer.current !== null) clearTimeout(pressTimer.current);
+    if (undoTimer.current !== null) clearTimeout(undoTimer.current);
+  }, []);
+
+  // `target` of undefined clears the override and hands the charge back to its own date. Callers
+  // only ever pass the natural cycle's neighbours — see the sheet below for why that's clamped.
+  const applyCycleMove = (tx: Transaction, target: string | undefined) => {
+    if (!updateTransaction) return;
+    // cycleMovedManually is what tells the log form this cycle was chosen by a person and must
+    // survive a later save. Without it the form clears the field — which is correct for the stamps
+    // an old build left on card credits, and would silently undo this move.
+    updateTransaction({
+      ...tx,
+      appliedBillingCycleYearMonth: target,
+      cycleMovedManually: target ? true : undefined,
+    });
+    setMoveTarget(null);
+    // The row vanishing off this statement IS the confirmation the move worked, which only reads
+    // as success rather than loss if it comes with a way back.
+    if (undoTimer.current !== null) clearTimeout(undoTimer.current);
+    setUndoState({
+      tx,
+      message: target
+        ? `Moved to ${format(parseISO(`${target}-01`), 'MMMM')}`
+        : 'Reset to transaction date',
+    });
+    undoTimer.current = window.setTimeout(() => setUndoState(null), 6000);
+  };
+
+  const undoCycleMove = () => {
+    if (!undoState || !updateTransaction) return;
+    updateTransaction(undoState.tx);
+    if (undoTimer.current !== null) clearTimeout(undoTimer.current);
+    setUndoState(null);
+  };
 
   const cycleTxs = relevantAccountTransactions
     .filter(t => getTransactionCycle(t) === selectedCycle)
@@ -372,13 +473,47 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
                   <p className="text-center text-muted" style={{ opacity: 0.5 }}>no transactions recorded yet.</p>
                 </div>
               ) : (
-                cycleTxs.map((tx, idx) => (
-                  <div key={tx.id} className="flex justify-between align-center fade-in" style={{
-                    borderBottom: '1px solid var(--border-color)',
-                    opacity: 0.9,
-                    padding: '0.85rem 0',
-                    animationDelay: `${idx * 0.05}s`
-                  }}>
+                cycleTxs.map((tx, idx) => {
+                  const naturalCycle = getNaturalBillingCycle(tx, statementDay);
+                  // Already moved by hand: say where it came from, so a 15 Aug row sitting among
+                  // September's dates reads as deliberate rather than as a sorting bug.
+                  //
+                  // Both tags track the gesture exactly: a row that can't be long-pressed must not
+                  // be marked, or the mark points at a control that isn't there. A CC payment
+                  // sitting outside its date's cycle is not a correction needing explanation — it's
+                  // the normal result of "Apply Payment To", chosen when the payment was logged, so
+                  // tagging it told the person who set it something they already knew.
+                  const isMoved = canMoveCycle(tx) && getTransactionCycle(tx) !== naturalCycle;
+                  // Near enough to this cycle's cut that the bank may post it after the statement
+                  // generates. Doubles as the affordance — an unmarked long-press is undiscoverable.
+                  const nearCut = canMoveCycle(tx) && !isMoved
+                    && naturalCycle === selectedCycle
+                    && isNearStatementCut(tx.date, statementDay);
+                  return (
+                  <div
+                    key={tx.id}
+                    className="flex justify-between align-center fade-in"
+                    style={{
+                      borderBottom: '1px solid var(--border-color)',
+                      opacity: 0.9,
+                      padding: '0.85rem 0',
+                      animationDelay: `${idx * 0.05}s`,
+                      // Android pops text-selection handles on a long press otherwise, on top of
+                      // the sheet.
+                      userSelect: 'none',
+                      WebkitUserSelect: 'none',
+                      WebkitTouchCallout: 'none',
+                    }}
+                    onContextMenu={e => e.preventDefault()}
+                    onTouchStart={e => startPress(tx, e.touches[0].clientX, e.touches[0].clientY)}
+                    onTouchMove={e => trackPress(e.touches[0].clientX, e.touches[0].clientY)}
+                    onTouchEnd={cancelPress}
+                    onTouchCancel={cancelPress}
+                    onMouseDown={e => startPress(tx, e.clientX, e.clientY)}
+                    onMouseMove={e => trackPress(e.clientX, e.clientY)}
+                    onMouseUp={cancelPress}
+                    onMouseLeave={cancelPress}
+                  >
                     <div className="flex align-center" style={{ gap: '0.75rem', flex: 1, minWidth: 0 }}>
                       <div style={{
                         width: '38px',
@@ -396,7 +531,33 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
                       </div>
                       <div className="flex-col" style={{ minWidth: 0 }}>
                         <span style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{tx.description}</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{tx.category.toLowerCase()}</span>
+                        <div className="flex align-center" style={{ gap: '0.4rem', minWidth: 0 }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{tx.category.toLowerCase()}</span>
+                          {(isMoved || nearCut) && (
+                            <span
+                              className="text-mono uppercase"
+                              style={{
+                                fontSize: '0.58rem',
+                                letterSpacing: '0.4px',
+                                whiteSpace: 'nowrap',
+                                flexShrink: 0,
+                                padding: '0.08rem 0.35rem',
+                                borderRadius: '4px',
+                                color: isMoved ? 'var(--accent)' : 'var(--text-secondary)',
+                                background: 'var(--bg-hover)',
+                                // Dashed while it's only a possibility; solid once you've decided.
+                                border: isMoved
+                                  ? '1px solid var(--accent)'
+                                  : '1px dashed var(--border-color)',
+                                opacity: isMoved ? 0.95 : 0.75,
+                              }}
+                            >
+                              {isMoved
+                                ? `from ${format(parseISO(`${naturalCycle}-01`), 'MMM')}`
+                                : 'may settle next'}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <div className="flex-col align-end" style={{ flexShrink: 0, marginLeft: '0.75rem' }}>
@@ -408,7 +569,8 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
                       </span>
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
 
@@ -444,6 +606,134 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
 
         </div>
       </div>
+
+      {/* Move sheet. Both destinations are measured from the charge's NATURAL cycle, never from
+          wherever it currently sits, so the reachable set stays {previous, natural, next} no matter
+          how many times it's moved — otherwise three taps would put a purchase three months out
+          with nothing on screen explaining why. Options it already occupies are dropped, so the
+          sheet never offers a move that does nothing. */}
+      {moveTarget && (() => {
+        const natural = getNaturalBillingCycle(moveTarget, statementDay);
+        const applied = getTransactionCycle(moveTarget);
+        const monthName = (c: string) => format(parseISO(`${c}-01`), 'MMMM');
+        // Up is later, down is earlier — the direction the cycle picker above already sorts in
+        // (newest cycle at the top), so "up" moves the charge the same way the list reads.
+        const choices = [
+          {
+            cycle: shiftBillingCycle(natural, 1) as string | undefined,
+            icon: <ArrowUp size={20} />,
+            label: `Move to ${monthName(shiftBillingCycle(natural, 1))} statement`,
+            sub: 'Posted after this cycle was cut',
+          },
+          {
+            cycle: shiftBillingCycle(natural, -1) as string | undefined,
+            icon: <ArrowDown size={20} />,
+            label: `Move to ${monthName(shiftBillingCycle(natural, -1))} statement`,
+            sub: 'Posted before this cycle opened',
+          },
+          {
+            cycle: undefined,
+            icon: <RotateCcw size={20} />,
+            label: 'Reset to transaction date',
+            sub: `Bills in ${monthName(natural)}, as dated`,
+          },
+        ]
+          .filter(c => (c.cycle ?? natural) !== applied)
+          // Nearest destination first, measured from the cycle you're looking at. On the open cycle
+          // holding a charge that was pushed forward, that puts "Reset" (one month back) above
+          // "Move to July" (two) — the likely correction ahead of the distant one. Ties keep the
+          // declared order, so an unmoved charge still offers next-then-previous, up-then-down.
+          .sort((a, b) =>
+            Math.abs(differenceInCalendarMonths(parseISO(`${a.cycle ?? natural}-01`), selectedDate))
+            - Math.abs(differenceInCalendarMonths(parseISO(`${b.cycle ?? natural}-01`), selectedDate))
+          );
+
+        return (
+          <div className="modal-overlay" onClick={() => setMoveTarget(null)}>
+            <div className="modal-content" onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                {/* "Transaction", not "Charge": refunds move too, and a refund isn't a charge. */}
+                <h3>Move Transaction</h3>
+                <button onClick={() => setMoveTarget(null)}><X /></button>
+              </div>
+              <div className="modal-body flex-col gap-3">
+                <div className="flex-col" style={{ gap: '0.15rem', marginBottom: '0.25rem' }}>
+                  <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {moveTarget.description}
+                  </span>
+                  <span className="text-mono text-xs text-secondary">
+                    {formatCredCurrency(moveTarget.amount, 'var(--font-mono)')}
+                    {' · '}
+                    {new Date(moveTarget.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }).toUpperCase()}
+                    {' · billed in '}{monthName(applied)}
+                  </span>
+                </div>
+
+                {choices.map(choice => (
+                  <button
+                    key={choice.cycle ?? 'reset'}
+                    className="btn btn-secondary w-100 flex-row align-center gap-3"
+                    style={{ justifyContent: 'flex-start', padding: '1rem', textAlign: 'left' }}
+                    onClick={() => applyCycleMove(moveTarget, choice.cycle)}
+                  >
+                    {choice.icon}
+                    <span className="flex-col" style={{ gap: '0.15rem', minWidth: 0 }}>
+                      <span>{choice.label}</span>
+                      {/* .btn imposes uppercase + 1px letter-spacing on everything inside it, which
+                          on a full sentence read louder and wider than the label above it even at a
+                          smaller font-size. Opted out here so the explanation stays subordinate to
+                          the action, in the sentence case it's written in. */}
+                      <span style={{
+                        fontSize: '0.7rem',
+                        fontWeight: 400,
+                        color: 'var(--text-secondary)',
+                        textTransform: 'none',
+                        letterSpacing: 'normal',
+                      }}>{choice.sub}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary w-100" style={{ padding: '1rem' }} onClick={() => setMoveTarget(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {undoState && (
+        <div
+          className="fade-in flex align-center justify-between"
+          style={{
+            position: 'fixed',
+            left: '1rem',
+            right: '1rem',
+            bottom: `calc(1.25rem + env(safe-area-inset-bottom, 12px))`,
+            // Above .modal-overlay (9000) so it isn't buried if another sheet opens over it.
+            zIndex: 9100,
+            gap: '1rem',
+            padding: '0.75rem 0.85rem 0.75rem 1rem',
+            borderRadius: '12px',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+          }}
+        >
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {undoState.message}
+          </span>
+          <button
+            className="flex align-center"
+            onClick={undoCycleMove}
+            style={{ gap: '0.35rem', flexShrink: 0, background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer', padding: '0.15rem 0.25rem' }}
+          >
+            <Undo2 size={15} /> Undo
+          </button>
+        </div>
+      )}
     </div>
   );
 }
