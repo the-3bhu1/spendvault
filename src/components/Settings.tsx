@@ -218,6 +218,21 @@ export default function Settings() {
     });
   };
 
+  // Same alert, but the caller can wait for it to be dismissed before doing the next thing. Needed
+  // where an OS sheet follows: fire-and-forget would open the share sheet over the top of the
+  // message explaining why it's opening. Safe to await — an alert renders no cancel button and its
+  // backdrop click routes to onConfirm (ConfirmDialog), so OK is the only way out.
+  const showAlertAsync = (message: string, title: string = 'Notice') =>
+    new Promise<void>(resolve => {
+      setConfirmConfig({
+        title,
+        message,
+        confirmLabel: 'OK',
+        isAlert: true,
+        onConfirm: () => { setConfirmConfig(null); resolve(); }
+      });
+    });
+
   // Reset security state when navigating away from profile
   useEffect(() => {
     if (activeView !== 'profile') {
@@ -728,7 +743,10 @@ export default function Settings() {
 
   // ── Backup / Restore state ──────────────────────────────────────────────
   const importFileRef = useRef<HTMLInputElement>(null);
-  const [exportStatus, setExportStatus] = useState<{ fileName: string; sizeKb: string } | null>(null);
+  // `mode` distinguishes the two outcomes, which are not the same thing and used to render
+  // identically: 'saved' means a file was written to the device, 'shared' means it was only handed
+  // to the OS share sheet. Sharing writes nothing the user can go and find — see exportBackup.
+  const [exportStatus, setExportStatus] = useState<{ fileName: string; sizeKb: string; mode: 'saved' | 'shared'; fellBackToShare?: boolean } | null>(null);
   const [importPreview, setImportPreview] = useState<{ txCount: number; accountCount: number; sizeKb: string; raw: string } | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -874,6 +892,9 @@ export default function Settings() {
   const exportBackup = async (isSharing: boolean = false) => {
     try {
       const { json, fileName, sizeKb } = await buildFileAndShare();
+      // Set when a "Save to Documents" tap could not write the file and had to hand off to the
+      // share sheet, so the result panel can explain why a save ended somewhere else.
+      let fellBackToShare = false;
 
       if (Capacitor.isNativePlatform()) {
         // Request storage permissions explicitly
@@ -894,14 +915,30 @@ export default function Settings() {
               encoding: Encoding.UTF8,
             });
             showAlert(`Backup successfully saved to your device's Documents folder:\n\n${fileName}`, 'Backup Saved');
-            setExportStatus({ fileName, sizeKb });
+            setExportStatus({ fileName, sizeKb, mode: 'saved' });
             return;
           } catch (e) {
+            // Told, not just logged. The share sheet appearing after a SAVE tap is otherwise
+            // unexplained — it reads as the wrong button having been pressed, and the user has no
+            // way to know the save was attempted and refused. Awaited so the message is read and
+            // dismissed before the OS sheet covers it.
             console.warn('Direct save to Documents failed, falling back to share sheet', e);
+            fellBackToShare = true;
+            await showAlertAsync(
+              `Couldn't write to your Documents folder — this device may restrict app access to it.\n\n`
+              + `Opening the share sheet instead. Pick Files (or a cloud app) to keep a copy of ${fileName}.`,
+              'Save Failed'
+            );
           }
         }
 
-        // Share Sheet flow (used for "Share Directly" or as fallback for "Save")
+        // Share Sheet flow (used for "Share Directly" or as fallback for "Save").
+        //
+        // Directory.Cache is the app's OWN private cache, not a folder the user can browse — it
+        // exists only to give the share sheet something to hand over, and Android reclaims it at
+        // will. So nothing is saved to the device by this path: whether a file ends up anywhere
+        // depends entirely on which target is picked (Drive keeps a copy, Files saves one, WhatsApp
+        // sends one). Hence mode 'shared', which the UI must not report as a saved backup.
         const result = await Filesystem.writeFile({
           path: fileName,
           data: json,
@@ -914,7 +951,7 @@ export default function Settings() {
           // We provide ONLY the URL here to trigger the "File" handler in Android
           // instead of the "Social Share" handler.
         });
-        setExportStatus({ fileName, sizeKb });
+        setExportStatus({ fileName, sizeKb, mode: 'shared', fellBackToShare });
       } else {
         // Web: trigger browser download directly
         const blob = new Blob([json], { type: 'application/json' });
@@ -924,7 +961,7 @@ export default function Settings() {
         a.download = fileName;
         a.click();
         URL.revokeObjectURL(url);
-        setExportStatus({ fileName, sizeKb });
+        setExportStatus({ fileName, sizeKb, mode: 'saved' });
       }
     } catch (err: any) {
       // User cancelled the share sheet — not a real error
@@ -1543,21 +1580,43 @@ export default function Settings() {
           {/* Primary: Download file */}
           <div className="card flex-col gap-4">
             <SettingsCardHeader icon={Download} title="Download Backup File" />
-            <p className="text-muted text-sm">Saves a <code>.json</code> file to your device's Downloads folder. Import it anytime to restore.</p>
+            {/* Documents, not Downloads: exportBackup writes to Directory.Documents, and the
+                success alert has always said so. The two labels here were the odd ones out. */}
+            <p className="text-muted text-sm">Saves a <code>.json</code> file to your device's Documents folder. Import it anytime to restore.</p>
 
             {exportStatus ? (
               <div className="flex-col gap-3">
                 <div style={{ padding: '1rem', background: 'var(--bg-color)', borderRadius: '12px', border: '1px solid var(--success)' }}>
                   <div className="flex align-center gap-2" style={{ marginBottom: '0.4rem' }}>
                     <Check size={16} className="text-success" />
-                    <span className="font-bold text-sm" style={{ color: 'var(--success)' }}>Backup saved!</span>
+                    <span className="font-bold text-sm" style={{ color: 'var(--success)' }}>
+                      {exportStatus.mode === 'saved' ? 'Backup saved!' : 'Backup shared!'}
+                    </span>
                   </div>
                   <span className="text-xs text-muted" style={{ fontFamily: 'monospace' }}>{exportStatus.fileName}</span>
                   <span className="text-xs text-muted" style={{ display: 'block', marginTop: '0.2rem' }}>{exportStatus.sizeKb} KB</span>
+                  {/* Sharing leaves nothing on the device, so say where it did go: whether a file
+                      exists now is up to the app that was picked, and claiming a saved backup here
+                      is how someone ends up with no backup at all. */}
+                  {exportStatus.mode === 'shared' && (
+                    <span className="text-xs text-muted" style={{ display: 'block', marginTop: '0.5rem' }}>
+                      {exportStatus.fellBackToShare
+                        ? 'Saving to Documents failed, so this was shared instead. Nothing was saved to this device.'
+                        : 'Sent to the app you chose. Nothing was saved to this device.'}
+                    </span>
+                  )}
                 </div>
-                <button className="btn btn-secondary flex align-center justify-center" style={{ padding: '0.9rem' }} onClick={() => exportBackup(true)}>
-                  <Share2 size={18} style={backupActionIconStyle} /> Share File
-                </button>
+                {/* Each state offers the action NOT just taken — sharing after a save, saving after
+                    a share — instead of repeating the one that already happened. */}
+                {exportStatus.mode === 'saved' ? (
+                  <button className="btn btn-secondary flex align-center justify-center" style={{ padding: '0.9rem' }} onClick={() => exportBackup(true)}>
+                    <Share2 size={18} style={backupActionIconStyle} /> Share File
+                  </button>
+                ) : (
+                  <button className="btn btn-secondary flex align-center justify-center" style={{ padding: '0.9rem' }} onClick={() => exportBackup(false)}>
+                    <Download size={18} style={backupActionIconStyle} /> Save to Device
+                  </button>
+                )}
                 <button className="btn btn-secondary flex align-center justify-center gap-2" style={{ padding: '0.9rem' }} onClick={() => setExportStatus(null)}>
                   Export Again
                 </button>
@@ -1565,7 +1624,7 @@ export default function Settings() {
             ) : (
               <div className="flex-col gap-3">
                 <button className="btn btn-primary w-100 flex align-center justify-center" style={{ padding: '0.9rem 1.5rem', minHeight: '48px' }} onClick={() => exportBackup(false)}>
-                  <Download size={18} style={backupActionIconStyle} /> Save to Downloads
+                  <Download size={18} style={backupActionIconStyle} /> Save to Documents
                 </button>
                 <button className="btn btn-secondary w-100 flex align-center justify-center" style={{ padding: '0.9rem 1.5rem', minHeight: '48px' }} onClick={() => exportBackup(true)}>
                   <Share2 size={18} style={backupActionIconStyle} /> Share Directly
@@ -2506,7 +2565,7 @@ export default function Settings() {
             <div className="modal-header">
               <h3>Profile Photo</h3>
               <button onClick={() => setIsActionSheetOpen(false)}>
-                <CloseIcon size={20} />
+                <CloseIcon />
               </button>
             </div>
             <div className="modal-body flex-col gap-3">
@@ -2566,7 +2625,7 @@ export default function Settings() {
           <div className="modal-content">
             <div className="modal-header">
               <h3>Crop Profile Picture</h3>
-              <button onClick={() => setIsCropperOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)' }}><CloseIcon size={20} /></button>
+              <button onClick={() => setIsCropperOpen(false)}><CloseIcon /></button>
             </div>
             <div className="modal-body flex-col align-center gap-6">
               <div
