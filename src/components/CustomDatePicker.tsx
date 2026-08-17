@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   format, 
   addMonths, 
@@ -17,7 +17,7 @@ import {
   getYear,
   getMonth
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, X } from 'lucide-react';
 
 interface CustomDatePickerProps {
   value: string; // yyyy-MM-dd
@@ -29,10 +29,9 @@ interface CustomDatePickerProps {
 
 type ViewMode = 'calendar' | 'selector';
 
-const CustomDatePicker: React.FC<CustomDatePickerProps> = ({ 
-  value, 
-  onChange, 
-  isOpen, 
+const DatePickerPanel: React.FC<Omit<CustomDatePickerProps, 'isOpen'>> = ({
+  value,
+  onChange,
   onClose,
   label = "Select Date"
 }) => {
@@ -63,13 +62,6 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
   const yearStart = activeYear - 3 + yearPageOffset;
   const visibleYears = Array.from({ length: VISIBLE_YEARS }, (_, i) => yearStart + i);
 
-  // Reset year page offset when switching to selector
-  useEffect(() => {
-    if (viewMode === 'selector') {
-      setYearPageOffset(0);
-    }
-  }, [viewMode]);
-
   const handlePrevMonth = () => setViewDate(subMonths(viewDate, 1));
   const handleNextMonth = () => setViewDate(addMonths(viewDate, 1));
   
@@ -77,8 +69,6 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
     onChange(format(date, 'yyyy-MM-dd'));
     onClose();
   };
-
-  if (!isOpen) return null;
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 9999 }}>
@@ -93,7 +83,7 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
               {format(selectedDate, 'EEE, d MMM yyyy')}
             </h3>
           </div>
-          <button onClick={onClose}>✕</button>
+          <button onClick={onClose}><X /></button>
         </div>
 
         <div className="modal-body flex-col gap-4" style={{ padding: '1rem 1.5rem' }}>
@@ -104,7 +94,10 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
                 {/* Calendar Header */}
                 <div className="flex justify-between align-center" style={{ marginBottom: '1.5rem' }}>
                   <button 
-                    onClick={() => setViewMode('selector')}
+                    // Paging the year list is a move within one visit to the selector, so it starts
+                    // from the active year each time the selector is opened. Done here, at the only
+                    // way in, rather than in an effect watching viewMode.
+                    onClick={() => { setYearPageOffset(0); setViewMode('selector'); }}
                     className="flex align-center gap-2 text-mono uppercase clickable" 
                     style={{ margin: 0, fontSize: '0.9rem', fontWeight: 800, background: 'var(--bg-hover)', padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}
                   >
@@ -271,5 +264,19 @@ const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
     </div>
   );
 };
+
+// Mounted only while open, which is the whole point: the panel's useState initialisers then run on
+// every open, so it always starts on the month `value` names.
+//
+// It used to render null while STAYING mounted, so those initialisers ran exactly once — on first
+// construction — and whatever month that was got frozen. Editing an entry made it visible: the log
+// form seeds its state with today and loads the real date in a later effect, so the picker latched
+// onto today, and opening it on an April transaction showed an August grid beneath a header
+// correctly reading "Fri, 17 Apr 2026" — selectedDate is derived and kept up, viewDate never did.
+//
+// Doing it by remount rather than by syncing in an effect also resets the month/year pane and the
+// year paging for free, and leaves no stale view state to go wrong later.
+const CustomDatePicker: React.FC<CustomDatePickerProps> = ({ isOpen, ...rest }) =>
+  isOpen ? <DatePickerPanel {...rest} /> : null;
 
 export default CustomDatePicker;

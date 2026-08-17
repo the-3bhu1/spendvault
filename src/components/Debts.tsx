@@ -17,7 +17,8 @@ import {
   UserPlus,
   Wallet,
   Edit2,
-  Calendar
+  Calendar,
+  X
 } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
@@ -820,7 +821,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
           <div className="modal-content" onClick={e => e.stopPropagation()} style={{ padding: 0 }}>
             <div className="modal-header">
               <h3>Edit Name</h3>
-              <button onClick={() => setIsEditingName(false)}>✕</button>
+              <button onClick={() => setIsEditingName(false)}><X /></button>
             </div>
             <div className="modal-body flex-col gap-4" style={{ padding: '1rem 1.5rem 2rem' }}>
               <div className="input-group">
@@ -1268,7 +1269,7 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, tra
             <h3>
               {initialTx ? 'Edit' : 'Add'} {type === 'repayment' ? 'Repayment' : (type === 'lent' ? 'Lent' : 'Borrowed')}
             </h3>
-            <button onClick={onClose}>✕</button>
+            <button onClick={onClose}><X /></button>
           </div>
           <div className="modal-body flex-col gap-3 no-scrollbar" style={{ padding: '1rem 1.5rem 2rem', overflowY: 'auto' }}>
             {type === 'repayment' && (

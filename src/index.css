@@ -947,6 +947,16 @@ tr:hover td {
   transition: color 0.2s;
 }
 
+/* Every sheet closes with the same mark at the same size. Two representations used to coexist — a
+   text ✕ glyph in most sheets and a lucide <X> in Settings' — and they could not be reconciled by
+   the font-size above, which governs a glyph and does nothing to an SVG, so the icon sheets read
+   visibly smaller. Every close button is now the lucide icon, sized here rather than per call site
+   so a new sheet can't introduce a third size. */
+.modal-header button svg {
+  width: 22px;
+  height: 22px;
+}
+
 .modal-header button:hover {
   color: var(--text-primary);
 }

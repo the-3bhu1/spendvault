@@ -1392,7 +1392,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
           <div className="modal-content">
             <div className="modal-header">
               <h3>{editId ? 'Edit Account' : 'Add New Account'}</h3>
-              <button onClick={() => setIsModalOpen(false)}>✕</button>
+              <button onClick={() => setIsModalOpen(false)}><X /></button>
             </div>
             <div className="modal-body" ref={modalBodyRef}>
               <div className="input-group">
