@@ -1,0 +1,13 @@
+# Files that are EXECUTED on Linux must keep LF endings, whatever the checkout platform does.
+#
+# core.autocrlf=true on Windows rewrites text files to CRLF on checkout. For a shell script that is
+# fatal in a way that reads as nonsense: the kernel takes the whole shebang line literally and the
+# script dies with "bad interpreter: /usr/bin/env bash^M". android/gradlew was already checked out
+# with CRLF, so the release-builder container (Dockerfile.android) could never have run it.
+*.sh text eol=lf
+gradlew text eol=lf
+
+# Read by the Docker daemon rather than by Windows.
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf
+docker-compose.yml text eol=lf
