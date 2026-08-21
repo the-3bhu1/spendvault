@@ -26,6 +26,15 @@ export interface PendingSmsTransaction {
   relationKind?: SmsRelationKind;
 }
 
+/** One SMS sitting in the Gemini second filter, or the verdict of one that just failed it.
+ *  It exists purely so the ledger has something to render during the 2-5s the classify call
+ *  takes: without it a notification tap lands on a screen with no pending card and no
+ *  explanation, and a rejected SMS never explains why nothing appeared. */
+export interface SmsScreening {
+  id: string;
+  status: 'screening' | 'rejected';
+}
+
 export type SmsRelationKind = 'cc_payment' | 'investment' | 'transfer';
 type SmsSemantic = SmsRelationKind | 'generic';
 
@@ -60,6 +69,7 @@ interface FinanceContextType {
   pendingTransfer: PendingTransfer | null;
   setPendingTransfer: (transfer: PendingTransfer | null) => void;
   smsQueue: PendingSmsTransaction[];
+  smsScreening: SmsScreening[];
   addToSmsQueue: (tx: PendingSmsTransaction) => void;
   removeFromSmsQueue: (index: number) => void;
   removeSmsByMatch: (amount: number, type: string, targetAccountId: string) => void;
@@ -71,6 +81,7 @@ interface FinanceContextType {
   addTransaction: (transaction: Transaction) => void;
   updateTransaction: (transaction: Transaction) => void;
   reorderTransactions: (...txs: Transaction[]) => void;
+  setRewardLegExclusion: (legId: string, excludedAmount: number | undefined) => void;
   deleteTransaction: (id: string) => void;
   updateCashbackStatement: (statement: CashbackStatement) => void;
   updateCategories: (categories: string[]) => void;
@@ -104,6 +115,9 @@ const LOCAL_STORAGE_KEY = 'minimalist_finance_data_v1';
 // of `data` (and therefore out of backup export/import) while still surviving app kills/backgrounding
 // the same way `data` does — see the persistence effect below.
 const SMS_QUEUE_STORAGE_KEY = 'minimalist_finance_sms_queue_v1';
+/** How long a "filtered out" verdict stays on screen before the ledger closes back up. Long
+ *  enough to read a two-line notice, short enough not to feel like a stuck card. */
+const SMS_REJECTION_NOTICE_MS = 3200;
 
 // Renumber each day's `order` to a gap-free, duplicate-free 0..N-1 run that matches the order the
 // list already renders in. Drag-reorder renumbers a day 0..N-1 on every move and assumes those
@@ -151,6 +165,11 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       return [];
     }
   });
+  const [smsScreening, setSmsScreening] = useState<SmsScreening[]>([]);
+  // Timers that retire a rejection notice. Tracked so an unmount cannot leave one running.
+  const screeningTimers = useRef<number[]>([]);
+  useEffect(() => () => { screeningTimers.current.forEach(t => clearTimeout(t)); }, []);
+
   const [recentlyProcessedSms, setRecentlyProcessedSms] = useState<{ amount: number; type: string; sourceIdentifier?: string; source?: string; raw?: string; timestamp: number }[]>([]);
 
   // Always-current snapshot of the user, so the async SMS second filter can read the
@@ -272,15 +291,32 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   // transaction is never silently lost. OTPs are already excluded on-device (SmsParser.kt).
   const addToSmsQueue = async (tx: PendingSmsTransaction) => {
     if (userRef.current?.aiSmsFilter) {
+      // Announce the wait before starting it. The classify call takes 2-5s, which is long
+      // enough that a user arriving from the notification would otherwise see an unchanged
+      // ledger and assume the tap did nothing.
+      const id = `scr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      setSmsScreening(prev => [...prev, { id, status: 'screening' }]);
       try {
         const ok = await classifySmsIsTransaction(tx.raw);
         if (!ok) {
           console.log("SpendVaultSms: Gemini second filter rejected SMS as non-transaction:", tx.raw);
+          // Don't just vanish: the placeholder turns into a verdict and retires itself, so the
+          // user learns the SMS was judged and dropped rather than being left waiting for a
+          // card that is never coming.
+          setSmsScreening(prev => prev.map(s => (s.id === id ? { ...s, status: 'rejected' } : s)));
+          const timer = window.setTimeout(
+            () => setSmsScreening(prev => prev.filter(s => s.id !== id)),
+            SMS_REJECTION_NOTICE_MS,
+          );
+          screeningTimers.current.push(timer);
           return;
         }
       } catch (e) {
         console.error("SpendVaultSms: Gemini second filter failed, failing open:", e);
       }
+      // Passed, or the filter errored and we fail open — either way the placeholder hands
+      // over to the real pending card in the same spot.
+      setSmsScreening(prev => prev.filter(s => s.id !== id));
     }
     enqueueSms(tx);
   };
@@ -1385,8 +1421,15 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
                 updated.amount = updatedTransaction.amount;
                 updated.numberOfShares = updatedTransaction.numberOfShares;
               } else {
-                // Non-split transfer/payment: 1:1
-                updated.amount = updatedTransaction.amount;
+                /* Transfers are 1:1 unless the row says otherwise. counterpartAmount is what the
+                   FAR side moved — a discounted gift-card load credits more than it debits, a
+                   fee-charging rail credits less — so it wins here, and the mirror below keeps
+                   this leg able to describe the pair from its own side when it gets edited. */
+                const farSide = updatedTransaction.counterpartAmount;
+                updated.amount = (farSide !== undefined && farSide > 0) ? farSide : updatedTransaction.amount;
+                updated.counterpartAmount = updated.amount !== updatedTransaction.amount
+                  ? updatedTransaction.amount
+                  : undefined;
               }
 
               if (isNcmcRecharge) {
@@ -1553,6 +1596,29 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   // Linked-transaction delete cascade (both directions). See docs/LINKED_TRANSACTIONS.md
+  /* Writes ONLY the passive fields of a reward-split leg.
+   *
+   * A passive exclusion is stated against the full price, but the price lives on two rows: the
+   * anchor holds what the primary account paid and the leg holds what rewards covered. The anchor
+   * can only absorb an exclusion up to its own amount (a bigger one would make statsAmount go
+   * negative and subtract from other spends), so the remainder has to land on the leg.
+   *
+   * This is deliberately NOT updateTransaction: that treats any write to a leg as a "child edit"
+   * and rebalances the split around it — stripping paymentSourceAccountId, re-deriving the anchor.
+   * All this needs is two fields patched in place, with the leg's derived identity untouched.
+   */
+  const setRewardLegExclusion = (legId: string, excludedAmount: number | undefined) => {
+    const excluded = excludedAmount && excludedAmount > 0 ? excludedAmount : undefined;
+    setData(prev => ({
+      ...prev,
+      transactions: prev.transactions.map(t => (
+        t.id === legId
+          ? { ...t, excludeFromStats: excluded !== undefined, excludedAmount: excluded }
+          : t
+      )),
+    }));
+  };
+
   const deleteTransaction = (id: string) => {
     setData(prev => {
       const tx = prev.transactions.find(t => t.id === id);
@@ -2132,6 +2198,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       pendingTransfer,
       setPendingTransfer,
       smsQueue,
+      smsScreening,
       addToSmsQueue,
       removeFromSmsQueue,
       removeSmsByMatch,
@@ -2143,6 +2210,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       addTransaction,
       updateTransaction,
       reorderTransactions,
+      setRewardLegExclusion,
       deleteTransaction,
       updateCashbackStatement,
       updateCategories,

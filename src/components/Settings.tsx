@@ -2610,7 +2610,7 @@ export default function Settings() {
       {isViewModeOpen && data.user?.profileImage && (
         <div className="modal-overlay" style={{ background: '#000' }} onClick={() => setIsViewModeOpen(false)}>
           <button
-            style={{ position: 'absolute', top: 'calc(env(safe-area-inset-top) + 1rem)', right: '1rem', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', zIndex: 100 }}
+            style={{ position: 'absolute', top: 'calc(var(--safe-area-inset-top) + 1rem)', right: '1rem', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', zIndex: 100 }}
             onClick={() => setIsViewModeOpen(false)}
           >
             <CloseIcon size={24} />

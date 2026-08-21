@@ -108,6 +108,11 @@ class SmsReaderPlugin : Plugin() {
                 if (isAppInForeground && plugin != null && plugin.hasListeners("onTransaction")) {
                     android.util.Log.d("SpendVaultSms", "App in foreground. Dispatching directly to JS listener.")
                     plugin.dispatchTransaction(ret)
+                    // Notify even though the app is open. Until the JS side registered a listener
+                    // this branch was unreachable, so every SMS -- foreground included -- went to
+                    // the queue-and-notify path below; keeping the notification here preserves that
+                    // alert instead of silently dropping it now that live delivery works.
+                    sendLocalNotification(context, tx)
                 } else {
                     android.util.Log.d("SpendVaultSms", "App is closed/background. Saving to persistent queue & posting notification.")
                     saveToQueue(context, ret)

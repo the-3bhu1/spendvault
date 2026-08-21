@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account, InvestmentKind } from '../types';
 import { formatCurrency, formatAmount, formatDateString, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, getInvestmentKind, isCountableTransaction } from '../utils';
-import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, ChevronRight, ChevronDown, Hash, Shapes, Layers } from 'lucide-react';
+import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, ChevronRight, ChevronDown, Hash, Shapes, Layers, Sparkles, Loader2, Filter, ArrowUp } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
 import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, getInvestmentKindIcon } from './transactionIcons';
@@ -359,10 +359,17 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                     const hidesRewardLeg = (tx.rewardUsed || 0) > 0
                       && !!tx.rewardUsedAccountId
                       && counterparts!.some(c => c.tx.accountId === tx.rewardUsedAccountId);
+                    /* Same argument one category over: an instant-cashback leg is money that
+                       arrived and is hidden in here, and no category below hints at it. Reachable
+                       on far more rows than it used to be, now that instant cashback is offered on
+                       transfers and bill payments (it is the payment app that pays it, not the
+                       card issuer — see the gate in LogTransactionForm). */
+                    const hidesCashbackLeg = counterparts!.some(c => (c.tx.category || '').toLowerCase() === 'cashback');
+                    const cashbackSuffix = hidesCashbackLeg ? ' + cashback' : '';
                     if (hidesRewardLeg) {
-                      return cats.includes('cc payment')
+                      return (cats.includes('cc payment')
                         ? 'Paid from funding account + rewards'
-                        : 'Part-paid with rewards';
+                        : 'Part-paid with rewards') + cashbackSuffix;
                     }
                     // Investment legs all share one category, so the wording comes from the leg's kind.
                     const invKinds = counterparts!.filter(c => isInvestmentCategory(c.tx.category)).map(c => c.tx.investmentKind);
@@ -370,13 +377,20 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                     if (invKinds.includes('stocks')) return 'Stock purchase debited from wallet';
                     if (invKinds.includes('commodity')) return 'Commodity purchase debited from bank';
                     if (invKinds.length > 0) return 'Investment auto-logged from funding account';
-                    if (cats.includes('transfer')) return 'Transfer entry on destination account';
+                    if (cats.includes('transfer')) {
+                      return hidesCashbackLeg
+                        ? 'Transfer entry + instant cashback'
+                        : 'Transfer entry on destination account';
+                    }
                     // The grouping below always parents a CC Payment pair on the card's credit leg
                     // (creditParent || pool[0], and the credit leg is always present) — so the hidden
                     // counterpart here is always the funding/debit side, never the card. A reward leg
                     // among them is handled above.
-                    if (cats.includes('cc payment')) return 'Paid from funding account';
-                    if (cats.includes('ncmc travel recharge')) return 'Travel wallet top-up entry';
+                    if (cats.includes('cc payment')) return 'Paid from funding account' + cashbackSuffix;
+                    if (cats.includes('ncmc travel recharge')) return 'Travel wallet top-up entry' + cashbackSuffix;
+                    // A plain purchase that earned instant cashback has no other leg to describe,
+                    // so the cashback IS the group rather than a footnote on it.
+                    if (hidesCashbackLeg) return 'Instant cashback logged';
                     return 'Linked entry';
                   })()}
             </span>
@@ -409,8 +423,12 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
   );
 }
 
+/** How far down the ledger has to be before the jump-to-top button appears. Roughly one
+ *  screenful — below that the top is already a short flick away. */
+const SCROLL_TOP_REVEAL_PX = 400;
+
 export default function Transactions() {
-  const { data, pendingTransfer, setPendingTransfer, smsQueue, removeFromSmsQueue, reorderTransactions, deleteTransaction } = useFinance();
+  const { data, pendingTransfer, setPendingTransfer, smsQueue, smsScreening, removeFromSmsQueue, reorderTransactions, deleteTransaction } = useFinance();
 
   const ACCOUNT_TYPE_ORDER = ['bank_account', 'credit_card', 'debit_card', 'cash', 'e_wallet', 'rewards', 'stocks', 'mutual_funds', 'commodity'];
   const sortByAccountType = (a: { type: string }, b: { type: string }) => {
@@ -580,6 +598,19 @@ export default function Transactions() {
     [format(new Date(), 'yyyy-MM')]: true
   });
 
+  /* Scroll-to-top affordance. The ledger is the one screen that can run to hundreds of rows,
+     and the scroll container is .app-root (App.tsx owns it and restores per-tab positions),
+     not this component — so the listener has to reach for it rather than use a local ref. */
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  useEffect(() => {
+    const root = document.querySelector('.app-root');
+    if (!root) return;
+    const onScroll = () => setShowScrollTop(root.scrollTop > SCROLL_TOP_REVEAL_PX);
+    onScroll();
+    root.addEventListener('scroll', onScroll, { passive: true });
+    return () => root.removeEventListener('scroll', onScroll);
+  }, []);
+
   const toggleMonth = (month: string) => {
     setExpandedMonths(prev => ({
       ...prev,
@@ -655,6 +686,10 @@ export default function Transactions() {
     setFilterMonth(['all']);
     setFilterTag(['all']);
     setSearchQuery('');
+    // Months opened while a filter narrowed the list were opened to see THAT result, not as a
+    // lasting preference. Clearing the filter restores the whole ledger, so the accordion goes
+    // back to its default too — current month open, everything older collapsed.
+    setExpandedMonths({ [format(new Date(), 'yyyy-MM')]: true });
   };
 
   const filteredIncome = filteredTransactions.reduce((sum, tx) => {
@@ -681,41 +716,94 @@ export default function Transactions() {
 
   return (
     <div className="flex-col gap-6 transactions-tab-root">
-      {smsQueue.length > 0 && (
-        <div
-          className="card fade-in"
-          style={{
-            background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.1))',
-            border: '1px solid var(--accent)',
-            padding: '1rem',
-            cursor: 'pointer',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center'
-          }}
-          onClick={processNextSms}
-        >
-          <div className="flex align-center gap-3">
-            <div className="flex-center" style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'var(--accent)', color: 'var(--bg-color)' }}>
-              <Smartphone size={20} />
-            </div>
-            <div className="flex-col">
-              <span className="font-bold text-mono" style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>
-                {smsQueue.length} Pending {smsQueue.length === 1 ? 'Transaction' : 'Transactions'}
-              </span>
-              <span className="text-xs text-muted">
-                {smsQueue[0]?.relationKind === 'cc_payment' ? 'Next: linked card payment — pre-filled as CC Payment'
-                  : smsQueue[0]?.relationKind === 'transfer' ? 'Next: linked transfer leg'
-                  : smsQueue[0]?.relationKind === 'investment' ? 'Next: linked investment leg'
-                  : 'Tap to review and log'}
-              </span>
-            </div>
-          </div>
-          <ChevronRight size={20} className="text-muted" />
-        </div>
-      )}
       <div className="flex-col gap-4">
         <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>transactions</h2>
+
+        {/* The 2-5s Gemini second filter, made visible. Same footprint as the pending card
+            below it, so when the verdict lands the card is replaced in place rather than the
+            page jumping. A rejected SMS states the verdict for a beat and then retires — see
+            SMS_REJECTION_NOTICE_MS in FinanceContext. */}
+        {smsScreening.map(s => {
+          const isScreening = s.status === 'screening';
+          return (
+            <div
+              key={s.id}
+              className="card fade-in"
+              style={{
+                background: isScreening
+                  ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(168, 85, 247, 0.08))'
+                  : 'rgba(255,255,255,0.02)',
+                border: '1px solid var(--border-color)',
+                padding: '1rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <div className="flex align-center gap-3">
+                <div
+                  className="flex-center"
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '12px',
+                    background: isScreening ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255,255,255,0.05)',
+                    color: isScreening ? 'var(--accent)' : 'var(--text-secondary)',
+                    flexShrink: 0,
+                  }}
+                >
+                  {isScreening ? <Sparkles size={20} /> : <Filter size={20} />}
+                </div>
+                <div className="flex-col">
+                  <span className="font-bold text-mono" style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                    {isScreening ? 'Checking SMS' : 'Filtered out'}
+                  </span>
+                  <span className="text-xs text-muted">
+                    {isScreening
+                      ? 'Gemini smart SMS filter is reading this message\u2026'
+                      : 'Not a valid transaction \u2014 nothing was added.'}
+                  </span>
+                </div>
+              </div>
+              {isScreening
+                ? <Loader2 size={20} className="icon-spin text-muted" />
+                : <X size={18} className="text-muted" />}
+            </div>
+          );
+        })}
+        {smsQueue.length > 0 && (
+          <div
+            className="card fade-in"
+            style={{
+              background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.1))',
+              border: '1px solid var(--accent)',
+              padding: '1rem',
+              cursor: 'pointer',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}
+            onClick={processNextSms}
+          >
+            <div className="flex align-center gap-3">
+              <div className="flex-center" style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'var(--accent)', color: 'var(--bg-color)' }}>
+                <Smartphone size={20} />
+              </div>
+              <div className="flex-col">
+                <span className="font-bold text-mono" style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                  {smsQueue.length} Pending {smsQueue.length === 1 ? 'Transaction' : 'Transactions'}
+                </span>
+                <span className="text-xs text-muted">
+                  {smsQueue[0]?.relationKind === 'cc_payment' ? 'Next: linked card payment — pre-filled as CC Payment'
+                    : smsQueue[0]?.relationKind === 'transfer' ? 'Next: linked transfer leg'
+                    : smsQueue[0]?.relationKind === 'investment' ? 'Next: linked investment leg'
+                    : 'Tap to review and log'}
+                </span>
+              </div>
+            </div>
+            <ChevronRight size={20} className="text-muted" />
+          </div>
+        )}
         <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
           <div className="flex gap-3 align-center">
             <button
@@ -1290,6 +1378,48 @@ export default function Transactions() {
         }}
         onCancel={() => setDeleteConfirmId(null)}
       />
+
+      {/* Sits clear of the floating nav bar (which is 0.6rem + its own height off the bottom
+          edge) and above the gesture bar. Jumps rather than animates: this is a "get me out of
+          August" control, and a smooth scroll through 300 rows is a long way to watch. */}
+      {/* Always mounted, never conditionally rendered: unmounting it the instant the scroll
+          crosses back under the threshold cut the exit off mid-frame, which read as a jerk.
+          Kept in the tree, both directions are the same transition played forwards or back,
+          and it drops out of the tab order while hidden. */}
+      <button
+        aria-label="Scroll to top"
+        aria-hidden={!showScrollTop}
+        tabIndex={showScrollTop ? 0 : -1}
+        onClick={() => {
+          const root = document.querySelector('.app-root');
+          if (root) root.scrollTop = 0;
+        }}
+        style={{
+          position: 'fixed',
+          right: '1.25rem',
+          bottom: 'calc(88px + var(--safe-area-inset-bottom))',
+          width: '46px',
+          height: '46px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'var(--bg-card-elevated)',
+          color: 'var(--text-primary)',
+          border: '1px solid var(--border-color)',
+          borderRadius: '4px',
+          boxShadow: '3px 3px 0 #000',
+          cursor: 'pointer',
+          zIndex: 999,
+          opacity: showScrollTop ? 1 : 0,
+          // Sinks toward the nav bar as it goes, so it reads as the button retiring rather
+          // than the pixels simply switching off.
+          transform: showScrollTop ? 'translateY(0) scale(1)' : 'translateY(10px) scale(0.9)',
+          pointerEvents: showScrollTop ? 'auto' : 'none',
+          transition: 'opacity 0.22s ease, transform 0.22s cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
+      >
+        <ArrowUp size={20} />
+      </button>
     </div>
   );
 }

@@ -209,9 +209,9 @@ export default function OnboardingScreen() {
     return (
       <div className="onboarding-root flex-col align-center justify-between fade-in" style={{
         position: 'fixed', inset: 0, background: 'var(--bg-color)', zIndex: 10000,
-        paddingTop: 'calc(3rem + env(safe-area-inset-top, 24px))',
+        paddingTop: 'calc(3rem + var(--safe-area-inset-top))',
         paddingLeft: '2rem', paddingRight: '2rem',
-        paddingBottom: 'calc(2rem + env(safe-area-inset-bottom, 16px))',
+        paddingBottom: 'calc(2rem + var(--safe-area-inset-bottom))',
         overflowY: 'auto'
       }}>
         <div className="flex align-center w-100" style={{ maxWidth: '400px' }}>
@@ -300,10 +300,10 @@ export default function OnboardingScreen() {
       inset: 0,
       background: 'var(--bg-color)',
       zIndex: 10000,
-      paddingTop: 'calc(3rem + env(safe-area-inset-top, 24px))',
+      paddingTop: 'calc(3rem + var(--safe-area-inset-top))',
       paddingLeft: '2rem',
       paddingRight: '2rem',
-      paddingBottom: 'calc(2rem + env(safe-area-inset-bottom, 16px))',
+      paddingBottom: 'calc(2rem + var(--safe-area-inset-bottom))',
       overflowY: 'auto'
     }}>
       {/* Top Header / Progress indicator */}

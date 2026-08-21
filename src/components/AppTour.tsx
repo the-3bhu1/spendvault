@@ -645,7 +645,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       const left = (window.innerWidth - cardWidth) / 2;
       return {
         position: 'fixed',
-        top: 'calc(env(safe-area-inset-top, 0px) + 16px)',
+        top: 'calc(var(--safe-area-inset-top) + 16px)',
         bottom: 'auto',
         left: `${left}px`,
         width: `${cardWidth}px`,
@@ -658,7 +658,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       const left = (window.innerWidth - cardWidth) / 2;
       return {
         position: 'fixed',
-        bottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)',
+        bottom: 'calc(var(--safe-area-inset-bottom) + 8px)',
         top: 'auto',
         left: `${left}px`,
         width: `${cardWidth}px`,

@@ -179,6 +179,13 @@ export interface Transaction {
   amount: number;
   category: string;
   isRecurring: boolean;
+  /** What the OTHER leg of a transfer moves, when the two sides differ. Absent means 1:1.
+   *  POV-neutral on purpose: logged as a debit it is the amount the destination received,
+   *  logged as a credit it is the amount the source was debited. A discounted gift-card load
+   *  (pay ₹180, receive ₹200 of balance) and a fee-charging transfer (send ₹200, ₹197 lands)
+   *  are the same shape in opposite directions, so nothing here assumes which side is larger.
+   *  Mirrored onto the counterpart row by updateTransaction, so either leg can be edited. */
+  counterpartAmount?: number;
   appliedBillingCycleYearMonth?: string;
   /** Set only when appliedBillingCycleYearMonth was chosen deliberately by a statement-screen
    *  long-press. It exists to tell that apart from the SAME field written by an old build, which
@@ -201,7 +208,18 @@ export interface Transaction {
   isRewardTransaction?: boolean;
   order?: number; // Added to support manual ordering
   linkedTransactionId?: string; // Legacy: ID of the auto-generated counterpart
-  linkedTransactionIds?: string[]; // Multiple counterparts (e.g. Bank + Reward Account)
+  /** Ids of this row's counterparts (e.g. Bank + Reward Account on a 3-leg split).
+   *
+   *  NOT every id in here names a Transaction. A row logged from the Lending & Borrowing screen
+   *  carries the id of its DebtTransaction — an entry inside `debts[].transactions[]`, a different
+   *  collection — and that cross-reference is load-bearing: it is the primary way
+   *  updateTransaction finds the debt entry to keep in step, and the way deleteTransaction knows
+   *  to retire it (see FinanceContext, "Scenario C", and Debts.tsx handleAddDebt).
+   *
+   *  So resolving these against `transactions` alone WILL leave misses, and those misses are not
+   *  rot to be swept up — deleting them decouples a debt from its ledger row. Anything walking
+   *  this list has to tolerate an id it cannot resolve rather than treat it as broken. */
+  linkedTransactionIds?: string[];
   cashbackLevelId?: string; // ID of the specific CashbackRate selected
   excludeFromStats?: boolean;
   excludedAmount?: number;

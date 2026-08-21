@@ -109,6 +109,18 @@ function App() {
       });
     }
 
+    /* Live delivery while the app is already open. Without a registered listener the native
+       side has nowhere to hand a fresh SMS, so it falls back to the persistent queue — which
+       is only drained on cold start or resume. That is why an SMS arriving with the ledger on
+       screen used to produce nothing until the app was backgrounded and reopened. */
+    const liveSms = Capacitor.getPlatform() === 'android'
+      ? SmsReader.addListener('onTransaction', (tx) => {
+          if (!autoLogSmsRef.current) return;
+          console.log("SpendVaultSms: Live transaction received while app is open:", tx);
+          addToSmsQueueRef.current(tx);
+        })
+      : null;
+
     // Register active state resume change listener (warm restarts)
     const listener = CapApp.addListener('appStateChange', async (state) => {
       if (state.isActive) {
@@ -143,6 +155,7 @@ function App() {
 
     return () => {
       listener.then((l: PluginListenerHandle) => l.remove());
+      liveSms?.then((l: PluginListenerHandle) => l.remove());
     };
   }, [data.user?.pinHash, isAuthenticated, showSplash]);
 
@@ -512,7 +525,7 @@ function App() {
         <div 
           style={{
             position: 'fixed',
-            bottom: '100px',
+            bottom: 'calc(100px + var(--safe-area-inset-bottom))',
             left: '0',
             right: '0',
             width: 'max-content',

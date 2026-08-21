@@ -180,7 +180,7 @@ export function CustomPicker({
         <div className="no-scrollbar" style={{ 
           overflowY: 'auto', 
           flex: 1, 
-          padding: isMulti ? '0.5rem 1.5rem' : '0.5rem 1.5rem calc(1.5rem + env(safe-area-inset-bottom, 16px))' 
+          padding: isMulti ? '0.5rem 1.5rem' : '0.5rem 1.5rem calc(1.5rem + var(--safe-area-inset-bottom))' 
         }}>
           {sortedPickerOptions.length === 0 ? (
             <div className="text-center text-muted text-xs" style={{ padding: '1.5rem 0' }}>
@@ -277,7 +277,7 @@ export function CustomPicker({
         </div>
         {isMulti && (
           <div style={{ 
-            padding: '1rem 1.5rem calc(1rem + env(safe-area-inset-bottom, 16px))', 
+            padding: '1rem 1.5rem calc(1rem + var(--safe-area-inset-bottom))', 
             background: 'var(--bg-card)', 
             borderTop: '1.5px solid var(--border-color)', 
             zIndex: 10,
