@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react';
 import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitEvent, RecurringBill, Debt, DebtTransaction } from './types';
-import { BUILT_IN_ACCOUNT_TYPES } from './types';
+import { BUILT_IN_ACCOUNT_TYPES, isOffsetTypeAlias } from './types';
 import { classifySmsIsTransaction } from './services/GeminiService';
 import { clearChatHistory } from './services/ChatHistoryService';
 import { INVESTMENT_CATEGORY, isInvestmentCategory, inferInvestmentKind, getInvestmentKind, isPointsDenominated } from './utils';
@@ -343,6 +343,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           if (lowerType === 'ewallet' || lowerType === 'e-wallet') {
             return { ...acc, type: 'e_wallet' };
           }
+          // Migration: the offset ledger is now a built-in type. It began life as a hand-made custom
+          // type, so an existing account carries whatever the user typed ('offset', 'Offset Ledger',
+          // ...) — normalise every spelling onto the native 'offset' key. Nothing else about the
+          // account changes; its transactions already reference it by id.
+          if (isOffsetTypeAlias(acc.type)) {
+            return { ...acc, type: 'offset' };
+          }
           return acc;
         });
 
@@ -352,9 +359,11 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
 
         // A native type must never also be listed as a custom one — the pickers would show it twice.
         // (The 'sips' -> 'mutual_funds' rename and 'epf' being absent from nativeTypes both used to
-        // leak entries in here.)
+        // leak entries in here.) Offset goes through isOffsetTypeAlias rather than nativeTypes so the
+        // pre-native spellings ('Offset Ledger', ...) are retired along with the exact 'offset' key —
+        // otherwise the accounts migrate to the built-in type but the custom entry outlives them.
         parsed.customAccountTypes = parsed.customAccountTypes.filter(
-          (t: string) => !nativeTypes.includes(t) && t !== 'sips'
+          (t: string) => !nativeTypes.includes(t) && t !== 'sips' && !isOffsetTypeAlias(t)
         );
 
         // Recovery: Re-add any custom account types found in the accounts list that are missing

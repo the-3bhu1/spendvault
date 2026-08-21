@@ -142,6 +142,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     { id: 'stocks', name: 'Stocks', subtext: 'Market Investments' },
     { id: 'mutual_funds', name: 'Mutual Funds', subtext: 'SIP or Lumpsum Fund Holdings' },
     { id: 'commodity', name: 'Commodity', subtext: 'Physical Gold & Silver' },
+    { id: 'offset', name: 'Offset Ledger', subtext: 'Paired Entries That Net to Zero' },
     ...(data.customAccountTypes || []).map(type => ({
       id: type,
       name: type,
@@ -671,7 +672,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             mutual_funds: 'Mutual Funds',
             rewards: 'Rewards & Cashback',
             cash: 'Physical Cash',
-            commodity: 'Commodities'
+            commodity: 'Commodities',
+            offset: 'Offset Ledgers'
           };
 
           const TYPE_ORDER = [
@@ -684,7 +686,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             'epf',
             'stocks',
             'mutual_funds',
-            'commodity'
+            'commodity',
+            'offset'
           ];
 
           // Archived accounts are hidden from the normal list — they get their own section below.

@@ -364,10 +364,14 @@ export function Wealth() {
       bank: live.filter((a: Account) => a.type === 'bank_account'),
       cash: live.filter((a: Account) => a.type === 'cash'),
       ewallet: live.filter((a: Account) => a.type === 'e_wallet'),
-      // Debit cards, rewards wallets, and anything the user defined themselves. Grouped rather
-      // than dropped so the Assets total matches the money the user actually holds.
+      // Debit cards, rewards wallets, offset ledgers, and anything the user defined themselves.
+      // Grouped rather than dropped so the Assets total matches the money the user actually holds.
+      // 'offset' is named explicitly because it used to be a custom type and was counted here via
+      // isCustomType — going native would otherwise have silently dropped it out of Assets. A fully
+      // paired offset ledger nets to zero, so it contributes nothing; an unpaired entry is a real
+      // ₹ position (money fronted, or spent and not yet funded) and belongs in the total.
       other: live.filter((a: Account) =>
-        a.type === 'debit_card' || a.type === 'rewards' || isCustomType(a.type)
+        a.type === 'debit_card' || a.type === 'rewards' || a.type === 'offset' || isCustomType(a.type)
       ),
     };
   }, [activeAccounts]);
@@ -841,6 +845,7 @@ export function Wealth() {
     e_wallet: 'E-Wallet',
     debit_card: 'Debit Card',
     rewards: 'Rewards Wallet',
+    offset: 'Offset Ledger',
   };
 
   const renderLiquidRow = (account: Account) => {

@@ -18,7 +18,7 @@ import { getGeminiUsageToday, testGeminiKey } from '../services/GeminiService';
 import { invalidateCommodityCache } from '../services/MarketDataService';
 import { minifyPayload, expandPayload } from '../services/backupCodec';
 import { APP_VERSION } from '../utils';
-import { BUILT_IN_ACCOUNT_TYPES } from '../types';
+import { BUILT_IN_ACCOUNT_TYPES, isOffsetTypeAlias } from '../types';
 
 const GridButton = ({ icon: Icon, label, onClick }: { icon: React.ElementType, label: string, onClick?: () => void }) => (
   <div className="card flex-col align-center justify-center" style={{ padding: '1.25rem 0.5rem', gap: '0.75rem', cursor: 'pointer', height: '100%' }} onClick={onClick}>
@@ -563,7 +563,10 @@ export default function Settings() {
     // used to be hand-written here and was missing 'commodity' and 'epf', which let a user create a
     // custom type that shadowed a built-in.
     const existingTypes: string[] = [...BUILT_IN_ACCOUNT_TYPES, ...(data.customAccountTypes || [])];
-    if (trimmed && !existingTypes.some(type => type.toLowerCase() === trimmed.toLowerCase())) {
+    // isOffsetTypeAlias on top of the name check: 'offset' is native now, and the alternate spellings
+    // ('Offset Ledger', ...) are folded into it on load. Accepting one here would create a custom type
+    // that the next app start silently swallows.
+    if (trimmed && !isOffsetTypeAlias(trimmed) && !existingTypes.some(type => type.toLowerCase() === trimmed.toLowerCase())) {
       updateCustomAccountTypes([...(data.customAccountTypes || []), trimmed]);
       setNewAccountType('');
     }

@@ -48,7 +48,14 @@ An account is any place money sits or is owed. Built-in types:
   include Statutory Wage Ceiling (₹15,000 cap) vs Actual Basic + DA. Requires a "Current Employer"
   name field (shown in the EPF passbook header and detail view).
 - rewards — a reward-points wallet (points, not rupees), with a reward unit and conversion rate.
+- offset — an Offset Ledger: a bookkeeping account for spending that never touched one of the user's
+  own accounts, e.g. a share of a bill a friend paid, or a contribution funded by money someone owed
+  them. Entries come in pairs (the spend as a debit, the money that funded it as a credit), so a
+  settled ledger nets to zero and the spend still lands in the month's category totals. Shown in the
+  Accounts tab under "Offset Ledgers" and counted under Wealth → Assets → Other.
 Add or remove custom account types in Settings → Account Types (a type that's in use can't be deleted).
+"offset" was a custom type in older versions and is built-in now; existing Offset Ledger accounts are
+migrated automatically on upgrade, so it no longer appears in the custom list.
 Actions (each account is a card on the Accounts tab):
 - Add: Accounts tab → "+" → fill the form → save. For a stock/fund you can search its symbol while adding.
 - Edit or archive: use the pencil (edit) and trash (archive) icon buttons on the account's card — there
@@ -183,7 +190,8 @@ for contributions to a pooled/committee fund — a real spend, NOT stats-exclude
 Spends and can carry a monthly budget. Use it when a contribution is settled by offsetting someone's
 debt instead of paying cash: log the offset as a repayment in the Debt ledger (which moves the account
 balance but counts as neither Spend nor Income) plus a Fund debit on the same account and date, so the
-account nets to zero and the contribution still shows in that month's Spends.
+account nets to zero and the contribution still shows in that month's Spends. An Offset Ledger account
+(type 'offset') is the account to use for that pair when no real account of yours was touched.
 System categories (internal bookkeeping, EXCLUDED from spend totals so transfers/payments/investments
 don't look like spending): Transfer, CC Payment, NCMC Travel Recharge, Investments, and
 Lending & Borrowing. Lending & Borrowing is auto-excluded from both Spends and Income everywhere
@@ -308,7 +316,7 @@ followed by up to three category cards, each with a chevron that opens its own s
 
 1. **Portfolio** — market investments: Stocks, Mutual Funds, Commodities (gold/silver).
 2. **Assets** — liquid money: Bank Accounts, Physical Cash, E-Wallets, plus an "Other" group holding
-   Debit Cards, Rewards wallets and any user-created custom account types.
+   Debit Cards, Rewards wallets, Offset Ledgers and any user-created custom account types.
 3. **Retirement** — EPF (Employee Provident Fund).
 
 The headline Wealth total = Portfolio current value + Assets liquid balance + Retirement balance. It is

@@ -5,10 +5,21 @@
 // The union type is derived from the array so the two can never disagree again.
 export const BUILT_IN_ACCOUNT_TYPES = [
   'credit_card', 'bank_account', 'cash', 'debit_card', 'e_wallet',
-  'stocks', 'mutual_funds', 'rewards', 'commodity', 'epf',
+  'stocks', 'mutual_funds', 'rewards', 'commodity', 'epf', 'offset',
 ] as const;
 export type BuiltInAccountType = typeof BUILT_IN_ACCOUNT_TYPES[number];
 export type AccountType = BuiltInAccountType | (string & {});
+
+// 'offset' shipped as a user-created CUSTOM type long before it became native, and it was spelled
+// several ways by hand. Every one of those spellings has to resolve to the native key, otherwise the
+// old custom type survives alongside the built-in one and the pickers list the same thing twice.
+// scripts/migrate-offset-account-type.mjs mirrors this list for backup files migrated outside the app.
+export const OFFSET_TYPE_ALIASES: readonly string[] = [
+  'offset', 'offset ledger', 'offset_ledger', 'offset-ledger', 'offsetledger',
+];
+export const isOffsetTypeAlias = (type: string): boolean =>
+  OFFSET_TYPE_ALIASES.includes(type.trim().toLowerCase());
+
 export type RoundingRule = 'round' | 'floor' | 'ceil' | 'none';
 
 export interface EPFSalaryRevision {
