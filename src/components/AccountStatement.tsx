@@ -64,8 +64,8 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
   const currentCycle = getBillingCycleForDate(format(new Date(), 'yyyy-MM-dd'), statementDay);
   // Reads the manual override for debits as well as payments — see getAppliedBillingCycle. The
   // card's outstanding balance (calculateCycleBalanceForCycle) and the bill reminder
-  // (calculateTotalSpendPerCycle) go through the same helper, so a charge moved here moves
-  // everywhere at once rather than leaving this screen disagreeing with the card it belongs to.
+  // (CardDuesService) go through the same helper, so a charge moved here moves everywhere at once
+  // rather than leaving this screen disagreeing with the card it belongs to.
   const getTransactionCycle = (tx: Transaction) => getAppliedBillingCycle(tx, statementDay);
 
   // Declared up here rather than beside the other view state below: cycleOptions reads it.

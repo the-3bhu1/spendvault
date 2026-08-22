@@ -1,5 +1,5 @@
 import { format, parseISO, addMonths, subMonths, addDays, setDate, differenceInCalendarDays } from 'date-fns';
-import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitItem, InvestmentKind, RecurringBill, BrandKey } from './types';
+import type { Account, Transaction, CardNetwork, CashbackStatement, SplitItem, InvestmentKind, RecurringBill, BrandKey } from './types';
 
 /**
  * The message carried by a thrown value, if it has one.
@@ -564,27 +564,11 @@ export const calculateBalance = (
   return opening + change + adjustment;
 };
 
-export const calculateTotalSpendPerCycle = (transactions: Transaction[], accountId: string, cycle: string, statementDay: number, rounding: RoundingRule = 'none') => {
-  const ccTransactions = transactions.filter(t => t.accountId === accountId);
-  let spend = 0;
-  let payment = 0;
-
-  ccTransactions.forEach(t => {
-    const tCycle = getAppliedBillingCycle(t, statementDay);
-    if (tCycle === cycle) {
-      if (t.type === 'debit') spend += t.amount;
-      if (t.type === 'credit') payment += t.amount;
-    }
-  });
-
-  const rawNet = spend - payment;
-  let netPayable = rawNet;
-  if (rounding === 'round') netPayable = Math.round(rawNet);
-  else if (rounding === 'floor') netPayable = Math.floor(rawNet);
-  else if (rounding === 'ceil') netPayable = Math.ceil(rawNet);
-
-  return { spend, payment, netPayable };
-};
+// calculateTotalSpendPerCycle used to live here: a per-cycle spend/payment/net for one card, with
+// no affectsRupeeBalance filter. That omission is why Bills and the bill-alert banner overstated the
+// bill on any card that had redeemed its own points, while Accounts and the Dashboard did not. Both
+// callers now read services/CardDuesService, which applies the predicate — and the function is gone
+// rather than deprecated, so nothing can reach for the wrong one of two near-identical helpers.
 
 export type CardTexture = 'weave' | 'hairline' | 'guilloche' | 'dots' | 'none';
 export type CardGeometry = 'chevron' | 'slash' | 'facet' | 'arc' | 'none';

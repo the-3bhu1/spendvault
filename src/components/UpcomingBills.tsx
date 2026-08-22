@@ -22,7 +22,8 @@ import { TransactionSelector } from './TransactionSelector';
 import { LogTransactionForm } from './LogTransactionForm';
 import { getCategoryIcon } from './transactionIcons';
 import CustomDatePicker from './CustomDatePicker';
-import { calculateTotalSpendPerCycle, getLatestBilledCycle, advanceBillCycle } from '../utils';
+import { advanceBillCycle } from '../utils';
+import { getActiveCardDues } from '../services/CardDuesService';
 import { scrollToFirstError } from '../utils/formErrors';
 
 const FREQUENCY_LABELS: Record<RecurringFrequency, string> = {
@@ -167,41 +168,23 @@ export default function UpcomingBills() {
       return clean as RecurringBill;
     });
 
-    // 2. Process Credit Card Bills
-    const ccBills = data.accounts
-      .filter(acc => acc.type === 'credit_card' && acc.dueDay)
-      .map(acc => {
-        const dueDay = acc.dueDay!;
-        const dueDate = new Date(today.getFullYear(), today.getMonth(), dueDay);
-
-        const statementDay = acc.statementDay || 1;
-        const lastStatementDate = new Date(today.getFullYear(), today.getMonth(), statementDay);
-        if (today.getDate() < statementDay) {
-          lastStatementDate.setMonth(lastStatementDate.getMonth() - 1);
-        }
-
-        if (dueDate < today) {
-          dueDate.setMonth(dueDate.getMonth() + 1);
-        }
-
-
-        const lastStatementCycle = getLatestBilledCycle(statementDay);
-        const { netPayable } = calculateTotalSpendPerCycle(data.transactions, acc.id, lastStatementCycle, statementDay, acc.statementRounding);
-
-        const isPaid = netPayable <= 0;
-
-        return {
-          id: `cc-${acc.id}`,
-          name: `${acc.name} Payment`,
-          amount: Math.max(0, netPayable),
-          category: 'CC Payment',
-          nextDueDate: format(dueDate, 'yyyy-MM-dd'),
-          isCC: true,
-          isPaid,
-          accountId: acc.id,
-          statementDay
-        };
-      });
+    // 2. Process Credit Card Bills. The statement amount and the due date both come from
+    // CardDuesService — the same derivation the Dashboard, Accounts and the alert banner read, so a
+    // bill here can no longer name a figure the card itself disagrees with.
+    const ccBills = getActiveCardDues(data.accounts, data.transactions, today)
+      .filter(d => d.dueDate !== undefined)
+      .map(d => ({
+        id: `cc-${d.account.id}`,
+        name: `${d.account.name} Payment`,
+        amount: d.billed,
+        category: 'CC Payment',
+        nextDueDate: d.dueDate!,
+        isCC: true,
+        // Nothing billed means the statement is settled — there is no bill to pay this cycle.
+        isPaid: d.billed <= 0,
+        accountId: d.account.id,
+        statementDay: d.account.statementDay || 1
+      }));
 
     return [...manualBills, ...ccBills].sort((a, b) => {
       // 1. Settled credit-card statements sink to the bottom. Manual bills never settle.

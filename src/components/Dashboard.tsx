@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useFinance } from '../FinanceContext';
-import { getCurrentMonthStr, formatCurrency, getOrdinalSuffix, getAppliedBillingCycle, getLatestBilledCycle, isStatsExcludedCategory, CATEGORY_PALETTE, ACCOUNT_PALETTE, getDistinctChartColors, affectsRupeeBalance } from '../utils';
+import { getCurrentMonthStr, formatCurrency, isStatsExcludedCategory, statsAmount, CATEGORY_PALETTE, ACCOUNT_PALETTE, getDistinctChartColors } from '../utils';
+import { getActiveCardDues, sumCardDues } from '../services/CardDuesService';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import RollingNumber from './RollingNumber';
 import type { Account } from '../types';
-import { format, parseISO, addMonths } from 'date-fns';
 
 export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: Account) => void }) {
   const { data } = useFinance();
@@ -12,78 +12,37 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
   const [activeCatIdx, setActiveCatIdx] = useState<number | null>(null);
   const [activeAccIdx, setActiveAccIdx] = useState<number | null>(null);
 
-  const { totalSpend, spendByCategory, spendByAccount, ccDues, totalBilledCC, totalUnbilledCC } = useMemo(() => {
+  // Dues come from CardDuesService — the single derivation shared with Accounts, Bills and the
+  // bill-alert banner. This screen used to hand-roll the same cycle walk inline, which is how four
+  // surfaces ended up with three answers to "what's billed?".
+  const ccDues = useMemo(() => getActiveCardDues(data.accounts, data.transactions), [data.accounts, data.transactions]);
+  const { outstanding: totalOutstandingCC, billed: totalBilledCC, unbilled: totalUnbilledCC } = useMemo(
+    () => sumCardDues(ccDues),
+    [ccDues]
+  );
+
+  const { totalSpend, spendByCategory, spendByAccount } = useMemo(() => {
     let spend = 0;
     const catSpend: Record<string, number> = {};
     const accSpend: Record<string, number> = {};
-    const dues: { accountName: string, billed: number, unbilled: number, total: number, dueDayStr?: string }[] = [];
 
-    // Monthly Spend
-    const currentMonthTxs = data.transactions.filter(t => t.date.startsWith(currentMonth));
-    currentMonthTxs.forEach(t => {
-      if (t.type === 'debit') {
-        const account = data.accounts.find(a => a.id === t.accountId);
-        {
-          if (isStatsExcludedCategory(t.category)) return;
-          const effectiveAmount = t.amount - (t.excludedAmount || (t.excludeFromStats ? t.amount : 0));
-          spend += effectiveAmount;
-          if (effectiveAmount > 0) {
-            catSpend[t.category] = (catSpend[t.category] || 0) + effectiveAmount;
-            accSpend[account?.name || 'Unknown'] = (accSpend[account?.name || 'Unknown'] || 0) + effectiveAmount;
-          }
-        }
+    data.transactions.forEach(t => {
+      if (!t.date.startsWith(currentMonth)) return;
+      if (t.type !== 'debit') return;
+      if (isStatsExcludedCategory(t.category)) return;
+      // The shared carve-out helper, so a Passive Log shrinks this total by exactly as much as it
+      // shrinks the same month on Insights.
+      const effectiveAmount = statsAmount(t);
+      spend += effectiveAmount;
+      if (effectiveAmount > 0) {
+        const accountName = data.accounts.find(a => a.id === t.accountId)?.name || 'Unknown';
+        catSpend[t.category] = (catSpend[t.category] || 0) + effectiveAmount;
+        accSpend[accountName] = (accSpend[accountName] || 0) + effectiveAmount;
       }
     });
 
-    // Credit Card Dues calculation - Simple Version 1 Logic
-    data.accounts.filter(a => a.type === 'credit_card' && !a.archived).forEach(cc => {
-      const statementDay = cc.statementDay || 1;
-      const billedCycle = getLatestBilledCycle(statementDay);
-      const unbilledCycle = format(addMonths(parseISO(`${billedCycle}-01`), 1), 'yyyy-MM');
-      
-      let billed = 0;
-      let unbilled = 0;
-      
-      data.transactions.forEach(t => {
-        // A points redemption draws on the reward wallet, not the credit line, so it is not part of
-        // what's due. Skipping it here keeps these dues equal to the card balance shown in Accounts.
-        if (t.accountId === cc.id && affectsRupeeBalance(t)) {
-          const txCycle = getAppliedBillingCycle(t, statementDay);
-
-          if (txCycle === unbilledCycle) {
-            unbilled += t.type === 'debit' ? t.amount : -t.amount;
-          } else if (txCycle === billedCycle) {
-            billed += t.type === 'debit' ? t.amount : -t.amount;
-          }
-        }
-      });
-
-      const rawBilled = Math.max(0, billed);
-      let finalBilled = rawBilled;
-      const rounding = cc.statementRounding || 'none';
-      if (rounding === 'round') finalBilled = Math.round(rawBilled);
-      else if (rounding === 'floor') finalBilled = Math.floor(rawBilled);
-      else if (rounding === 'ceil') finalBilled = Math.ceil(rawBilled);
-
-      const finalUnbilled = Math.max(0, unbilled);
-      const totalOutstanding = finalBilled + finalUnbilled;
-      
-      if (totalOutstanding > 0 || finalBilled > 0) {
-        dues.push({ 
-          accountName: cc.name, 
-          billed: finalBilled,
-          unbilled: finalUnbilled,
-          total: totalOutstanding,
-          dueDayStr: cc.dueDay ? getOrdinalSuffix(cc.dueDay) : undefined
-        });
-      }
-    });
-
-    const totalBilledCC = dues.reduce((sum, d) => sum + d.billed, 0);
-    const totalUnbilledCC = dues.reduce((sum, d) => sum + d.unbilled, 0);
-
-    return { totalSpend: spend, spendByCategory: catSpend, spendByAccount: accSpend, ccDues: dues, totalBilledCC, totalUnbilledCC };
-  }, [data, currentMonth]);
+    return { totalSpend: spend, spendByCategory: catSpend, spendByAccount: accSpend };
+  }, [data.transactions, data.accounts, currentMonth]);
 
 
   // Slices run largest-first (clockwise from 12 o'clock), so the ring reads as a ranking and the
@@ -113,7 +72,7 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
         <div className="card flex-col gap-2">
           <span className="text-muted text-sm">Active CC Dues</span>
           <h3 className="text-serif" style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--warning)', margin: 0 }}>
-            {formatCurrency(ccDues.reduce((sum, d) => sum + d.total, 0))}
+            {formatCurrency(totalOutstandingCC)}
           </h3>
           <div className="flex gap-4" style={{ marginTop: '0.25rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-color)' }}>
             <div className="flex-col">
@@ -131,12 +90,14 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
 
       <div className="card flex-col gap-4">
         <h3>Current Outstanding Dues</h3>
-        {ccDues.length === 0 ? (
+        {/* A card with nothing outstanding gets no row here — this list is what's owed, and the
+            service now returns every live card rather than only the ones with a balance. */}
+        {ccDues.filter(d => d.outstanding > 0).length === 0 ? (
           <p className="text-muted text-sm">No pending credit card dues.</p>
         ) : (
            <div className="flex-col gap-3">
-             {ccDues.map((due, idx) => {
-               const account = data.accounts.find(a => a.name === due.accountName);
+             {ccDues.filter(d => d.outstanding > 0).map((due, idx) => {
+               const account = due.account;
                // Lift-on-hover lives in CSS (.due-row), gated on a real pointer. As an inline
                // onMouseEnter/onMouseLeave pair it stuck on touch: the enter fired on tap and the
                // leave never arrived, so the row stayed raised until the next tap elsewhere.
@@ -150,10 +111,10 @@ export default function Dashboard({ onViewStatement }: { onViewStatement: (acc: 
                   <div className="flex justify-between align-center" style={{ marginBottom: '0.75rem' }}>
                     <div className="flex align-center gap-3">
                       <span className="text-xl">💳</span>
-                      <span style={{ fontWeight: 600 }}>{due.accountName}</span>
+                      <span style={{ fontWeight: 600 }}>{due.account.name}</span>
                     </div>
                     <div className="flex align-center gap-2">
-                      <span className="text-serif" style={{ fontWeight: 700, color: 'var(--danger)', fontSize: '1.3rem' }}>{formatCurrency(due.total)}</span>
+                      <span className="text-serif" style={{ fontWeight: 700, color: 'var(--danger)', fontSize: '1.3rem' }}>{formatCurrency(due.outstanding)}</span>
                       <span className="text-muted" style={{ fontSize: '1.2rem', opacity: 0.5 }}>›</span>
                     </div>
                   </div>
