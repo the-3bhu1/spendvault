@@ -717,7 +717,9 @@ export default function Transactions() {
   return (
     <div className="flex-col gap-6 transactions-tab-root">
       <div className="flex-col gap-4">
-        <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>transactions</h2>
+        {/* line-height 1 so the title's box hugs its caps — the inherited 1.5 padded ~9px of leading
+            under the glyphs, which read as a bigger gap above the pending card than below it. */}
+        <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', lineHeight: 1 }}>transactions</h2>
 
         {/* The 2-5s Gemini second filter, made visible. Same footprint as the pending card
             below it, so when the verdict lands the card is replaced in place rather than the

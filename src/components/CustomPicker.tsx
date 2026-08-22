@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, Check, Search } from 'lucide-react';
+import { ChevronDown, Check, Search, X } from 'lucide-react';
 
 export interface PickerOption {
   id: string;
@@ -146,10 +146,13 @@ export function CustomPicker({
     <div className="bottom-sheet-overlay" onClick={() => setIsOpen(false)}>
       <div className="bottom-sheet" onClick={e => e.stopPropagation()}>
         <div className="sheet-handle" />
-        <div className="flex align-start" style={{ padding: '1.5rem 1.75rem 0.75rem', borderBottom: '2px solid #000', gap: '1rem' }}>
+        {/* .modal-header so the close mark is sized by the one rule that governs every sheet's
+            X — only the alignment and bottom padding differ here, because a long picker label
+            wraps to a second line and the X stays on the first. */}
+        <div className="modal-header" style={{ alignItems: 'flex-start', padding: '1.5rem 1.75rem 0.75rem', gap: '1rem' }}>
           <h3 style={{ margin: 0, fontSize: '1.85rem', fontWeight: 700, letterSpacing: '-0.5px', color: 'var(--text-primary)', flex: 1, minWidth: 0, lineHeight: 1.1 }}>{label}</h3>
-          <button onClick={() => setIsOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.25rem', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginLeft: 'auto' }}>
-            ✕
+          <button onClick={() => setIsOpen(false)} style={{ justifyContent: 'center', flexShrink: 0, marginLeft: 'auto' }}>
+            <X />
           </button>
         </div>
 

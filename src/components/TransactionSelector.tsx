@@ -51,10 +51,10 @@ export const TransactionSelector: React.FC<TransactionSelectorProps> = ({
   return (
     <div className="modal-overlay flex-center" style={{ zIndex: 10000 }}>
       <div className="modal-content animate-in full-screen flex-col" style={{ padding: 0 }}>
-        <div className="flex justify-between align-center" style={{ padding: 'calc(0.75rem + var(--safe-area-inset-top)) 1.75rem 1rem', borderBottom: '2px solid #000', width: '100%' }}>
+        <div className="modal-header" style={{ padding: 'calc(0.75rem + var(--safe-area-inset-top)) 1.75rem 1rem' }}>
           <h3 style={{ margin: 0, fontSize: '1.85rem', fontWeight: 700, letterSpacing: '-0.5px', color: 'var(--text-primary)' }}>{title}</h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.25rem', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center' }}>
-            <X size={24} />
+          <button onClick={onClose}>
+            <X />
           </button>
         </div>
 
