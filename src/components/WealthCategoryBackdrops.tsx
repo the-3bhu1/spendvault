@@ -1,138 +1,16 @@
-// Decorative bas-relief backdrops for the three Wealth category screens.
-//
-// Same idiom as WealthBackdrop — inline SVG (crisp at any density, no network request, tones taken
-// from CSS custom properties so one drawing serves both themes), shaded relief rather than line art,
-// one light source at the top-left — but a DIFFERENT SUBJECT for each category. The tree screen's
-// vault door says "your wealth"; repeating it on the inner screens would say nothing about which
-// category you'd opened, so each gets its own engraving:
+// The three Wealth category engravings. The shared relief language — square viewBox, concentric
+// composition, lit/shadow edges, the legibility well — lives in relief.tsx; what's here is the
+// SUBJECT of each drawing, and each category gets its own:
 //
 //   Portfolio  → a sunburst medallion behind a candlestick colonnade with a rising trend ribbon.
 //   Assets     → a treasury facade: pediment, dentils, fluted colonnade, steps and coin stacks.
 //   Retirement → a laurel wreath around an hourglass, sand running from the upper bulb.
 //
-// All three inherit WealthBackdrop's COMPOSITION contract, and it's load-bearing: the viewBox is
-// square, everything is concentric about its centre, and the drawing is scaled with 'meet'. Each
-// hero centres its content, so the drawing's centre lands on the content's centre at any width —
-// which is what puts the avatar, label and total inside the medallion / between the columns / inside
-// the wreath. Break the squareness or the centring and the content drifts off the motif.
-//
-// RELIEF, as in WealthBackdrop: filled bodies shaded by gradient, paired lit/shadow edge strokes
-// (light on the top-left of a form, shadow on its bottom-right), and feDropShadow on the members
-// that physically stand proud. Break the shared light direction and the whole thing flattens out.
+// The tree screen's vault door (WealthBackdrop) says "your wealth"; repeating it on the inner
+// screens would say nothing about which category you'd opened.
 import React from 'react';
-import type { ReactNode } from 'react';
-
-const VB = 400; // square: see COMPOSITION above
-const C = VB / 2; // 200 — the centre of the motif and of the hero content alike
-
-const f = (v: number) => v.toFixed(2);
-const polar = (r: number, a: number) => ({ x: C + r * Math.cos(a), y: C + r * Math.sin(a) });
-const deg = (a: number) => (a * 180) / Math.PI;
-
-// A full ring with a hole punched in it (drawn with fillRule="evenodd"). A moulding needs a body to
-// shade across its width — a stroked circle has no way to provide one.
-const ring = (rIn: number, rOut: number) =>
-  `M ${C - rOut} ${C} A ${rOut} ${rOut} 0 1 0 ${C + rOut} ${C} A ${rOut} ${rOut} 0 1 0 ${C - rOut} ${C} Z ` +
-  `M ${C - rIn} ${C} A ${rIn} ${rIn} 0 1 0 ${C + rIn} ${C} A ${rIn} ${rIn} 0 1 0 ${C - rIn} ${C} Z`;
-
-const arc = (r: number, a0: number, a1: number) => {
-  const p0 = polar(r, a0);
-  const p1 = polar(r, a1);
-  const large = Math.abs(a1 - a0) > Math.PI ? 1 : 0;
-  const sweep = a1 > a0 ? 1 : 0;
-  return `M ${f(p0.x)} ${f(p0.y)} A ${r} ${r} 0 ${large} ${sweep} ${f(p1.x)} ${f(p1.y)}`;
-};
-
-// A tapered radial limb: wide at rIn, narrowing to (near) a point at rOut. Used for sunburst rays.
-const spike = (rIn: number, rOut: number, a: number, halfIn: number, halfOut: number) => {
-  const p1 = polar(rIn, a - halfIn);
-  const p2 = polar(rOut, a - halfOut);
-  const p3 = polar(rOut, a + halfOut);
-  const p4 = polar(rIn, a + halfIn);
-  return `M ${f(p1.x)} ${f(p1.y)} L ${f(p2.x)} ${f(p2.y)} L ${f(p3.x)} ${f(p3.y)} L ${f(p4.x)} ${f(p4.y)} Z`;
-};
-
-// ── Shared defs ──────────────────────────────────────────────────────────────────────────────────
-// Ids are prefixed per drawing. Only one category is ever on screen at a time, but duplicate ids
-// across three mounted SVGs would be a silent trap the first time that changes.
-const ReliefDefs: React.FC<{ p: string; wellRx: number; wellRy: number }> = ({ p, wellRx, wellRy }) => (
-  <>
-    {/* Vertical shading for members lit from above: lintels, plates, plinths. */}
-    <linearGradient id={`${p}-stone-v`} x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stopColor="var(--relief-hi)" />
-      <stop offset="55%" stopColor="var(--relief-mid)" />
-      <stop offset="100%" stopColor="var(--relief-lo)" />
-    </linearGradient>
-
-    {/* Horizontal shading for round members lit from the left: columns, posts, candle bodies. */}
-    <linearGradient id={`${p}-stone-h`} x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stopColor="var(--relief-hi)" />
-      <stop offset="55%" stopColor="var(--relief-mid)" />
-      <stop offset="100%" stopColor="var(--relief-lo)" />
-    </linearGradient>
-
-    {/* Offset focal point, so a disc or a ring reads as domed/toroidal rather than flat. */}
-    <radialGradient id={`${p}-dome`} cx="38%" cy="34%" r="72%">
-      <stop offset="0%" stopColor="var(--relief-hi)" />
-      <stop offset="62%" stopColor="var(--relief-mid)" />
-      <stop offset="100%" stopColor="var(--relief-lo)" />
-    </radialGradient>
-
-    {/* Cast shadows. Two strengths: a long one for members standing well proud of the wall, a tight
-        one for small hardware sitting just off it. */}
-    <filter id={`${p}-cast`} x="-30%" y="-30%" width="180%" height="180%">
-      <feDropShadow dx="2.5" dy="3.5" stdDeviation="3" floodColor="var(--relief-shadow)" />
-    </filter>
-    <filter id={`${p}-cast-tight`} x="-50%" y="-50%" width="220%" height="220%">
-      <feDropShadow dx="1" dy="1.4" stdDeviation="1.1" floodColor="var(--relief-shadow)" />
-    </filter>
-
-    {/* Fades the relief out at the very bottom so it doesn't butt up hard against the rows below. */}
-    <linearGradient id={`${p}-fade`} x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stopColor="#fff" stopOpacity="1" />
-      <stop offset="80%" stopColor="#fff" stopOpacity="1" />
-      <stop offset="100%" stopColor="#fff" stopOpacity="0.12" />
-    </linearGradient>
-
-    {/* Legibility well. Black in a luminance mask means "hide", so a higher stopOpacity mutes more:
-        the centre keeps roughly a fifth of the relief — enough to still read as texture behind the
-        avatar and the total without competing with them — and ramps back to full strength at the
-        well's edge. Done in the mask rather than by weakening the tokens so the frame, columns and
-        wreath, none of which sit under text, stay at full contrast. The well is an ellipse because
-        these heroes are taller than they are busy: Portfolio stacks a total, a day change, a refresh
-        button, a timestamp and a pill row down the same axis. */}
-    <radialGradient id={`${p}-clear`} cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stopColor="#000" stopOpacity="0.82" />
-      <stop offset="42%" stopColor="#000" stopOpacity="0.7" />
-      <stop offset="74%" stopColor="#000" stopOpacity="0.3" />
-      <stop offset="100%" stopColor="#000" stopOpacity="0" />
-    </radialGradient>
-
-    <mask id={`${p}-mask`}>
-      <rect width={VB} height={VB} fill={`url(#${p}-fade)`} />
-      <ellipse cx={C} cy={C} rx={wellRx} ry={wellRy} fill={`url(#${p}-clear)`} />
-    </mask>
-  </>
-);
-
-const ReliefSvg: React.FC<{ p: string; wellRx: number; wellRy: number; children: ReactNode }> = ({
-  p, wellRx, wellRy, children,
-}) => (
-  <svg
-    viewBox={`0 0 ${VB} ${VB}`}
-    // 'meet', not 'slice': the whole drawing has to be visible, so it scales to fit the hero box and
-    // letterboxes rather than filling the box and cropping the motif away.
-    preserveAspectRatio="xMidYMid meet"
-    aria-hidden="true"
-    focusable="false"
-    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
-  >
-    <defs>
-      <ReliefDefs p={p} wellRx={wellRx} wellRy={wellRy} />
-    </defs>
-    <g mask={`url(#${p}-mask)`} strokeLinecap="round">{children}</g>
-  </svg>
-);
+import { ReliefSvg } from './relief';
+import { C, f, polar, deg, ring, arc, spike } from '../utils/reliefGeometry';
 
 // ── Portfolio: the bourse medallion ─────────────────────────────────────────────────────────────
 // A coin-rim medallion, a carved sunburst filling it, and a colonnade of candlesticks standing on a

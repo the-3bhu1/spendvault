@@ -272,6 +272,13 @@ export const formatAmount = (amount: number, account?: Account) => {
 
 export const getCurrentMonthStr = () => format(new Date(), 'yyyy-MM'); // "2023-10"
 
+// "Tribhuvan's", or "Your" when there's no name to work with. Every category-tree hero opens with
+// it — the root screen's and each category's — and they have to stay in step, so it's built once.
+export const userPossessive = (name?: string) => {
+  const firstName = name?.split(' ')[0];
+  return firstName ? `${firstName}'s` : 'Your';
+};
+
 // Function to calculate credit card billing cycle for a given date
 //
 // A statement closes ON statementDay, and the cut is exclusive: a transaction dated

@@ -1,0 +1,182 @@
+// The Credit Cards tree's engravings. Same relief language as the Wealth category backdrops — see
+// the COMPOSITION and RELIEF notes in relief.tsx — with subjects of their own:
+//
+//   Cards → a stack of plates lying in a wallet, the top one carrying a chip, under a coin rim.
+//   Dues  → one plate creased by a statement fold, with the charges ruled below it.
+//
+// Why a card and not a coin or a vault: the Dashboard's hero is a coin (what you spent) and Wealth's
+// is a vault door (what you own). A liability screen has to look like the plastic it tracks, or all
+// three heroes read as the same drawing at a glance.
+//
+// WHERE THE DRAWING SITS is the hard part here, and two attempts got it wrong before this one.
+//
+// Measured in the running app, the Cards hero's content occupies viewBox y 59–341 of 400: avatar
+// 59–123, label 139–157, total 169–213, billed/unbilled 229–269, utilization meter 285–310, due
+// line 326–341. That is 70% of the drawing's height, and it cannot be escaped by making the hero
+// taller — 'meet' scales the square by min(width, height) and centres it, so the drawing and the
+// content grow together and the content stays at the same 70%.
+//
+// So the motif lives in the bands that are actually free: a rim in the LEFT AND RIGHT margins (its
+// ticks suppressed near the vertical, where the content is), and the card stack in the BOTTOM strip,
+// its top edges peeking up out of the lower border like cards in a wallet pocket and its bodies
+// running off the viewBox. Nothing is drawn through the middle. Any future hero in this idiom has to
+// measure its own stack the same way — the numbers above are this hero's, not a constant.
+import React from 'react';
+import { ReliefSvg } from './relief';
+import { C, f } from '../utils/reliefGeometry';
+
+// A card at the real 1.586:1 ISO/IEC 7810 ratio. Anything squarer stops reading as a card once the
+// chip is on it.
+const CARD_W = 250;
+const CARD_H = Math.round(CARD_W / 1.586); // 158
+const CARD_R = 11;
+
+/** Rounded-rect path for a card plate, centred horizontally on C. */
+const plate = (w: number, h: number, cy: number) =>
+  `M ${f(C - w / 2 + CARD_R)} ${f(cy - h / 2)} ` +
+  `h ${f(w - CARD_R * 2)} a ${CARD_R} ${CARD_R} 0 0 1 ${CARD_R} ${CARD_R} ` +
+  `v ${f(h - CARD_R * 2)} a ${CARD_R} ${CARD_R} 0 0 1 ${-CARD_R} ${CARD_R} ` +
+  `h ${f(-(w - CARD_R * 2))} a ${CARD_R} ${CARD_R} 0 0 1 ${-CARD_R} ${-CARD_R} ` +
+  `v ${f(-(h - CARD_R * 2))} a ${CARD_R} ${CARD_R} 0 0 1 ${CARD_R} ${-CARD_R} Z`;
+
+/** The EMV chip: a small plate with the contact pattern cut into it. */
+const Chip: React.FC<{ p: string; x: number; y: number; w?: number }> = ({ p, x, y, w = 40 }) => {
+  const h = w * 0.76;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  return (
+    <g filter={`url(#${p}-cast-tight)`}>
+      <rect x={x} y={y} width={w} height={h} rx="4" fill={`url(#${p}-stone-v)`} stroke="var(--relief-edge)" strokeWidth="0.9" opacity="0.9" />
+      {/* One horizontal bus with fingers off each side — the pattern actually printed on an EMV
+          module, not a generic grid. */}
+      <line x1={x + 4} y1={cy} x2={x + w - 4} y2={cy} stroke="var(--relief-line)" strokeWidth="1.1" opacity="0.75" />
+      <line x1={cx} y1={y + 3.5} x2={cx} y2={y + h - 3.5} stroke="var(--relief-line)" strokeWidth="1.1" opacity="0.75" />
+      {[0.3, 0.7].map(t => (
+        <React.Fragment key={t}>
+          <line x1={x + 4} y1={y + h * t} x2={cx - 5} y2={y + h * t} stroke="var(--relief-line)" strokeWidth="0.9" opacity="0.55" />
+          <line x1={cx + 5} y1={y + h * t} x2={x + w - 4} y2={y + h * t} stroke="var(--relief-line)" strokeWidth="0.9" opacity="0.55" />
+        </React.Fragment>
+      ))}
+    </g>
+  );
+};
+
+/**
+ * A milled coin rim, drawn as four arcs with gaps at the compass points rather than a closed ring
+ * of ticks. The gaps are what keep it from reading as a dashed circle — a continuous chain of marks
+ * at this weight looked like a border of little boxes, not a turned edge.
+ */
+const MilledRim: React.FC<{ r: number; mills?: number; opacity?: number }> = ({ r, mills = 96, opacity = 0.3 }) => {
+  const ticks = Array.from({ length: mills }, (_, i) => {
+    const a = (i / mills) * Math.PI * 2 - Math.PI / 2;
+    // Suppressed near the top and bottom: the top is where the avatar sits and the bottom is where
+    // the plates lie, and a tick crossing either reads as a scratch on the content.
+    const deg = ((a * 180) / Math.PI + 450) % 360;
+    const nearVertical = Math.min(Math.abs(deg - 90), Math.abs(deg - 270)) > 62;
+    if (nearVertical) return null;
+    const x1 = C + (r - 7) * Math.cos(a);
+    const y1 = C + (r - 7) * Math.sin(a);
+    const x2 = C + r * Math.cos(a);
+    const y2 = C + r * Math.sin(a);
+    return <line key={i} x1={f(x1)} y1={f(y1)} x2={f(x2)} y2={f(y2)} stroke="var(--relief-line)" strokeWidth="0.9" />;
+  });
+  return (
+    <>
+      <circle cx={C} cy={C} r={r} fill="none" stroke="var(--relief-line)" strokeWidth="0.9" opacity={opacity * 0.8} />
+      <circle cx={C} cy={C} r={r - 7} fill="none" stroke="var(--relief-edge)" strokeWidth="0.7" opacity={opacity * 0.5} />
+      <g opacity={opacity}>{ticks}</g>
+    </>
+  );
+};
+
+// ── Cards home: the wallet stack ─────────────────────────────────────────────────────────────────
+const CD = 'cdb';
+// The front plate's top edge, 11px below the due line's baseline — the first row of pixels that is
+// certainly clear. Its centre therefore falls past the bottom of the viewBox, which is the point:
+// only the top band of each card shows.
+const CD_FRONT_EDGE = 352;
+const CD_TOP_Y = CD_FRONT_EDGE + CARD_H / 2;
+// Each plate behind is one further down the stack: its edge a few pixels higher, narrower for
+// perspective, dimmer. Only those edges show, which is what makes it a stack and not a fan.
+const CD_LAYERS = [
+  { dy: 0, inset: 0, o: 1 },
+  { dy: -9, inset: 18, o: 0.45 },
+  { dy: -17, inset: 36, o: 0.24 },
+];
+
+export const CardsBackdrop: React.FC = () => (
+  // A tall well: the content stack here is the longest in the app — avatar through due line.
+  <ReliefSvg p={CD} wellRx={150} wellRy={172}>
+    <MilledRim r={178} />
+
+    {/* Back plates first, so the front one occludes them. Drawn in reverse order and clipped by
+        nothing — the front plate's own fill is what hides their bodies. */}
+    {[...CD_LAYERS].reverse().map(({ dy, inset, o }, i) => (
+      <g key={i} opacity={o} filter={dy === 0 ? `url(#${CD}-cast)` : undefined}>
+        <path
+          d={plate(CARD_W - inset, CARD_H, CD_TOP_Y + dy)}
+          fill={`url(#${CD}-stone-v)`}
+          stroke={dy === 0 ? 'var(--relief-edge)' : 'var(--relief-line)'}
+          strokeWidth={dy === 0 ? 1.2 : 0.9}
+        />
+      </g>
+    ))}
+
+    {/* Everything printed on the front plate has to fit the ~48px of it that is visible, so the
+        chip and the stripe sit immediately below its top edge rather than in the card's usual
+        positions. Below y=400 is off-screen and would be drawn for nobody. */}
+    <Chip p={CD} x={C - CARD_W / 2 + 20} y={CD_FRONT_EDGE + 12} w={34} />
+    {/* Magnetic stripe, as a recessed band: filled low, shadowed at its top edge and lit at its
+        bottom — the inverse of a raised member, which is what makes it read as sunk in. */}
+    <path
+      d={`M ${C + 10} ${CD_FRONT_EDGE + 14} h ${CARD_W / 2 - 30} v 22 h ${-(CARD_W / 2 - 30)} Z`}
+      fill="var(--relief-lo)" stroke="var(--relief-shadow)" strokeWidth="0.9" opacity="0.7"
+    />
+    <line
+      x1={C + 10} y1={CD_FRONT_EDGE + 36}
+      x2={C + CARD_W / 2 - 20} y2={CD_FRONT_EDGE + 36}
+      stroke="var(--relief-edge)" strokeWidth="0.8" opacity="0.5"
+    />
+  </ReliefSvg>
+);
+
+// ── Dues: the plate, creased ─────────────────────────────────────────────────────────────────────
+// A statement is a folded sheet, so this one puts the crease across the card and rules the charges
+// under it. Same low placement, same reasoning: the Dues hero carries a total, a billed/unbilled
+// pair and a pill row down the middle.
+const DU = 'dub';
+// The Dues hero's stack is shorter (no due line), but the clear band is the same place, so the plate
+// sits at the same depth. The crease lands inside the visible band rather than at the card's middle.
+const DU_EDGE = 348;
+const DU_Y = DU_EDGE + CARD_H / 2;
+
+export const DuesBackdrop: React.FC = () => (
+  <ReliefSvg p={DU} wellRx={146} wellRy={164}>
+    <MilledRim r={168} mills={80} opacity={0.22} />
+
+    <g filter={`url(#${DU}-cast)`}>
+      <path d={plate(CARD_W, CARD_H, DU_Y)} fill={`url(#${DU}-stone-v)`} stroke="var(--relief-edge)" strokeWidth="1.2" />
+    </g>
+
+    {/* The crease: a lit edge immediately above a shadowed one is the whole trick — two thin lines
+        1.5px apart read as a fold, where either alone reads as a rule. */}
+    <line x1={C - CARD_W / 2} y1={DU_EDGE + 26} x2={C + CARD_W / 2} y2={DU_EDGE + 26} stroke="var(--relief-edge)" strokeWidth="1" opacity="0.7" />
+    <line x1={C - CARD_W / 2} y1={DU_EDGE + 27.5} x2={C + CARD_W / 2} y2={DU_EDGE + 27.5} stroke="var(--relief-shadow)" strokeWidth="1.3" opacity="0.55" />
+
+    <Chip p={DU} x={C - CARD_W / 2 + 20} y={DU_EDGE + 8} w={30} />
+
+    {/* Two charges ruled below the fold, ragged-right like a printed list — the shape of a statement
+        with no legible figure on it. A readable number on a decorative plate reads as data the
+        screen is claiming to know. */}
+    {[0, 1].map(i => (
+      <line
+        key={i}
+        x1={C - CARD_W / 2 + 20}
+        y1={DU_EDGE + 38 + i * 11}
+        x2={C - CARD_W / 2 + 20 + [150, 118][i]}
+        y2={DU_EDGE + 38 + i * 11}
+        stroke="var(--relief-line)" strokeWidth="1.6" opacity={0.3 - i * 0.07}
+      />
+    ))}
+  </ReliefSvg>
+);

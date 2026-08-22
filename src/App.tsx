@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { Home, Wallet, ReceiptText, Gift, Users, Sparkles, LayoutGrid, ChevronRight, Calendar, HandCoins, LogOut, TrendingUpDown, MessageSquare, X } from 'lucide-react';
+import { Home, Wallet, ReceiptText, Gift, Users, Sparkles, LayoutGrid, ChevronRight, Calendar, HandCoins, LogOut, TrendingUpDown, MessageSquare, X, CreditCard as CreditCardIcon } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import Accounts from './components/Accounts';
 import Transactions from './components/Transactions';
@@ -13,6 +13,7 @@ import ProfileAvatar from './components/ProfileAvatar';
 import UpcomingBills from './components/UpcomingBills';
 import Debts from './components/Debts';
 import { Wealth } from './components/Wealth';
+import CreditCards from './components/CreditCards';
 import AskVault from './components/AskVault';
 
 import { useFinance } from './FinanceContext';
@@ -26,7 +27,7 @@ import SmsReader from './services/SmsService';
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 
-export type Tab = 'dashboard' | 'accounts' | 'transactions' | 'cashback' | 'insights' | 'settings' | 'splits' | 'bills' | 'debts' | 'wealth';
+export type Tab = 'dashboard' | 'accounts' | 'transactions' | 'cashback' | 'insights' | 'settings' | 'splits' | 'bills' | 'debts' | 'wealth' | 'cards';
 
 function App() {
   const { data, pendingTransfer, addToSmsQueue, isAuthenticated, setAuthenticated } = useFinance();
@@ -406,6 +407,26 @@ function App() {
                 </div>
               )}
 
+              {/* Reached from the Hub until the Dashboard's Cards plaque lands, which is what this
+                  entry is for — the tree has to be walkable while the old dues cards are still on
+                  the Dashboard. Shown only to someone who actually holds a card. */}
+              {data.accounts.some(acc => acc.type === 'credit_card' && !acc.archived) && (
+                <div
+                  className="card flex align-center gap-4 clickable"
+                  onClick={() => { setActiveTab('cards'); setIsHubOpen(false); }}
+                  style={{ padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}
+                >
+                  <div className="flex-center" style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'linear-gradient(135deg, #f59e0b, #ef4444)', color: 'white', flexShrink: 0 }}>
+                    <CreditCardIcon size={22} />
+                  </div>
+                  <div className="flex-col flex-1">
+                    <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Cards</span>
+                    <span className="text-xs text-muted">Dues, Statements & Rewards</span>
+                  </div>
+                  <ChevronRight size={18} className="text-muted" />
+                </div>
+              )}
+
               {/* Wealth now covers liquid Assets too, not just investments, so the entry has to
                   appear for anyone holding anything at all. Credit cards are the sole exclusion —
                   they're a liability and contribute no category. */}
@@ -464,6 +485,7 @@ function App() {
 
         {activeTab === 'cashback' && <div className="fade-in"><Cashback /></div>}
         {activeTab === 'wealth' && <div className="fade-in" style={{ height: '100%' }}><Wealth /></div>}
+        {activeTab === 'cards' && <div className="fade-in" style={{ height: '100%' }}><CreditCards onViewStatement={(acc) => setSelectedAccountForStatement(acc)} /></div>}
         {activeTab === 'insights' && <div className="fade-in"><Insights /></div>}
         {activeTab === 'settings' && <div className="fade-in"><Settings /></div>}
         {activeTab === 'splits' && <div className="fade-in"><Splits /></div>}
