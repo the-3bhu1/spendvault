@@ -785,6 +785,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         ? acc.investedValue + rawBal
                         : (acc.avgNav && mfTotalUnits > 0 ? acc.avgNav * mfTotalUnits : undefined)
                       : undefined;
+                    // Average cost per unit — derived from the two figures above rather than stored,
+                    // so it can never drift from them. Mirrors getInvestmentAccountStats().avgPrice,
+                    // which Wealth and Ask Vault read; this card computes its own totals inline.
+                    const mfAvgNav = mfEffectiveInvested !== undefined && mfTotalUnits > 0
+                      ? mfEffectiveInvested / mfTotalUnits
+                      : null;
 
                     // Commodity market data — pre-computed once for middle + bottom sections
                     const commodityTxGrams = acc.type === 'commodity'
@@ -810,6 +816,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     const commodityEffectiveInvested = acc.type === 'commodity'
                       ? (acc.investedValue !== undefined ? acc.investedValue + rawBal : undefined)
                       : undefined;
+                    const commodityAvgPerGram = commodityEffectiveInvested !== undefined && commodityTotalGrams > 0
+                      ? commodityEffectiveInvested / commodityTotalGrams
+                      : null;
 
                     // Stocks market data — pre-computed once for middle + bottom sections
                     const stockTxShares = acc.type === 'stocks'
@@ -823,6 +832,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     const stockEffectiveInvested = acc.type === 'stocks'
                       ? (acc.investedValue !== undefined ? acc.investedValue + rawBal : undefined)
                       : undefined;
+                    const stockAvgPrice = stockEffectiveInvested !== undefined && stockTotalShares > 0
+                      ? stockEffectiveInvested / stockTotalShares
+                      : null;
 
                     return (
                       <div key={acc.id} className={`card flex-col ${isFirstAccount ? 'tour-first-account' : ''}`} style={{ padding: '0' }}>
@@ -1083,7 +1095,18 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               {mfTotalUnits > 0 && (
                                 <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                                   <span className="text-mono text-muted text-xs">TOTAL UNITS</span>
-                                  <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{mfTotalUnits.toLocaleString('en-IN', { maximumFractionDigits: 4 })}</span>
+                                  {/* Average cost sits with the quantity, NOT in the quote row below:
+                                    it is derived from stored figures alone, so it must still read when
+                                    the live price fails to fetch. The quote is the next row down, so
+                                    the avg-vs-LTP comparison stays adjacent. */}
+                                  <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
+                                    <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{mfTotalUnits.toLocaleString('en-IN', { maximumFractionDigits: 4 })}</span>
+                                    {mfAvgNav !== null && (
+                                      <span className="text-mono text-muted" style={{ fontSize: '0.62rem', marginTop: '0.1rem' }}>
+                                        AVG NAV ₹{mfAvgNav.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               )}
                               {acc.marketSymbol && (
@@ -1185,7 +1208,18 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               {hasShares && (
                                 <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                                   <span className="text-mono text-muted text-xs">TOTAL SHARES</span>
-                                  <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{totalShares.toLocaleString('en-IN', { maximumFractionDigits: 4 })}</span>
+                                  {/* Average cost sits with the quantity, NOT in the quote row below:
+                                    it is derived from stored figures alone, so it must still read when
+                                    the live price fails to fetch. The quote is the next row down, so
+                                    the avg-vs-LTP comparison stays adjacent. */}
+                                  <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
+                                    <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{totalShares.toLocaleString('en-IN', { maximumFractionDigits: 4 })}</span>
+                                    {stockAvgPrice !== null && (
+                                      <span className="text-mono text-muted" style={{ fontSize: '0.62rem', marginTop: '0.1rem' }}>
+                                        AVG ₹{stockAvgPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / SHARE
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               )}
                               {hasPnLSetup && (
@@ -1269,7 +1303,18 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               {commodityTotalGrams > 0 && (
                                 <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                                   <span className="text-mono text-muted text-xs">TOTAL GRAMS</span>
-                                  <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{commodityTotalGrams.toLocaleString('en-IN', { maximumFractionDigits: 4 })} g</span>
+                                  {/* Average cost sits with the quantity, NOT in the quote row below:
+                                    it is derived from stored figures alone, so it must still read when
+                                    the live price fails to fetch. The quote is the next row down, so
+                                    the avg-vs-LTP comparison stays adjacent. */}
+                                  <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
+                                    <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{commodityTotalGrams.toLocaleString('en-IN', { maximumFractionDigits: 4 })} g</span>
+                                    {commodityAvgPerGram !== null && (
+                                      <span className="text-mono text-muted" style={{ fontSize: '0.62rem', marginTop: '0.1rem' }}>
+                                        AVG ₹{commodityAvgPerGram.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / G
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               )}
                               {acc.marketSymbol && (
@@ -1735,7 +1780,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         step="any"
                         min="0"
                       />
-                      <span className="text-xs text-muted" style={{ marginTop: '0.25rem', display: 'block' }}>Your average buy NAV — shown on the card for reference</span>
+                      <span className="text-xs text-muted" style={{ marginTop: '0.25rem', display: 'block' }}>Only a fallback for invested value if you leave it blank — the AVG shown on the card is derived from invested ÷ units</span>
                     </div>
                   )}
                 </>

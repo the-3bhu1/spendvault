@@ -923,9 +923,18 @@ export function getInvestmentAccountStats(
   const totalReturn = currentValue - totalInvested;
   const totalReturnPct = totalInvested > 0 ? (totalReturn / totalInvested) * 100 : 0;
 
+  // Average price paid per unit — derived, never stored. Nothing asks the user for it: it is
+  // exactly the two numbers above divided, so a saved copy could only ever disagree with them.
+  //
+  // Caveat worth knowing when reading this figure: totalInvested is net cash flow, and a sell leg
+  // subtracts its full proceeds (market price), not the cost of the units sold. So after a partial
+  // sale at a profit this sits BELOW the true cost basis. Exact for accumulate-only holdings.
+  const avgPrice = totalUnits > 0 ? totalInvested / totalUnits : 0;
+
   return {
     totalUnits,
     totalInvested,
+    avgPrice,
     currentValue,
     totalReturn,
     totalReturnPct,
