@@ -57,7 +57,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       },
       {
         title: "Dashboard Overview",
-        description: "See your total spending and active credit card dues at a glance. We've populated some sample data so you can see SpendVault in action!",
+        description: "Your home screen answers one question: what this month cost. Tap the ring below it to see where the money went, or the Cards and Wealth plaques to open what you owe and what you own. We've populated some sample data so you can see SpendVault in action!",
         selector: ".tour-dashboard-stats",
         tab: "dashboard",
         icon: Sparkles

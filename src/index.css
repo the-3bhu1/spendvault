@@ -1442,14 +1442,6 @@ tr:hover td {
   background-color: rgba(255, 255, 255, 0.02);
 }
 
-/* A "Current Outstanding Dues" row on the Dashboard. Same reason as .linked-entry-toggle below:
-   in CSS so the lift can be gated on a real pointer. */
-@media (hover: hover) {
-  .due-row:hover {
-    transform: translateY(-2px);
-  }
-}
-
 /* The "Linked entry" disclosure under a transaction row. Kept in CSS rather than inline JS hover
    handlers so the hover can be gated on a real pointer — same guard as .btn and .picker-option. */
 .linked-entry-toggle {

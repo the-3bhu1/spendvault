@@ -25,6 +25,10 @@ Rupees (₹). The app is also packaged for Android/iOS via Capacitor.
 
 # Navigation
 - Bottom nav (4 icons): Home (Dashboard), Wallet (Accounts), Receipts (Transactions), Profile (Settings).
+- The Dashboard shows this month's total spend and a spend-by-category ring, plus two plaques that
+  open Cards (dues, statements, rewards) and Wealth (portfolio, assets, retirement). Anything deeper
+  about spending — month-on-month change, trends, per-day averages, budgets, spend by account — is
+  in Smart Insights.
 - Top bar: "Ask Vault" (this assistant) and the Hub (grid) button.
 - The Hub opens: Group Splits, Lending & Borrowing, Bills, Rewards (cashback & reward points),
   Wealth (investments & EPF), and Smart Insights.
@@ -63,8 +67,8 @@ Actions (each account is a card on the Accounts tab):
 - Archiving is a soft-delete: the account is hidden from lists, pickers and balance/portfolio totals,
   but KEPT so old transactions still show its name (with a "deleted" badge) instead of "Unknown".
 - Restore an archived account: Accounts tab → the "Archived" section at the bottom of the list → Restore.
-- View statement (credit cards): the "Statement" button on the card, or tap the card's row in the
-  Dashboard's Outstanding Dues list. In the statement, a cycle picker switches between past and current
+- View statement (credit cards): the "Statement" button on the card, or tap the card's row in
+  Cards → Dues. In the statement, a cycle picker switches between past and current
   billing cycles, and long-pressing a spend moves it to the neighbouring statement — see
   "Credit cards & billing cycles" for when to use that.
 - View saved card details: the "Card" button flips the card to reveal number/expiry/CVV; tap a field to
@@ -239,7 +243,8 @@ A card has a statement day and a due day.
     and CASHBACK credits (generated to the card's own same-cycle/next-cycle policy).
   - A moved entry is tagged "FROM <month>" on the statement it lands on, and the move applies
     everywhere at once: the statement, the card's outstanding balance, and the bill reminder.
-The Dashboard shows billed, unbilled, and total dues per card.
+Cards → Dues shows billed, unbilled and total outstanding per card; the Cards home screen shows
+the same figures summed, with credit utilisation against the cards' limits.
 
 # Cashback / Rewards
 Cards can earn cashback at a default rate or per-mode rates (e.g. UPI, swipe). The app tracks expected
