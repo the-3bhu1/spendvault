@@ -9,17 +9,28 @@
 // Every figure on every level comes from CardDuesService. That's the point of the service: the
 // Dashboard tile, this hero, these rows and the Bills screen cannot disagree about what a card owes.
 //
-// Phase 1 ships the tree and Dues. Statements, Rewards and My Cards get their rows when their
-// screens exist — an empty category is a dead end, and Wealth's tree already refuses to show one.
-// A Dues row opens the existing statement modal for now: that modal is exactly what Level 3 will
-// absorb, so the destination is right even though it isn't a screen yet.
+// Statements, Rewards and My Cards get their rows when their screens exist — an empty category is a
+// dead end, and Wealth's tree already refuses to show one.
+//
+// Level 3 is the statement, on a screen. The modal AccountStatement still exists and Accounts still
+// opens it: that entry point has nothing to do with this tree, and forcing it through three levels of
+// navigation to reach one card would be worse than leaving it alone. What the two must not do is
+// disagree, which is why the ledger rows and the long-press move are one implementation shared from
+// CycleMove / useCycleMove rather than a copy.
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { CreditCard } from 'lucide-react';
+import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Account } from '../types';
-import { formatCurrency, resolveCardIssuer, userPossessive, getOrdinalSuffix } from '../utils';
-import { getActiveCardDues, sumCardDues, type CardDues } from '../services/CardDuesService';
-import { CategoryCard, CategoryHero, SubviewHeader, FilterPills } from './TreeUi';
+import {
+  formatCurrency, resolveCardIssuer, userPossessive, getOrdinalSuffix,
+  getBillingCycleForDate, formatBillingCycleRange, getAppliedBillingCycle, affectsRupeeBalance,
+} from '../utils';
+import { getActiveCardDues, getCardCycleFigures, sumCardDues, type CardDues } from '../services/CardDuesService';
+import { CategoryCard, CategoryHero, SubviewHeader, SealedMark, FilterPills } from './TreeUi';
+import { DetailHeroBand, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
+import { useCycleMove } from '../hooks/useCycleMove';
+import { CycleLedgerRow, CycleMoveSheet, CycleMoveToast } from './CycleMove';
 import { CardsBackdrop, DuesBackdrop } from './CardsBackdrops';
 import { CardBrandLogo } from './CardBrandLogo';
 import { LogoAvatar } from './LogoAvatar';
@@ -27,6 +38,9 @@ import { getLiquidLogoUrl } from '../services/LogoService';
 import ProfileAvatar from './ProfileAvatar';
 
 type CardsCategory = 'dues';
+
+/** What each category is called, for the detail screen's header. */
+const CATEGORY_LABELS: Record<CardsCategory, string> = { dues: 'Dues' };
 
 /** Whole rupees for the root screen and the category cards — paise are noise on a summary, and
  *  Wealth's tree makes the same call. Every inner figure uses formatCurrency so it reconciles
@@ -50,13 +64,20 @@ const duePhrase = (d: CardDues) => {
   return `In ${d.daysToDue} day${d.daysToDue === 1 ? '' : 's'}`;
 };
 
-export default function CreditCards({ onViewStatement }: { onViewStatement: (acc: Account) => void }) {
+export default function CreditCards() {
   const { data } = useFinance();
   const [category, setCategory] = useState<CardsCategory | null>(null);
   const [duesFilter, setDuesFilter] = useState<string>('all');
+  // Level 3: which card's statement is open, and which of its cycles. The card is held by ID rather
+  // than as an object so the screen reads today's figures — an Account captured on open would keep
+  // whatever balance and dues it had at that moment while transactions carried on being logged.
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [selectedCycle, setSelectedCycle] = useState<string | null>(null);
   // Where each level was scrolled to, so backing out of one lands where it was left rather than at
-  // the top. Same two-slot memory as Wealth's.
+  // the top. Same two-slot memory as Wealth's — the detail screen always opens at the top, so it
+  // needs no slot of its own.
   const scrollRef = useRef<{ tree: number; category: number }>({ tree: 0, category: 0 });
+  const cycleMove = useCycleMove();
 
   const dues = useMemo(
     () => getActiveCardDues(data.accounts, data.transactions),
@@ -70,6 +91,10 @@ export default function CreditCards({ onViewStatement }: { onViewStatement: (acc
   // that fires afterwards. (If the card comes back while this tab is still mounted, the sub-view
   // comes back with it — it was never left deliberately.)
   const activeCategory = hasCards ? category : null;
+  // Derived, not synced: a card archived or deleted while its statement was open has to put the user
+  // back on the sub-view, and reading it here does that on the same render rather than through an
+  // effect that fires afterwards.
+  const activeCard = selectedCardId ? dues.find(d => d.account.id === selectedCardId) ?? null : null;
   const possessive = userPossessive(data.user?.name);
 
   // The card whose bill lands first and still has something on it. Nothing to say when every
@@ -86,24 +111,38 @@ export default function CreditCards({ onViewStatement }: { onViewStatement: (acc
     setCategory(next);
   };
 
+  /** Opens one card's statement. `cycle` of undefined means the cycle still accruing — which is what
+   *  a Dues row is about. Statements passes a closed one, because that's what it lists. */
+  const openCard = (account: Account, cycle?: string) => {
+    const appRoot = document.querySelector('.app-root');
+    scrollRef.current.category = appRoot?.scrollTop ?? 0;
+    setSelectedCycle(cycle ?? null);
+    setSelectedCardId(account.id);
+  };
+
   useEffect(() => {
     const handleBack = (e: Event) => {
-      // Unwinds one level at a time. The statement modal is unwound by App before this event is even
-      // dispatched, so by the time we see it the innermost level open here is the sub-view.
-      if (activeCategory) {
+      // Unwinds one level at a time, innermost first: statement → sub-view → tree. The move sheet is
+      // a .modal-overlay and closes itself before this fires.
+      if (activeCard) {
+        e.preventDefault();
+        setSelectedCardId(null);
+      } else if (activeCategory) {
         e.preventDefault();
         setCategory(null);
       }
     };
     window.addEventListener('appBackButton', handleBack);
     return () => window.removeEventListener('appBackButton', handleBack);
-  }, [activeCategory]);
+  }, [activeCategory, activeCard]);
 
   useEffect(() => {
     const appRoot = document.querySelector('.app-root');
     if (!appRoot) return;
-    appRoot.scrollTo({ top: activeCategory ? scrollRef.current.category : scrollRef.current.tree, behavior: 'auto' });
-  }, [activeCategory]);
+    // Descending starts at the top; coming back restores that level's saved position.
+    const top = activeCard ? 0 : activeCategory ? scrollRef.current.category : scrollRef.current.tree;
+    appRoot.scrollTo({ top, behavior: 'auto' });
+  }, [activeCategory, activeCard]);
 
   // A card whose issuer resolves gets its real mark; anything else falls back to the brand-domain
   // favicon, and then to initials inside LogoAvatar. resolveCardIssuer reads the card's saved
@@ -184,7 +223,7 @@ export default function CreditCards({ onViewStatement }: { onViewStatement: (acc
   return (
     <div style={{ background: 'var(--bg-primary)', paddingBottom: '100px' }}>
       {/* ───────────────────────── Level 1: the tree ───────────────────────── */}
-      {!activeCategory && (
+      {!activeCategory && !activeCard && (
         <>
           {/* position/overflow for the backdrop, which is absolutely positioned to this box and
               bleeds past the horizontal padding. minHeight gives the square drawing room to render
@@ -228,7 +267,7 @@ export default function CreditCards({ onViewStatement }: { onViewStatement: (acc
               <CategoryCard
                 icon={<CreditCard size={20} />}
                 iconColor="var(--warning)"
-                label="Dues"
+                label={CATEGORY_LABELS.dues}
                 subtext="Billed & unbilled"
                 value={formatWhole(totals.outstanding)}
                 valueNote={nextDue ? (
@@ -249,11 +288,11 @@ export default function CreditCards({ onViewStatement }: { onViewStatement: (acc
       )}
 
       {/* ───────────────────────── Level 2: Dues ───────────────────────── */}
-      {activeCategory === 'dues' && (
+      {activeCategory === 'dues' && !activeCard && (
         <div className="fade-in">
           <SubviewHeader title="Cards" onBack={() => setCategory(null)} hideTitle />
 
-          <CategoryHero backdrop={<DuesBackdrop />} label="Dues" minHeight="360px" userName={data.user?.name}>
+          <CategoryHero backdrop={<DuesBackdrop />} label={CATEGORY_LABELS.dues} minHeight="360px" userName={data.user?.name}>
             <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
               {formatCurrency(totals.outstanding)}
             </div>
@@ -281,7 +320,7 @@ export default function CreditCards({ onViewStatement }: { onViewStatement: (acc
               // vanished when it was paid off would read as a card that had gone missing.
               <div
                 key={d.account.id}
-                onClick={() => onViewStatement(d.account)}
+                onClick={() => openCard(d.account)}
                 className="clickable"
                 style={{
                   padding: '1rem 0',
@@ -322,7 +361,165 @@ export default function CreditCards({ onViewStatement }: { onViewStatement: (acc
         </div>
       )}
 
-      {/* Level 3, the per-card detail screen, is Phase 3 — see the note at the top of this file. */}
+      {/* ───────────────────────── Level 3: one card's statement ───────────────────────── */}
+      {activeCard && (() => {
+        const cardDues = activeCard;
+        const card = cardDues.account;
+        const statementDay = card.statementDay || 1;
+        const openCycle = getBillingCycleForDate(format(new Date(), 'yyyy-MM-dd'), statementDay);
+        const cycle = selectedCycle ?? openCycle;
+        const isOpenCycle = cycle === openCycle;
+        // Rupee legs only, matching the statement modal and every cycle sum in the service: a points
+        // redemption draws on the reward wallet, so it is on neither side of this bill.
+        const cardTxs = data.transactions.filter(t => t.accountId === card.id && affectsRupeeBalance(t));
+        const cycleTxs = cardTxs
+          .filter(t => getAppliedBillingCycle(t, statementDay) === cycle)
+          .sort((a, b) => b.date.localeCompare(a.date));
+        const figures = getCardCycleFigures(card, data.transactions, cycle);
+
+        // Which cycles get a pill. Four at most: FilterPills is a fixed-width segmented control, and
+        // a fifth pill truncates every label to three characters. The window slides to keep the
+        // selected cycle lit, so a cycle opened from Statements is visible even if it's a year back —
+        // and the open cycle is always in the set, because a card with no history still has one.
+        const ranked = Array.from(new Set([openCycle, cycle, ...cardTxs.map(t => getAppliedBillingCycle(t, statementDay))]))
+          .sort((a, b) => b.localeCompare(a));
+        const at = ranked.indexOf(cycle);
+        const from = Math.min(Math.max(0, at - 1), Math.max(0, ranked.length - 4));
+        // Reversed for display: time runs left to right, so the newest cycle is the rightmost pill.
+        const cycleTabs = ranked.slice(from, from + 4).reverse()
+          .map(c => ({ v: c, label: format(parseISO(`${c}-01`), 'MMM') }));
+
+        const last4 = card.cardDetails?.cardNumber?.replace(/\D/g, '').slice(-4);
+        const identity = ['Credit card', card.cardDetails?.network?.toUpperCase(), last4 && `•••• ${last4}`]
+          .filter(Boolean).join(' · ');
+
+        return (
+          <div className="fade-in" style={{ boxSizing: 'border-box' }}>
+            <SubviewHeader title={CATEGORY_LABELS[activeCategory ?? 'dues']} onBack={() => setSelectedCardId(null)} hideTitle />
+
+            <DetailHeroBand />
+
+            {/* Identity block — the same shape as Wealth's holding detail, down to the lift that sets
+                the mark into the panel above, so the app's two detail screens read as one screen. */}
+            <div style={{ padding: '0 1.5rem 0.5rem', marginTop: `-${DETAIL_HERO_LIFT}px`, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+              <SealedMark>
+                {/* LogoAvatar, not the CardBrandLogo the Dues rows use — and the difference is the
+                    shape of the hole it fills. The wax is a CIRCLE centred on this box, and an issuer
+                    lockup is a 6:1 plate (HDFC) or a 4:1 wordmark (Axis): inscribed in a 60px circle
+                    that leaves an 8px-tall sliver, which reads as a sticker stuck on the seal rather
+                    than a device struck into it. LogoAvatar resolves the co-brand's round mark, and
+                    falls back to a monogram — which is what a seal carries anyway. The issuer's
+                    wordmark still names the bank on the row this screen was opened from, where a
+                    landscape tile is the right shape for it. */}
+                <LogoAvatar name={card.name} logoUrl={getLiquidLogoUrl(card)} size={DETAIL_HERO_AVATAR} accountType={card.type} />
+              </SealedMark>
+
+              <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.35, maxWidth: '90%' }}>
+                {card.name}
+              </div>
+              <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.4rem', letterSpacing: '1px' }}>
+                {identity}
+              </div>
+
+              {/* The CARD's position, not the cycle's: this is what the row that opened the screen
+                  said, and a detail screen that opens on a different number reads as the wrong card.
+                  The selected cycle's own figures are below the pills, where they change with them. */}
+              <div className="text-serif" style={{ fontSize: '2.6rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '1.25rem', lineHeight: 1 }}>
+                {formatCurrency(cardDues.outstanding)}
+              </div>
+              {renderSplit(cardDues.billed, cardDues.unbilled)}
+              {cardDues.utilization !== undefined && renderUtilization(cardDues.utilization, cardDues.creditLimit ?? 0)}
+              {duePhrase(cardDues) && (
+                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', letterSpacing: '0.5px', color: dueColor(cardDues), marginTop: '1rem' }}>
+                  {cardDues.billed > 0 ? duePhrase(cardDues) : `Nothing billed · due ${cardDues.dueDayStr}`}
+                </div>
+              )}
+            </div>
+
+            <div style={{ padding: '0 1.5rem calc(1.5rem + var(--safe-area-inset-bottom))' }}>
+              <div className="flex justify-center" style={{ marginTop: '1.5rem' }}>
+                <FilterPills tabs={cycleTabs} active={cycle} onSelect={setSelectedCycle} marginTop="0" flexible />
+              </div>
+
+              {/* What the selected cycle is, in dates. The pill says "Aug"; a statement is a range,
+                  and which range depends on a cut day the pill can't show. */}
+              <div className="text-mono uppercase" style={{ fontSize: '0.6rem', letterSpacing: '1px', color: 'var(--text-secondary)', textAlign: 'center', marginTop: '0.85rem' }}>
+                {formatBillingCycleRange(cycle, statementDay)}
+                {' · '}
+                <span style={{ color: isOpenCycle ? 'var(--accent)' : 'var(--text-muted)' }}>
+                  {isOpenCycle ? 'Open cycle' : 'Closed statement'}
+                </span>
+              </div>
+
+              {/* The cycle's three figures. NOT billed / unbilled / cashback, which the plan for this
+                  screen called for: billed and unbilled are properties of the CARD (latest closed
+                  cycle, and the open one), so under a cycle selector they would sit still while the
+                  pills moved, and they already appear above. Spends and payments are the two sides of
+                  whichever cycle is selected, and the third cell is their result — printed on a closed
+                  statement, still moving on an open one. */}
+              <div className="flex justify-between" style={{ gap: '0.75rem', marginTop: '1.25rem' }}>
+                {[
+                  { label: 'Spends', value: figures.spend, tone: 'var(--text-primary)' },
+                  { label: 'Payments', value: figures.payment, tone: figures.payment > 0 ? 'var(--success)' : 'var(--text-secondary)' },
+                  {
+                    label: isOpenCycle ? 'Running' : 'Statement',
+                    value: isOpenCycle ? figures.payable : figures.statementAmount,
+                    tone: 'var(--text-primary)',
+                  },
+                ].map(cell => (
+                  <div key={cell.label} className="card" style={{ flex: 1, padding: '0.85rem 0.5rem', textAlign: 'center', minWidth: 0 }}>
+                    <div className="text-mono uppercase" style={{ fontSize: '0.55rem', fontWeight: 800, letterSpacing: '1px', color: 'var(--text-muted)' }}>{cell.label}</div>
+                    <div className="text-serif" style={{ fontSize: '1rem', fontWeight: 700, color: cell.tone, marginTop: '0.25rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {formatWhole(cell.value)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* The cycle's own ledger, rows and gesture shared with the statement modal. */}
+              <div className="text-mono uppercase" style={{ fontSize: '0.6rem', fontWeight: 800, letterSpacing: '1.5px', color: 'var(--text-muted)', margin: '1.75rem 0 0.25rem' }}>
+                {cycleTxs.length > 0 ? `${cycleTxs.length} transaction${cycleTxs.length === 1 ? '' : 's'}` : 'Ledger'}
+              </div>
+              {cycleTxs.length === 0 ? (
+                <div style={{ padding: '2rem 0', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                  Nothing billed to this cycle
+                </div>
+              ) : (
+                cycleTxs.map((tx, idx) => (
+                  <CycleLedgerRow
+                    key={tx.id}
+                    tx={tx}
+                    statementDay={statementDay}
+                    selectedCycle={cycle}
+                    index={idx}
+                    press={cycleMove.press(tx)}
+                  />
+                ))
+              )}
+              {/* Long-press is undiscoverable without being told once. The rows already carry a
+                  dashed "may settle next" tag where it's most likely to be wanted; this says what to
+                  do about it. */}
+              {cycleTxs.length > 0 && (
+                <div className="text-mono uppercase" style={{ fontSize: '0.55rem', letterSpacing: '0.5px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '1.25rem', opacity: 0.8 }}>
+                  Hold a row to move it to another statement
+                </div>
+              )}
+            </div>
+
+            {cycleMove.moveTarget && (
+              <CycleMoveSheet
+                tx={cycleMove.moveTarget}
+                statementDay={statementDay}
+                selectedCycle={cycle}
+                onApply={cycleMove.applyCycleMove}
+                onCancel={cycleMove.closeMove}
+              />
+            )}
+          </div>
+        );
+      })()}
+
+      {cycleMove.undoState && <CycleMoveToast message={cycleMove.undoState.message} onUndo={cycleMove.undoCycleMove} />}
     </div>
   );
 }

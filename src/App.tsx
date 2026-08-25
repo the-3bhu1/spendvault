@@ -468,7 +468,7 @@ function App() {
 
         {activeTab === 'cashback' && <div className="fade-in"><Cashback /></div>}
         {activeTab === 'wealth' && <div className="fade-in" style={{ height: '100%' }}><Wealth /></div>}
-        {activeTab === 'cards' && <div className="fade-in" style={{ height: '100%' }}><CreditCards onViewStatement={(acc) => setSelectedAccountForStatement(acc)} /></div>}
+        {activeTab === 'cards' && <div className="fade-in" style={{ height: '100%' }}><CreditCards /></div>}
         {activeTab === 'insights' && <div className="fade-in"><Insights /></div>}
         {activeTab === 'settings' && <div className="fade-in"><Settings /></div>}
         {activeTab === 'splits' && <div className="fade-in"><Splits /></div>}
