@@ -61,6 +61,13 @@ export default function Dashboard({ onOpenCards, onOpenWealth }: {
   const monthLabel = `${new Date(`${currentMonth}-01`).toLocaleString('default', { month: 'short' })} '${currentMonth.substring(2, 4)}`;
   const hasSpend = totalSpend > 0;
 
+  // The figure is the coin's DENOMINATION, so it wants to fill the field — but the field is a fixed
+  // circle and a rupee figure is not a fixed width. Stepped by magnitude rather than measured,
+  // because RollingNumber renders one span per digit and has no width to measure until it has
+  // already laid out. Ten characters at 3.15rem is about as wide as the field allows; a crore-scale
+  // figure needs the smaller step to stay inside it.
+  const heroFontSize = totalSpend >= 1_00_00_000 ? '2.5rem' : totalSpend >= 1_00_000 ? '2.85rem' : '3.15rem';
+
   return (
     <div className="flex-col gap-6">
       {/* The title stays. All three other nav screens announce themselves in this exact style
@@ -80,7 +87,7 @@ export default function Dashboard({ onOpenCards, onOpenWealth }: {
         style={{
           position: 'relative',
           overflow: 'hidden',
-          minHeight: '300px',
+          minHeight: '360px',
           margin: '0 -1.5rem',
           padding: '1.5rem',
           display: 'flex',
@@ -95,12 +102,12 @@ export default function Dashboard({ onOpenCards, onOpenWealth }: {
 
         {/* One lifted wrapper, rather than a position/z-index on every figure inside it. */}
         <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <div className="text-mono uppercase" style={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: '2.5px', color: 'var(--text-secondary)', marginBottom: '0.6rem' }}>
+          <div className="text-mono uppercase" style={{ fontSize: '0.8rem', fontWeight: 700, letterSpacing: '3.5px', color: 'var(--text-secondary)', marginBottom: '0.7rem' }}>
             {monthLabel}
           </div>
           {/* Whole rupees: this is a glance surface, and the paise belong on the screens where a
               figure is reconciled against Accounts. */}
-          <RollingNumber value={totalSpend} fontSize="2.75rem" whole />
+          <RollingNumber value={totalSpend} fontSize={heroFontSize} whole />
           {!hasSpend && (
             <div className="text-mono uppercase" style={{ fontSize: '0.6rem', letterSpacing: '1px', color: 'var(--text-muted)', marginTop: '0.75rem' }}>
               Nothing logged this month yet
