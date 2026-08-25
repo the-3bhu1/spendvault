@@ -4,6 +4,7 @@
 //   Cards      → a stack of plates lying in a wallet, the top one carrying a chip, under a coin rim.
 //   Dues       → one plate creased by a statement fold, with the charges ruled below it.
 //   Statements → continuous-feed stationery, folded and perforated: one panel per cycle.
+//   Rewards    → a voucher with a torn scalloped edge, a star struck in the middle of it.
 //
 // Why a card and not a coin or a vault: the Dashboard's hero is a coin (what you spent) and Wealth's
 // is a vault door (what you own). A liability screen has to look like the plastic it tracks, or all
@@ -260,3 +261,69 @@ export const StatementsBackdrop: React.FC = () => (
     ))}
   </ReliefSvg>
 );
+
+// ── Rewards: the voucher ─────────────────────────────────────────────────────────────────────────
+// A coupon torn off its book: scalloped along the tear, with a star struck in the middle. Neither
+// plastic nor a statement — a reward is a thing you're given, and the voucher is the one object in
+// this tree that says "owed TO you" rather than "owed BY you".
+//
+// The star is the device, and it is the only closed figure in the tree's three motifs. That is
+// deliberate: at a glance the eye finds it before it reads any of the paper, which is what stops the
+// Rewards hero from looking like the Statements hero with different numbers on it.
+const RW = 'rwb';
+// Measured in the running app at the hero's 360px height: avatar 89–163, label 178–197, figure
+// 210–255, one unit line 262–279, count line 291–308. A second unit line pushes that to ~325, which
+// is the case the top edge has to clear — a first cut put it at 296, above the count line entirely.
+// It lands at the same depth as the Statements sheet, which is worth having: the tree's two paper
+// motifs then sit on the same line.
+const RW_TOP = 336;
+const RW_FOOT = 412;
+const RW_L = 84;
+const RW_R = 316;
+const RW_SCALLOPS = 12;
+const RW_BITE = (RW_R - RW_L) / RW_SCALLOPS;
+
+// A five-pointed star, struck rather than drawn: ten vertices alternating between the outer and
+// inner radius, starting at the top point.
+const starPath = (cx: number, cy: number, rOut: number, rIn: number) =>
+  Array.from({ length: 10 }, (_, i) => {
+    const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+    const r = i % 2 === 0 ? rOut : rIn;
+    return `${i === 0 ? 'M' : 'L'} ${f(cx + r * Math.cos(a))} ${f(cy + r * Math.sin(a))}`;
+  }).join(' ') + ' Z';
+
+export const RewardsBackdrop: React.FC = () => {
+  // The tear: a run of semicircular bites taken OUT of the top edge. Sweep-flag 0 is what makes each
+  // arc dip into the paper — with 1 they bulge upward and the edge reads as a row of beads sitting on
+  // top of the voucher instead of a perforation torn through it.
+  const tear = Array.from({ length: RW_SCALLOPS }, () =>
+    `a ${f(RW_BITE / 2)} ${f(RW_BITE / 2)} 0 0 0 ${f(RW_BITE)} 0`).join(' ');
+
+  return (
+    <ReliefSvg p={RW} wellRx={146} wellRy={150}>
+      <MilledRim r={170} mills={80} opacity={0.22} />
+
+      <g filter={`url(#${RW}-cast)`}>
+        <path
+          d={`M ${RW_L} ${RW_TOP} ${tear} L ${RW_R} ${RW_FOOT} L ${RW_L} ${RW_FOOT} Z`}
+          fill={`url(#${RW}-stone-v)`} stroke="var(--relief-edge)" strokeWidth="1.1"
+        />
+      </g>
+
+      {/* The star, standing proud of the voucher: its own cast shadow plus a lit upper edge. A flat
+          filled star at this size reads as a sticker; the shadow is what strikes it into the card. */}
+      <g filter={`url(#${RW}-cast-tight)`}>
+        <path d={starPath(C, 374, 24, 10)} fill={`url(#${RW}-dome)`} stroke="var(--relief-edge)" strokeWidth="1" opacity="0.95" />
+      </g>
+
+      {/* Print either side of the star, ragged — the shape of a voucher's terms, with nothing legible
+          on it. Short, because the star has to stay the thing the eye lands on. */}
+      {[[RW_L + 12, 56], [C + 40, 52]].map(([x, w], i) => (
+        <React.Fragment key={i}>
+          <line x1={x} y1="368" x2={x + w} y2="368" stroke="var(--relief-line)" strokeWidth="1.5" opacity="0.24" />
+          <line x1={x} y1="380" x2={x + w * 0.7} y2="380" stroke="var(--relief-line)" strokeWidth="1.5" opacity="0.16" />
+        </React.Fragment>
+      ))}
+    </ReliefSvg>
+  );
+};

@@ -18,7 +18,7 @@
 // disagree, which is why the ledger rows and the long-press move are one implementation shared from
 // CycleMove / useCycleMove rather than a copy.
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { CreditCard, FileText } from 'lucide-react';
+import { CreditCard, FileText, Gift } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Account } from '../types';
@@ -27,20 +27,22 @@ import {
   getBillingCycleForDate, formatBillingCycleRange, getAppliedBillingCycle, affectsRupeeBalance,
 } from '../utils';
 import { getActiveCardDues, getCardCycleFigures, sumCardDues, type CardDues } from '../services/CardDuesService';
+import { buildRewardRows, summarisePendingRewards } from '../services/RewardsService';
+import Cashback from './Cashback';
 import { CategoryCard, CategoryHero, SubviewHeader, SealedMark, FilterPills } from './TreeUi';
 import { DetailHeroBand, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
 import { useCycleMove } from '../hooks/useCycleMove';
 import { CycleLedgerRow, CycleMoveSheet, CycleMoveToast } from './CycleMove';
-import { CardsBackdrop, DuesBackdrop, StatementsBackdrop } from './CardsBackdrops';
+import { CardsBackdrop, DuesBackdrop, StatementsBackdrop, RewardsBackdrop } from './CardsBackdrops';
 import { CardBrandLogo } from './CardBrandLogo';
 import { LogoAvatar } from './LogoAvatar';
 import { getLiquidLogoUrl } from '../services/LogoService';
 import ProfileAvatar from './ProfileAvatar';
 
-type CardsCategory = 'dues' | 'statements';
+type CardsCategory = 'dues' | 'statements' | 'rewards';
 
 /** What each category is called, on its row, its hero and the detail screen's header. */
-const CATEGORY_LABELS: Record<CardsCategory, string> = { dues: 'Dues', statements: 'Statements' };
+const CATEGORY_LABELS: Record<CardsCategory, string> = { dues: 'Dues', statements: 'Statements', rewards: 'Rewards' };
 
 /** One closed statement: what a card billed for one cycle that has already been cut. */
 interface ClosedStatement {
@@ -120,6 +122,13 @@ export default function CreditCards() {
     // Newest cycle first, and within a cycle by card name, so a month's statements sit together.
     return out.sort((a, b) => b.cycle.localeCompare(a.cycle) || a.account.name.localeCompare(b.account.name));
   }, [dues, data.transactions]);
+
+  // What the cards have earned but not yet paid out. Same derivation the vault screen uses — the row
+  // and the hero here would drift from it within one change otherwise.
+  const rewards = useMemo(() => {
+    const rows = Object.values(buildRewardRows(data.transactions, data.accounts, data.cashbackStatements));
+    return { rows, pending: summarisePendingRewards(rows, data.accounts) };
+  }, [data.transactions, data.accounts, data.cashbackStatements]);
 
   const hasCards = dues.length > 0;
   // Derived rather than synced: archiving the last card while a sub-view is open has to put the user
@@ -264,6 +273,8 @@ export default function CreditCards() {
   // Only cards that actually have a closed statement get a pill — a pill that filters to an empty
   // list is a dead end with extra steps.
   const statementCardIds = Array.from(new Set(statements.map(st => st.account.id)));
+  // The units that don't already lead the Rewards hero.
+  const unitLines = rewards.pending.byUnit.slice(rewards.pending.rupees > 0 ? 0 : 1);
 
   return (
     <div style={{ background: 'var(--bg-primary)', paddingBottom: '100px' }}>
@@ -346,6 +357,29 @@ export default function CreditCards() {
                   }
                   onClick={() => openCategory('statements')}
                   tourClass="tour-cards-cat-statements"
+                />
+              )}
+
+              {/* Shown once anything has ever earned a reward — including a fully-confirmed history,
+                  which is worth being able to look back at. */}
+              {rewards.rows.length > 0 && (
+                <CategoryCard
+                  icon={<Gift size={20} />}
+                  iconColor="var(--success)"
+                  label={CATEGORY_LABELS.rewards}
+                  subtext="Cashback & points"
+                  // A COUNT, not the rupee figure the plan called for, and the reason is arithmetic:
+                  // a card can pay in its own unit (Jewels, EDGE points) at its own conversion rate,
+                  // so one ₹ total across cards would be adding incompatible things. The hero below
+                  // states each unit separately, which a single row has no room to do.
+                  value={String(rewards.pending.count)}
+                  valueNote={
+                    <div className="text-mono uppercase" style={{ fontSize: '0.58rem', fontWeight: 700, marginTop: '0.3rem', letterSpacing: '0.5px', color: rewards.pending.count > 0 ? 'var(--success)' : 'var(--text-secondary)' }}>
+                      {rewards.pending.count > 0 ? 'Pending' : 'All credited'}
+                    </div>
+                  }
+                  onClick={() => openCategory('rewards')}
+                  tourClass="tour-cards-cat-rewards"
                 />
               )}
             </div>
@@ -493,6 +527,55 @@ export default function CreditCards() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ───────────────────────── Level 2: Rewards ─────────────────────────
+          The Cashback vault, absorbed. Its own screen is unchanged below the hero — it is the most
+          intricate surface in the app (confirm, edit, bulk-confirm, consolidate) and redrawing it to
+          match the tree would risk all of that for a header. What it loses is its title, because the
+          hero directly above now says where you are. */}
+      {activeCategory === 'rewards' && !activeCard && (
+        <div className="fade-in">
+          <SubviewHeader title={CATEGORY_LABELS.rewards} onBack={() => setCategory(null)} hideTitle />
+
+          {/* 360px, matching Dues. The hero's own content decides this: 'meet' scales the square by
+              min(width, height), so while the box is shorter than it is wide a taller hero genuinely
+              buys the drawing room — the content is laid out in pixels, so a bigger scale shrinks its
+              footprint in viewBox units. (That escape closes once height reaches width, which is the
+              case the note in CardsBackdrops is about.) */}
+          <CategoryHero backdrop={<RewardsBackdrop />} label={CATEGORY_LABELS.rewards} minHeight="360px" userName={data.user?.name}>
+            {/* Rupees lead when there are any; a points-only wallet leads with its own unit rather
+                than with a ₹0 that would read as "nothing owed". */}
+            <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
+              {rewards.pending.rupees > 0 || rewards.pending.byUnit.length === 0
+                ? formatWhole(rewards.pending.rupees)
+                : `${Math.round(rewards.pending.byUnit[0].amount)} ${rewards.pending.byUnit[0].unit.toLowerCase()}`}
+            </div>
+            {/* One line per remaining unit, and at most two of them — the drawing below has a fixed
+                top edge, and a third line would print over it. Never converted into the figure above:
+                a conversion rate is what a point is worth if you spend it a particular way, not what
+                you are owed. */}
+            {unitLines.slice(0, 2).map(u => (
+              <div key={u.unit} className="text-mono uppercase" style={{ fontSize: '0.62rem', letterSpacing: '1px', color: 'var(--text-secondary)', marginTop: '0.45rem' }}>
+                + {Math.round(u.amount * 100) / 100} {u.unit.toLowerCase()}
+              </div>
+            ))}
+            {unitLines.length > 2 && (
+              <div className="text-mono uppercase" style={{ fontSize: '0.62rem', letterSpacing: '1px', color: 'var(--text-muted)', marginTop: '0.45rem' }}>
+                + {unitLines.length - 2} more unit{unitLines.length - 2 === 1 ? '' : 's'}
+              </div>
+            )}
+            <div className="text-mono uppercase" style={{ fontSize: '0.6rem', letterSpacing: '1px', color: 'var(--text-muted)', marginTop: '0.7rem' }}>
+              {rewards.pending.count > 0
+                ? `${rewards.pending.count} awaiting credit`
+                : 'Everything credited'}
+            </div>
+          </CategoryHero>
+
+          <div style={{ paddingBottom: 'calc(1.5rem + var(--safe-area-inset-bottom))' }}>
+            <Cashback embedded />
           </div>
         </div>
       )}

@@ -3,33 +3,11 @@ import { format, addMonths } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import { formatCurrency, generateId, formatDateString, getAppliedBillingCycle, getBillingCycleDates, formatBillingCycleRange } from '../utils';
 import type { Account, CashbackStatement, Transaction } from '../types';
+import { buildRewardRows, getRewardUnit, type RewardRow as StatementRow } from '../services/RewardsService';
 import { Info, Pencil, Check, X, ChevronDown, RotateCcw } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 
-/**
- * One reward-earning transaction together with the statement state tracked against it.
- *
- * Rebuilt from data.transactions on every render, then keyed by transaction id, grouped
- * into billing-cycle buckets, and passed around by the confirm/consolidate handlers — which
- * is why it is named rather than repeated inline at each of them.
- */
-interface StatementRow {
-  expected: number;
-  realized: number;
-  confirmed: boolean;
-  statementId: string | null;
-  transaction: Transaction;
-  account: Account;
-  /**
-   * Where the reward was deposited. Absent on a freshly built row — the merge from
-   * data.cashbackStatements below copies realized/confirmed/statementId but not this — and
-   * grafted on in-place by the confirm handlers so consolidation can read back the target
-   * they just used without waiting for the next render.
-   */
-  realizedIntoAccountId?: string;
-}
-
-export default function Cashback() {
+export default function Cashback({ embedded = false }: { embedded?: boolean }) {
   const { data, addTransaction, updateCashbackStatement, deleteTransaction, updateTransaction } = useFinance();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState<number>(0);
@@ -41,19 +19,7 @@ export default function Cashback() {
   const [bulkConfirm, setBulkConfirm] = useState<{ sts: StatementRow[]; accountId: string } | null>(null);
   const [bulkDepositAccountId, setBulkDepositAccountId] = useState('');
 
-  const getRewardUnitAndRate = (account: Account | undefined) => {
-    if (!account) return { unit: '', rate: 1 };
-    if (account.rewardUnit) {
-      return { unit: account.rewardUnit, rate: account.pointsConversionRate || 1 };
-    }
-    if (account.cashbackDestinationAccountId) {
-      const dest = data.accounts.find(a => a.id === account.cashbackDestinationAccountId);
-      if (dest && dest.rewardUnit) {
-        return { unit: dest.rewardUnit, rate: dest.pointsConversionRate || 1 };
-      }
-    }
-    return { unit: '', rate: 1 };
-  };
+  const getRewardUnitAndRate = (account: Account | undefined) => getRewardUnit(account, data.accounts);
 
   const formatCashback = (value: number, account: Account | undefined) => {
     const { unit } = getRewardUnitAndRate(account);
@@ -76,52 +42,7 @@ export default function Cashback() {
     return formatBillingCycleRange(getAppliedBillingCycle(tx, statementDay), statementDay);
   };
 
-  const statements: Record<string, StatementRow> = {};
-
-  data.transactions.forEach(tx => {
-    const account = data.accounts.find(a => a.id === tx.accountId);
-    // Deleting an account archives it rather than removing it, so a reward transaction should
-    // always resolve one. Skip the row if it somehow doesn't: every consumer below reads
-    // st.account.name/.id/.statementDay unguarded, so an orphan would blank the whole screen.
-    if (!account) return;
-
-    // Only show "Delayed" rewards or legacy expectedCashback that isn't instant
-    const isDelayed = tx.rewardEarnedType === 'delayed' || (!tx.rewardEarnedType && (tx.expectedCashback || 0) > 0);
-
-    if (isDelayed && tx.type === 'debit' && tx.category !== 'Transfer' && tx.category !== 'CC Payment' && tx.category !== 'NCMC Travel Recharge' && !tx.isTravelTransaction) {
-      // The expectation is whatever the editor computed and stored — never re-derived here. handleSave
-      // applies the chosen Cashback Mode's rate (a named level, or the card default) and deliberately
-      // computes ZERO when no mode is chosen, so a 0 here means "this spend earns nothing", not
-      // "nobody worked it out yet".
-      //
-      // This used to fall back to the card's defaultCashbackRate whenever expected was 0, which
-      // manufactured an estimate the editor had explicitly declined: a ₹362 recharge on a 5% card
-      // showed 18 Jewels pending while its own Cashback Mode read "None". The fallback never did serve
-      // the legacy rows it was written for either — those qualify through the `!rewardEarnedType &&
-      // expectedCashback > 0` clause above, so expected is already non-zero for them.
-      const expected = tx.rewardEarned || tx.expectedCashback || 0;
-
-      if (expected > 0) {
-        statements[tx.id] = {
-          expected: expected,
-          realized: 0,
-          confirmed: false,
-          statementId: null,
-          transaction: tx,
-          account
-        };
-      }
-    }
-  });
-
-  data.cashbackStatements?.forEach(s => {
-    const txId = s.billingCycleYearMonth;
-    if (statements[txId]) {
-      statements[txId].realized = s.realized;
-      statements[txId].confirmed = s.confirmed;
-      statements[txId].statementId = s.id;
-    }
-  });
+  const statements = buildRewardRows(data.transactions, data.accounts, data.cashbackStatements);
 
   const consolidateCycleGroup = (accId: string, sts: StatementRow[]) => {
     const confirmedSts = sts.filter(s => s.confirmed);
@@ -458,8 +379,13 @@ export default function Cashback() {
 
   return (
     <div className="flex-col gap-6 cashback-tab-root" style={{ maxWidth: '600px', margin: '0 auto', width: '100%' }}>
-      <div className="flex justify-between align-center gap-4">
-        <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>cashback vault</h2>
+      {/* `embedded`: this screen also renders as Rewards inside the Cards tree, which puts an
+          illustrated hero directly above it saying "<Name>'s Rewards". A second title under that read
+          as two screens stacked. The filter keeps its place at the right of the row either way. */}
+      <div className={`flex align-center gap-4 ${embedded ? 'justify-end' : 'justify-between'}`}>
+        {!embedded && (
+          <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>cashback vault</h2>
+        )}
         {statementArray.length > 0 && (
           <button 
             className="btn flex align-center gap-1 text-mono text-xs" 
