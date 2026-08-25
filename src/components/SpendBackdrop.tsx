@@ -1,7 +1,7 @@
 // The Dashboard hero's engraving: a struck coin, engine-turned, with a vault dial as its device.
 //
 // Same relief language as the Wealth and Cards backdrops — see the COMPOSITION and RELIEF notes in
-// relief.tsx. Three pieces, each answering a specific complaint about an earlier draft:
+// relief.tsx. Three pieces:
 //
 //   THE LEGEND RING, from the app's own logo (public/logo.png), which is itself a coin: a ring of
 //   repeating text around a field with a device struck in the middle. A rim carrying nothing but
@@ -11,12 +11,12 @@
 //
 //   THE GUILLOCHE, filling the annulus. Engine-turning is the interlace printed on banknotes, share
 //   certificates and cheques, and it is built here the way a rose engine builds it — rings of
-//   overlapping circles whose centres sit on a circle, two counts against each other to make the
+//   overlapping circles whose centres sit on a circle, several counts against each other to make the
 //   weave. It replaced a field of plain concentric rings that read as a frame around nothing.
 //
-//   THE VAULT DIAL, below the total. A safe's combination dial: graduated collar, domed knob with
-//   gripping spokes, hub, and the index it is read against. The app is called SpendVault and this is
-//   the part that says so.
+//   THE VAULT DIAL, struck at the centre, with the total across it. A safe's combination dial:
+//   graduated collar, domed knob with gripping spokes, hub, and the index it is read against. The app
+//   is called SpendVault and this is the part that says so.
 //
 // The dial is also where the drawing's one apparent contradiction resolves. An early draft radiated
 // arcs across the whole field and read as a spoked wheel, which is why everything decorative since
@@ -24,10 +24,20 @@
 // an abstract flourish are right as a mechanism, and what contains them is that every one is short
 // and sits inside the dial's own collar.
 //
-// The composition is the coin's own — legend at the rim, denomination in the field, device below it —
-// which is why this is the one hero in the app whose motif sits in the middle. Cards and Wealth stack
-// five or six elements down the same square and have to keep their centres clear (the long note in
-// CardsBackdrops has that arithmetic). Here the hero carries two lines, so the field is free.
+// WHAT MOVED, and why the earlier arrangement was wrong. The dial first sat BELOW the total, on the
+// argument that two centres competing on one axis makes a field look busy — and the guilloche was
+// pushed out to r 116 to leave the dial somewhere to be. That solved the wrong problem twice over: it
+// gave the coin two focal points instead of one, and it hollowed out the rosette to make room for the
+// second. A coin's device is struck in the MIDDLE of its field and its denomination sits over it;
+// the legend, the weave and the device are concentric about one point, which is also the point the
+// hero centres its type on. So the dial is back at the centre, the weave runs back in to r 100, and
+// the way the figure stays legible is the INK constant below rather than an empty disc.
+//
+// The composition is the coin's own — legend at the rim, weave in the annulus, device and
+// denomination together in the field — which is why this is the one hero in the app whose motif sits
+// in the middle. Cards and Wealth stack five or six elements down the same square and have to keep
+// their centres clear (the long note in CardsBackdrops has that arithmetic). Here the hero carries
+// two lines, so the field is free.
 //
 // NOT data-bound. None of it moves with the numbers: a drawing whose geometry did would invite being
 // measured, and there is a real chart on the screen below for that.
@@ -36,6 +46,14 @@ import { ReliefSvg } from './relief';
 import { C, f, polar } from '../utils/reliefGeometry';
 
 const SP = 'spb';
+
+// One multiplier over the whole engraving. Every element's own opacity below was tuned against its
+// neighbours — the bead against the rim, the majors against the minors — and those relationships are
+// worth keeping, so the way this drawing steps back behind the month's total is a single group opacity
+// rather than forty edited numbers. It is also the only lever that works now the device is BEHIND the
+// type: the legibility well (relief.tsx) mutes the centre, but the well is shared with the other
+// heroes and is tuned for motifs that keep their middles empty.
+const INK = 0.58;
 
 // ── The rim and its legend ───────────────────────────────────────────────────────────────────────
 // Pushed close to the viewBox edge, and the band kept narrow: every unit the rim takes is a unit the
@@ -68,19 +86,20 @@ const BEAD = 166;
 const FIELD = 162;
 
 // ── The guilloche ────────────────────────────────────────────────────────────────────────────────
-// Engine-turning: the interlace printed on banknotes, share certificates and cheques, built the way
-// a rose engine builds it — rings of overlapping circles whose centres sit on a circle. Two rings of
-// different counts produce the weave; one alone reads as a chain of loops.
+// Engine-turning: rings of overlapping circles whose centres sit on a circle. Three counts, because
+// two produced a weave only where they crossed and read as a chain of loops either side of it; a
+// third ring at a different count and radius closes the annulus into one continuous lattice.
 //
-// Both rings are kept in the OUTER band, and that is not a stylistic choice. The field's clear disc
-// is what the total and the dial have to live in: pull the guilloche inward and the interlace crosses
-// the figure. Ring A's circles reach r ≈ 100 at their innermost, which is the floor of everything
-// below it.
+// The band is bounded by arithmetic, not by taste: each ring reaches R ± rho, so the innermost
+// (124 ± 24) floors the weave at r 100 and the outermost (154 ± 11) tops it out at 165, just inside
+// the bead. r 100 is the number that matters — it clears the dial's collar and its index with a
+// margin, so the lattice frames the device instead of colliding with it.
 const GUILLOCHE = [
-  { n: 32, R: 138, rho: 22, op: 0.26, w: 0.85 },
-  { n: 46, R: 152, rho: 12, op: 0.3, w: 0.8 },
+  { n: 26, R: 124, rho: 24, op: 0.24, w: 0.85 },
+  { n: 34, R: 140, rho: 18, op: 0.26, w: 0.8 },
+  { n: 46, R: 154, rho: 11, op: 0.3, w: 0.75 },
 ];
-const GUILLOCHE_IN = 116;
+const GUILLOCHE_IN = 100;
 const GUILLOCHE_OUT = 164;
 
 // ── The vault dial ───────────────────────────────────────────────────────────────────────────────
@@ -93,142 +112,153 @@ const GUILLOCHE_OUT = 164;
 // mechanism. What keeps it from infecting the rest of the drawing is that every radius here is short
 // and contained inside the dial's own collar.
 //
-// Placed below the total rather than behind it: the dial is a form with a centre of its own, and two
-// centres competing on one axis is what makes a field look busy. This is where a coin puts a mint
-// mark or a secondary device.
+// At the coin's own centre, under the total. Its opacities run much higher than the rest of the
+// drawing's and that is not an inconsistency: the well (relief.tsx) hides ~82% of the relief at the
+// centre and ~70% out to r 84, so the collar and the knob are fighting a mute nothing else in this
+// drawing is subject to. At the rim's values the dial disappeared entirely.
 //
-// Sized and placed against two hard edges: the total's baseline above it, and the guilloche's inner
-// boundary below. A first cut sat at r 27 / cy 272 with 24 graduations and a 4px index wedge — at the
-// ~48px this occupies on a phone, that much detail collapsed into a smudge, and the wedge landed
-// under the figure's descenders. Fewer, heavier marks and a little more room in both directions.
-const DIAL_CX = 200;
-const DIAL_CY = 286;
-const DIAL_R = 28;
+// The radius is set from the type rather than from the
+// field: the hero's figure runs to roughly 220 units wide at its largest step, so a collar at r 78
+// is bracketed BY the digits rather than hidden behind them — the dial reads as a whole object with
+// the denomination struck across it, which is what a coin does, instead of as a ring peeking out
+// from behind a number.
+const DIAL_CX = C;
+const DIAL_CY = C;
+const DIAL_R = 78;
 
 export const SpendBackdrop: React.FC = () => (
   // The well is sized to the text block — month label and figure — rather than to the field. It has
   // to mute the rings directly behind the type without flattening the ones that give the rest of the
   // surface its texture.
   <ReliefSvg p={SP} wellRx={142} wellRy={104}>
-    {/* ── Rim ── */}
-    <g filter={`url(#${SP}-cast)`}>
-      <circle cx={C} cy={C} r={RIM_OUT} fill="none" stroke="var(--relief-line)" strokeWidth="1.6" opacity="0.55" />
-    </g>
-    <circle cx={C} cy={C} r={RIM_IN} fill="none" stroke="var(--relief-edge)" strokeWidth="1" opacity="0.4" />
+    <g opacity={INK}>
+      {/* ── Rim ── */}
+      <g filter={`url(#${SP}-cast)`}>
+        <circle cx={C} cy={C} r={RIM_OUT} fill="none" stroke="var(--relief-line)" strokeWidth="1.6" opacity="0.55" />
+      </g>
+      <circle cx={C} cy={C} r={RIM_IN} fill="none" stroke="var(--relief-edge)" strokeWidth="1" opacity="0.4" />
 
-    {/* ── Legend ──
-        textLength + lengthAdjust="spacing" force the repeated word to occupy the circle exactly, so
-        the ring closes cleanly whatever the font resolves to. The tracking comes out of that fit
-        rather than from a letter-spacing value, for the same reason. */}
-    <path id={`${SP}-legend-path`} d={legendPath} fill="none" />
-    <text
-      fill="var(--relief-line)"
-      opacity="0.62"
-      style={{ fontFamily: 'var(--font-mono)', fontSize: `${LEGEND_SIZE}px`, fontWeight: 700 }}
-    >
-      <textPath
-        href={`#${SP}-legend-path`}
-        startOffset="0"
-        textLength={f(LEGEND_CIRCUMFERENCE)}
-        lengthAdjust="spacing"
+      {/* ── Legend ──
+          textLength + lengthAdjust="spacing" force the repeated word to occupy the circle exactly, so
+          the ring closes cleanly whatever the font resolves to. The tracking comes out of that fit
+          rather than from a letter-spacing value, for the same reason. */}
+      <path id={`${SP}-legend-path`} d={legendPath} fill="none" />
+      <text
+        fill="var(--relief-line)"
+        opacity="0.62"
+        style={{ fontFamily: 'var(--font-mono)', fontSize: `${LEGEND_SIZE}px`, fontWeight: 700 }}
       >
-        {LEGEND}
-      </textPath>
-    </text>
+        <textPath
+          href={`#${SP}-legend-path`}
+          startOffset="0"
+          textLength={f(LEGEND_CIRCUMFERENCE)}
+          lengthAdjust="spacing"
+        >
+          {LEGEND}
+        </textPath>
+      </text>
 
-    {/* ── Field: the domed surface, its bead, and the record's rings ── */}
-    <circle cx={C} cy={C} r={FIELD} fill={`url(#${SP}-dome)`} />
-    {/* The bead reads as raised because its lit half and its shadowed half are separate strokes: one
-        continuous stroke all the way round would be a printed outline, not a moulding under a light
-        from the top-left. */}
-    <path
-      d={`M ${f(polar(BEAD, Math.PI * 0.75).x)} ${f(polar(BEAD, Math.PI * 0.75).y)} A ${BEAD} ${BEAD} 0 0 1 ${f(polar(BEAD, Math.PI * 1.75).x)} ${f(polar(BEAD, Math.PI * 1.75).y)}`}
-      fill="none" stroke="var(--relief-edge)" strokeWidth="1.8" opacity="0.5"
-    />
-    <path
-      d={`M ${f(polar(BEAD, Math.PI * 1.75).x)} ${f(polar(BEAD, Math.PI * 1.75).y)} A ${BEAD} ${BEAD} 0 0 1 ${f(polar(BEAD, Math.PI * 0.75).x)} ${f(polar(BEAD, Math.PI * 0.75).y)}`}
-      fill="none" stroke="var(--relief-shadow)" strokeWidth="1.8" opacity="0.34"
-    />
-
-    {/* ── The guilloche ── */}
-    {GUILLOCHE.map(({ n, R, rho, op, w }, gi) => (
-      <g key={gi} opacity={op}>
-        {Array.from({ length: n }, (_, i) => {
-          const a = (i / n) * Math.PI * 2;
-          const c = polar(R, a);
-          return <circle key={i} cx={f(c.x)} cy={f(c.y)} r={rho} fill="none" stroke="var(--relief-line)" strokeWidth={w} />;
-        })}
-      </g>
-    ))}
-    {/* The two circles that bound the weave. Without them the interlace frays into the field instead
-        of sitting in a band. */}
-    <circle cx={C} cy={C} r={GUILLOCHE_IN} fill="none" stroke="var(--relief-line)" strokeWidth="1" opacity="0.24" />
-    <circle cx={C} cy={C} r={GUILLOCHE_OUT} fill="none" stroke="var(--relief-line)" strokeWidth="1" opacity="0.28" />
-
-    {/* ── The vault dial ── */}
-    <g>
-      {/* Graduated collar: the ring the index is read against. Ticks are the only radii in the
-          drawing, and they live entirely inside this collar. */}
-      <circle cx={DIAL_CX} cy={DIAL_CY} r={DIAL_R} fill="none" stroke="var(--relief-line)" strokeWidth="1.3" opacity="0.6" />
-      <circle cx={DIAL_CX} cy={DIAL_CY} r={f(DIAL_R * 0.84)} fill="none" stroke="var(--relief-edge)" strokeWidth="0.8" opacity="0.4" />
-      <g opacity="0.55">
-        {Array.from({ length: 16 }, (_, i) => {
-          const a = (i / 16) * Math.PI * 2;
-          const major = i % 4 === 0;
-          const r1 = DIAL_R * 0.84;
-          const r2 = DIAL_R * (major ? 1 : 0.94);
-          return (
-            <line
-              key={i}
-              x1={f(DIAL_CX + r1 * Math.cos(a))} y1={f(DIAL_CY + r1 * Math.sin(a))}
-              x2={f(DIAL_CX + r2 * Math.cos(a))} y2={f(DIAL_CY + r2 * Math.sin(a))}
-              stroke="var(--relief-line)" strokeWidth={major ? 1.6 : 1}
-            />
-          );
-        })}
-      </g>
-
-      {/* The knob: a domed disc with its own lit and shadowed edge, so it stands proud of the collar
-          rather than sitting flush in it. */}
-      <g filter={`url(#${SP}-cast-tight)`}>
-        <circle cx={DIAL_CX} cy={DIAL_CY} r={f(DIAL_R * 0.78)} fill={`url(#${SP}-dome)`} stroke="var(--relief-edge)" strokeWidth="1" opacity="0.9" />
-      </g>
-
-      {/* Gripping spokes, on the diagonals: on the axes they would read as a crosshair, and a
-          crosshair is a sight, not a handle. */}
-      <g opacity="0.62">
-        {[0.25, 0.75, 1.25, 1.75].map(k => {
-          const a = Math.PI * k;
-          const r1 = DIAL_R * 0.26;
-          const r2 = DIAL_R * 0.68;
-          return (
-            <line
-              key={k}
-              x1={f(DIAL_CX + r1 * Math.cos(a))} y1={f(DIAL_CY + r1 * Math.sin(a))}
-              x2={f(DIAL_CX + r2 * Math.cos(a))} y2={f(DIAL_CY + r2 * Math.sin(a))}
-              stroke="var(--relief-line)" strokeWidth="2.8" strokeLinecap="round"
-            />
-          );
-        })}
-      </g>
-
-      {/* Hub and spindle. */}
-      <circle cx={DIAL_CX} cy={DIAL_CY} r={f(DIAL_R * 0.24)} fill="var(--relief-mid)" stroke="var(--relief-line)" strokeWidth="1.1" opacity="0.75" />
-      <circle cx={DIAL_CX} cy={DIAL_CY} r={f(DIAL_R * 0.1)} fill="var(--relief-line)" opacity="0.5" />
-
-      {/* The index: a wedge above the collar, pointing at the graduation it reads. It is what makes
-          the whole thing a dial you turn rather than a wheel you look at. */}
+      {/* ── Field: the domed surface and its bead ── */}
+      <circle cx={C} cy={C} r={FIELD} fill={`url(#${SP}-dome)`} />
+      {/* The bead reads as raised because its lit half and its shadowed half are separate strokes: one
+          continuous stroke all the way round would be a printed outline, not a moulding under a light
+          from the top-left. */}
       <path
-        d={`M ${DIAL_CX} ${f(DIAL_CY - DIAL_R - 2)} L ${f(DIAL_CX - 6)} ${f(DIAL_CY - DIAL_R - 13)} L ${f(DIAL_CX + 6)} ${f(DIAL_CY - DIAL_R - 13)} Z`}
-        fill="var(--relief-line)" opacity="0.6"
+        d={`M ${f(polar(BEAD, Math.PI * 0.75).x)} ${f(polar(BEAD, Math.PI * 0.75).y)} A ${BEAD} ${BEAD} 0 0 1 ${f(polar(BEAD, Math.PI * 1.75).x)} ${f(polar(BEAD, Math.PI * 1.75).y)}`}
+        fill="none" stroke="var(--relief-edge)" strokeWidth="1.8" opacity="0.5"
       />
-    </g>
+      <path
+        d={`M ${f(polar(BEAD, Math.PI * 1.75).x)} ${f(polar(BEAD, Math.PI * 1.75).y)} A ${BEAD} ${BEAD} 0 0 1 ${f(polar(BEAD, Math.PI * 0.75).x)} ${f(polar(BEAD, Math.PI * 0.75).y)}`}
+        fill="none" stroke="var(--relief-shadow)" strokeWidth="1.8" opacity="0.34"
+      />
 
-    {/* Four pellets on the diagonals, just inside the bead, where a coin's design is usually
-        punctuated — clear of the figure, and clear of the legend. */}
-    {[0.25, 0.75, 1.25, 1.75].map(k => {
-      const p = polar(FIELD - 12, Math.PI * k);
-      return <circle key={k} cx={f(p.x)} cy={f(p.y)} r="2.6" fill="var(--relief-line)" opacity="0.4" />;
-    })}
+      {/* ── The guilloche ── */}
+      {GUILLOCHE.map(({ n, R, rho, op, w }, gi) => (
+        <g key={gi} opacity={op}>
+          {Array.from({ length: n }, (_, i) => {
+            const a = (i / n) * Math.PI * 2;
+            const c = polar(R, a);
+            return <circle key={i} cx={f(c.x)} cy={f(c.y)} r={rho} fill="none" stroke="var(--relief-line)" strokeWidth={w} />;
+          })}
+        </g>
+      ))}
+      {/* The two circles that bound the weave. Without them the interlace frays into the field instead
+          of sitting in a band. */}
+      <circle cx={C} cy={C} r={GUILLOCHE_IN} fill="none" stroke="var(--relief-line)" strokeWidth="1" opacity="0.24" />
+      <circle cx={C} cy={C} r={GUILLOCHE_OUT} fill="none" stroke="var(--relief-line)" strokeWidth="1" opacity="0.28" />
+
+      {/* ── The vault dial ── */}
+      <g>
+        {/* Graduated collar: the ring the index is read against. Ticks are the only radii in the
+            drawing, and they live entirely inside this collar. 24 of them, majors at the quarters —
+            a safe's dial is finely divided, and at r 78 that many marks still resolve on a phone. */}
+        <circle cx={DIAL_CX} cy={DIAL_CY} r={DIAL_R} fill="none" stroke="var(--relief-line)" strokeWidth="1.4" opacity="1" />
+        <circle cx={DIAL_CX} cy={DIAL_CY} r={f(DIAL_R * 0.86)} fill="none" stroke="var(--relief-edge)" strokeWidth="0.9" opacity="0.8" />
+        <g opacity="0.95">
+          {Array.from({ length: 24 }, (_, i) => {
+            const a = (i / 24) * Math.PI * 2;
+            const major = i % 6 === 0;
+            const r1 = DIAL_R * 0.86;
+            const r2 = DIAL_R * (major ? 1 : 0.95);
+            return (
+              <line
+                key={i}
+                x1={f(DIAL_CX + r1 * Math.cos(a))} y1={f(DIAL_CY + r1 * Math.sin(a))}
+                x2={f(DIAL_CX + r2 * Math.cos(a))} y2={f(DIAL_CY + r2 * Math.sin(a))}
+                stroke="var(--relief-line)" strokeWidth={major ? 2 : 1.2}
+              />
+            );
+          })}
+        </g>
+
+        {/* The knob: a domed disc with its own lit edge, so it stands proud of the collar rather than
+            sitting flush in it. This is the surface the total is struck on, so it is a smooth
+            gradient and nothing else — the detail that makes it hardware is all at its rim. */}
+        <g filter={`url(#${SP}-cast-tight)`}>
+          <circle cx={DIAL_CX} cy={DIAL_CY} r={f(DIAL_R * 0.8)} fill={`url(#${SP}-dome)`} stroke="var(--relief-edge)" strokeWidth="1.2" opacity="1" />
+        </g>
+
+        {/* Gripping spokes, on the diagonals: on the axes they would read as a crosshair, and a
+            crosshair is a sight, not a handle. The diagonals also keep them out from under the
+            digits, which sit on the horizontal. */}
+        <g opacity="0.9">
+          {[0.25, 0.75, 1.25, 1.75].map(k => {
+            const a = Math.PI * k;
+            const r1 = DIAL_R * 0.3;
+            const r2 = DIAL_R * 0.72;
+            return (
+              <line
+                key={k}
+                x1={f(DIAL_CX + r1 * Math.cos(a))} y1={f(DIAL_CY + r1 * Math.sin(a))}
+                x2={f(DIAL_CX + r2 * Math.cos(a))} y2={f(DIAL_CY + r2 * Math.sin(a))}
+                stroke="var(--relief-line)" strokeWidth="3.4" strokeLinecap="round"
+              />
+            );
+          })}
+        </g>
+
+        {/* Hub and spindle: what the spokes converge ON. Dropped in a first pass at putting the dial
+            behind the type, on the theory that a filled disc under the digits would muddy them — but
+            four radii ending in mid-air read as scratches, not as a handle, and this sits at the
+            well's deepest point where it is the faintest form on the coin. */}
+        <circle cx={DIAL_CX} cy={DIAL_CY} r={f(DIAL_R * 0.3)} fill="var(--relief-mid)" stroke="var(--relief-line)" strokeWidth="1.2" opacity="0.9" />
+        <circle cx={DIAL_CX} cy={DIAL_CY} r={f(DIAL_R * 0.12)} fill="var(--relief-line)" opacity="0.7" />
+
+        {/* The index: a wedge above the collar, pointing at the graduation it reads. It is what makes
+            the whole thing a dial you turn rather than a wheel you look at. Above the collar and not
+            on it, so it is clear of the month label as well as of the figure. */}
+        <path
+          d={`M ${DIAL_CX} ${f(DIAL_CY - DIAL_R - 3)} L ${f(DIAL_CX - 7)} ${f(DIAL_CY - DIAL_R - 14)} L ${f(DIAL_CX + 7)} ${f(DIAL_CY - DIAL_R - 14)} Z`}
+          fill="var(--relief-line)" opacity="0.9"
+        />
+      </g>
+
+      {/* Four pellets on the diagonals, just inside the bead, where a coin's design is usually
+          punctuated — clear of the figure, and clear of the legend. */}
+      {[0.25, 0.75, 1.25, 1.75].map(k => {
+        const p = polar(FIELD - 12, Math.PI * k);
+        return <circle key={k} cx={f(p.x)} cy={f(p.y)} r="2.6" fill="var(--relief-line)" opacity="0.4" />;
+      })}
+    </g>
   </ReliefSvg>
 );

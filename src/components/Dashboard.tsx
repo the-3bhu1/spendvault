@@ -100,8 +100,15 @@ export default function Dashboard({ onOpenCards, onOpenWealth }: {
       >
         <SpendBackdrop />
 
-        {/* One lifted wrapper, rather than a position/z-index on every figure inside it. */}
-        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        {/* One lifted wrapper, rather than a position/z-index on every figure inside it.
+            paddingBottom is what strikes the FIGURE on the coin's centre instead of the block. The
+            backdrop is concentric about the box's centre, and a centred two-line block puts that
+            centre in the gap between the label and the digits — so the coin's device sat visibly
+            above its own denomination. The pad equals the label's line box plus its margin, i.e.
+            exactly what sits above the figure, and centring a block with that much dead space below
+            it lifts the figure by half of it: onto the centre. Derived from the label's own values
+            rather than a measured pixel count, so it tracks if either changes. */}
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', paddingBottom: 'calc(0.8rem * 1.5 + 0.7rem)' }}>
           <div className="text-mono uppercase" style={{ fontSize: '0.8rem', fontWeight: 700, letterSpacing: '3.5px', color: 'var(--text-secondary)', marginBottom: '0.7rem' }}>
             {monthLabel}
           </div>
