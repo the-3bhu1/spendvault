@@ -1,8 +1,9 @@
 // The Credit Cards tree's engravings. Same relief language as the Wealth category backdrops — see
 // the COMPOSITION and RELIEF notes in relief.tsx — with subjects of their own:
 //
-//   Cards → a stack of plates lying in a wallet, the top one carrying a chip, under a coin rim.
-//   Dues  → one plate creased by a statement fold, with the charges ruled below it.
+//   Cards      → a stack of plates lying in a wallet, the top one carrying a chip, under a coin rim.
+//   Dues       → one plate creased by a statement fold, with the charges ruled below it.
+//   Statements → continuous-feed stationery, folded and perforated: one panel per cycle.
 //
 // Why a card and not a coin or a vault: the Dashboard's hero is a coin (what you spent) and Wealth's
 // is a vault door (what you own). A liability screen has to look like the plastic it tracks, or all
@@ -176,6 +177,85 @@ export const DuesBackdrop: React.FC = () => (
         x2={C - CARD_W / 2 + 20 + [150, 118][i]}
         y2={DU_EDGE + 38 + i * 11}
         stroke="var(--relief-line)" strokeWidth="1.6" opacity={0.3 - i * 0.07}
+      />
+    ))}
+  </ReliefSvg>
+);
+
+// ── Statements: continuous stationery ────────────────────────────────────────────────────────────
+// Not a card. The other two heroes in this tree are plastic because they are about a card's balance;
+// this screen is about a RUN of statements, and what says "a series of these, one per month" is the
+// paper they were printed on — tractor-feed fanfold, with the sprocket margins down both sides and a
+// perforated tear line between sheets.
+//
+// It is drawn from ABOVE, and that is the second attempt. The first drew the fold edge-on, as a
+// triangular wave: an accordion needs depth to read as one, and measured against this hero's own
+// stack there are 64 units of clear space below the pill row — the wave came out as a zigzag line
+// with nothing behind it. Seen from above, the same subject needs no depth at all: the sprocket holes
+// are the whole signal, and they read at any height.
+const SM = 'smb';
+// Measured in the running app: avatar 64–130, label 146–166, total 181–228, count line 239–256, pill
+// row 280–327. So the sheet's top edge is at 334 and everything below it is drawn in 66 units. See
+// WHERE THE DRAWING SITS above — these numbers are this hero's, not a constant.
+const SM_TOP = 334;
+const SM_FOOT = 412; // past the viewBox, so the paper runs off the edge instead of ending on a line
+const SM_L = 58;
+const SM_R = 342;
+// The sprocket margins: the narrow strips outside the printing area, where the holes are punched.
+const SM_MARGIN = 16;
+const SM_HOLE_R = 3;
+
+export const StatementsBackdrop: React.FC = () => (
+  <ReliefSvg p={SM} wellRx={148} wellRy={160}>
+    <MilledRim r={170} mills={80} opacity={0.22} />
+
+    <g filter={`url(#${SM}-cast)`}>
+      <path
+        d={`M ${SM_L} ${SM_TOP} H ${SM_R} V ${SM_FOOT} H ${SM_L} Z`}
+        fill={`url(#${SM}-stone-v)`} stroke="var(--relief-edge)" strokeWidth="1.1"
+      />
+    </g>
+
+    {/* The two rules that separate the sprocket margins from the printing area. On real stationery
+        these are themselves perforations, so the margins tear off — drawn as rules here because at
+        this scale a third and fourth dotted line turns the whole sheet into texture. */}
+    {[SM_L + SM_MARGIN, SM_R - SM_MARGIN].map(x => (
+      <line key={x} x1={x} y1={SM_TOP} x2={x} y2={SM_FOOT} stroke="var(--relief-line)" strokeWidth="0.8" opacity="0.3" />
+    ))}
+
+    {/* Sprocket holes. A hole is a shadow with a LIT LOWER edge — light from the top-left falls on
+        the far wall of the punch — which is the inverse of the raised members elsewhere in this file.
+        Get that backwards and they read as studs sitting on the paper. */}
+    {[SM_L + SM_MARGIN / 2, SM_R - SM_MARGIN / 2].map(cx =>
+      [346, 362, 378, 394].map(cy => (
+        <g key={`${cx}-${cy}`}>
+          <circle cx={cx} cy={cy} r={SM_HOLE_R} fill="var(--relief-lo)" stroke="var(--relief-shadow)" strokeWidth="0.9" opacity="0.75" />
+          <path
+            d={`M ${cx - SM_HOLE_R * 0.8} ${cy + SM_HOLE_R * 0.6} A ${SM_HOLE_R} ${SM_HOLE_R} 0 0 0 ${cx + SM_HOLE_R * 0.8} ${cy + SM_HOLE_R * 0.6}`}
+            fill="none" stroke="var(--relief-edge)" strokeWidth="0.7" opacity="0.5"
+          />
+        </g>
+      ))
+    )}
+
+    {/* The tear lines: where one statement ends and the next begins. This is the element that makes
+        it a RUN of sheets rather than one page, so it gets the dashes. */}
+    {[354, 386].map(y => (
+      <line
+        key={y}
+        x1={SM_L + SM_MARGIN} y1={y} x2={SM_R - SM_MARGIN} y2={y}
+        stroke="var(--relief-line)" strokeWidth="1" opacity="0.4" strokeDasharray="2.5 5"
+      />
+    ))}
+
+    {/* Print between the tear lines, ragged-right — the shape of a statement, with no legible figure
+        on it. A readable number on a decorative sheet reads as data the screen is claiming to know. */}
+    {[190, 148].map((w, i) => (
+      <line
+        key={i}
+        x1={SM_L + SM_MARGIN + 14} y1={366 + i * 10}
+        x2={SM_L + SM_MARGIN + 14 + w} y2={366 + i * 10}
+        stroke="var(--relief-line)" strokeWidth="1.6" opacity={0.26 - i * 0.07}
       />
     ))}
   </ReliefSvg>

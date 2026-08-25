@@ -18,7 +18,7 @@
 // disagree, which is why the ledger rows and the long-press move are one implementation shared from
 // CycleMove / useCycleMove rather than a copy.
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { CreditCard } from 'lucide-react';
+import { CreditCard, FileText } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Account } from '../types';
@@ -31,16 +31,25 @@ import { CategoryCard, CategoryHero, SubviewHeader, SealedMark, FilterPills } fr
 import { DetailHeroBand, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
 import { useCycleMove } from '../hooks/useCycleMove';
 import { CycleLedgerRow, CycleMoveSheet, CycleMoveToast } from './CycleMove';
-import { CardsBackdrop, DuesBackdrop } from './CardsBackdrops';
+import { CardsBackdrop, DuesBackdrop, StatementsBackdrop } from './CardsBackdrops';
 import { CardBrandLogo } from './CardBrandLogo';
 import { LogoAvatar } from './LogoAvatar';
 import { getLiquidLogoUrl } from '../services/LogoService';
 import ProfileAvatar from './ProfileAvatar';
 
-type CardsCategory = 'dues';
+type CardsCategory = 'dues' | 'statements';
 
-/** What each category is called, for the detail screen's header. */
-const CATEGORY_LABELS: Record<CardsCategory, string> = { dues: 'Dues' };
+/** What each category is called, on its row, its hero and the detail screen's header. */
+const CATEGORY_LABELS: Record<CardsCategory, string> = { dues: 'Dues', statements: 'Statements' };
+
+/** One closed statement: what a card billed for one cycle that has already been cut. */
+interface ClosedStatement {
+  account: Account;
+  cycle: string;
+  /** The printed figure — payable put through the card's rounding rule. */
+  amount: number;
+  count: number;
+}
 
 /** Whole rupees for the root screen and the category cards — paise are noise on a summary, and
  *  Wealth's tree makes the same call. Every inner figure uses formatCurrency so it reconciles
@@ -68,6 +77,7 @@ export default function CreditCards() {
   const { data } = useFinance();
   const [category, setCategory] = useState<CardsCategory | null>(null);
   const [duesFilter, setDuesFilter] = useState<string>('all');
+  const [statementsFilter, setStatementsFilter] = useState<string>('all');
   // Level 3: which card's statement is open, and which of its cycles. The card is held by ID rather
   // than as an object so the screen reads today's figures — an Account captured on open would keep
   // whatever balance and dues it had at that moment while transactions carried on being logged.
@@ -84,6 +94,32 @@ export default function CreditCards() {
     [data.accounts, data.transactions]
   );
   const totals = useMemo(() => sumCardDues(dues), [dues]);
+
+  // Every cycle that has been CUT, newest first. The open cycle is excluded on purpose: it has no
+  // printed statement, its figure moves with every charge, and it is the whole subject of Dues.
+  // Cycles are 'YYYY-MM', so the string comparison below is a date comparison — which also drops a
+  // charge moved beyond the open cycle, since a statement that hasn't been cut can't be listed.
+  const statements = useMemo<ClosedStatement[]>(() => {
+    const out: ClosedStatement[] = [];
+    const today = format(new Date(), 'yyyy-MM-dd');
+    for (const { account } of dues) {
+      const statementDay = account.statementDay || 1;
+      const openCycle = getBillingCycleForDate(today, statementDay);
+      const counts = new Map<string, number>();
+      for (const t of data.transactions) {
+        if (t.accountId !== account.id) continue;
+        if (!affectsRupeeBalance(t)) continue;
+        const c = getAppliedBillingCycle(t, statementDay);
+        if (c >= openCycle) continue;
+        counts.set(c, (counts.get(c) ?? 0) + 1);
+      }
+      for (const [cycle, count] of counts) {
+        out.push({ account, cycle, amount: getCardCycleFigures(account, data.transactions, cycle).statementAmount, count });
+      }
+    }
+    // Newest cycle first, and within a cycle by card name, so a month's statements sit together.
+    return out.sort((a, b) => b.cycle.localeCompare(a.cycle) || a.account.name.localeCompare(b.account.name));
+  }, [dues, data.transactions]);
 
   const hasCards = dues.length > 0;
   // Derived rather than synced: archiving the last card while a sub-view is open has to put the user
@@ -108,6 +144,7 @@ export default function CreditCards() {
     // belongs to one visit down and back, not to the next entry from the tree.
     scrollRef.current.category = 0;
     setDuesFilter('all');
+    setStatementsFilter('all');
     setCategory(next);
   };
 
@@ -219,6 +256,14 @@ export default function CreditCards() {
   );
 
   const duesShown = duesFilter === 'all' ? dues : dues.filter(d => d.account.id === duesFilter);
+  const statementsShown = statementsFilter === 'all' ? statements : statements.filter(st => st.account.id === statementsFilter);
+  // The hero's figure is the sum of what's LISTED, which is what makes the pill row mean something:
+  // narrowing to one card narrows the total with it. A cross-card aggregate that ignored the filter
+  // would be a number the screen shows but the screen can't explain.
+  const statementsTotal = statementsShown.reduce((sum, st) => sum + st.amount, 0);
+  // Only cards that actually have a closed statement get a pill — a pill that filters to an empty
+  // list is a dead end with extra steps.
+  const statementCardIds = Array.from(new Set(statements.map(st => st.account.id)));
 
   return (
     <div style={{ background: 'var(--bg-primary)', paddingBottom: '100px' }}>
@@ -282,6 +327,27 @@ export default function CreditCards() {
                 onClick={() => openCategory('dues')}
                 tourClass="tour-cards-cat-dues"
               />
+
+              {/* Only when there IS history. A chevron into an empty list is a dead end, which is the
+                  rule Wealth's tree already follows for a category with nothing in it. */}
+              {statements.length > 0 && (
+                <CategoryCard
+                  icon={<FileText size={20} />}
+                  iconColor="var(--accent)"
+                  label={CATEGORY_LABELS.statements}
+                  subtext="Cycles & history"
+                  // The count, not the card count the plan called for: this row is about cycles, and
+                  // how many cards you hold is My Cards' figure rather than this one's.
+                  value={String(statements.length)}
+                  valueNote={
+                    <div className="text-mono uppercase" style={{ fontSize: '0.58rem', fontWeight: 700, marginTop: '0.3rem', letterSpacing: '0.5px', color: 'var(--text-secondary)' }}>
+                      {statements.length === 1 ? 'Closed cycle' : 'Closed cycles'}
+                    </div>
+                  }
+                  onClick={() => openCategory('statements')}
+                  tourClass="tour-cards-cat-statements"
+                />
+              )}
             </div>
           )}
         </>
@@ -357,6 +423,76 @@ export default function CreditCards() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ───────────────────────── Level 2: Statements ───────────────────────── */}
+      {activeCategory === 'statements' && !activeCard && (
+        <div className="fade-in">
+          <SubviewHeader title={CATEGORY_LABELS.statements} onBack={() => setCategory(null)} hideTitle />
+
+          <CategoryHero backdrop={<StatementsBackdrop />} label={CATEGORY_LABELS.statements} minHeight="340px" userName={data.user?.name}>
+            <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
+              {formatWhole(statementsTotal)}
+            </div>
+            <div className="text-mono uppercase" style={{ fontSize: '0.6rem', letterSpacing: '1px', color: 'var(--text-secondary)', marginTop: '0.6rem' }}>
+              Billed across {statementsShown.length} statement{statementsShown.length === 1 ? '' : 's'}
+            </div>
+            <FilterPills
+              tabs={[
+                { v: 'all', label: 'All' },
+                ...dues.filter(d => statementCardIds.includes(d.account.id))
+                  .map(d => ({ v: d.account.id, label: d.account.name.split(/[ ×x]/)[0] })),
+              ]}
+              active={statementsFilter}
+              onSelect={setStatementsFilter}
+              marginTop="1.25rem"
+              flexible
+              pillWidth={92}
+            />
+          </CategoryHero>
+
+          <div style={{ padding: '0.5rem 1.5rem calc(1.5rem + var(--safe-area-inset-bottom))' }}>
+            {statementsShown.map(st => {
+              const statementDay = st.account.statementDay || 1;
+              return (
+                <div
+                  key={`${st.account.id}-${st.cycle}`}
+                  onClick={() => openCard(st.account, st.cycle)}
+                  className="clickable"
+                  style={{
+                    padding: '1rem 0',
+                    borderBottom: '1px solid var(--border-color)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.9rem',
+                  }}
+                >
+                  {renderCardMark(st.account, 38)}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {/* The month leads and the dates follow, because a cut day of the 26th means
+                        "August" spans two calendar months and the row has to say which days. */}
+                    <div style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.3 }}>
+                      {format(parseISO(`${st.cycle}-01`), "MMMM yyyy")}
+                    </div>
+                    <div className="text-mono uppercase" style={{ fontSize: '0.58rem', color: 'var(--text-secondary)', marginTop: '0.2rem', letterSpacing: '0.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {formatBillingCycleRange(st.cycle, statementDay)}
+                      {statementsFilter === 'all' ? ` · ${st.account.name}` : ''}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 700, color: st.amount > 0 ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                      {formatCurrency(st.amount)}
+                    </div>
+                    <div className="text-mono uppercase" style={{ fontSize: '0.58rem', fontWeight: 700, color: 'var(--text-secondary)', marginTop: '0.2rem', letterSpacing: '0.5px' }}>
+                      {st.count} {st.count === 1 ? 'entry' : 'entries'}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
