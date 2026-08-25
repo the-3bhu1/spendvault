@@ -31,7 +31,7 @@
 // second. A coin's device is struck in the MIDDLE of its field and its denomination sits over it;
 // the legend, the weave and the device are concentric about one point, which is also the point the
 // hero centres its type on. So the dial is back at the centre, the weave runs back in to r 100, and
-// the way the figure stays legible is the INK constant below rather than an empty disc.
+// the way the figure stays legible is the VEIL below rather than an empty disc.
 //
 // The composition is the coin's own — legend at the rim, weave in the annulus, device and
 // denomination together in the field — which is why this is the one hero in the app whose motif sits
@@ -43,17 +43,35 @@
 // measured, and there is a real chart on the screen below for that.
 import React from 'react';
 import { ReliefSvg } from './relief';
-import { C, f, polar } from '../utils/reliefGeometry';
+import { VB, C, f, polar } from '../utils/reliefGeometry';
 
 const SP = 'spb';
 
-// One multiplier over the whole engraving. Every element's own opacity below was tuned against its
-// neighbours — the bead against the rim, the majors against the minors — and those relationships are
-// worth keeping, so the way this drawing steps back behind the month's total is a single group opacity
-// rather than forty edited numbers. It is also the only lever that works now the device is BEHIND the
-// type: the legibility well (relief.tsx) mutes the centre, but the well is shared with the other
-// heroes and is tuned for motifs that keep their middles empty.
-const INK = 0.58;
+// ── The veil ─────────────────────────────────────────────────────────────────────────────────────
+// How this drawing steps back behind the month's total. Every element's own opacity below was tuned
+// against its neighbours — the bead against the rim, the majors against the minors — and those
+// relationships are worth keeping, so the fade is applied over the whole group rather than by editing
+// forty numbers.
+//
+// RADIAL, and the first attempt at this was a flat group opacity of 0.58, which was wrong in a way
+// worth recording: the figure only sits over the MIDDLE of the coin, so a uniform fade paid for its
+// legibility with the rim, the legend and the outer weave — none of which have any type over them.
+// The strength now belongs to the radius. Full at the rim, and down to about half by the centre.
+//
+// It composes with the legibility well in relief.tsx, which is a separate, elliptical mute sized to
+// the text block; the two multiply. The well alone was not enough because it is shared with the Wealth
+// and Cards heroes and is tuned for motifs that keep their middles empty — this is the one drawing
+// whose device is deliberately behind the type. The well handles the type; the veil handles the
+// gradient from rim to centre.
+//
+// Offsets are fractions of r = 200, so 55% ≈ r 110 (the guilloche's inner ring) and 80% ≈ r 160 (its
+// outer edge, where the fade has to be fully out of the way).
+const VEIL = [
+  { at: '0%', keep: 0.5 },
+  { at: '30%', keep: 0.6 },
+  { at: '55%', keep: 0.82 },
+  { at: '80%', keep: 1 },
+];
 
 // ── The rim and its legend ───────────────────────────────────────────────────────────────────────
 // Pushed close to the viewBox edge, and the band kept narrow: every unit the rim takes is a unit the
@@ -112,10 +130,12 @@ const GUILLOCHE_OUT = 164;
 // mechanism. What keeps it from infecting the rest of the drawing is that every radius here is short
 // and contained inside the dial's own collar.
 //
-// At the coin's own centre, under the total. Its opacities run much higher than the rest of the
-// drawing's and that is not an inconsistency: the well (relief.tsx) hides ~82% of the relief at the
-// centre and ~70% out to r 84, so the collar and the knob are fighting a mute nothing else in this
-// drawing is subject to. At the rim's values the dial disappeared entirely.
+// At the coin's own centre, under the total. Its opacities run at or near 1 and its strokes are the
+// heaviest in the drawing, which is not an inconsistency but a correction: this is the only part
+// standing under BOTH mutes at once — the well hides ~82% of the relief at the centre and ~70% out to
+// r 84, and the veil is at its thinnest over the same ground. At the rim's values the dial vanished
+// completely. Weight, rather than opacity, is what buys it back: a heavier stroke survives a mute that
+// a brighter thin one does not, and it costs the figure less.
 //
 // The radius is set from the type rather than from the
 // field: the hero's figure runs to roughly 220 units wide at its largest step, so a collar at r 78
@@ -131,7 +151,22 @@ export const SpendBackdrop: React.FC = () => (
   // to mute the rings directly behind the type without flattening the ones that give the rest of the
   // surface its texture.
   <ReliefSvg p={SP} wellRx={142} wellRy={104}>
-    <g opacity={INK}>
+    {/* The veil. A local mask, nested inside the one ReliefSvg already applies — the two multiply,
+        which is exactly the wanted result: full-strength engraving at the rim, thinning toward the
+        centre, and thinner still inside the ellipse where the type sits. */}
+    <defs>
+      <radialGradient id={`${SP}-veil`} cx="50%" cy="50%" r="50%">
+        {VEIL.map(({ at, keep }) => (
+          <stop key={at} offset={at} stopColor="#fff" stopOpacity={keep} />
+        ))}
+      </radialGradient>
+      {/* The rect runs to the viewBox corners, past the gradient's r: the last stop extends, so the
+          corners keep full strength rather than being cut away. */}
+      <mask id={`${SP}-veil-mask`}>
+        <rect width={VB} height={VB} fill={`url(#${SP}-veil)`} />
+      </mask>
+    </defs>
+    <g mask={`url(#${SP}-veil-mask)`}>
       {/* ── Rim ── */}
       <g filter={`url(#${SP}-cast)`}>
         <circle cx={C} cy={C} r={RIM_OUT} fill="none" stroke="var(--relief-line)" strokeWidth="1.6" opacity="0.55" />
@@ -192,7 +227,7 @@ export const SpendBackdrop: React.FC = () => (
         {/* Graduated collar: the ring the index is read against. Ticks are the only radii in the
             drawing, and they live entirely inside this collar. 24 of them, majors at the quarters —
             a safe's dial is finely divided, and at r 78 that many marks still resolve on a phone. */}
-        <circle cx={DIAL_CX} cy={DIAL_CY} r={DIAL_R} fill="none" stroke="var(--relief-line)" strokeWidth="1.4" opacity="1" />
+        <circle cx={DIAL_CX} cy={DIAL_CY} r={DIAL_R} fill="none" stroke="var(--relief-line)" strokeWidth="1.8" opacity="1" />
         <circle cx={DIAL_CX} cy={DIAL_CY} r={f(DIAL_R * 0.86)} fill="none" stroke="var(--relief-edge)" strokeWidth="0.9" opacity="0.8" />
         <g opacity="0.95">
           {Array.from({ length: 24 }, (_, i) => {
@@ -205,7 +240,7 @@ export const SpendBackdrop: React.FC = () => (
                 key={i}
                 x1={f(DIAL_CX + r1 * Math.cos(a))} y1={f(DIAL_CY + r1 * Math.sin(a))}
                 x2={f(DIAL_CX + r2 * Math.cos(a))} y2={f(DIAL_CY + r2 * Math.sin(a))}
-                stroke="var(--relief-line)" strokeWidth={major ? 2 : 1.2}
+                stroke="var(--relief-line)" strokeWidth={major ? 2.4 : 1.5}
               />
             );
           })}
@@ -231,7 +266,7 @@ export const SpendBackdrop: React.FC = () => (
                 key={k}
                 x1={f(DIAL_CX + r1 * Math.cos(a))} y1={f(DIAL_CY + r1 * Math.sin(a))}
                 x2={f(DIAL_CX + r2 * Math.cos(a))} y2={f(DIAL_CY + r2 * Math.sin(a))}
-                stroke="var(--relief-line)" strokeWidth="3.4" strokeLinecap="round"
+                stroke="var(--relief-line)" strokeWidth="3.8" strokeLinecap="round"
               />
             );
           })}
@@ -241,7 +276,7 @@ export const SpendBackdrop: React.FC = () => (
             behind the type, on the theory that a filled disc under the digits would muddy them — but
             four radii ending in mid-air read as scratches, not as a handle, and this sits at the
             well's deepest point where it is the faintest form on the coin. */}
-        <circle cx={DIAL_CX} cy={DIAL_CY} r={f(DIAL_R * 0.3)} fill="var(--relief-mid)" stroke="var(--relief-line)" strokeWidth="1.2" opacity="0.9" />
+        <circle cx={DIAL_CX} cy={DIAL_CY} r={f(DIAL_R * 0.3)} fill="var(--relief-mid)" stroke="var(--relief-line)" strokeWidth="1.5" opacity="0.95" />
         <circle cx={DIAL_CX} cy={DIAL_CY} r={f(DIAL_R * 0.12)} fill="var(--relief-line)" opacity="0.7" />
 
         {/* The index: a wedge above the collar, pointing at the graduation it reads. It is what makes
