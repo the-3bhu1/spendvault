@@ -48,7 +48,11 @@ function App() {
   const autoLogSmsRef = useRef(data.user?.autoLogSms);
   autoLogSmsRef.current = data.user?.autoLogSms;
 
-  // Define which tabs should reset to top vs resume
+  // Define which tabs should reset to top vs resume.
+  // 'cards' replaces the retired 'cashback' here, and it belongs in this list for the same reason
+  // 'wealth' does: a tree unmounts on tab change, so it comes back at its root with its own scroll
+  // memory cleared, and its mount effect scrolls to the top itself. Saving a position this side could
+  // only ever be overridden by that — a passive child effect runs after this layout effect.
   const resettingTabs = ['dashboard', 'insights', 'wealth', 'cards', 'splits', 'bills', 'debts'];
 
   // Restore scroll position synchronously, before the browser paints the new
