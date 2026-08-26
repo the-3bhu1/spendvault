@@ -166,6 +166,20 @@ export default function CreditCards() {
     setSelectedCardId(account.id);
   };
 
+  // The tour can navigate tabs on its own; it cannot navigate a tree. This lets a tour step open (or
+  // close) one of the categories so it has something to point at — the same mechanism the splits tour
+  // uses to close a detail view. setState in a listener, not in an effect body: this is a signal from
+  // outside React, which is exactly what an effect subscription is for.
+  useEffect(() => {
+    const handleTourCategory = (e: Event) => {
+      const next = (e as CustomEvent<CardsCategory | null>).detail ?? null;
+      setSelectedCardId(null);
+      setCategory(next);
+    };
+    window.addEventListener('tour-cards-category', handleTourCategory);
+    return () => window.removeEventListener('tour-cards-category', handleTourCategory);
+  }, []);
+
   useEffect(() => {
     const handleBack = (e: Event) => {
       // Unwinds one level at a time, innermost first: statement → sub-view → tree. The move sheet is

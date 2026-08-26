@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { useFinance } from '../FinanceContext';
-import { Sparkles, ArrowRight, ArrowLeft, X, ShieldCheck, Eye, Smartphone, Zap, Gift, TrendingUp, MessageSquare, type LucideIcon } from 'lucide-react';
+import { Sparkles, ArrowRight, ArrowLeft, X, ShieldCheck, Eye, Smartphone, Zap, Gift, TrendingUp, CreditCard, MessageSquare, type LucideIcon } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import type { Tab } from '../App';
 
-export type TourType = 'onboarding' | 'splits' | 'debts' | 'bills' | 'cashback' | 'insights' | 'wealth';
+// 'cashback' is gone and 'cards' has taken its place. The Cashback vault is no longer a destination
+// of its own — it is Rewards, one of three categories inside the Cards tree — so a tour that opened
+// on it had nothing to open on. Everything it taught (what's pending per card, tap ✓ to confirm, the
+// merge into the ledger) is now a step of the cards tour, which walks the tree that contains it.
+export type TourType = 'onboarding' | 'splits' | 'debts' | 'bills' | 'cards' | 'insights' | 'wealth';
 
 interface AppTourProps {
   tourType: TourType;
@@ -25,6 +29,13 @@ interface TourStep {
   actionBefore?: () => void;
   icon?: LucideIcon;
   cardPosition?: 'bottom' | 'top';
+  /**
+   * Selector for a set of cards to walk a pointing finger across, one per 1.8s, while this step is
+   * shown. Replaces matching on the step's TITLE, which is how this used to be keyed — two tours now
+   * have a category row that wants the same treatment, and one of them would have had to be found by
+   * a string that also has to read well on screen.
+   */
+  demoCycle?: string;
 }
 
 export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, setIsHubOpen, isAskVaultOpen, setIsAskVaultOpen }: AppTourProps) {
@@ -78,7 +89,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       },
       {
         title: "SpendVault Hub",
-        description: "Tap the Hub icon to access advanced features: Group Splits, Lending & Borrowing, Bills, Rewards, Wealth, and Smart Insights. Detailed tours activate automatically when you open them for the first time!",
+        description: "Tap the Hub icon for the features that have no tab of their own: Group Splits, Lending & Borrowing, Bills, and Smart Insights. Cards and Wealth have their own plaques on the dashboard. Detailed tours activate automatically the first time you open any of them!",
         selector: ".tour-hub-btn",
         tab: "dashboard",
         icon: Zap
@@ -186,27 +197,43 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
         icon: ShieldCheck
       }
     ],
-    cashback: [
+    cards: [
       {
-        title: "Cashback & Rewards Tour",
-        description: "Welcome to Cashback Vault! SpendVault automatically calculates expected cashback from your credit card transactions and tracks them here for confirmation.",
-        icon: Gift
+        title: "Cards Tour",
+        description: "Welcome to Cards — everything your credit cards owe, bill and earn, in one place. Open it any time from the Cards plaque on your dashboard.",
+        icon: CreditCard
       },
       {
-        title: "Pending Cashback",
-        description: "Each card shows pending cashback earned from your transactions this billing cycle. Tap the ✓ button to confirm the amount once your bank credits it.",
-        selector: ".tour-cashback-statement",
+        title: "What You Owe",
+        description: "Your total outstanding across every card, split into what has been billed and what is still accruing on the open cycle. The bar below is how much of your combined credit limit is in use, and the line under it names the card whose bill lands first.",
+        selector: ".tour-cards-summary",
         icon: Sparkles
       },
       {
-        title: "Logged Automatically",
-        description: "Confirming is all it takes — SpendVault merges a cycle's cashback into a single credit and logs it into your ledger, handling the date and category for you. A \"Merge Credits\" button appears only in the rare case that needs repairing.",
-        selector: ".cashback-tab-root",
+        title: "Three Categories",
+        description: "Dues is what you owe right now. Statements is every cycle that has already been cut, newest first. Rewards is cashback and points waiting to be credited. Tap any category to open it — then tap any card for its own statement screen, with a cycle picker and that cycle's ledger.",
+        selector: ".tour-cards-categories",
+        cardPosition: 'top',
+        demoCycle: ".tour-cards-categories .card",
+        // Backing up to this step from the one below has to close the category that step opened,
+        // or the spotlight lands on rows that are no longer on screen.
+        actionBefore: () => window.dispatchEvent(new CustomEvent('tour-cards-category', { detail: null })),
         icon: Sparkles
       },
       {
         title: "Claim Your Rewards",
-        description: "Great! You now know how to track and realize cashback from your cards. Let's clear the sample data and start fresh.",
+        description: "Each card shows the cashback it has earned but not yet been paid. Tap the ✓ once your bank credits it — SpendVault then merges that cycle's rewards into a single credit and logs it into your ledger, handling the date and category for you.",
+        selector: ".tour-cashback-statement",
+        // The tour can navigate TABS on its own; it cannot navigate a tree. The Cards screen listens
+        // for this event so a step can open one of its categories — the same trick the splits tour
+        // uses to close a detail view.
+        actionBefore: () => window.dispatchEvent(new CustomEvent('tour-cards-category', { detail: 'rewards' })),
+        icon: Gift
+      },
+      {
+        title: "Stay Ahead of Your Bills",
+        description: "That's Cards. We'll clear the sample cards now so you can add your own from the Accounts tab.",
+        actionBefore: () => window.dispatchEvent(new CustomEvent('tour-cards-category', { detail: null })),
         icon: ShieldCheck
       }
     ],
@@ -293,7 +320,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       document.querySelectorAll('.nav-header-btn, .tour-hub-btn, .tour-askvault-btn').forEach(btn => {
         btn.classList.remove('demo-hub-active', 'demo-hub-finger', 'demo-askvault-active', 'demo-askvault-finger');
       });
-      document.querySelectorAll('.tour-wealth-tab-btn, .tour-wealth-categories .card').forEach(btn => {
+      document.querySelectorAll('.tour-wealth-tab-btn, .tour-wealth-categories .card, .tour-cards-categories .card').forEach(btn => {
         btn.classList.remove('demo-tab-active', 'demo-tab-finger');
       });
     };
@@ -492,10 +519,14 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
     // Walks a finger down the category cards so the user sees they're tappable. Unlike the old
     // filter-pill demo this must NOT click: a click navigates into the sub-view, which would
     // strand the spotlight on an element that no longer exists.
-    if (tourType === 'wealth' && stepInfo && stepInfo.title === "Three Categories") {
+    // Keyed off the step's own demoCycle selector rather than off its title and tour: both the wealth
+    // tree and the cards tree have a category row that wants this, and the two rows are named the
+    // same thing on screen for the same reason.
+    if (stepInfo?.demoCycle) {
+      const cycleSelector = stepInfo.demoCycle;
       let tabIdx = 0;
       const triggerCardCycle = () => {
-        const cards = document.querySelectorAll('.tour-wealth-categories .card');
+        const cards = document.querySelectorAll(cycleSelector);
         if (cards.length === 0) return;
 
         cards.forEach(c => {
