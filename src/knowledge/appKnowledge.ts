@@ -126,7 +126,8 @@ deleting one keeps the legs in sync / removes them together. By category:
     you don't have to pick the paying account first.
 
 "Split with Rewards?" is NOT limited to CC Payments — it appears on ANY ordinary debit (a purchase,
-a bill, a recharge) as long as a reward account can fund it. Investments are the only exclusion.
+a bill, a recharge). Investments are the only exclusion. It does not require owning a reward account:
+the "Other" source below covers one-off rewards.
 - On an ordinary purchase the split is a PAIR of entries, not three: the chosen account is debited for
   the part you actually paid, and a second leg debits the reward account for the rest. The Amount field
   always means the FULL price — the panel shows the derived "Primary Account Debit" underneath, and
@@ -140,6 +141,15 @@ a bill, a recharge) as long as a reward account can fund it. Investments are the
 - Redeeming more than the wallet holds is refused on save, and the message names what IS available in
   that account's own unit (e.g. "Only 432 Jewels available"). Editing an existing split can always be
   re-saved or lowered — its own already-recorded redemption counts as available.
+- "Other" (last option in the "From Rewards" picker) is for a ONE-TIME reward that isn't worth its own
+  account — a coupon, a voucher, a scratch-card credit, a referral discount. It behaves like any other
+  split on the amounts (the Amount field is the full price, the primary account is debited for the
+  rest), but there is NO second leg and no reward balance anywhere: nothing is deducted from any
+  account, so nothing has to be set up first. The ledger row shows the amount actually paid, with a
+  small "₹40 REWARD" pill beside the category recording the part a reward covered. Because there is no
+  balance behind it, the "Only ... available" check doesn't apply — the transaction total is the only
+  limit. Use a real rewards account instead when the source is a wallet with a running balance worth
+  tracking (CRED coins, super.money, a card's own points).
 - In the ledger the SPEND is the row you see, with the reward redemption collapsed under it as a
   linked entry ("Part-paid with rewards", or "Paid from funding account + rewards" on a CC Payment).
   Tapping that redemption opens the spend it belongs to, with the split panel in view — the amount

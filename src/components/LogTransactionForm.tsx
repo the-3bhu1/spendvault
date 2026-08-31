@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, InvestmentKind } from '../types';
-import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle } from '../utils';
-import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X } from 'lucide-react';
+import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource } from '../utils';
+import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X, Ticket } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, getInvestmentKindIcon, sortByAccountType } from './transactionIcons';
@@ -316,6 +316,9 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
 
   const getAccountIcon = (accId: string) => {
     if (accId === 'all') return <Activity size={18} />;
+    // A one-off reward has no account behind it, so it gets its own mark rather than the
+    // no-such-account fallback wallet it would otherwise land on.
+    if (isExternalRewardSource(accId)) return <Ticket size={18} />;
     const acc = data.accounts.find(a => a.id === accId);
     if (!acc) return <Wallet size={18} />;
     return getAccountTypeIcon(acc.type, 18, acc.archived);
@@ -509,14 +512,15 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       newErrors.rewardEarned = 'Cashback amount is required when deposit account is selected';
     }
     if (showRewardSplit && (Number(newTx.rewardUsed) || 0) > 0 && !newTx.rewardUsedAccountId) {
-      newErrors.rewardUsedAccountId = 'Reward account is required';
+      newErrors.rewardUsedAccountId = 'Reward source is required';
     }
     if (showRewardSplit && newTx.rewardUsedAccountId && (Number(newTx.rewardUsed) || 0) <= 0) {
-      newErrors.rewardUsed = 'Reward amount is required when reward account is selected';
+      newErrors.rewardUsed = 'Reward amount is required when a reward source is selected';
     }
     // Can't redeem more than the account holds. Compared in the account's own unit, and the message
-    // names the figure because the collapsed picker shows only the account name.
-    if (showRewardSplit && newTx.rewardUsedAccountId && rewardRupees > 0) {
+    // names the figure because the collapsed picker shows only the account name. Skipped for a
+    // one-time reward: it has no tracked balance, so there is no ceiling to test the amount against.
+    if (showRewardSplit && newTx.rewardUsedAccountId && !isExternalRewardSource(newTx.rewardUsedAccountId) && rewardRupees > 0) {
       // On an edit, this split's own existing leg has already been taken out of the balance — hand it
       // back before comparing, or re-saving (or even lowering) an untouched redemption would fail.
       // Only when the source account is unchanged: money spent from the old account is no help
@@ -529,6 +533,13 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       if (needed - available > 0.001) {
         newErrors.rewardUsed = `Only ${formatRewardBalance(available)} available`;
       }
+    }
+    // A one-time reward has no balance to bound it, so the transaction total is the only ceiling
+    // left. Without this, ₹500 of "Other" against a ₹100 purchase would clamp the primary debit to
+    // ₹0 (mainAccountAmount floors at zero) and quietly swallow the difference.
+    if (showRewardSplit && isExternalRewardSource(newTx.rewardUsedAccountId)
+      && rewardRupees - (Number(newTx.amount) || 0) > 0.001) {
+      newErrors.rewardUsed = `Cannot exceed the ${formatCurrency(Number(newTx.amount) || 0)} total`;
     }
 
     if (newTx.accountId && newTx.type === 'debit' && !newTx.isTravelTransaction && newTx.category?.toLowerCase() === 'ncmc travel recharge') {
@@ -659,7 +670,13 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     // the parent never pointed at the leg, which broke every sync that walks that list (editing the
     // amount left the leg stranded at its old figure, so the reward account stayed over-debited).
     // Unreachable while splits were CC-Payment-only.
-    const willCreateRewardLeg = showRewardSplit && (Number(newTx.rewardUsed) || 0) > 0 && !!newTx.rewardUsedAccountId && !editId;
+    //
+    // A split funded by a one-time reward ("Other") is a split in every respect EXCEPT this: there is
+    // no account to debit, so it creates no reward leg. The two facts are therefore separate — the
+    // split still has to anchor on the card leg below, or a Debit-POV CC Payment would leave the
+    // anchor on the ₹148 bank leg and reopen showing ₹148 as the total.
+    const hasRewardSplit = showRewardSplit && (Number(newTx.rewardUsed) || 0) > 0 && !!newTx.rewardUsedAccountId && !editId;
+    const willCreateRewardLeg = hasRewardSplit && !isExternalRewardSource(newTx.rewardUsedAccountId);
     const rewardCounterpartId = willCreateRewardLeg ? generateId() : null;
     // Anchoring, by contrast, IS CC-specific: a reward split anchors on the CARD leg (whose amount is
     // the full bill), per docs/LINKED_TRANSACTIONS.md. Logged from Credit POV the card IS the main tx,
@@ -667,7 +684,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     // the counterpart, so we move the anchor onto it and keep the bank main tx as a plain funding
     // child. Without this the anchor would sit on the bank leg (partial amount ₹148) and both
     // openEditModal reconstruction and updateTransaction's Option-B rebalance would use the wrong total.
-    const isCcRewardSplit = isCCPayment && willCreateRewardLeg;
+    const isCcRewardSplit = isCCPayment && hasRewardSplit;
     const anchorOnCounterpart = isCcRewardSplit && newTx.type === 'debit';
     let cardAnchorId: string | null = null;
 
@@ -766,7 +783,11 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         amount: counterpartAmount,
         category: isCCPayment ? 'CC Payment' : 'Transfer',
         isRecurring: false,
-        linkedTransactionIds: isCardAnchorLeg ? [mainTxId, rewardCounterpartId as string] : [mainTxId],
+        // The reward leg's id is only in this list when there IS a reward leg — a one-time reward
+        // has none, and pushing a null in would break every sync that walks this array.
+        linkedTransactionIds: isCardAnchorLeg
+          ? [mainTxId, ...(rewardCounterpartId ? [rewardCounterpartId] : [])]
+          : [mainTxId],
         rewardUsed: isCardAnchorLeg ? rewardUsedForTransfer : undefined,
         rewardUsedAccountId: isCardAnchorLeg ? newTx.rewardUsedAccountId : undefined,
         appliedBillingCycleYearMonth: isCCPayment && counterpartType === 'credit' && destAccount?.type === 'credit_card'
@@ -778,7 +799,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     }
 
     const rewardUsed = showRewardSplit ? (Number(newTx.rewardUsed) || 0) : 0;
-    if (rewardUsed > 0 && newTx.rewardUsedAccountId && !editId) {
+    if (willCreateRewardLeg) {
       const rewardLegId = rewardCounterpartId as string;
       // Debit POV: link the reward leg to the card anchor and keep it OFF the bank main tx's link list
       // (the card is the hub). Credit POV: the main tx IS the card, so link to it as before.
@@ -793,7 +814,9 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         id: rewardLegId,
         date: newTx.date as string,
         description: isCCPayment ? `Rewards used for ${paidCardName || account?.name || 'CC'}` : `Rewards applied to: ${newTx.description}`,
-        accountId: newTx.rewardUsedAccountId,
+        // Non-empty and not the external sentinel — willCreateRewardLeg tested both, which is what
+        // this cast stands in for now that the check no longer narrows the type inline.
+        accountId: newTx.rewardUsedAccountId as string,
         type: 'debit',
         // Rupees, like every other amount in the ledger — a points figure here would be summed as
         // money by the day totals and spend stats. calculateBalance applies the rate when it reads
@@ -1017,15 +1040,15 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   );
   // Investments are excluded: paying part of a fund/stock/metal buy out of reward points isn't a
   // thing the holdings math models. Everything else that spends money can be split — a CC Payment
-  // from either POV, or any ordinary debit. Gated on there actually being a source to spend from,
-  // so the button never opens a panel whose picker has nothing in it.
+  // from either POV, or any ordinary debit. No longer gated on owning a reward account: "Other"
+  // is always in the picker, so someone with no reward accounts at all can still record the ₹40
+  // coupon that paid part of a bill.
   //
   // Keyed off the CATEGORY, not activeInvestmentKind: the kind is still unset in the window between
   // picking "Investments" and picking the type below it, and the split must already be gone by then
   // — otherwise it shows, gets filled in, and is then silently dropped when the kind lands.
   const canSplitWithRewards = !isInvestmentCategory(newTx.category)
-    && (isCCPayment || newTx.type === 'debit')
-    && splitSourceAccounts.length > 0;
+    && (isCCPayment || newTx.type === 'debit');
 
   // The chosen reward source decides whether points apply at all: a card's own balance is counted in
   // its own unit, a plain rupee wallet (CRED coins, super.money) is already money. With no account
@@ -2011,15 +2034,16 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
               placeholder="Select Reward Account"
               options={[
                 { id: '', name: 'None (Select Account)' },
-                // splitSourceAccounts is also what gates the button/panel above, so the picker can
-                // never be offered empty (nor hide an account the gate counted).
                 ...[...splitSourceAccounts].sort(sortByAccountType).map(acc => ({
                   id: acc.id,
                   name: acc.archived ? `${acc.name} (deleted)` : acc.name,
                   subtext: acc.rewardType === 'points'
                     ? `${calculateBalance(acc, data.transactions, getCurrentMonthStr(), false, true, data.cashbackStatements)} ${acc.rewardUnit || ''}`
                     : formatCurrency(calculateBalance(acc, data.transactions, getCurrentMonthStr(), false, false, data.cashbackStatements))
-                }))
+                })),
+                // Last, as the catch-all it is: a coupon or voucher with no account to draw from. No
+                // balance line — there is nothing to run out of, which is the whole point of it.
+                { id: EXTERNAL_REWARD_SOURCE_ID, name: 'Other', subtext: 'One-time reward, not tracked' }
               ]}
               onChange={val => {
                 // Accounts can differ in unit and rate, so the typed digits would change meaning on

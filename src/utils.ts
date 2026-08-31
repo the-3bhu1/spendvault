@@ -428,6 +428,24 @@ import { calculateEPFProjection } from './utils/epfEngine';
 export const isPointsDenominated = (account?: Account) =>
   !!(account?.isCashbackEnabled && account?.rewardType === 'points');
 
+// A reward split whose source is a one-off the user doesn't track anywhere — a coupon, a voucher, a
+// scratch-card credit, a friend's referral code — held in `rewardUsedAccountId` as a sentinel rather
+// than a real account id. It is deliberately NOT an account: standing one up for a ₹40 coupon that
+// will never be used again is more bookkeeping than the coupon is worth.
+//
+// The sentinel is safe in that field precisely because every consumer of `rewardUsedAccountId`
+// asks "is this some account's id?" (`=== t.accountId`, `accounts.find(...)`), and this value
+// matches no account, so an external split reads as "a split with no reward leg" everywhere without
+// each of those sites needing to know the concept exists. The two places that DO need to know are
+// the ones that would otherwise conjure a leg out of nothing: handleSave (creates no leg) and the
+// balance check in validate() (there is no balance to check). Chosen over a separate boolean flag
+// so that `!!rewardUsedAccountId` — the existing "this row anchors a split" test, used in half a
+// dozen places — keeps working untouched.
+export const EXTERNAL_REWARD_SOURCE_ID = '__external_reward__';
+
+export const isExternalRewardSource = (accountId?: string) =>
+  accountId === EXTERNAL_REWARD_SOURCE_ID;
+
 export const rewardPointsRate = (account?: Account) =>
   isPointsDenominated(account) ? (account?.pointsConversionRate || 1) : 1;
 

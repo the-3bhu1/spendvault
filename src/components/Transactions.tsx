@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account, InvestmentKind } from '../types';
-import { formatCurrency, formatAmount, formatDateString, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, getInvestmentKind, isCountableTransaction } from '../utils';
+import { formatCurrency, formatAmount, formatDateString, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, getInvestmentKind, isCountableTransaction, isExternalRewardSource } from '../utils';
 import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, ChevronRight, ChevronDown, Hash, Shapes, Layers } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
@@ -261,6 +261,14 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
               {/* 'Investments' alone doesn't say fund vs. stock vs. metal — the kind pill fills that in. */}
               {invKind && (
                 <span className="metric-pill truncate" style={{ flexShrink: 0, maxWidth: '100%' }}>{investmentKindLabel(invKind)}</span>
+              )}
+              {/* A split funded by a one-time reward creates no redemption leg, so this row has no
+                  "Part-paid with rewards" entry to expand into — the amount just reads lower than
+                  what was actually bought. This pill is the only trace the discount leaves. */}
+              {(tx.rewardUsed || 0) > 0 && isExternalRewardSource(tx.rewardUsedAccountId) && (
+                <span className="metric-pill truncate" style={{ flexShrink: 0, maxWidth: '100%' }}>
+                  {formatCurrency(tx.rewardUsed!)} reward
+                </span>
               )}
               {(tx.tags || []).slice(0, 2).map(tag => (
                 <span key={tag} className="tag-pill truncate" style={{ flexShrink: 0, maxWidth: '100%' }}>#{tag}</span>
