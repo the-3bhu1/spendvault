@@ -565,7 +565,12 @@ export const calculateBalance = (
 };
 
 export const calculateTotalSpendPerCycle = (transactions: Transaction[], accountId: string, cycle: string, statementDay: number, rounding: RoundingRule = 'none') => {
-  const ccTransactions = transactions.filter(t => t.accountId === accountId);
+  // Same guard, same reason as calculateCycleBalanceForCycle and the statement screen: a points
+  // redemption draws on the card's reward wallet, never on its credit line, so the bank never bills
+  // it. Without this the bill was the FULL purchase price — a ₹448 spend paid with ₹362 of credit
+  // and ₹86 of Jewels stored a ₹362 anchor plus an ₹86 redemption leg on the same card, and summing
+  // both put ₹448 on Upcoming Bills while the statement (which does filter) correctly showed ₹362.
+  const ccTransactions = transactions.filter(t => t.accountId === accountId && affectsRupeeBalance(t));
   let spend = 0;
   let payment = 0;
 
