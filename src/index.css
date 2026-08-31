@@ -119,6 +119,58 @@ html.fonts-loaded #root {
   --nav-bg: rgba(18, 20, 26, 0.85);
   /* Cool-toned glass */
   --glass-bg: rgba(28, 31, 38, 0.6);
+  /* ---- Liquid glass (top bar + floating nav pill) -----------------------------------------
+     The chrome that FLOATS OVER content — the top bar and the nav pill — is one material, so it
+     is one token set rather than two hand-tuned rules that drift apart. Both themes define every
+     token; only the values invert.
+
+     What makes it read as glass rather than a translucent slab is the FILTER, not the alpha. A
+     tint alone just fades the page; the saturate + brightness pass is what makes colour behind
+     the glass bleed through vividly the way iOS/macOS glass does, and the blur is what keeps it
+     legible while it does. Hence the deliberately low tint alpha — the filter is carrying the
+     contrast, so the tint only has to keep text readable.
+
+     --glass-sheen / --glass-edge are the specular rim: a bright hairline along the top edge where
+     the light catches, and a faint outer edge that separates the pane from the page. Without the
+     rim a blurred pane reads as a smudge; the rim is what gives it a surface. */
+  --glass-tint: rgba(20, 23, 30, 0.42);
+  /* Blur radius is what decides whether this reads as GLASS or as a smear, and it is the one
+     value that cannot be pushed for effect. A radius spreads every colour behind the pane out to
+     its full width, so at 44px a small bright thing — a chart segment, a red amount — stopped
+     being in a place at all and became a wash bleeding across the whole pill. Real glass barely
+     displaces anything: you can still tell where things are and roughly what they say, they are
+     just soft. ~14px is that. Anything past ~20px starts detaching colour from its source.
+     Saturation and brightness are back near neutral for the same reason — they were amplifying
+     the spread into a glow. The pane's presence comes from the tint, the sheet and the rim
+     below, none of which move anything. */
+  --glass-filter: blur(14px) saturate(135%) brightness(1.06);
+  --glass-edge: rgba(255, 255, 255, 0.16);
+  --glass-sheen: rgba(255, 255, 255, 0.22);
+  --glass-inner-glow: rgba(255, 255, 255, 0.06);
+  --glass-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+  /* The SHEET: a raking highlight painted on top of the tint, brightest where the light lands
+     (top-left) and picking up again at the far edge. A flat tint has no surface — the eye reads
+     it as a hole cut in the page. This gradient is what makes it read as a pane with a front
+     face, and it is the single biggest difference between "translucent" and "glass". */
+  --glass-surface: linear-gradient(158deg,
+    rgba(255, 255, 255, 0.13) 0%,
+    rgba(255, 255, 255, 0.05) 26%,
+    rgba(255, 255, 255, 0.005) 52%,
+    rgba(255, 255, 255, 0.045) 100%);
+  /* The BEVEL: a bright hairline where the top face meets the edge, a dimmer one at the bottom
+     inside face, and a faint full ring. Together they give the pane thickness. */
+  --glass-rim:
+    inset 0 1px 1px rgba(255, 255, 255, 0.3),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.09),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  /* The travelling specular — see .nav-links::after. Light catches a curved edge at two opposite
+     points, not evenly all the way round, so the ring is bright at the top-left and bottom-right
+     and nearly gone across the middle. */
+  --glass-specular: linear-gradient(145deg,
+    rgba(255, 255, 255, 0.6) 0%,
+    rgba(255, 255, 255, 0.1) 30%,
+    rgba(255, 255, 255, 0.02) 55%,
+    rgba(255, 255, 255, 0.34) 100%);
   --logo-filter: invert(1);
   --btn-text: #ffffff;
   --primary-soft: rgba(99, 102, 241, 0.1);
@@ -160,6 +212,32 @@ html.fonts-loaded #root {
   --shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.05);
   --nav-bg: rgba(255, 255, 255, 0.8);
   --glass-bg: rgba(255, 255, 255, 0.4);
+  /* Light-theme glass. The page is near-white, so a white rim would be invisible and the pane
+     would have no outline at all — the outer edge inverts to ink while the top sheen stays white.
+     Brightness is barely lifted (a bright backdrop needs no help) and the saturation boost does
+     the work, so the card colours scrolling underneath stay visible through the pane. */
+  --glass-tint: rgba(255, 255, 255, 0.44);
+  --glass-filter: blur(14px) saturate(140%) brightness(1.02);
+  --glass-edge: rgba(15, 23, 42, 0.1);
+  --glass-sheen: rgba(255, 255, 255, 0.9);
+  --glass-inner-glow: rgba(255, 255, 255, 0.45);
+  --glass-shadow: 0 16px 38px rgba(15, 23, 42, 0.15), 0 2px 6px rgba(15, 23, 42, 0.07);
+  --glass-surface: linear-gradient(158deg,
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(255, 255, 255, 0.22) 26%,
+    rgba(255, 255, 255, 0.04) 52%,
+    rgba(255, 255, 255, 0.34) 100%);
+  --glass-rim:
+    inset 0 1px 1px rgba(255, 255, 255, 0.95),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+  /* The light-theme ring cannot be white the whole way round or it vanishes into the page: the
+     lit points stay white, and the unlit middle turns to ink so the pane still has an outline. */
+  --glass-specular: linear-gradient(145deg,
+    rgba(255, 255, 255, 0.98) 0%,
+    rgba(255, 255, 255, 0.35) 28%,
+    rgba(15, 23, 42, 0.09) 55%,
+    rgba(255, 255, 255, 0.85) 100%);
   --logo-filter: none;
   --btn-text: #ffffff;
   --primary-soft: rgba(79, 70, 229, 0.1);
@@ -1045,7 +1123,7 @@ tr:hover td {
 
 /* Nav styles */
 .navbar {
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--glass-edge);
   padding: 1rem 2rem;
   display: flex;
   justify-content: space-between;
@@ -1055,15 +1133,25 @@ tr:hover td {
   z-index: 100;
 }
 
+/* The pane itself lives on ::before rather than on .navbar so the bar's own children are never
+   inside the filtered layer — a backdrop-filter samples what is painted BEHIND it, and putting it
+   on the bar would leave the logo and icons sitting on top of a pane that is trying to blur them.
+   z-index:-1 keeps it behind that content and in front of the page scrolling past underneath. */
 .navbar::before {
   content: '';
   position: absolute;
   inset: 0;
   z-index: -1;
-  background-color: var(--nav-bg);
-  backdrop-filter: blur(8px) saturate(160%);
-  -webkit-backdrop-filter: blur(8px) saturate(160%);
-  transition: background-color 0.3s ease;
+  /* Sheet gradient over the tint — the front face of the pane. Colour last, image first: the
+     shorthand paints images above the background-colour. */
+  background: var(--glass-surface), var(--glass-tint);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  /* Top sheen only — the bar's own border-bottom is its lower edge, so a bottom inset here would
+     double it into a 2px rule. A full --glass-rim is likewise wrong on a bar that runs off both
+     sides of the screen: it would draw vertical hairlines against nothing. */
+  box-shadow: inset 0 1px 0 var(--glass-sheen);
+  transition: background 0.3s ease;
 }
 
 /* Frosted gradient scrim filling the strip below + behind the floating nav, so content scrolling
@@ -1084,15 +1172,25 @@ tr:hover td {
      Both the colour and the blur mask are EASED with intermediate stops rather than a single
      linear ramp to transparent — a single stop changes slope abruptly at its endpoint and the eye
      reads that as a hairline. Easing approaches transparent gently so there's no visible line.
-     Max tint is 65% at the very bottom, easing to 0 by ~46%. */
+     Max tint is 34% at the very bottom, easing to 0 by ~46%.
+
+     The tint used to peak at 65%, which is most of the way to opaque — and this scrim sits
+     directly BEHIND the nav pill, so it was what the pill's glass sampled. However transparent
+     the pill became, it was frosting a near-solid slab of --bg-color and read as painted-on. The
+     veil is now light enough for real content to show through the pill.
+
+     The blur here is deliberately modest. This scrim is part of the pill's backdrop, so its blur
+     composes with the pill's own — two 16px passes behind the pill is not a 16px pane, it is a
+     32px one, and that was half of why colour behind the nav looked displaced rather than
+     softened. The scrim's job is the fade; the pill's own glass does the frosting. */
   background: linear-gradient(to top,
-    color-mix(in srgb, var(--bg-color) 65%, transparent) 0%,
-    color-mix(in srgb, var(--bg-color) 42%, transparent) 18%,
-    color-mix(in srgb, var(--bg-color) 22%, transparent) 30%,
-    color-mix(in srgb, var(--bg-color) 8%, transparent) 38%,
+    color-mix(in srgb, var(--bg-color) 34%, transparent) 0%,
+    color-mix(in srgb, var(--bg-color) 22%, transparent) 18%,
+    color-mix(in srgb, var(--bg-color) 12%, transparent) 30%,
+    color-mix(in srgb, var(--bg-color) 4%, transparent) 38%,
     transparent 46%);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(9px);
+  backdrop-filter: blur(9px);
   -webkit-mask-image: linear-gradient(to top, #000 0%, rgba(0,0,0,0.6) 25%, rgba(0,0,0,0.2) 40%, transparent 50%);
   mask-image: linear-gradient(to top, #000 0%, rgba(0,0,0,0.6) 25%, rgba(0,0,0,0.2) 40%, transparent 50%);
 }
@@ -1110,19 +1208,59 @@ tr:hover td {
   align-items: center;
   justify-content: space-around;
   padding: 0.5rem;
-  /* Floating glass bar — frosted, lifted off the edges, with layered depth and a faint top
-     sheen for a premium, high-end feel (à la Uber's pill nav). Falls back to the opaque
-     --nav-bg tint where backdrop-filter is unsupported. */
-  background: var(--nav-bg);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  backdrop-filter: blur(24px) saturate(160%);
-  border: 1px solid var(--border-color);
+  /* Floating glass pill — the same material as the top bar, so it shares the token set rather
+     than carrying its own tuned numbers. Falls back to the opaque --nav-bg tint where
+     backdrop-filter is unsupported (see the @supports block below). */
+  background: var(--glass-surface), var(--glass-tint);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  border: 1px solid var(--glass-edge);
   border-radius: 999px;
+  /* Cast shadow, then the bevel. The pill is a free-floating object rather than a bar clipped to
+     the screen edges, so unlike .navbar it gets the full ring — that is what reads as thickness,
+     a pane of glass rather than a printed capsule. */
   box-shadow:
-    0 16px 40px rgba(0, 0, 0, 0.45),
-    0 2px 8px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    var(--glass-shadow),
+    var(--glass-rim),
+    inset 0 -2px 4px var(--glass-inner-glow);
   z-index: 1000;
+}
+
+/* The travelling specular rim, drawn as a 1px gradient ring just inside the border.
+   `inset: 0` on an absolutely-positioned child resolves against the PADDING box, so this sits
+   inboard of the border rather than covering it — outer edge and inner bevel, both visible.
+   The two-layer mask is the standard gradient-border trick: paint the gradient over the whole
+   box, then subtract the content box so only the 1px padding ring survives. */
+/* Guarded, because the failure mode is severe rather than cosmetic: with no mask support the
+   gradient would fill the whole capsule and paint over the nav. No ring is a fine outcome; a
+   solid slab across the tabs is not. */
+@supports ((mask-composite: exclude) or (-webkit-mask-composite: xor)) {
+.nav-links::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--glass-specular);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  /* Above the sliding pill (1) and the icons (2) — it is a 1px hairline hugging the edge, so it
+     never lands on anything readable, and it must not be interrupted by them. */
+  z-index: 3;
+  pointer-events: none;
+}
+}
+
+/* No backdrop-filter (older WebViews): the panes would be flat see-through rectangles with text
+   from the page running straight through the labels, so they go opaque instead. --nav-bg is the
+   pre-glass tint and is kept for exactly this. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .navbar::before,
+  .nav-links {
+    background: var(--nav-bg);
+  }
 }
 
 .nav-link {
@@ -1188,14 +1326,15 @@ tr:hover td {
   box-sizing: border-box;
   border-left: 0.2rem solid transparent;
   border-right: 0.2rem solid transparent;
-  /* Identical frosted highlight to the portfolio asset selector: translucent white, soft blur,
-     layered shadow + top sheen, fully-rounded stadium ends. */
-  background: rgba(255, 255, 255, 0.11);
+  /* Same frosted highlight as the portfolio asset selector, but through --pill-thumb-bg rather
+     than a literal translucent white: the bar it sits on is now genuinely see-through, and white
+     on white left the light theme with no visible indicator at all. The token already inverts to
+     ink on light. No blur of its own — it is stacked inside a pane that is already blurring the
+     page, and a second pass only muddies it. */
+  background: var(--pill-thumb-bg);
   background-clip: padding-box;
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
   border-radius: 999px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18), inset 0 1px 0 var(--glass-sheen);
   z-index: 1;
   pointer-events: none;
   transition: transform 0.45s cubic-bezier(0.34, 1.55, 0.5, 1);
