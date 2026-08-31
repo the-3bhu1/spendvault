@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Check, Search } from 'lucide-react';
 
@@ -122,6 +122,33 @@ export function CustomPicker({
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen]);
 
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const selectedItemRef = useRef<HTMLDivElement | null>(null);
+  // Which row the sheet opens on. The catch-all ('all' / '') already sits at the top and means "no
+  // real selection", so it never counts as a scroll target; a multi-select opens on its first pick.
+  const scrollTargetId = selectedOptions.find(o => o.id !== 'all' && o.id !== '')?.id;
+
+  // Open the list at the current selection instead of at the top — a grouped account picker would
+  // otherwise open on "BANK ACCOUNTS" while the account actually in play is several groups down,
+  // leaving no on-screen sign of what is selected.
+  //
+  // Measured with rects rather than scrollIntoView for two reasons: scrollIntoView also pans every
+  // scrollable ancestor (the page behind the overlay included), and the difference between two rects
+  // is immune to the sheet's slide-up animation, which is a pure translateY and so shifts both by the
+  // same amount. Runs as a layout effect so the position is right in the frame the sheet first
+  // paints, with no visible jump from the top.
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    const list = listRef.current;
+    const item = selectedItemRef.current;
+    if (!list || !item) return;
+    const listRect = list.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+    // Centre the row in the viewport where it fits; the browser clamps at both ends, so a selection
+    // near the very top or bottom of the list just stays where it is.
+    list.scrollTop += (itemRect.top - listRect.top) - (list.clientHeight - itemRect.height) / 2;
+  }, [isOpen]);
+
   // Guarantee Archived Accounts options are always placed at the end after all active options
   const sortedPickerOptions = React.useMemo(() => {
     const isSearching = searchQuery.trim().length > 0;
@@ -177,9 +204,9 @@ export function CustomPicker({
             </div>
           </div>
         )}
-        <div className="no-scrollbar" style={{ 
-          overflowY: 'auto', 
-          flex: 1, 
+        <div ref={listRef} className="no-scrollbar" style={{
+          overflowY: 'auto',
+          flex: 1,
           padding: isMulti ? '0.5rem 1.5rem' : '0.5rem 1.5rem calc(1.5rem + env(safe-area-inset-bottom, 16px))' 
         }}>
           {sortedPickerOptions.length === 0 ? (
@@ -233,6 +260,7 @@ export function CustomPicker({
                   )}
                   {expanded && (
                     <div
+                      ref={opt.id === scrollTargetId ? selectedItemRef : undefined}
                       className={`picker-option ${valueArray.includes(opt.id) ? 'selected' : ''}`}
                       onClick={() => {
                         if (isMulti) {
