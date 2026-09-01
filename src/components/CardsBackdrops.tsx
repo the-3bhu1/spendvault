@@ -358,11 +358,8 @@ const MC_SCR = { x: MC_T_L + 55, y: MC_T_T + 22, w: 150, h: 74 };
 // the viewBox reads as a small machine, where one running off the edge reads as a cropped big one.
 const MC_KEY = { x: MC_T_L + 62, y: MC_SCR.y + MC_SCR.h + 20, w: 34, h: 21, dx: 48, dy: 31, rows: 4 };
 
-// The slot the receipt is printing out of, at the head of the case. Sized and placed AROUND the
-// ribbon below rather than independently: paper wider than the slot it came out of is the one
-// mistake this pairing can make. The slip is 116 across on centre MC_T_L + 137, so it spans
-// MC_T_L + 79…195 and the slot has to contain that.
-const MC_SLOT = { x: MC_T_L + 74, y: MC_T_T - 4, w: 126, h: 8 };
+// The slot the receipt is printing out of, at the head of the case.
+const MC_SLOT = { x: MC_T_L + 40, y: MC_T_T - 4, w: 100, h: 8 };
 
 /** A torn paper edge: notches along the run from (x0,y0) to (x1,y1), emitted as path commands so it
  *  can close a ribbon rather than stand on its own. The notches bite along the run's NORMAL, so the
@@ -439,30 +436,16 @@ const cubicPN = ([p0, p1, p2, p3]: Cubic, t: number) => {
   return { x, y, nx: -ty / L, ny: tx / L };
 };
 
-/** de Casteljau split at t: the same curve as two cubics. Used to cut the slip at its fold, and it
- *  has to be an exact split rather than two hand-written curves — the two panels meet along one
- *  edge, and any disagreement in the tangent there opens a notch in the silhouette. */
-const splitCubic = ([p0, p1, p2, p3]: Cubic, t: number): [Cubic, Cubic] => {
-  const lerp = (a: Pt, b: Pt): Pt => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-  const a = lerp(p0, p1), b = lerp(p1, p2), c = lerp(p2, p3);
-  const d = lerp(a, b), e = lerp(b, c);
-  const m = lerp(d, e);
-  return [[p0, a, d, m], [m, e, c, p3]];
-};
-
-/** A ribbon swept along a cubic. `halfAt` gives the half-width at each t, so a panel can taper;
- *  `depths` tears the far end off, and omitting it leaves that end square for another panel to
- *  butt against.
+/** A constant-width ribbon swept along a cubic, torn off at the far end.
  *
  *  Sampled rather than offset analytically, because the offset of a cubic is not a cubic — the exact
  *  curve needs a higher order. At this width an 18-step polyline is indistinguishable from it, and
- *  the sampling is what buys the even width the hand-drawn version could not hold. */
-const ribbon = (c: Cubic, halfAt: (t: number) => number, depths?: number[]) => {
+ *  the sampling is what buys the constant width the hand-drawn version could not hold. */
+const ribbon = (c: Cubic, halfW: number, depths: number[]) => {
   const N = 18;
   const edge = (t: number, sign: number): Pt => {
     const p = cubicPN(c, t);
-    const h = halfAt(t);
-    return [p.x + p.nx * h * sign, p.y + p.ny * h * sign];
+    return [p.x + p.nx * halfW * sign, p.y + p.ny * halfW * sign];
   };
   let d = '';
   for (let i = 0; i <= N; i++) {
@@ -471,7 +454,7 @@ const ribbon = (c: Cubic, halfAt: (t: number) => number, depths?: number[]) => {
   }
   const [ax, ay] = edge(1, 1);
   const [bx, by] = edge(1, -1);
-  d += depths ? tornEdge(ax, ay, bx, by, depths) : ` L ${f(bx)} ${f(by)}`;
+  d += tornEdge(ax, ay, bx, by, depths);
   for (let i = N; i >= 0; i--) {
     const [x, y] = edge(i / N, -1);
     d += ` L ${f(x)} ${f(y)}`;
@@ -479,58 +462,19 @@ const ribbon = (c: Cubic, halfAt: (t: number) => number, depths?: number[]) => {
   return `${d} Z`;
 };
 
-// THE ARC IS A HOOK, not a bow, and it runs the full height of the left void. The spine leaves the
-// head of the machine, climbs almost vertically, turns over the top and comes back DOWN to the
-// right — screen (54, 210) → (60, 131) → (90, 74) → (129, 59) → (164, 109). That last leg is the
-// whole point: a till slip has been on a roll for a mile and the paper remembers it, so the free
-// end falls back on itself instead of pointing away. Two earlier versions missed this — one ran
-// straight from slot to tip and read as a plank, the next bowed but never turned over, which is a
-// banner rather than a receipt.
-//
-// Solved against the void rather than eyeballed, and the numbers are the constraint. Swept and
-// rotated with the case, the ribbon occupies screen x −5…219, y 3…221: it grazes the top of the
-// frame, clears a padded avatar box (x 172…228, y 87…148) at every one of 160 sampled edge points,
-// and stops 17 units short of the card graphic at x 236. There is no slack left in it — re-run
-// those bounds before moving any control point or the half-width.
+// Solved against the void rather than eyeballed: the tip at local (+176, −152) from the case's
+// top-left lands at screen (64, 41), and the torn edge across it runs from (86, 60) to (41, 23) —
+// all of which is inside the upper-left hole (x −30…120, y 0…190) and clear of the avatar at x 184.
 const MC_R_CURVE: Cubic = [
-  [MC_T_L + 137, MC_T_T + 14],
-  [MC_T_L + 143, MC_T_T - 98],
-  [MC_T_L + 246, MC_T_T - 186],
-  [MC_T_L + 263, MC_T_T - 70],
+  [MC_T_L + 90, MC_T_T + 2],
+  [MC_T_L + 96, MC_T_T - 56],
+  [MC_T_L + 130, MC_T_T - 112],
+  [MC_T_L + 176, MC_T_T - 152],
 ];
-// 116 units across, against a 236-unit case — half the width of the machine that prints it, which
-// is about the ratio a real slip has. It was 58, then 96: both read as a ribbon or a strap, because
-// what makes paper look like paper at this scale is being wide enough to carry print across.
-const MC_R_HALF = 58;
-
-/* THE FOLD, and it is the difference between a bent strap and a curling receipt.
- *
- * Every earlier version bent the slip within its own plane — the outline turned, but the same face
- * pointed at the reader the whole way, which is a strip of card bent round a corner. Paper coming
- * off a roll does not do that. It turns OVER: the surface rolls away from you and what comes back
- * down is the blank REVERSE, which is why a till slip on a counter shows two tones with a crease
- * between them.
- *
- * So the slip is two panels cut from one curve at its apex. Up to the fold you see the printed face;
- * past it you see the back, and the crease across the full width is where the surface turns through
- * the light. Splitting the SAME cubic (rather than drawing two) is what keeps the two panels exactly
- * the same paper: identical tangent at the join, so the silhouette runs through it without a notch.
- *
- * The apex is the right place to cut because that is where the surface actually turns away from a
- * reader standing in front of it — the fold and the top of the arc are the same event.
- */
-const MC_R_FOLD = 0.5;
-const [MC_R_FACE_CURVE, MC_R_BACK_CURVE] = splitCubic(MC_R_CURVE, MC_R_FOLD);
-
-// The face is flat to the reader, so it holds its width. Square-ended: the fold is a crease, not a
-// tear, and the back panel butts against this edge.
-const MC_RECEIPT_FACE = ribbon(MC_R_FACE_CURVE, () => MC_R_HALF);
-// The back TAPERS, and this is the one place the file's constant-width rule is deliberately broken.
-// Constant width is what says "flat paper" — but this panel is not flat to the reader any more, it
-// is turning away, and a surface turning away foreshortens. Holding it at full width across the
-// turn is what made the earlier attempt read as a bend rather than a fold. 12% over the run: enough
-// to feel, not enough to read as a wedge.
-const MC_RECEIPT_BACK = ribbon(MC_R_BACK_CURVE, t => MC_R_HALF * (1 - 0.12 * t), [10, 4, 11, 5, 8.5, 3.5]);
+// 58 units across — narrow next to the 215-unit case, which is what makes it read as a till slip
+// rather than as a sheet of paper.
+const MC_R_HALF = 29;
+const MC_RECEIPT = ribbon(MC_R_CURVE, MC_R_HALF, [6, 2.5, 7, 3.5, 5.5, 2]);
 
 /** A point across the slip at t, given as a fraction of its half-width either side of the fold. */
 const mcAcross = (t: number, k: number) => {
@@ -546,18 +490,11 @@ const mcAcross = (t: number, k: number) => {
 // One highlight along the fold gives it a near side and a far side, which is the cheapest possible
 // way to say "this is limp" — and limpness is the only thing that distinguishes paper from plastic
 // in a drawing where everything is the same tone.
-// Runs to the FOLD and stops. Past it the reader is looking at the other side of the sheet, where
-// this crease is the ridge rather than the valley — carrying one continuous highlight across the
-// turn would say the surface never turned.
 const MC_R_CREASE = Array.from({ length: 15 }, (_, i) => {
-  const p = cubicPN(MC_R_CURVE, (i / 14) * MC_R_FOLD);
+  const p = cubicPN(MC_R_CURVE, i / 14);
   const d = -MC_R_HALF * 0.34;
   return `${i === 0 ? 'M' : 'L'} ${f(p.x + p.nx * d)} ${f(p.y + p.ny * d)}`;
 }).join(' ');
-
-// The crease itself, across the full width at the fold. This single line is what tells the reader
-// the two tones either side of it are one sheet rather than two objects.
-const MC_R_FOLD_LINE = mcAcross(MC_R_FOLD, 1);
 
 // THE SIGNATURE, and it is the reason this slip is styled the way it is rather than as more print.
 //
@@ -565,23 +502,19 @@ const MC_R_FOLD_LINE = mcAcross(MC_R_FOLD, 1);
 // a card yours rather than the bank's — which is the difference between this screen and the Cards
 // root it sits under. So the receipt carries a ruled line with a hand across it, and the ruled line
 // is drawn shorter than the hand that overruns it, because that is what a real signature does.
-const MC_R_SIGN_RULE = mcAcross(0.1, 0.62);
+const MC_R_SIGN_RULE = mcAcross(0.2, 0.62);
 const MC_R_SIGN = (() => {
-  const a = mcAcross(0.15, 0.72);
-  // Amplitude rises with the slip: the same 3.6 across a run twice as long flattens into a ruled
-  // line with a wobble, which is a strikethrough, not a signature.
-  return squiggle(a.x1, a.y1, a.x2, a.y2, 5, 5.6);
+  const a = mcAcross(0.26, 0.72);
+  return squiggle(a.x1, a.y1, a.x2, a.y2, 5, 3.6);
 })();
 
 // Illegible print across the slip, struck along its own normals so the lines lie ON the paper as it
 // turns instead of staying level with the frame. A readable figure on a decorative drawing reads as
 // data the screen is claiming to know — the rule the whole file keeps.
-// Weight RISES toward the fold. A till printer feeds the head of the slip out first, so the header
-// is the far end — and now that the far end has turned over, the heaviest line the reader can still
-// see is the one nearest the crease. Reading the ramp the other way round would put the merchant's
-// name at the machine and the total in mid-air.
-// All three sit before MC_R_FOLD, because past it there is no printed side to sit on.
-const MC_RECEIPT_LINES = [0.24, 0.33, 0.42].map((t, i) => {
+// Weight RISES toward the tip. A till printer feeds the head of the slip out first, so the tip is
+// the top of the receipt and carries the heaviest line — the merchant's name. Reading the ramp the
+// other way round would put the header at the machine and the total in mid-air.
+const MC_RECEIPT_LINES = [0.45, 0.6, 0.78].map((t, i) => {
   const a = mcAcross(t, 0.66);
   return {
     key: t,
@@ -659,27 +592,11 @@ export const MyCardsBackdrop: React.FC = () => (
           against it. */}
       <g filter={`url(#${MC}-cast)`}>
         <path
-          d={MC_RECEIPT_FACE} fill={`url(#${MC}-stone-v)`}
+          d={MC_RECEIPT} fill={`url(#${MC}-stone-v)`}
           style={{ fillOpacity: 'var(--relief-plate-fill)' }}
           stroke="var(--relief-edge)" strokeWidth="1.1"
         />
-        {/* The REVERSE, drawn after the face so it passes in front of it at the crease — the near
-            side of a fold is the side that has turned towards you. Flat --relief-hi rather than the
-            stone gradient: the gradient is what gives the face its shallow modelling, and repeating
-            it here would make the back a second lit plane instead of one blank sheet caught square
-            in the light. The blank is the point — no print reaches this side. */}
-        <path
-          d={MC_RECEIPT_BACK} fill="var(--relief-hi)"
-          stroke="var(--relief-edge)" strokeWidth="1.1"
-        />
       </g>
-      {/* The crease across the fold, heavier than the longitudinal curl line: it is the one mark
-          holding the two tones together as a single sheet. */}
-      <line
-        x1={f(MC_R_FOLD_LINE.x1)} y1={f(MC_R_FOLD_LINE.y1)}
-        x2={f(MC_R_FOLD_LINE.x2)} y2={f(MC_R_FOLD_LINE.y2)}
-        stroke="var(--relief-edge)" strokeWidth="1.6" opacity="0.8"
-      />
       {/* The curl's highlight, then the print, then the signature over its rule — in that order so
           the hand sits on top of everything the way ink on paper does. */}
       <path d={MC_R_CREASE} fill="none" stroke="var(--relief-edge)" strokeWidth="1.2" opacity="0.55" />
