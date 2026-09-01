@@ -51,10 +51,10 @@ export const TransactionSelector: React.FC<TransactionSelectorProps> = ({
   return (
     <div className="modal-overlay flex-center" style={{ zIndex: 10000 }}>
       <div className="modal-content animate-in full-screen flex-col" style={{ padding: 0 }}>
-        <div className="flex justify-between align-center" style={{ padding: 'calc(1.5rem + env(safe-area-inset-top, 0px)) 1.75rem 1rem', borderBottom: '2px solid #000', width: '100%' }}>
+        <div className="modal-header" style={{ padding: 'calc(0.75rem + var(--safe-area-inset-top)) 1.75rem 1rem' }}>
           <h3 style={{ margin: 0, fontSize: '1.85rem', fontWeight: 700, letterSpacing: '-0.5px', color: 'var(--text-primary)' }}>{title}</h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.25rem', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center' }}>
-            <X size={24} />
+          <button onClick={onClose}>
+            <X />
           </button>
         </div>
 
@@ -93,9 +93,13 @@ export const TransactionSelector: React.FC<TransactionSelectorProps> = ({
                       onClick={() => setExpandedMonths(prev => ({ ...prev, [m]: !prev[m] }))}
                       style={{ padding: '0.75rem 1.5rem', background: 'var(--bg-hover)', borderBottom: '1px solid var(--border-color)' }}
                     >
-                      <div className="flex align-center gap-2 text-mono font-bold" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>
+                      <div className="flex align-center gap-3 text-mono font-bold" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>
                         <Calendar size={14} className="text-primary" />
-                        {monthLabel.toUpperCase()}
+                        {/* Optical centring: Overpass Mono's ascent and descent are asymmetric, so an all-caps
+                            label draws ~0.2em above the middle of its own line box. Flexbox centres that box, not
+                            the glyphs, and line-height cannot move them — the half-leading cancels out. A nudge of
+                            the measured difference is the only lever. */}
+                        <span style={{ position: 'relative', top: '0.2em' }}>{monthLabel.toUpperCase()}</span>
                       </div>
                       <div className="flex align-center gap-2 text-muted" style={{ fontSize: '0.7rem' }}>
                         {txsInMonth.length} items

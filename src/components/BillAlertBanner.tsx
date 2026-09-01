@@ -73,7 +73,7 @@ export default function BillAlertBanner({ onNavigateToBills }: BillAlertBannerPr
       className="animate-slide-down"
       style={{
         position: 'fixed',
-        top: 'env(safe-area-inset-top, 0px)',
+        top: 'var(--safe-area-inset-top)',
         left: 0,
         right: 0,
         zIndex: 8500,

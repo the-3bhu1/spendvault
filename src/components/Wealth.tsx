@@ -364,10 +364,14 @@ export function Wealth() {
       bank: live.filter((a: Account) => a.type === 'bank_account'),
       cash: live.filter((a: Account) => a.type === 'cash'),
       ewallet: live.filter((a: Account) => a.type === 'e_wallet'),
-      // Debit cards, rewards wallets, and anything the user defined themselves. Grouped rather
-      // than dropped so the Assets total matches the money the user actually holds.
+      // Debit cards, rewards wallets, offset ledgers, and anything the user defined themselves.
+      // Grouped rather than dropped so the Assets total matches the money the user actually holds.
+      // 'offset' is named explicitly because it used to be a custom type and was counted here via
+      // isCustomType — going native would otherwise have silently dropped it out of Assets. A fully
+      // paired offset ledger nets to zero, so it contributes nothing; an unpaired entry is a real
+      // ₹ position (money fronted, or spent and not yet funded) and belongs in the total.
       other: live.filter((a: Account) =>
-        a.type === 'debit_card' || a.type === 'rewards' || isCustomType(a.type)
+        a.type === 'debit_card' || a.type === 'rewards' || a.type === 'offset' || isCustomType(a.type)
       ),
     };
   }, [activeAccounts]);
@@ -538,6 +542,7 @@ export function Wealth() {
       return {
         totalUnits: 1,
         totalInvested: 0,
+        avgPrice: 0,
         currentValue: proj.balance,
         totalReturn: 0,
         totalReturnPct: 0,
@@ -841,6 +846,7 @@ export function Wealth() {
     e_wallet: 'E-Wallet',
     debit_card: 'Debit Card',
     rewards: 'Rewards Wallet',
+    offset: 'Offset Ledger',
   };
 
   const renderLiquidRow = (account: Account) => {
@@ -2398,6 +2404,15 @@ export function Wealth() {
                     label={selectedAsset.type === 'stocks' ? 'Shares' : selectedAsset.type === 'commodity' ? 'Grams' : 'Units'}
                     value={`${stats.totalUnits.toLocaleString('en-IN', { maximumFractionDigits: 4 })}${selectedAsset.type === 'commodity' ? ' g' : ''}`}
                   />
+                  {/* Sits directly under the unit count it is derived from, and reads against the
+                    live per-unit price in the hero above — the two numbers whose gap IS the P&L
+                    row below. Hidden at zero units, where invested/units has nothing to say. */}
+                  {stats.avgPrice > 0 && (
+                    <StatRow
+                      label={selectedAsset.type === 'mutual_funds' ? 'Avg. Buy NAV' : 'Avg. Buy Price'}
+                      value={`${formatFullCurrency(stats.avgPrice)}${selectedAsset.type === 'commodity' ? '/g' : selectedAsset.type === 'mutual_funds' ? '/unit' : ''}`}
+                    />
+                  )}
                   <StatRow
                     label="Total Returns"
                     value={signedAmount(stats.totalReturn >= 0, `₹${Math.abs(stats.totalReturn).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${stats.totalReturnPct >= 0 ? '+' : ''}${stats.totalReturnPct.toFixed(2)}%)`)}

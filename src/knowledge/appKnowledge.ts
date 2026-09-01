@@ -48,7 +48,14 @@ An account is any place money sits or is owed. Built-in types:
   include Statutory Wage Ceiling (₹15,000 cap) vs Actual Basic + DA. Requires a "Current Employer"
   name field (shown in the EPF passbook header and detail view).
 - rewards — a reward-points wallet (points, not rupees), with a reward unit and conversion rate.
+- offset — an Offset Ledger: a bookkeeping account for spending that never touched one of the user's
+  own accounts, e.g. a share of a bill a friend paid, or a contribution funded by money someone owed
+  them. Entries come in pairs (the spend as a debit, the money that funded it as a credit), so a
+  settled ledger nets to zero and the spend still lands in the month's category totals. Shown in the
+  Accounts tab under "Offset Ledgers" and counted under Wealth → Assets → Other.
 Add or remove custom account types in Settings → Account Types (a type that's in use can't be deleted).
+"offset" was a custom type in older versions and is built-in now; existing Offset Ledger accounts are
+migrated automatically on upgrade, so it no longer appears in the custom list.
 Actions (each account is a card on the Accounts tab):
 - Add: Accounts tab → "+" → fill the form → save. For a stock/fund you can search its symbol while adding.
 - Edit or archive: use the pencil (edit) and trash (archive) icon buttons on the account's card — there
@@ -93,10 +100,11 @@ Actions (Transactions tab):
     type alongside other categories leaves those other categories' transactions untouched.
 - Exclude from stats: this control appears in the editor only after you enable Settings → Smart
   Features → Passive Logs. You can exclude a transaction fully, or a partial amount; Dashboard and
-  Insights then skip that amount. The two boxes (Excluded Amount / Active Share) always add up to what
-  the entry charges the chosen account — so on a reward split that is the primary-account portion, not
-  the full price: a ₹448 purchase paid with ₹86 of rewards can exclude at most ₹362, because ₹362 is
-  what the account paid.
+  Insights then skip that amount. The two boxes (Excluded Amount / Active Share) add up to the FULL
+  price of the entry, rewards included. On a reward split the exclusion is stored across both legs —
+  a ₹448 purchase paid with ₹86 of rewards can exclude the whole ₹448, which excludes ₹362 on the
+  purchase and ₹86 on the reward leg, so the purchase contributes ₹0 to Spends. Exclude a smaller
+  figure and the primary account's portion absorbs it first (₹400 excluded = ₹362 + ₹38).
 - Tag: in the editor, type a #tag. There are two tag types:
   - **Active tags** (shown by default in the tag picker dropdown) — for recurring tags like #food or #worktrip.
   - **Event / One-off tags** (hidden from the dropdown by default, but searchable when typing) — for
@@ -110,8 +118,12 @@ Actions (Transactions tab):
 # Auto-generated (linked) transactions — what creates a child log
 Several actions create paired/child transactions, linked together (linkedTransactionIds). Editing or
 deleting one keeps the legs in sync / removes them together. By category:
-- Transfer: moving money between two accounts. Creates a debit on the source and a matching credit on
-  the destination (descriptions "Transfer to/from <account>").
+- Transfer: moving money between two accounts. Creates a debit on the source and a credit on the
+  destination (descriptions "Transfer to/from <account>"). The two sides are the same figure by
+  default; a toggle under the account picker ("Same amount" / "Custom amount") lets the far side
+  state its own. Use it when a platform sells balance at a discount (pay ₹180 from the bank for a
+  ₹200 gift-card load — the wallet is credited ₹200) or when a rail charges a fee (send ₹200, ₹197
+  lands). The difference is not income or a spend: transfers are a system category either way.
 - CC Payment: paying a credit card from a bank/payment account. Creates a debit on the paying account
   and a credit on the card (reducing its outstanding). The card credit is applied to the chosen
   billing cycle (current or previous statement).
@@ -175,7 +187,11 @@ the "Other" source below covers one-off rewards.
     The transaction is described automatically after the holding account (e.g. the fund or stock name),
     and switching type clears any account or quantity that no longer applies.
 - Cashback (instant): on a debit with instant cashback, an extra credit posts to the chosen rewards
-  account (category "Cashback").
+  account (category "Cashback"). Offered on ANY debit from a bank or e-wallet — including transfers,
+  card bill payments and NCMC recharges — because it is the payment app (super.money, CRED, …) that
+  rebates the payer, whatever the money was for. It needs a rewards/e-wallet account to deposit into.
+  Card cashback is the other kind: paid by the issuer for spending on the card, so it is NOT offered
+  on transfers, CC payments, NCMC recharges or fund purchases.
 - Cashback (delayed): see Rewards — confirming realized cashback posts a "Cashback" credit
   into the chosen account.
 - NCMC Travel Recharge: on an NCMC-enabled debit card, moves money from the card's payments balance
@@ -193,7 +209,8 @@ for contributions to a pooled/committee fund — a real spend, NOT stats-exclude
 Spends and can carry a monthly budget. Use it when a contribution is settled by offsetting someone's
 debt instead of paying cash: log the offset as a repayment in the Debt ledger (which moves the account
 balance but counts as neither Spend nor Income) plus a Fund debit on the same account and date, so the
-account nets to zero and the contribution still shows in that month's Spends.
+account nets to zero and the contribution still shows in that month's Spends. An Offset Ledger account
+(type 'offset') is the account to use for that pair when no real account of yours was touched.
 System categories (internal bookkeeping, EXCLUDED from spend totals so transfers/payments/investments
 don't look like spending): Transfer, CC Payment, NCMC Travel Recharge, Investments, and
 Lending & Borrowing. Lending & Borrowing is auto-excluded from both Spends and Income everywhere
@@ -318,7 +335,7 @@ followed by up to three category cards, each with a chevron that opens its own s
 
 1. **Portfolio** — market investments: Stocks, Mutual Funds, Commodities (gold/silver).
 2. **Assets** — liquid money: Bank Accounts, Physical Cash, E-Wallets, plus an "Other" group holding
-   Debit Cards, Rewards wallets and any user-created custom account types.
+   Debit Cards, Rewards wallets, Offset Ledgers and any user-created custom account types.
 3. **Retirement** — EPF (Employee Provident Fund).
 
 The headline Wealth total = Portfolio current value + Assets liquid balance + Retirement balance. It is
@@ -346,6 +363,19 @@ intraday, so the chart's tooltip names a time rather than a date); a fund's are 
 Every chart opens on the leftmost range in its own row and does not remember the last one you picked
 — reopening any holding or account starts fresh. An individual holding can also be refreshed from its
 account card in the Accounts tab.
+
+### Average buy price
+Every market holding shows what it cost per unit: "Avg. Buy Price" (stocks), "Avg. Buy NAV" (funds) or
+an average ₹/gram (metals), on the holding's detail sheet directly under its unit count, and as an AVG
+line under TOTAL SHARES / TOTAL UNITS / TOTAL GRAMS on that account's card in the Accounts tab. It is
+DERIVED — total invested ÷ total units — and never entered by the user, so there is no field for it in
+the Add/Edit Account form and it cannot be edited directly; correct it by correcting the invested value
+or the unit count. Because it needs no market price, it still reads when a live quote fails to fetch.
+The mutual-fund form's optional "Average NAV" is NOT this figure: it is only a fallback used to
+estimate invested value when that field is left blank.
+Caveat to state if asked how accurate it is: total invested is net cash flow, and a sell subtracts the
+full sale proceeds rather than the cost of the units sold — so after a partial sale at a profit the
+average sits BELOW the true cost basis. For a holding that has only ever been added to, it is exact.
 
 ## Assets sub-view
 Total cash and funds available, with filter pills (All / Bank / Cash / Wallets / Other) shown only for
@@ -397,7 +427,11 @@ autoLogSms). OTPs and personal messages are excluded on-device and never sent an
 messages (e.g. a payment and its confirmation) are de-duplicated. An optional AI second filter
 (Settings → AI Features → "Smarter SMS Filter"; Gemini, opt-in) drops EMI offers, promos, and
 reward-point "credits" before logging; if it errors it
-fails open (keeps the SMS). New SMS appear as a preview queue to confirm before adding. The merchant
+fails open (keeps the SMS). New SMS appear as a preview queue to confirm before adding, and they
+arrive whether the app is open or closed — with the app on screen the pending card appears live.
+While the AI filter is deciding (a couple of seconds) the Ledger shows a placeholder card saying the
+SMS is being checked; it becomes the pending card if the message passes, or briefly reports that it
+was filtered out as not a real transaction before disappearing. The merchant
 name parsed out of the SMS becomes the transaction's description (kept in the bank's original casing).
 That preview queue is saved on-device so it survives closing/restarting the app, but it is device-local
 and is deliberately NOT included in a backup/export — confirm or discard pending items before restoring

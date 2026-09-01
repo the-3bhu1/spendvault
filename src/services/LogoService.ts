@@ -699,8 +699,9 @@ export function getMFLogoUrl(accountName: string): string | null {
  *  that share a word ("HDFC" the bank vs. the fund house); the cache outranks the heuristic because
  *  a looked-up domain beats a guessed one.
  *
- *  Physical cash is skipped past the heuristic/AI tiers entirely: it isn't a brand, and a name like
- *  "Petty Cash" has no logo to find — LogoAvatar renders its WalletMinimal glyph instead.
+ *  Physical cash and offset ledgers are skipped past the heuristic/AI tiers entirely: neither is a
+ *  brand, and a name like "Petty Cash" or "Offset Ledger" has no logo to find — LogoAvatar renders
+ *  their WalletMinimal / Scale glyph instead.
  *
  *  Consequence worth knowing: the account NAME picks the logo. A card that could carry any of
  *  several brands (issuer network vs. app vs. card brand) shows whichever one the name mentions.
@@ -710,7 +711,7 @@ export function getLiquidLogoUrl(account: AccountLike): string | null {
   const registry = resolveLiquidDomain(account.name);
   if (registry) return logoFromDomain(registry);
 
-  if (account.type === 'cash') return null;
+  if (account.type === 'cash' || account.type === 'offset') return null;
 
   const aiDomain = domainCache[liquidAiKey(account.name)];
   if (aiDomain) return logoFromDomain(aiDomain);
@@ -724,7 +725,7 @@ export function getLiquidLogoUrl(account: AccountLike): string | null {
  *  Mirrors ensureAssetLogo. No-op without a Gemini key — and deliberately caches NOTHING in that
  *  case, so adding a key later still triggers a fresh lookup. */
 export async function ensureLiquidLogo(account: AccountLike): Promise<void> {
-  if (account.type === 'cash') return;          // physical cash has no brand to resolve
+  if (account.type === 'cash' || account.type === 'offset') return; // neither has a brand to resolve
   if (resolveLiquidDomain(account.name)) return; // already covered deterministically
 
   const key = liquidAiKey(account.name);

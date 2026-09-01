@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { format, parseISO, differenceInCalendarMonths } from 'date-fns';
 import { CreditCard, Calendar, ChevronLeft, ArrowDown, ArrowUp, RotateCcw, Undo2, X } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
@@ -220,7 +220,10 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
   else if (rounding === 'floor') netAmount = Math.floor(rawNetAmount);
   else if (rounding === 'ceil') netAmount = Math.ceil(rawNetAmount);
 
-  useEffect(() => {
+  /* Layout effect, not a plain effect: the "View all" button renders only when this says the
+     list is clipped, so the measurement has to settle BEFORE paint or the button pops in a
+     frame late on every open. */
+  useLayoutEffect(() => {
     const updateClippingState = () => {
       if (showAllTransactions) {
         setIsTransactionsClipped(false);
@@ -234,7 +237,10 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
         return;
       }
 
-      setIsTransactionsClipped(content.scrollHeight > viewport.clientHeight + 1);
+      /* No slack in this comparison. A row cut by even a pixel is a row the user cannot fully
+         read, so it counts as clipped and earns the "View all" link — erring toward offering
+         the link is always cheaper than silently hiding half a transaction. */
+      setIsTransactionsClipped(content.scrollHeight > viewport.clientHeight);
     };
 
     updateClippingState();
@@ -257,9 +263,9 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
 
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1900, background: 'var(--bg-color)', overflow: 'hidden' }} className="fade-in">
-      <div className="flex-col" style={{ gap: 0, height: '100vh', background: 'var(--bg-color)' }}>
+      <div className="flex-col" style={{ gap: 0, height: '100%', background: 'var(--bg-color)' }}>
         <div style={{
-          paddingTop: 'calc(2.5rem + env(safe-area-inset-top, 24px))',
+          paddingTop: 'calc(0.75rem + var(--safe-area-inset-top))',
           paddingLeft: '0.5rem',
           paddingRight: '0.5rem',
           paddingBottom: '1.25rem',
@@ -310,26 +316,31 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
             card shrinks, and it starts overflowing this overflow:hidden band bottom-
             first (the projected box sits ~8px below the layout box at 26deg). */}
         <div style={{
-          height: showAllTransactions ? '0px' : '380px',
+          height: showAllTransactions ? '0px' : '348px',
           overflow: 'hidden',
           transition: showAllTransactions
             ? 'height 1.2s cubic-bezier(0.76, 0, 0.24, 1) 0.3s'
             : 'height 1.2s cubic-bezier(0.76, 0, 0.24, 1)'
         }}>
           <div style={{
-            height: '380px',
+            height: '348px',
             background: 'linear-gradient(180deg, var(--bg-hover) 0%, var(--bg-color) 80%, var(--bg-color) 100%)',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: '1.5rem',
+            /* Asymmetric on purpose. The band is sized to its content (title 88.8 + card 214.4
+               + 12 gap = 315.2), so this padding IS the visible breathing room: 20px above the
+               title, 12px below the card. The lower figure is the smaller of the two because
+               the raked card's near edge projects 1px ABOVE its layout box, so the ink already
+               reads as further from the edge than the number suggests — 12px is what keeps the
+               drop shadow from being cut by this band's overflow:hidden. */
+            padding: '1.25rem 1.5rem 0.75rem',
             textAlign: 'center',
             color: 'var(--text-primary)',
           }}>
             <h2 className="text-serif" style={{
               fontSize: '1.85rem',
-              marginTop: '1rem',
               opacity: showAllTransactions ? 0 : 0.9,
               transform: showAllTransactions ? 'translateY(-40px) scale(0.92)' : 'translateY(0) scale(1)',
               filter: showAllTransactions ? 'blur(4px)' : 'blur(0px)',
@@ -402,7 +413,17 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
                       {acc.name}
                     </span>
                     <span style={{
-                      fontFamily: '"Courier New", Courier, monospace',
+                      /* Same family as the account name directly above it. This was
+                         '"Courier New", Courier, monospace' — a stack that ships on no Android
+                         device, so it fell back to the system mono and left the name as the one
+                         element on this card face in a typeface used nowhere else in the app.
+                         Monospacing was the tell, not the specific face, so the app mono read
+                         no better; matching the neighbouring label is what makes it belong. */
+                      fontFamily: 'var(--font-family)',
+                      /* 400, matching the label above and the weight the old Courier rendered at.
+                         Anything heavier stops reading as embossed lettering and starts reading
+                         as a headline. */
+                      fontWeight: 400,
                       fontSize: '14px',
                       color: 'rgba(var(--card-ink), 0.9)',
                       textTransform: 'uppercase',
@@ -429,7 +450,7 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
         </div>
 
         <div className="flex-col" style={{
-          padding: '1.2rem 1.5rem 0 1.5rem',
+          padding: '0.75rem 1.5rem 0 1.5rem',
           flex: 1,
           minHeight: 0,
           display: 'flex',
@@ -587,7 +608,10 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
             )}
           </div>
 
-          {cycleTxs.length > 0 && (
+          {/* Same condition the fade scrim uses, so the link and the fade always agree: offer
+              "View all" only when something is actually hidden. Once expanded the link stays,
+              as the way back to the collapsed view. */}
+          {cycleTxs.length > 0 && (showAllTransactions || isTransactionsClipped) && (
             <div className="flex justify-center" style={{ flexShrink: 0, padding: '0.75rem 0 1.5rem' }}>
               <button
                 onClick={() => {
@@ -711,7 +735,7 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
             position: 'fixed',
             left: '1rem',
             right: '1rem',
-            bottom: `calc(1.25rem + env(safe-area-inset-bottom, 12px))`,
+            bottom: `calc(1.25rem + var(--safe-area-inset-bottom))`,
             // Above .modal-overlay (9000) so it isn't buried if another sheet opens over it.
             zIndex: 9100,
             gap: '1rem',

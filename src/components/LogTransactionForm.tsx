@@ -53,14 +53,13 @@ const buildInputStrings = (tx: Partial<Transaction>) => ({
   rewardEarned: (tx.rewardEarned === 0 || tx.rewardEarned === undefined) ? '' : tx.rewardEarned.toString(),
   rewardUsed: (tx.rewardUsed === 0 || tx.rewardUsed === undefined) ? '' : tx.rewardUsed.toString(),
   excludedAmount: (tx.excludedAmount === 0 || tx.excludedAmount === undefined) ? '' : tx.excludedAmount.toString(),
-  // Counted against the amount the primary account actually pays, not the full price — the same base
-  // the passive inputs use (see selfFundedAmount). `amount` here is the FULL price on a reopened split
-  // (openEditModal adds the reward back), so without the subtraction a fully passive ₹448 purchase
-  // split with ₹86 read "active share 86" while being entirely excluded.
+  counterpartAmount: tx.counterpartAmount === undefined ? '' : tx.counterpartAmount.toString(),
+  // The complement of the exclusion against the full price. `amount` here is already the FULL price
+  // on a reopened split (the sanitizer adds the reward back), and excludedAmount is likewise the
+  // combined figure across both rows, so the two sides are measured on the same base.
   activeShare: (tx.excludeFromStats && tx.amount !== undefined)
     ? (() => {
-        const base = Math.max(0, (tx.amount || 0) - (tx.type === 'debit' ? (tx.rewardUsed || 0) : 0));
-        const s = Math.max(0, base - (tx.excludedAmount || 0));
+        const s = Math.max(0, (tx.amount || 0) - (tx.excludedAmount || 0));
         return s === 0 ? '' : parseFloat(s.toFixed(2)).toString();
       })()
     : '',
@@ -78,7 +77,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   sms,
   onSuccess
 }) => {
-  const { data, addTransaction, updateTransaction, updateTags, updateEventTags, updateRecurringBill, removeFromSmsQueue, removeSmsByMatch } = useFinance();
+  const { data, addTransaction, updateTransaction, setRewardLegExclusion, updateTags, updateEventTags, updateRecurringBill, removeFromSmsQueue, removeSmsByMatch } = useFinance();
 
   const [newTx, setNewTx] = useState<Partial<Transaction>>(blankTx);
   const [inputStrings, setInputStrings] = useState(() => buildInputStrings(blankTx()));
@@ -167,16 +166,24 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       && !!tx.rewardUsedAccountId;
     if (isPlainSplitAnchor) {
       sanitizedTx.amount = (tx.amount || 0) + (tx.rewardUsed || 0);
+      // The exclusion is stored per row for the same reason the amount is, so reassemble it too:
+      // the field means "how much of this purchase was passive", and the reward leg holds whatever
+      // part of that the anchor could not absorb. Without this a ₹448 purchase excluded in full
+      // reopens reading 362 and re-saving quietly un-excludes the reward leg.
+      if (sanitizedTx.excludeFromStats && sanitizedTx.excludedAmount !== undefined) {
+        const leg = linkedTxs.find(t => t.accountId === tx.rewardUsedAccountId);
+        sanitizedTx.excludedAmount += leg?.excludedAmount || 0;
+      }
     }
 
     // Rows logged before the passive controls accounted for a split can hold an exclusion LARGER than
     // the amount they store — the toggle measured against the pre-split total, so a ₹448 purchase split
-    // with ₹86 saved excludedAmount 448 beside a stored amount of 362. The tightened check in validate()
-    // would refuse to re-save such a row untouched, so heal it on open instead. `tx.amount` is by
-    // definition the self-funded figure, and clamping to it preserves the behaviour these rows already
-    // had: excludedAmount >= amount still reads as fully passive.
-    if (sanitizedTx.excludeFromStats && (sanitizedTx.excludedAmount || 0) > (tx.amount || 0)) {
-      sanitizedTx.excludedAmount = tx.amount || 0;
+    // with ₹86 saved excludedAmount 448 beside a stored amount of 362. Clamping to the FULL price (the
+    // reconstructed sanitizedTx.amount, not the stored figure) is what makes those rows legal again
+    // rather than something to heal: 448 against a 448 purchase is exactly what this form now means,
+    // and re-saving one redistributes it across the two rows properly.
+    if (sanitizedTx.excludeFromStats && (sanitizedTx.excludedAmount || 0) > (sanitizedTx.amount || 0)) {
+      sanitizedTx.excludedAmount = sanitizedTx.amount || 0;
     }
 
     const isRewardChild = linkedTxs.some(p => p.rewardUsedAccountId && p.rewardUsedAccountId === tx.accountId);
@@ -498,12 +505,20 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     if (activeInvestmentKind === 'commodity' && !newTx.numberOfShares) {
       newErrors.numberOfShares = 'Grams is required';
     }
-    // Compared against what the row will store, not the full price — see selfFundedAmount. The message
-    // names the figure, since with a split active it is not the number in the Amount field.
+    // Measured against the full price. With a reward split active the excess over what this account
+    // paid is carried by the reward leg, so the whole purchase can be excluded in one figure.
     if (newTx.excludeFromStats && (newTx.excludedAmount || 0) > passiveCeiling + 0.001) {
-      newErrors.excludedAmount = passiveCeiling < (Number(newTx.amount) || 0)
-        ? `Cannot exclude more than ${formatCurrency(passiveCeiling)} paid from this account`
-        : 'Cannot exclude more than total amount';
+      newErrors.excludedAmount = 'Cannot exclude more than total amount';
+    }
+    /* Deliberately NOT "must be >= the amount paid". Which side is larger depends on the POV
+       this row was logged from — a gift-card discount reads as a bigger credit from the debit
+       side and a smaller debit from the credit side — and transfers that charge a fee land less
+       than was sent either way. The only rules that hold in every direction are: it has to be
+       there, and it has to be a real positive figure. The delta hint under the field is what
+       catches a mistyped one. */
+    if ((newTx.category || '').toLowerCase() === 'transfer' && paymentSourceAccountId
+        && newTx.counterpartAmount !== undefined && !((Number(newTx.counterpartAmount) || 0) > 0)) {
+      newErrors.counterpartAmount = 'Enter the amount the other account moved';
     }
     if (newTx.rewardEarnedType === 'instant' && (Number(newTx.rewardEarned) || 0) > 0 && !newTx.rewardEarnedAccountId) {
       newErrors.rewardEarnedAccountId = 'Deposit account is required for instant cashback';
@@ -766,7 +781,14 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       const bankPortion = Number(newTx.amount) - rewardUsedForTransfer;
       // The receiving/credit leg (e.g. CC bill reduction) must reflect the FULL payment
       // (bank portion + rewards portion). Only the funding/debit leg is reduced by rewards.
-      const counterpartAmount = counterpartType === 'credit' ? Number(newTx.amount) : bankPortion;
+      const counterpartLegAmount = counterpartType === 'credit' ? Number(newTx.amount) : bankPortion;
+      // A transfer may move a different figure on the far side — a discounted gift-card load
+      // credits more than it debits, a fee-charging transfer credits less. Only plain transfers
+      // get this: a CC payment always lands exactly what was sent, and investments already carry
+      // their own allotted/charges split.
+      const legAmount = (isTransfer && newTx.counterpartAmount !== undefined && newTx.counterpartAmount > 0)
+        ? Number(newTx.counterpartAmount)
+        : counterpartLegAmount;
 
       // Debit POV split: this credit counterpart IS the card, so it becomes the split anchor —
       // it holds rewardUsed + links to both the bank main tx and the reward leg. (Credit POV keeps
@@ -780,7 +802,10 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         description: counterpartDesc,
         accountId: paymentSourceAccountId,
         type: counterpartType,
-        amount: counterpartAmount,
+        amount: legAmount,
+        // Mirrored so this row is self-describing too: opening it for edit shows the pair
+        // the same way round, and re-saving from this side keeps both amounts.
+        counterpartAmount: legAmount !== Number(newTx.amount) ? Number(newTx.amount) : undefined,
         category: isCCPayment ? 'CC Payment' : 'Transfer',
         isRecurring: false,
         // The reward leg's id is only in this list when there IS a reward leg — a one-time reward
@@ -834,6 +859,20 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       : ((newTx.type === 'debit')
         ? Math.max(0, Number(newTx.amount) - rewardUsed)
         : Number(newTx.amount));
+
+    /* A passive exclusion is entered against the full price but has to be STORED per row, because
+       statsAmount subtracts a row's exclusion from that row's own amount — parking the whole ₹448
+       on an anchor that holds ₹362 would score the purchase at −₹86 and eat into other spends.
+       So the anchor absorbs what it can and the reward leg carries the rest. An exclusion with no
+       stated amount means "all of it", which is both rows in full. */
+    const passiveOn = !hidesPassiveToggleFinal && !!newTx.excludeFromStats;
+    const totalExcluded = passiveOn
+      ? (newTx.excludedAmount ?? (Number(newTx.amount) || 0))
+      : 0;
+    const anchorExcluded = passiveOn ? Math.min(totalExcluded, mainAccountAmount) : 0;
+    const rewardLegExcluded = passiveOn
+      ? Math.min(rewardUsed, Math.max(0, totalExcluded - mainAccountAmount))
+      : 0;
 
     // On edit, updateTransaction syncs an EXISTING linked cashback leg but won't create one.
     // So create the leg here when instant cashback is configured but no cashback leg exists yet
@@ -942,14 +981,15 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       rewardUsed: anchorOnCounterpart ? 0 : rewardUsed,
       rewardUsedAccountId: anchorOnCounterpart ? undefined : newTx.rewardUsedAccountId,
       isTravelTransaction: newTx.isTravelTransaction,
+      counterpartAmount: (isTransfer && paymentSourceAccountId && newTx.counterpartAmount !== undefined && newTx.counterpartAmount > 0 && newTx.counterpartAmount !== Number(newTx.amount))
+        ? Number(newTx.counterpartAmount)
+        : undefined,
       linkedTransactionIds: currentLinkedIds,
       cashbackLevelId: selectedCashbackLevelId,
       excludeFromStats: hidesPassiveToggleFinal ? false : newTx.excludeFromStats,
       // Clamped to what is actually stored: a stale exclusion (e.g. the split was raised after the
       // passive amount was set) must never exceed the amount, or the row reads as fully passive.
-      excludedAmount: (!hidesPassiveToggleFinal && newTx.excludeFromStats)
-        ? Math.min(newTx.excludedAmount ?? mainAccountAmount, mainAccountAmount)
-        : undefined,
+      excludedAmount: passiveOn ? anchorExcluded : undefined,
       paymentSourceAccountId: paymentSourceAccountId,
       allottedAmount: isInvestment ? allottedAmount : undefined,
       investmentCharges: isInvestment ? investmentCharges : undefined,
@@ -963,6 +1003,18 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       updateTransaction(finalTx);
     } else {
       addTransaction(finalTx);
+    }
+
+    /* Hand the reward leg its share of the exclusion. Done as a separate patch rather than inline
+       at leg creation because the same call has to serve both paths: on an edit the leg already
+       exists and is re-synced by updateTransaction above, which preserves the fields this writes.
+       Both are functional state updates, so this one reads the result of the save. */
+    const rewardLegId = rewardCounterpartId
+      ?? (editId && newTx.rewardUsedAccountId
+        ? (data.transactions.find(t => currentLinkedIds.includes(t.id) && t.accountId === newTx.rewardUsedAccountId)?.id ?? null)
+        : null);
+    if (rewardLegId) {
+      setRewardLegExclusion(rewardLegId, rewardLegExcluded > 0 ? rewardLegExcluded : undefined);
     }
 
     // Logging a tracked bill rolls it to its next occurrence. Only ever reachable from the Upcoming
@@ -1080,10 +1132,11 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   // exclusion was measured against a total this row never held, and the "Cannot exclude more than
   // total amount" check compared against the pre-split figure so it couldn't catch it. Excluded plus
   // active now always sum to what the row records.
-  const selfFundedAmount = (total: number) => newTx.type === 'debit'
-    ? Math.max(0, total - (showRewardSplit ? (Number(newTx.rewardUsed) || 0) : 0))
-    : total;
-  const passiveCeiling = selfFundedAmount(Number(newTx.amount) || 0);
+  /* The exclusion is stated against the FULL price, rewards included, because that is the number
+     the user thinks of as "this purchase". It gets stored split across the two rows — the anchor
+     absorbs up to what the primary account actually paid, the overflow lands on the reward leg.
+     handleSave does that division; mainAccountAmount there is the boundary. */
+  const passiveCeiling = Number(newTx.amount) || 0;
 
   return (
   <div className="modal-overlay">
@@ -1179,12 +1232,12 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                     // Excluded amount is authoritative; refresh the derived active-share field
                     // so it stays consistent when the total changes.
                     activeShare: newTx.excludeFromStats
-                      ? (() => { const share = Math.max(0, selfFundedAmount(finalAmount) - (newTx.excludedAmount || 0)); return share === 0 ? '' : parseFloat(share.toFixed(2)).toString(); })()
+                      ? (() => { const share = Math.max(0, finalAmount - (newTx.excludedAmount || 0)); return share === 0 ? '' : parseFloat(share.toFixed(2)).toString(); })()
                       : s.activeShare
                   }));
 
                   if (errors.amount) setErrors(prev => ({ ...prev, amount: '' }));
-                  if (errors.excludedAmount && selfFundedAmount(finalAmount) >= (newTx.excludedAmount || 0)) {
+                  if (errors.excludedAmount && finalAmount >= (newTx.excludedAmount || 0)) {
                     setErrors(prev => ({ ...prev, excludedAmount: '' }));
                   }
                 }
@@ -1458,6 +1511,89 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
             />
           )}
 
+        {/* Two sides of a transfer are usually the same figure, and stay implicit when they are.
+            They part company when a platform sells balance at a discount (pay ₹180 for a ₹200
+            gift card) or a rail charges a fee (send ₹200, ₹197 lands) — both are one transfer,
+            not a transfer plus a mystery row, so the far side gets to state its own amount. */}
+        {isTransfer && !!paymentSourceAccountId && (() => {
+          const isCustom = newTx.counterpartAmount !== undefined;
+          const paid = Number(newTx.amount) || 0;
+          const other = Number(newTx.counterpartAmount) || 0;
+          /* Framed as leaves-vs-arrives, not as this row vs the other one. The same gift-card
+             discount is a BIGGER counterpart from the debit side and a SMALLER one from the
+             credit side, so reading the raw delta against the current row would call a discount
+             a fee on half the screens. Money direction is the only POV-independent framing. */
+          const leaves = newTx.type === 'debit' ? paid : other;
+          const arrives = newTx.type === 'debit' ? other : paid;
+          const delta = arrives - leaves;
+          const otherAccName = data.accounts.find(a => a.id === paymentSourceAccountId)?.name || 'the other account';
+          // Reads from whichever side this row was logged: a debit sends, a credit receives.
+          const customLabel = newTx.type === 'debit' ? 'Amount Received' : 'Amount Debited';
+          return (
+            <div className="input-group" style={{ marginTop: '0.5rem', marginBottom: '1rem' }}>
+              <label>{newTx.type === 'debit' ? `${otherAccName} receives` : `${otherAccName} is debited`}</label>
+              <div className="flex" style={{ border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
+                {([false, true] as const).map(custom => (
+                  <button
+                    key={String(custom)}
+                    type="button"
+                    className="text-mono text-xs font-bold"
+                    style={{
+                      flex: 1,
+                      padding: '0.6rem 0.5rem',
+                      background: custom === isCustom ? 'var(--accent)' : 'transparent',
+                      color: custom === isCustom ? 'var(--btn-text)' : 'var(--text-secondary)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      letterSpacing: '0.5px',
+                    }}
+                    onClick={() => {
+                      // Switching to custom seeds the field with what is being sent, so the row
+                      // is valid the moment it appears and only the difference has to be typed.
+                      const next = custom ? (paid || 0) : undefined;
+                      setNewTx(prev => ({ ...prev, counterpartAmount: next }));
+                      setInputStrings(prev => ({ ...prev, counterpartAmount: next === undefined ? '' : String(next) }));
+                      if (errors.counterpartAmount) setErrors(prev => ({ ...prev, counterpartAmount: '' }));
+                    }}
+                  >
+                    {custom ? 'CUSTOM AMOUNT' : 'SAME AMOUNT'}
+                  </button>
+                ))}
+              </div>
+              {isCustom && (
+                <>
+                  <label style={{ marginTop: '0.75rem' }}>{customLabel}</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className={`input-field ${errors.counterpartAmount ? 'border-danger' : ''}`}
+                    value={inputStrings.counterpartAmount}
+                    placeholder="0.00"
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                        setInputStrings(prev => ({ ...prev, counterpartAmount: val }));
+                        setNewTx(prev => ({ ...prev, counterpartAmount: val === '' ? 0 : parseFloat(val) }));
+                        if (errors.counterpartAmount) setErrors(prev => ({ ...prev, counterpartAmount: '' }));
+                      }
+                    }}
+                  />
+                  {errors.counterpartAmount && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.counterpartAmount}</span>}
+                  {/* States the difference rather than forbidding one. Which direction is
+                      "correct" depends on the POV this row was logged from, so a rule would be
+                      wrong half the time; a mistyped figure, though, reads as an absurd delta. */}
+                  {!errors.counterpartAmount && other > 0 && delta !== 0 && (
+                    <span className="text-xs text-muted" style={{ marginTop: '0.35rem' }}>
+                      {formatCurrency(Math.abs(delta))} {delta > 0 ? 'more arrives than leaves' : 'less arrives than leaves'}
+                      {' · '}{delta > 0 ? 'discount / bonus' : 'fee / charge'}
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })()}
+
         {(activeInvestmentKind === 'stocks' || activeInvestmentKind === 'commodity') && (
           <div className="input-group" style={{ marginTop: '0.5rem', marginBottom: '1rem' }}>
             <label>{activeInvestmentKind === 'commodity' ? 'Grams' : 'No. of Shares'}</label>
@@ -1701,11 +1837,22 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
           const isNcmcRecharge = newTx.category?.toLowerCase() === 'ncmc travel recharge';
           const isMf = activeInvestmentKind === 'mutual_funds';
 
-          if (isTransfer || isCCPayment || isNcmcRecharge || isMf) return null;
+          /* The category exclusions belong to ISSUER cashback only. A bank pays card cashback for
+             spending on the card, never for moving money, so a transfer / bill payment / travel
+             recharge / fund purchase earns nothing there — hence the block stays hidden for cards.
+             INSTANT cashback is a different payer: the app that pushed the money (super.money,
+             CRED, ...) rebates the payer whatever the money was for, and a discounted gift-card
+             load is a transfer that very much does earn. Gating that on the category hid a real
+             rebate behind a rule written for the other kind. */
+          if (!showInstantUI && (isTransfer || isCCPayment || isNcmcRecharge || isMf)) return null;
+          // Travel spends draw down an NCMC purse that was already loaded; nothing pays cashback
+          // on the second hop. The recharge that funded it is a separate row and can still earn.
           if (newTx.isTravelTransaction) return null;
 
           if (!isCard && !showInstantUI) return null;
+          // Cashback follows money going OUT. A credit is the receiving side of some other row.
           if (newTx.type !== 'debit') return null;
+          // Instant cashback posts a real credit leg, so it needs somewhere to post it.
           if (showInstantUI && !hasCashbackDepositAccount) return null;
 
           return (
@@ -2177,7 +2324,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                 style={{ padding: '0.4rem 0.8rem', borderRadius: '8px', fontSize: '0.75rem' }}
                 onClick={() => {
                   const isExpanding = !newTx.excludeFromStats;
-                  // The row's own figure, not the full price — see selfFundedAmount.
+                  // The full price: turning this on means the whole purchase was passive, rewards
+                  // included. handleSave decides how much of it each row carries.
                   const amountToExclude = isExpanding ? passiveCeiling : undefined;
                   const updatedTx = {
                     ...newTx,

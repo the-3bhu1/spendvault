@@ -184,10 +184,10 @@ export default function AuthScreen() {
   return (
     <div className="auth-root flex-col align-center justify-between fade-in" style={{ 
       position: 'fixed', inset: 0, background: 'var(--bg-color)', zIndex: 10000, 
-      paddingTop: 'calc(3rem + env(safe-area-inset-top, 24px))',
+      paddingTop: 'calc(3rem + var(--safe-area-inset-top))',
       paddingLeft: '2rem',
       paddingRight: '2rem',
-      paddingBottom: 'calc(2rem + env(safe-area-inset-bottom, 16px))'
+      paddingBottom: 'calc(2rem + var(--safe-area-inset-bottom))'
     }}>
       <div className="flex-col align-center gap-4">
         <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(56, 189, 248, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--accent)' }}>

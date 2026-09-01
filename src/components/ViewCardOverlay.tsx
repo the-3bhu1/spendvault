@@ -218,7 +218,9 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
                   </span>
                 )}
                 <span style={{ 
-                  fontFamily: '"Courier New", Courier, monospace', 
+                  // Matches the statement hero's card face — see the note there.
+                  fontFamily: 'var(--font-family)', 
+                  fontWeight: 400,
                   fontSize: '14px', 
                   color: 'rgba(var(--card-ink), 0.9)',
                   textTransform: 'uppercase',

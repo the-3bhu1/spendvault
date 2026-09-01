@@ -32,7 +32,7 @@ export const SubviewWrapper = ({ title, children, onBack, footer }: SubviewWrapp
     {footer && (
       <div className="animate-opacity" style={{ 
         position: 'fixed', 
-        bottom: 'calc(80px + env(safe-area-inset-bottom, 0px))', 
+        bottom: 'calc(80px + var(--safe-area-inset-bottom))', 
         left: '1.5rem', 
         right: '1.5rem', 
         zIndex: 100,

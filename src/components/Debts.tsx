@@ -155,18 +155,23 @@ export default function Debts() {
     const trimmedName = name.trim();
     const trimmedDesc = (desc || '').trim();
     const txId = generateId();
+    /* Minted before the entry so the pair is linked BOTH ways from birth. The ledger row has
+       always carried the entry id, but the entry's own back-link was left undefined whenever the
+       row was created here rather than adopted from an existing one — updateTransaction looks up
+       the forward link first and only falls back to this one, so it worked, on one strap. */
+    const ledgerTxId = (logInLedger && accountId) ? generateId() : undefined;
     const newTx: DebtTransaction = {
       id: txId,
       amount,
       date: date || format(new Date(), 'yyyy-MM-dd'),
       description: trimmedDesc || (type === 'lent' ? 'Lent' : 'Borrowed'),
       type,
-      linkedTxId
+      linkedTxId: ledgerTxId ?? linkedTxId
     };
 
     if (logInLedger && accountId) {
       const ledgerTx: Transaction = {
-        id: generateId(),
+        id: ledgerTxId as string,
         accountId,
         amount,
         type: type === 'lent' ? 'debit' : 'credit',
@@ -208,18 +213,20 @@ export default function Debts() {
     if (!debt) return;
 
     const txId = generateId();
+    // Same both-ways linking as handleAddDebt — see the note there.
+    const ledgerTxId = (logInLedger && accountId) ? generateId() : undefined;
     const newTx: DebtTransaction = {
       id: txId,
       amount,
       date: date || format(new Date(), 'yyyy-MM-dd'),
       description: (desc || '').trim(),
       type,
-      linkedTxId
+      linkedTxId: ledgerTxId ?? linkedTxId
     };
 
     if (logInLedger && accountId) {
       const ledgerTx: Transaction = {
-        id: generateId(),
+        id: ledgerTxId as string,
         accountId,
         amount,
         type: (type === 'lent' || type === 'repayment_sent') ? 'debit' : 'credit',
@@ -847,7 +854,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
         <div
           style={{
             position: 'fixed',
-            bottom: '100px',
+            bottom: 'calc(100px + var(--safe-area-inset-bottom))',
             left: 0,
             right: 0,
             width: 'max-content',

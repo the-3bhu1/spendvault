@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Cuboid, ShieldUser, WalletMinimal } from 'lucide-react';
+import { Cuboid, Scale, ShieldUser, WalletMinimal } from 'lucide-react';
 import { getCachedLogo, cacheLogoImage, getLogoShape, ensureLogoShape } from '../services/LogoService';
 
 // Circular avatar for an investment holding. Renders the real brand logo when a URL resolves and
@@ -116,6 +116,10 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf, isWallet, accoun
 
   const showImg = srcIdx < sources.length;
   const isPhysicalCash = isWallet || accountType === 'cash';
+  // Same reasoning as physical cash: an offset ledger is a bookkeeping device, not a brand, so
+  // LogoService never resolves a logo for it and initials ("OL") would say nothing. Scale matches
+  // getAccountTypeIcon('offset') — the avatar and the picker icon must not disagree.
+  const isOffsetLedger = accountType === 'offset';
 
   // Zoom a padded mark until its farthest ink just touches the circle, and centre it there. All of
   // this is in fractions of the avatar's own size, so one calculation serves every call site's size.
@@ -192,6 +196,8 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf, isWallet, accoun
         />
       ) : isPhysicalCash ? (
         <WalletMinimal size={Math.round(size * 0.48)} strokeWidth={2.2} />
+      ) : isOffsetLedger ? (
+        <Scale size={Math.round(size * 0.48)} strokeWidth={2.2} />
       ) : (
         getInitials(name)
       )}

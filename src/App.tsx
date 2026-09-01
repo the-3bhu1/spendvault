@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { Home, Wallet, ReceiptText, Gift, Users, Sparkles, LayoutGrid, ChevronRight, Calendar, HandCoins, LogOut, TrendingUpDown, MessageSquare } from 'lucide-react';
+import { Home, Wallet, ReceiptText, Gift, Users, Sparkles, LayoutGrid, ChevronRight, Calendar, HandCoins, LogOut, TrendingUpDown, MessageSquare, X } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import Accounts from './components/Accounts';
 import Transactions from './components/Transactions';
@@ -109,6 +109,18 @@ function App() {
       });
     }
 
+    /* Live delivery while the app is already open. Without a registered listener the native
+       side has nowhere to hand a fresh SMS, so it falls back to the persistent queue — which
+       is only drained on cold start or resume. That is why an SMS arriving with the ledger on
+       screen used to produce nothing until the app was backgrounded and reopened. */
+    const liveSms = Capacitor.getPlatform() === 'android'
+      ? SmsReader.addListener('onTransaction', (tx) => {
+          if (!autoLogSmsRef.current) return;
+          console.log("SpendVaultSms: Live transaction received while app is open:", tx);
+          addToSmsQueueRef.current(tx);
+        })
+      : null;
+
     // Register active state resume change listener (warm restarts)
     const listener = CapApp.addListener('appStateChange', async (state) => {
       if (state.isActive) {
@@ -143,6 +155,7 @@ function App() {
 
     return () => {
       listener.then((l: PluginListenerHandle) => l.remove());
+      liveSms?.then((l: PluginListenerHandle) => l.remove());
     };
   }, [data.user?.pinHash, isAuthenticated, showSplash]);
 
@@ -320,10 +333,10 @@ function App() {
       {isHubOpen && (
         <div className="modal-overlay flex-center no-scroll" style={{ zIndex: 3000 }} onClick={() => setIsHubOpen(false)}>
           <div className="bottom-sheet" onClick={e => e.stopPropagation()} style={{ background: 'var(--bg-color)', borderTop: '1px solid var(--border-color)' }}>
-            <div className="flex justify-between align-center" style={{ padding: '1.5rem 1.75rem 1rem', borderBottom: '2px solid #000', marginBottom: '1rem', width: '100%' }}>
+            <div className="modal-header" style={{ marginBottom: '1rem' }}>
               <h3 className="text-mono uppercase" style={{ margin: 0, fontSize: '0.85rem', letterSpacing: '2px', color: 'var(--text-secondary)', fontWeight: 800 }}>SpendVault Hub</h3>
-              <button onClick={() => setIsHubOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.25rem', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center' }}>
-                ✕
+              <button onClick={() => setIsHubOpen(false)}>
+                <X />
               </button>
             </div>
 
@@ -512,7 +525,7 @@ function App() {
         <div 
           style={{
             position: 'fixed',
-            bottom: '100px',
+            bottom: 'calc(100px + var(--safe-area-inset-bottom))',
             left: '0',
             right: '0',
             width: 'max-content',

@@ -5,7 +5,7 @@ import {
   Train, ShoppingBag, Utensils, Car, Zap, HeartPulse, Film, BadgeIndianRupee, Banknote,
   CreditCard, ArrowRightLeft, Home, Handshake, Gift, ChartNoAxesCombined, ChartCandlestick,
   Gem, HandCoins, MoreHorizontal, Coins, Landmark, WalletCards, WalletMinimal, BarChart3,
-  TrendingUp, Medal, Wallet, ShieldUser, ChartLine, ArchiveX, Fuel, PiggyBank
+  TrendingUp, Medal, Wallet, ShieldUser, ChartLine, ArchiveX, Fuel, PiggyBank, Scale
 } from 'lucide-react';
 
 export const getCategoryIcon = (category: string, size = 17) => {
@@ -70,6 +70,7 @@ export const getAccountEmoji = (
     case 'rewards': return '🎁';
     case 'cash': return '💵';
     case 'epf': return '🏛️';
+    case 'offset': return '⚖️';
     case 'commodity':
       return opts?.commodityMetal === 'silver' ? '🥈' : opts?.commodityMetal === 'gold' ? '🥇' : '💎';
     default: return '💼';
@@ -109,6 +110,12 @@ export const getAccountTypeIcon = (type: string, size = 18, archived = false) =>
       // Metal-agnostic: this takes only the type, so it can't tell gold from silver. The
       // per-account 🥇/🥈 distinction lives in getAccountEmoji, which does get account context.
       return <Medal size={size} />;
+    case 'offset':
+      // Balance scales: an offset ledger only ever holds paired entries — the spend on one pan, the
+      // money someone else fronted for it on the other — so it nets to zero. Nothing else in the app
+      // uses Scale, and it stays clear of ArrowRightLeft (the Transfer category) and HandCoins
+      // (Lending & Borrowing), the two icons an offset entry sits closest to in a transaction list.
+      return <Scale size={size} />;
     default:
       return <Wallet size={size} />;
   }
@@ -124,7 +131,8 @@ export const ACCOUNT_TYPE_LABELS: Record<string, string> = {
   epf: 'EPF (Provident Fund)',
   stocks: 'Stocks & Investments',
   mutual_funds: 'Mutual Funds',
-  commodity: 'Commodities'
+  commodity: 'Commodities',
+  offset: 'Offset Ledgers'
 };
 
 export const ACCOUNT_TYPE_ORDER: Record<string, number> = {
@@ -137,7 +145,10 @@ export const ACCOUNT_TYPE_ORDER: Record<string, number> = {
   epf: 6,
   stocks: 7,
   mutual_funds: 8,
-  commodity: 9
+  commodity: 9,
+  // Last: an offset ledger is bookkeeping scaffolding, not somewhere money sits, so it sorts below
+  // every account the user actually holds a balance in.
+  offset: 10
 };
 
 export const getAccountGroupLabel = (type: string, archived?: boolean): string => {

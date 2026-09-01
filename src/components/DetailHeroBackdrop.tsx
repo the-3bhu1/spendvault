@@ -218,8 +218,23 @@ const SEAL_UNIT = VB / DETAIL_HERO_SEAL; // 3.85 units per px
 const sealStroke = (widthPx: number) => widthPx * SEAL_UNIT;
 
 const R_DEVICE = (DETAIL_HERO_AVATAR / 2) * SEAL_UNIT; // where the mark's edge falls
-const R_WAX_IN = R_DEVICE + sealStroke(1); // the wax closes on the device, near enough to touch
+/* The wax closes UNDER the mark, not up to it. The mark is drawn over this svg (see
+   renderSealedMark), so half a pixel of overlap costs nothing and removes the seam: a hole that
+   stops at the mark's edge leaves two antialiased curves averaging against the panel between them,
+   and that hairline of background is what read as the seal sitting off its logo. */
+const R_WAX_IN = R_DEVICE - sealStroke(0.5);
+/* Where the die pressed the wax down — UNDER the mark, not around it. Drawn outside it, even at a
+   hair's width, this dark ring is itself the "thin gap": against a saturated logo any dark band
+   hugging the edge reads as space between the two, whatever it was meant to depict. The impression
+   now comes from the lip a little further out, and what actually touches the mark is wax. */
+const R_PRESS = R_DEVICE - sealStroke(0.6);
 const R_WAX_OUT = R_DEVICE + sealStroke(11);
+// Same weight as the scalloped rim, so the seal's two circular edges are one family: the mark is
+// held by a line of the same grey and thickness that draws the outside of the wax.
+const RIM_HUG = sealStroke(1.2);
+// Pinned to the band the dots always sat in, so tucking the inner edge under the mark doesn't drag
+// the legend course inward with it.
+const R_DOTS = (R_DEVICE + sealStroke(1) + R_WAX_OUT) / 2;
 const SCALLOPS = 18;
 const SCALLOP_BULGE = 0.62; // >0.5 of the chord, which is what makes each arc bow outward
 
@@ -288,12 +303,27 @@ export const DetailHeroSeal: React.FC = () => (
         pressed the wax down, so it is drawn as shadow — that step is what makes the mark look
         impressed INTO the seal rather than laid on top of it. */}
     <path d={RIM} fill="none" stroke="var(--relief-edge)" strokeWidth={sealStroke(1.2)} />
-    <circle cx={C} cy={C} r={R_WAX_IN} fill="none" stroke="var(--relief-shadow)" strokeWidth={sealStroke(1.6)} opacity="0.55" />
-    <circle cx={C} cy={C} r={R_WAX_IN + sealStroke(1.4)} fill="none" stroke="var(--relief-edge)" strokeWidth={sealStroke(0.7)} opacity="0.6" />
+    <circle cx={C} cy={C} r={R_PRESS} fill="none" stroke="var(--relief-shadow)" strokeWidth={sealStroke(1.2)} opacity="0.55" />
+    {/* The wax's inner rim, gripping the mark. Positioned by its INNER edge, not its centre: a
+        stroke is drawn half either side of its radius, so centring it on the mark's circumference
+        would bury half of it and offsetting it outward would fence a band of wax between ring and
+        logo — which is exactly what read as a gap. Sitting the inner edge on R_DEVICE puts the
+        whole width outside the mark, touching it. */}
+    <circle
+      cx={C}
+      cy={C}
+      r={R_DEVICE + RIM_HUG / 2}
+      fill="none"
+      /* The motif's own line: same token, same width and same full strength as the scalloped rim
+         below, so this reads as part of the seal rather than as a shadow or a highlight of its own.
+         The earlier 0.6 opacity is what made it a washed-out version of that line instead of it. */
+      stroke="var(--relief-edge)"
+      strokeWidth={RIM_HUG}
+    />
 
     {/* Legend course: the ring of dots a seal's die leaves between its rim and its device. */}
     {Array.from({ length: 28 }, (_, i) => {
-      const q = polar((R_WAX_IN + R_WAX_OUT) / 2, (Math.PI * 2 * i) / 28);
+      const q = polar(R_DOTS, (Math.PI * 2 * i) / 28);
       return (
         <circle
           key={`dhs-dot-${i}`}

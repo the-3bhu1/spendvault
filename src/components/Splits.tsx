@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { format } from 'date-fns';
-import { Plus, Users, ChevronRight, Trash2, Check, Search, ChevronDown, Calendar, Edit2, ChevronLeft, ArrowRight, ImageDown, ReceiptIndianRupee } from 'lucide-react';
+import { Plus, Users, ChevronRight, Trash2, Check, Search, ChevronDown, Calendar, Edit2, ChevronLeft, ArrowRight, ImageDown, ReceiptIndianRupee, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -794,17 +794,17 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
               {/* Header: Changes based on state */}
               {!selectedTxId && !editingItemId ? (
                 /* Select Transaction: original layout — left title + close (X) */
-                <div className="flex justify-between align-center" style={{ padding: 'calc(1.5rem + env(safe-area-inset-top, 0px)) 1.5rem 1rem', borderBottom: '2px solid #000', width: '100%' }}>
+                <div className="modal-header" style={{ padding: 'calc(0.75rem + var(--safe-area-inset-top)) 1.5rem 1rem' }}>
                   <h3 style={{ margin: 0, fontSize: '1.85rem', fontWeight: 700, letterSpacing: '-0.5px', color: 'var(--text-primary)' }}>
                     Select Transaction
                   </h3>
-                  <button onClick={() => { setIsItemModalOpen(false); resetForm(); }} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.25rem', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center' }}>
-                    ✕
+                  <button onClick={() => { setIsItemModalOpen(false); resetForm(); }}>
+                    <X />
                   </button>
                 </div>
               ) : (
                 /* Split Details / Edit Split: back button + centered title */
-                <div className="align-center" style={{ display: 'flex', position: 'relative', padding: 'calc(1.5rem + env(safe-area-inset-top, 0px)) 0.5rem 1rem 0.5rem', borderBottom: '2px solid #000', width: '100%' }}>
+                <div className="align-center" style={{ display: 'flex', position: 'relative', padding: 'calc(0.75rem + var(--safe-area-inset-top)) 0.5rem 1rem 0.5rem', borderBottom: '2px solid #000', width: '100%' }}>
                   <button
                     className="btn btn-secondary"
                     style={{ padding: '0.5rem', flexShrink: 0 }}
@@ -900,9 +900,13 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
                               onClick={() => setExpandedMonths(prev => ({ ...prev, [m]: !prev[m] }))}
                               style={{ padding: '0.75rem 1.5rem', background: 'var(--bg-hover)', borderBottom: '1px solid var(--border-color)' }}
                             >
-                              <div className="flex align-center gap-2 text-mono font-bold" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>
+                              <div className="flex align-center gap-3 text-mono font-bold" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>
                                 <Calendar size={14} className="text-primary" />
-                                {monthLabel.toUpperCase()}
+                                {/* Optical centring: Overpass Mono's ascent and descent are asymmetric, so an all-caps
+                                    label draws ~0.2em above the middle of its own line box. Flexbox centres that box, not
+                                    the glyphs, and line-height cannot move them — the half-leading cancels out. A nudge of
+                                    the measured difference is the only lever. */}
+                                <span style={{ position: 'relative', top: '0.2em' }}>{monthLabel.toUpperCase()}</span>
                               </div>
                               <div className="flex align-center gap-2 text-muted" style={{ fontSize: '0.7rem' }}>
                                 {txsInMonth.length} items
@@ -1303,10 +1307,10 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
         {editingEvent && (
           <div className="modal-overlay flex-center" style={{ zIndex: 2000 }}>
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ padding: 0 }}>
-              <div className="flex justify-between align-center" style={{ padding: '1.5rem 1.75rem 1rem', borderBottom: '2px solid #000', marginBottom: '0.5rem', width: '100%' }}>
+              <div className="modal-header" style={{ marginBottom: '0.5rem' }}>
                 <h3 style={{ margin: 0, fontSize: '1.85rem', fontWeight: 700, letterSpacing: '-0.5px', color: 'var(--text-primary)' }}>Edit Event</h3>
-                <button onClick={() => setEditingEvent(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.25rem', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center' }}>
-                  ✕
+                <button onClick={() => setEditingEvent(false)}>
+                  <X />
                 </button>
               </div>
               <div className="flex-col gap-6" style={{ padding: '1rem 1.5rem 2rem' }}>
