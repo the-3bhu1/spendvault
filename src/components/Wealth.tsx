@@ -543,6 +543,7 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
       return {
         totalUnits: 1,
         totalInvested: 0,
+        avgPrice: 0,
         currentValue: proj.balance,
         totalReturn: 0,
         totalReturnPct: 0,
@@ -2194,6 +2195,15 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
                     label={selectedAsset.type === 'stocks' ? 'Shares' : selectedAsset.type === 'commodity' ? 'Grams' : 'Units'}
                     value={`${stats.totalUnits.toLocaleString('en-IN', { maximumFractionDigits: 4 })}${selectedAsset.type === 'commodity' ? ' g' : ''}`}
                   />
+                  {/* Sits directly under the unit count it is derived from, and reads against the
+                    live per-unit price in the hero above — the two numbers whose gap IS the P&L
+                    row below. Hidden at zero units, where invested/units has nothing to say. */}
+                  {stats.avgPrice > 0 && (
+                    <StatRow
+                      label={selectedAsset.type === 'mutual_funds' ? 'Avg. Buy NAV' : 'Avg. Buy Price'}
+                      value={`${formatFullCurrency(stats.avgPrice)}${selectedAsset.type === 'commodity' ? '/g' : selectedAsset.type === 'mutual_funds' ? '/unit' : ''}`}
+                    />
+                  )}
                   <StatRow
                     label="Total Returns"
                     value={signedAmount(stats.totalReturn >= 0, `₹${Math.abs(stats.totalReturn).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${stats.totalReturnPct >= 0 ? '+' : ''}${stats.totalReturnPct.toFixed(2)}%)`)}

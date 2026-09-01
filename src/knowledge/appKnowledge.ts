@@ -381,6 +381,19 @@ Every chart opens on the leftmost range in its own row and does not remember the
 — reopening any holding or account starts fresh. An individual holding can also be refreshed from its
 account card in the Accounts tab.
 
+### Average buy price
+Every market holding shows what it cost per unit: "Avg. Buy Price" (stocks), "Avg. Buy NAV" (funds) or
+an average ₹/gram (metals), on the holding's detail sheet directly under its unit count, and as an AVG
+line under TOTAL SHARES / TOTAL UNITS / TOTAL GRAMS on that account's card in the Accounts tab. It is
+DERIVED — total invested ÷ total units — and never entered by the user, so there is no field for it in
+the Add/Edit Account form and it cannot be edited directly; correct it by correcting the invested value
+or the unit count. Because it needs no market price, it still reads when a live quote fails to fetch.
+The mutual-fund form's optional "Average NAV" is NOT this figure: it is only a fallback used to
+estimate invested value when that field is left blank.
+Caveat to state if asked how accurate it is: total invested is net cash flow, and a sell subtracts the
+full sale proceeds rather than the cost of the units sold — so after a partial sale at a profit the
+average sits BELOW the true cost basis. For a holding that has only ever been added to, it is exact.
+
 ## Assets sub-view
 Total cash and funds available, with filter pills (All / Bank / Cash / Wallets / Other) shown only for
 the groups present. Each row shows the account's running balance and its type. Tapping a row opens

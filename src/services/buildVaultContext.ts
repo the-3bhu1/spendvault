@@ -117,16 +117,22 @@ function buildSummary(data: FinanceData): string {
 
       const stats = getInvestmentAccountStats(a, data.transactions, price);
 
+      const unitWord = a.type === 'commodity' ? 'gram' : a.type === 'mutual_funds' ? 'unit' : 'share';
+
       let invLine = `  - ${a.name} [${a.type}]: `;
       if (stats.currentPrice > 0) {
         invLine += `Current Value ${formatCurrency(stats.currentValue)} (Total Invested: ${formatCurrency(stats.totalInvested)}, Overall P&L: ${stats.totalReturn >= 0 ? '+' : ''}${formatCurrency(stats.totalReturn)} / ${stats.totalReturnPct.toFixed(2)}%)`;
+        // Both per-unit prices, so "am I above my average?" is answerable without the model
+        // dividing the totals itself.
+        if (stats.avgPrice > 0) invLine += ` [Avg. buy price ${formatCurrency(stats.avgPrice)}/${unitWord} vs. current ${formatCurrency(stats.currentPrice)}/${unitWord}]`;
         if (prevPrice && prevPrice > 0) {
           const oneDayReturn = (stats.currentPrice - prevPrice) * stats.totalUnits;
           const oneDayPct = ((stats.currentPrice - prevPrice) / prevPrice) * 100;
           invLine += ` [Today's Gain/Loss: ${oneDayReturn >= 0 ? '+' : ''}${formatCurrency(oneDayReturn)} / ${oneDayPct.toFixed(2)}%]`;
         }
       } else {
-        invLine += `Total Invested ${formatCurrency(stats.totalInvested)} (Units: ${stats.totalUnits})`;
+        invLine += `Total Invested ${formatCurrency(stats.totalInvested)} (Units: ${stats.totalUnits}` +
+          (stats.avgPrice > 0 ? `, Avg. buy price ${formatCurrency(stats.avgPrice)}/${unitWord}` : '') + ')';
       }
       if (a.type === 'commodity' && a.commodityMetal) invLine += ` (${a.commodityMetal})`;
       out.push(invLine);
