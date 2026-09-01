@@ -27,13 +27,18 @@ export interface PendingSmsTransaction {
   relationKind?: SmsRelationKind;
 }
 
-/** One SMS sitting in the Gemini second filter, or the verdict of one that just failed it.
+/** One SMS sitting in the Gemini second filter, or the verdict of one that has been through it.
  *  It exists purely so the ledger has something to render during the 2-5s the classify call
  *  takes: without it a notification tap lands on a screen with no pending card and no
- *  explanation, and a rejected SMS never explains why nothing appeared. */
+ *  explanation, and a rejected SMS never explains why nothing appeared.
+ *
+ *  Tracked per SMS but never RENDERED per SMS — the ledger consolidates the whole batch into one
+ *  card. A drain of ten notifications drew ten cards and pushed the transaction list off the
+ *  screen entirely. `passed` is kept rather than deleted on the spot so the batch can state what
+ *  it did once they have all been judged. */
 export interface SmsScreening {
   id: string;
-  status: 'screening' | 'rejected';
+  status: 'screening' | 'passed' | 'rejected';
 }
 
 export type SmsRelationKind = 'cc_payment' | 'investment' | 'transfer';
@@ -167,9 +172,31 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
   });
   const [smsScreening, setSmsScreening] = useState<SmsScreening[]>([]);
-  // Timers that retire a rejection notice. Tracked so an unmount cannot leave one running.
-  const screeningTimers = useRef<number[]>([]);
-  useEffect(() => () => { screeningTimers.current.forEach(t => clearTimeout(t)); }, []);
+
+  /* Retire the batch, once, when nothing is left in flight — not each SMS on its own timer. The
+     ledger draws these as a single consolidated card, so they have to arrive and leave together:
+     staggered removals would make the count tick down one by one and let a summary be stated over
+     a batch that is still being judged.
+
+     An all-clear hands over immediately rather than pausing to say so. Everything that passed is
+     already sitting in the pending card right beside this one, so a "3 detected" notice would be
+     the same fact twice, and holding the row wide for it delays the transaction list coming back.
+     A rejection is the opposite: it is the only place that outcome is ever reported, because the
+     SMS leaves no other trace, so it holds the screen for a beat.
+
+     A new SMS landing before that beat is up cancels the timer through the cleanup and joins the
+     batch, which is right — a drain arriving in waves is one continuous event to the person
+     watching it. */
+  useEffect(() => {
+    if (smsScreening.length === 0) return;
+    if (smsScreening.some(s => s.status === 'screening')) return;
+    if (!smsScreening.some(s => s.status === 'rejected')) {
+      setSmsScreening([]);
+      return;
+    }
+    const timer = window.setTimeout(() => setSmsScreening([]), SMS_REJECTION_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [smsScreening]);
 
   const [recentlyProcessedSms, setRecentlyProcessedSms] = useState<{ amount: number; type: string; sourceIdentifier?: string; source?: string; raw?: string; timestamp: number }[]>([]);
 
@@ -305,19 +332,15 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           // user learns the SMS was judged and dropped rather than being left waiting for a
           // card that is never coming.
           setSmsScreening(prev => prev.map(s => (s.id === id ? { ...s, status: 'rejected' } : s)));
-          const timer = window.setTimeout(
-            () => setSmsScreening(prev => prev.filter(s => s.id !== id)),
-            SMS_REJECTION_NOTICE_MS,
-          );
-          screeningTimers.current.push(timer);
           return;
         }
       } catch (e) {
         console.error("SpendVaultSms: Gemini second filter failed, failing open:", e);
       }
-      // Passed, or the filter errored and we fail open — either way the placeholder hands
-      // over to the real pending card in the same spot.
-      setSmsScreening(prev => prev.filter(s => s.id !== id));
+      // Passed, or the filter errored and we fail open. Marked rather than removed: the batch
+      // retires as a unit once nothing is left in flight (see the effect below), and the count of
+      // what got through is half of what the summary says.
+      setSmsScreening(prev => prev.map(s => (s.id === id ? { ...s, status: 'passed' } : s)));
     }
     enqueueSms(tx);
   };

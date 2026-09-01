@@ -721,6 +721,35 @@ export default function Transactions() {
 
   const sortedMonths = Object.keys(groupedByMonth).sort((a, b) => b.localeCompare(a));
 
+  /* One card for the whole screening batch, never one per SMS. While anything is still with Gemini
+     the card counts what is in flight; once the batch settles it reports what came of it, which is
+     the only place a filtered-out SMS is ever accounted for — it leaves no other trace. An all-clear
+     batch retires without a summary (FinanceContext), so `passed` is only ever read here beside a
+     rejection. */
+  const smsInFlight = smsScreening.filter(s => s.status === 'screening').length;
+  const smsPassed = smsScreening.filter(s => s.status === 'passed').length;
+  const smsRejected = smsScreening.filter(s => s.status === 'rejected').length;
+  const isSmsScreening = smsInFlight > 0;
+  // Half the width each once both cards are up. The copy shortens to match — a phone split in two
+  // has room for "4 Pending", not "4 Pending Transactions".
+  const isSmsRowSplit = smsScreening.length > 0 && smsQueue.length > 0;
+
+  const smsScreeningTitle = isSmsScreening
+    ? (smsInFlight === 1 ? 'Checking SMS' : `Checking ${smsInFlight} SMSes`)
+    : smsPassed > 0
+      ? (isSmsRowSplit
+        ? `${smsPassed} kept · ${smsRejected} dropped`
+        : `${smsPassed} ${smsPassed === 1 ? 'transaction' : 'transactions'} detected`)
+      : (smsRejected === 1 ? 'Filtered out' : `${smsRejected} filtered out`);
+  const smsScreeningSubtitle = isSmsScreening
+    ? (isSmsRowSplit ? 'Gemini is reading them…' : 'Gemini smart SMS filter is reading them…')
+    : smsPassed > 0
+      ? (isSmsRowSplit
+        ? 'AI filter finished'
+        : `${smsRejected} ${smsRejected === 1 ? 'message was' : 'messages were'} not a transaction and ${smsRejected === 1 ? 'was' : 'were'} dropped.`)
+      : (smsRejected === 1
+        ? 'Not a valid transaction — nothing was added.'
+        : 'Not valid transactions — nothing was added.');
 
   return (
     <div className="flex-col gap-6 transactions-tab-root">
@@ -729,89 +758,63 @@ export default function Transactions() {
             under the glyphs, which read as a bigger gap above the pending card than below it. */}
         <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', lineHeight: 1 }}>transactions</h2>
 
-        {/* The 2-5s Gemini second filter, made visible. Same footprint as the pending card
-            below it, so when the verdict lands the card is replaced in place rather than the
-            page jumping. A rejected SMS states the verdict for a beat and then retires — see
-            SMS_REJECTION_NOTICE_MS in FinanceContext. */}
-        {smsScreening.map(s => {
-          const isScreening = s.status === 'screening';
-          return (
-            <div
-              key={s.id}
-              className="card fade-in"
-              style={{
-                background: isScreening
-                  ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(168, 85, 247, 0.08))'
-                  : 'rgba(255,255,255,0.02)',
-                border: '1px solid var(--border-color)',
-                padding: '1rem',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
-              <div className="flex align-center gap-3">
-                <div
-                  className="flex-center"
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '12px',
-                    background: isScreening ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255,255,255,0.05)',
-                    color: isScreening ? 'var(--accent)' : 'var(--text-secondary)',
-                    flexShrink: 0,
-                  }}
-                >
-                  {isScreening ? <Sparkles size={20} /> : <Filter size={20} />}
+        {/* The SMS strip: the pending queue and the Gemini second filter share ONE row, whatever
+            the volume. Each side states a whole batch, and they split the width when both have
+            something to say, so this costs the same height for twenty notifications as for one.
+            Drawn per SMS in flight, as it was, ten drained notifications stacked ten cards and
+            pushed the transaction list clean off the screen. */}
+        {(smsQueue.length > 0 || smsScreening.length > 0) && (
+          <div className={`sms-status-row${isSmsRowSplit ? ' is-split' : ''}`}>
+            {smsQueue.length > 0 && (
+              <div className="card fade-in sms-status-card sms-status-card--pending" onClick={processNextSms}>
+                <div className="flex align-center gap-3" style={{ minWidth: 0 }}>
+                  <div className="flex-center sms-status-card__icon" style={{ background: 'var(--accent)', color: 'var(--bg-color)' }}>
+                    <Smartphone size={isSmsRowSplit ? 16 : 20} />
+                  </div>
+                  <div className="flex-col" style={{ minWidth: 0 }}>
+                    <span className="font-bold text-mono sms-status-card__title" style={{ color: 'var(--text-primary)' }}>
+                      {isSmsRowSplit
+                        ? `${smsQueue.length} Pending`
+                        : `${smsQueue.length} Pending ${smsQueue.length === 1 ? 'Transaction' : 'Transactions'}`}
+                    </span>
+                    <span className="text-xs text-muted sms-status-card__sub">
+                      {smsQueue[0]?.relationKind === 'cc_payment' ? (isSmsRowSplit ? 'Next: card payment' : 'Next: linked card payment — pre-filled as CC Payment')
+                        : smsQueue[0]?.relationKind === 'transfer' ? (isSmsRowSplit ? 'Next: transfer leg' : 'Next: linked transfer leg')
+                        : smsQueue[0]?.relationKind === 'investment' ? (isSmsRowSplit ? 'Next: investment leg' : 'Next: linked investment leg')
+                        : isSmsRowSplit ? 'Tap to review' : 'Tap to review and log'}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex-col">
-                  <span className="font-bold text-mono" style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>
-                    {isScreening ? 'Checking SMS' : 'Filtered out'}
-                  </span>
-                  <span className="text-xs text-muted">
-                    {isScreening
-                      ? 'Gemini smart SMS filter is reading this message\u2026'
-                      : 'Not a valid transaction \u2014 nothing was added.'}
-                  </span>
+                <ChevronRight size={20} className="text-muted sms-status-card__chevron" />
+              </div>
+            )}
+            {smsScreening.length > 0 && (
+              <div
+                className="card fade-in sms-status-card sms-status-card--screening"
+                style={isSmsScreening ? undefined : { background: 'rgba(255,255,255,0.02)' }}
+              >
+                <div className="flex align-center gap-3" style={{ minWidth: 0 }}>
+                  <div
+                    className="flex-center sms-status-card__icon"
+                    style={{
+                      background: isSmsScreening ? 'rgba(99, 102, 241, 0.15)' : 'rgba(255,255,255,0.05)',
+                      color: isSmsScreening ? 'var(--accent)' : 'var(--text-secondary)',
+                    }}
+                  >
+                    {isSmsScreening ? <Sparkles size={isSmsRowSplit ? 16 : 20} /> : <Filter size={isSmsRowSplit ? 16 : 20} />}
+                  </div>
+                  <div className="flex-col" style={{ minWidth: 0 }}>
+                    <span className="font-bold text-mono sms-status-card__title" style={{ color: 'var(--text-primary)' }}>
+                      {smsScreeningTitle}
+                    </span>
+                    <span className="text-xs text-muted sms-status-card__sub">{smsScreeningSubtitle}</span>
+                  </div>
                 </div>
+                {isSmsScreening
+                  ? <Loader2 size={20} className="icon-spin text-muted" style={{ flexShrink: 0 }} />
+                  : <X size={18} className="text-muted" style={{ flexShrink: 0 }} />}
               </div>
-              {isScreening
-                ? <Loader2 size={20} className="icon-spin text-muted" />
-                : <X size={18} className="text-muted" />}
-            </div>
-          );
-        })}
-        {smsQueue.length > 0 && (
-          <div
-            className="card fade-in"
-            style={{
-              background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.1))',
-              border: '1px solid var(--accent)',
-              padding: '1rem',
-              cursor: 'pointer',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}
-            onClick={processNextSms}
-          >
-            <div className="flex align-center gap-3">
-              <div className="flex-center" style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'var(--accent)', color: 'var(--bg-color)' }}>
-                <Smartphone size={20} />
-              </div>
-              <div className="flex-col">
-                <span className="font-bold text-mono" style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>
-                  {smsQueue.length} Pending {smsQueue.length === 1 ? 'Transaction' : 'Transactions'}
-                </span>
-                <span className="text-xs text-muted">
-                  {smsQueue[0]?.relationKind === 'cc_payment' ? 'Next: linked card payment — pre-filled as CC Payment'
-                    : smsQueue[0]?.relationKind === 'transfer' ? 'Next: linked transfer leg'
-                    : smsQueue[0]?.relationKind === 'investment' ? 'Next: linked investment leg'
-                    : 'Tap to review and log'}
-                </span>
-              </div>
-            </div>
-            <ChevronRight size={20} className="text-muted" />
+            )}
           </div>
         )}
         <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
