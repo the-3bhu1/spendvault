@@ -477,9 +477,13 @@ messages (e.g. a payment and its confirmation) are de-duplicated. An optional AI
 reward-point "credits" before logging; if it errors it
 fails open (keeps the SMS). New SMS appear as a preview queue to confirm before adding, and they
 arrive whether the app is open or closed — with the app on screen the pending card appears live.
-While the AI filter is deciding (a couple of seconds) the Ledger shows a placeholder card saying the
-SMS is being checked; it becomes the pending card if the message passes, or briefly reports that it
-was filtered out as not a real transaction before disappearing. The merchant
+While the AI filter is deciding (a couple of seconds) the Ledger shows one card for the whole batch —
+"Checking 4 SMSes" — never one card per message, so a drain of ten notifications cannot push the
+transaction list off the screen. When the batch finishes, that card reports the result for a few
+seconds before retiring: how many were detected as transactions, and how many were dropped as not
+real ones (the dropped count appears nowhere else — a filtered SMS leaves no other trace). If there
+are also messages waiting to be confirmed, the pending card and the screening card share a single
+row, half the width each, rather than stacking. The merchant
 name parsed out of the SMS becomes the transaction's description (kept in the bank's original casing).
 That preview queue is saved on-device so it survives closing/restarting the app, but it is device-local
 and is deliberately NOT included in a backup/export — confirm or discard pending items before restoring

@@ -121,9 +121,9 @@ const LOCAL_STORAGE_KEY = 'minimalist_finance_data_v1';
 // of `data` (and therefore out of backup export/import) while still surviving app kills/backgrounding
 // the same way `data` does — see the persistence effect below.
 const SMS_QUEUE_STORAGE_KEY = 'minimalist_finance_sms_queue_v1';
-/** How long a "filtered out" verdict stays on screen before the ledger closes back up. Long
+/** How long a finished screening batch states its result before the ledger closes back up. Long
  *  enough to read a two-line notice, short enough not to feel like a stuck card. */
-const SMS_REJECTION_NOTICE_MS = 3200;
+const SMS_SCREENING_SUMMARY_MS = 3200;
 
 // Renumber each day's `order` to a gap-free, duplicate-free 0..N-1 run that matches the order the
 // list already renders in. Drag-reorder renumbers a day 0..N-1 on every move and assumes those
@@ -178,23 +178,18 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
      staggered removals would make the count tick down one by one and let a summary be stated over
      a batch that is still being judged.
 
-     An all-clear hands over immediately rather than pausing to say so. Everything that passed is
-     already sitting in the pending card right beside this one, so a "3 detected" notice would be
-     the same fact twice, and holding the row wide for it delays the transaction list coming back.
-     A rejection is the opposite: it is the only place that outcome is ever reported, because the
-     SMS leaves no other trace, so it holds the screen for a beat.
+     EVERY finished batch states its result first, including one where nothing was filtered out. The
+     alternative — vanishing silently when all is well — makes the filter invisible in exactly the
+     case that proves it ran, and the count of what was dropped is not knowable any other way: a
+     rejected SMS leaves no trace at all.
 
-     A new SMS landing before that beat is up cancels the timer through the cleanup and joins the
+     A new SMS landing before the notice is up cancels the timer through the cleanup and joins the
      batch, which is right — a drain arriving in waves is one continuous event to the person
      watching it. */
   useEffect(() => {
     if (smsScreening.length === 0) return;
     if (smsScreening.some(s => s.status === 'screening')) return;
-    if (!smsScreening.some(s => s.status === 'rejected')) {
-      setSmsScreening([]);
-      return;
-    }
-    const timer = window.setTimeout(() => setSmsScreening([]), SMS_REJECTION_NOTICE_MS);
+    const timer = window.setTimeout(() => setSmsScreening([]), SMS_SCREENING_SUMMARY_MS);
     return () => clearTimeout(timer);
   }, [smsScreening]);
 

@@ -722,10 +722,9 @@ export default function Transactions() {
   const sortedMonths = Object.keys(groupedByMonth).sort((a, b) => b.localeCompare(a));
 
   /* One card for the whole screening batch, never one per SMS. While anything is still with Gemini
-     the card counts what is in flight; once the batch settles it reports what came of it, which is
-     the only place a filtered-out SMS is ever accounted for — it leaves no other trace. An all-clear
-     batch retires without a summary (FinanceContext), so `passed` is only ever read here beside a
-     rejection. */
+     the card counts what is in flight; once the batch settles it reports what came of it, for every
+     batch — including one where nothing was dropped, which is the only evidence the filter ran at
+     all. The dropped count in particular is knowable nowhere else: a rejected SMS leaves no trace. */
   const smsInFlight = smsScreening.filter(s => s.status === 'screening').length;
   const smsPassed = smsScreening.filter(s => s.status === 'passed').length;
   const smsRejected = smsScreening.filter(s => s.status === 'rejected').length;
@@ -734,22 +733,24 @@ export default function Transactions() {
   // has room for "4 Pending", not "4 Pending Transactions".
   const isSmsRowSplit = smsScreening.length > 0 && smsQueue.length > 0;
 
+  const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
   const smsScreeningTitle = isSmsScreening
     ? (smsInFlight === 1 ? 'Checking SMS' : `Checking ${smsInFlight} SMSes`)
-    : smsPassed > 0
-      ? (isSmsRowSplit
-        ? `${smsPassed} kept · ${smsRejected} dropped`
-        : `${smsPassed} ${smsPassed === 1 ? 'transaction' : 'transactions'} detected`)
-      : (smsRejected === 1 ? 'Filtered out' : `${smsRejected} filtered out`);
+    // Nothing got through: the count of what was dropped IS the whole result, so it leads.
+    : smsPassed === 0
+      ? (smsRejected === 1 ? 'Filtered out' : `${smsRejected} filtered out`)
+      : isSmsRowSplit
+        ? `${smsPassed} detected`
+        : `${smsPassed} ${plural(smsPassed, 'transaction', 'transactions')} detected`;
   const smsScreeningSubtitle = isSmsScreening
     ? (isSmsRowSplit ? 'Gemini is reading them…' : 'Gemini smart SMS filter is reading them…')
-    : smsPassed > 0
-      ? (isSmsRowSplit
-        ? 'AI filter finished'
-        : `${smsRejected} ${smsRejected === 1 ? 'message was' : 'messages were'} not a transaction and ${smsRejected === 1 ? 'was' : 'were'} dropped.`)
-      : (smsRejected === 1
-        ? 'Not a valid transaction — nothing was added.'
-        : 'Not valid transactions — nothing was added.');
+    : smsPassed === 0
+      ? `Not ${plural(smsRejected, 'a valid transaction', 'valid transactions')} — nothing was added.`
+      : isSmsRowSplit
+        ? (smsRejected === 0 ? 'None filtered out' : `${smsRejected} filtered out`)
+        : smsRejected === 0
+          ? 'Nothing was filtered out by the AI filter.'
+          : `${smsRejected} ${plural(smsRejected, 'message was', 'messages were')} not a transaction and ${plural(smsRejected, 'was', 'were')} dropped.`;
 
   return (
     <div className="flex-col gap-6 transactions-tab-root">
