@@ -552,10 +552,19 @@ export default function CreditCards({ onExit, onViewStatement }: {
   // Absent on every card, the figure would be a confident zero, so the hero leads with outstanding
   // instead and says which one it is rather than showing a blank where a headline should be.
   const hasLimit = totals.creditLimit > 0;
-  // What the wallet costs to hold, per year. Declared fees only: a waiver is a per-card, per-year
-  // question that the card's own screen answers with a progress bar, and netting it off here would
-  // be a headline that changes with every purchase.
-  const annualFees = dues.reduce((sum, d) => sum + (d.account.cardFees?.annualFee ?? 0), 0);
+  /* How many of the wallet's cards cost nothing to hold. A COUNT rather than the summed rupee fee
+     this used to show, because the sum answered a question nobody has: ₹3,500 across five cards
+     says nothing about whether the next renewal hits you, and it moved whenever a card was added
+     even if that card was free. Which cards are free is the fact you actually carry around.
+
+     Absent or zero annualFee IS lifetime free — the fee picker stores nothing at all for an LTF
+     card, so absent is that mode's shape rather than missing data. Same rule as
+     getCardFeeStanding's; see CardFees in types.ts.
+
+     Declared fees only. A spend waiver is a per-card, per-year question that the card's own screen
+     answers with a progress bar, and folding it in here would make this flip between two words as
+     the month's spending crosses a threshold. */
+  const ltfCount = dues.filter(d => !d.account.cardFees?.annualFee).length;
 
   const openCategory = (next: CardsCategory) => {
     const appRoot = document.querySelector('.app-root');
@@ -958,8 +967,16 @@ export default function CreditCards({ onExit, onViewStatement }: {
                 left edge to x 89 — over the reader's screen, so the hero's label and the drawing's
                 own PAYMENT SUCCESSFUL overlapped as two pieces of type in the same place. At these
                 lengths the row is 142 wide and both clear columns come back. */}
+            {/* "2 of 5" rather than "2 LTF · 3 paid", and the constraint above is the reason: at
+                1.05rem serif a fourteen-character value sets this cell wider than BOTH labels did
+                when they broke the layout. The label carries the subject so the value can be a bare
+                count — which also makes every state fit in eight characters or fewer. */}
             {renderFigures(
-              { label: 'Fees / yr', value: annualFees > 0 ? formatWhole(annualFees) : 'None' },
+              {
+                label: 'LTF',
+                value: ltfCount === cardCount ? 'All' : ltfCount === 0 ? 'None' : `${ltfCount} of ${cardCount}`,
+                tone: ltfCount === cardCount ? 'var(--success)' : undefined,
+              },
               { label: 'Earned', value: leadFigure(rewards.lifetime), tone: 'var(--success)' },
             )}
           </CategoryHero>
