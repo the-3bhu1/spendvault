@@ -261,7 +261,17 @@ A card has a statement day and a due day.
 The home screen shows total outstanding across every live card — billed, unbilled, credit utilisation
 against the cards' limits, and which card's bill lands soonest — then up to three categories:
 1. **My Cards** — one tile per card, painted in that card's own colours, showing what it owes and
-   when its bill is due. A card at ₹0 keeps its tile; its cut and due dates are still information.
+   when its bill is due. A card at ₹0 keeps its tile; its statement and due dates are still
+   information. Each tile carries ONE date line, and which one says whether there is a bill to pay:
+   - "Due 4th · in 2 days" — this card has a BILLED statement outstanding. The date is the payment
+     due date, and the phrase after it counts down to it ("Due today", "Overdue by 3 days").
+   - "Statement 5th" — nothing is billed yet. The whole figure on the tile is still accruing on the
+     OPEN cycle, so there is no bill and a due date would be a date with nothing behind it. The 5th
+     is the card's statement day: the day the cycle closes, that amount becomes billed, and the tile
+     switches to a "Due …" line. It is always the NEXT occurrence of that day, and the figure can
+     still change until then, because anything spent before the 5th joins the same cycle.
+   So a card showing "Statement …" is not part of the bill-due banner's count either — that banner
+   counts billed statements, and this card has none.
    Cards are listed in WALLET ORDER — the same order as the Accounts tab, the order they were added —
    not by whose bill falls due first, so a card sits in the same position on every screen that names
    it. (Bills and the bill-due banner still rank by urgency: those two ARE lists of what falls due

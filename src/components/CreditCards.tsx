@@ -373,14 +373,24 @@ const CardTile: React.FC<{ d: CardDues; wide: boolean; onOpen: (account: Account
           {formatWhole(d.outstanding)}
         </div>
         {/* One line, and which line depends on whether there is a bill to answer for. An unbilled
-            card gets its cut date, because that is the next thing that will happen to it; a billed
-            one gets the due date and how long is left, which is the only urgent fact on this screen.
-            The urgency colour from `dueColor` is deliberately NOT used: it is tuned against the
-            app's dark ground and disappears on a saturated skin. */}
+            card gets its statement day, because that is the next thing that will happen to it; a
+            billed one gets the due date and how long is left, which is the only urgent fact on this
+            screen. The urgency colour from `dueColor` is deliberately NOT used: it is tuned against
+            the app's dark ground and disappears on a saturated skin.
+
+            "Statement", not "Cut". Cut is this codebase's own word (daysToStatementCut, the cycle
+            comments) and it read as a REDUCTION sitting under a rupee figure — "₹123 · Cut 5th"
+            scans as something knocked off the total, not as a date. It was also the only place the
+            app said it: the same statementDay is "Statement Generation Day" in the account form and
+            "STATEMENT CYCLE" on the account row, so the densest label in the app was the one using
+            vocabulary the reader had never been shown. At 13-14 characters it sets on ONE line in
+            the 2-column tile, whose date line measures 121px and wraps at 20 — which is why no
+            relative phrase was added to match the Due line: "Statement 5th · in 3 days" is 25.
+            (The Due line itself already wraps there at "In 29 days"; pre-existing, left alone.) */}
         <div className="text-mono uppercase" style={{ fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.5px', color: inkSoft, marginTop: '0.35rem' }}>
           {d.billed > 0 && d.dueDayStr
             ? `Due ${d.dueDayStr}${phrase ? ` \u00b7 ${phrase}` : ''}`
-            : `Cut ${getOrdinalSuffix(d.account.statementDay || 1)}`}
+            : `Statement ${getOrdinalSuffix(d.account.statementDay || 1)}`}
         </div>
       </div>
     </div>
