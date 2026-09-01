@@ -8,6 +8,7 @@ import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, getInvestmentKindIcon, sortByAccountType } from './transactionIcons';
 import { scrollToFirstError } from '../utils/formErrors';
+import { shouldCreateRewardLeg } from '../services/RewardLegService';
 
 // THE log/edit-transaction form. Single implementation, shared by every entry point:
 //   - the main Ledger (add, edit, SMS-driven prefill, Wealth "liquidate" prefill)
@@ -691,7 +692,20 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     // split still has to anchor on the card leg below, or a Debit-POV CC Payment would leave the
     // anchor on the ₹148 bank leg and reopen showing ₹148 as the total.
     const hasRewardSplit = showRewardSplit && (Number(newTx.rewardUsed) || 0) > 0 && !!newTx.rewardUsedAccountId && !editId;
-    const willCreateRewardLeg = hasRewardSplit && !isExternalRewardSource(newTx.rewardUsedAccountId);
+    /* An edit can need a leg built too, and used to get none: the `!editId` above meant that giving an
+       existing row a real reward source — switching it off a one-time reward, or adding a split to a
+       row that never had one — recorded the redemption on the anchor while the reward account was
+       never debited. updateTransaction syncs an existing leg but has never created one, which is the
+       same gap the instant-cashback block below already compensates for. The gate lives in
+       RewardLegService beside the retarget/delete half of the same decision. */
+    const willCreateRewardLeg = showRewardSplit
+      && (Number(newTx.rewardUsed) || 0) > 0
+      && shouldCreateRewardLeg({
+        editId,
+        source: newTx.rewardUsedAccountId,
+        linkedIds: currentLinkedIds,
+        transactions: data.transactions,
+      });
     const rewardCounterpartId = willCreateRewardLeg ? generateId() : null;
     // Anchoring, by contrast, IS CC-specific: a reward split anchors on the CARD leg (whose amount is
     // the full bill), per docs/LINKED_TRANSACTIONS.md. Logged from Credit POV the card IS the main tx,

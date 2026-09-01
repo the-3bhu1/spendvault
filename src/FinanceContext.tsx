@@ -3,7 +3,8 @@ import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitE
 import { BUILT_IN_ACCOUNT_TYPES, isOffsetTypeAlias } from './types';
 import { classifySmsIsTransaction } from './services/GeminiService';
 import { clearChatHistory } from './services/ChatHistoryService';
-import { INVESTMENT_CATEGORY, isInvestmentCategory, inferInvestmentKind, getInvestmentKind, isPointsDenominated } from './utils';
+import { INVESTMENT_CATEGORY, isInvestmentCategory, inferInvestmentKind, getInvestmentKind } from './utils';
+import { resolveRewardLegTransition } from './services/RewardLegService';
 
 export interface PendingTransfer {
   fromAccountId: string;
@@ -1348,6 +1349,25 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         updatedTransaction.paymentSourceAccountId = '';
       }
 
+      /* What becomes of the split's reward leg — see services/RewardLegService. Skipped for a child
+         leg's own edit: its form carries reconstructed anchor fields that the block above has just
+         stripped, and reading those as a source change would delete its sibling. */
+      const rewardLegMove = (!isRewardSplitChildEdit && !isRewardSplitBankEdit)
+        ? resolveRewardLegTransition({
+          anchor: updatedTransaction,
+          storedAnchor: oldTx,
+          transactions: prev.transactions,
+          accounts: prev.accounts,
+        })
+        : { kind: 'none' as const };
+
+      if (rewardLegMove.kind === 'delete') {
+        const linkedIdsNow = updatedTransaction.linkedTransactionIds
+          || (updatedTransaction.linkedTransactionId ? [updatedTransaction.linkedTransactionId] : []);
+        txsToDelete = [...txsToDelete, rewardLegMove.legId];
+        updatedTransaction.linkedTransactionIds = linkedIdsNow.filter(id => id !== rewardLegMove.legId);
+      }
+
       let updatedTxs = prev.transactions.map(t => t.id === transaction.id ? updatedTransaction : t);
       
       if (txsToDelete.length > 0) {
@@ -1372,15 +1392,12 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
                 updated.accountId = updatedTransaction.rewardEarnedAccountId;
               }
             } 
-            // Check if this linked transaction is a Reward Split counterpart
-            else if (updatedTransaction.rewardUsedAccountId && t.accountId === updatedTransaction.rewardUsedAccountId) {
-              const rewardsSourceAcc = prev.accounts.find(a => a.id === updatedTransaction.rewardUsedAccountId);
-              // Both sides are rupees (the points conversion lives in calculateBalance), so this is a copy.
-              updated.amount = Number(updatedTransaction.rewardUsed) || 0;
-              const isCCPayment = updatedTransaction.category?.toLowerCase() === 'cc payment';
-              updated.description = isCCPayment ? t.description : `Rewards applied to: ${updatedTransaction.description}`;
-              updated.isRewardTransaction = isPointsDenominated(rewardsSourceAcc);
-            } 
+            // Check if this linked transaction is a Reward Split counterpart. The patch carries the
+            // account too, so a leg whose source was switched moves with it instead of being left
+            // behind to be mistaken for a transfer counterpart.
+            else if (rewardLegMove.kind === 'sync' && t.id === rewardLegMove.legId) {
+              Object.assign(updated, rewardLegMove.patch);
+            }
             // Otherwise it's a Transfer counterpart, Mutual Funds, or CC payment bank portion
             else {
               const isCCPayment = updatedTransaction.category?.toLowerCase() === 'cc payment';
