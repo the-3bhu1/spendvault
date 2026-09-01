@@ -198,6 +198,10 @@ html.fonts-loaded #root {
   --relief-line: rgba(255, 255, 255, 0.20);
   --relief-edge: rgba(255, 255, 255, 0.34);
   --relief-shadow: rgba(0, 0, 0, 0.65);
+  /* How much of a large filled FORM's body to keep — see --relief-plate-fill under the light theme,
+     which is where this token earns its existence. Relief reads through its edges, so this damps
+     bodies only and leaves every stroke alone. */
+  --relief-plate-fill: 1;
   /* The frosted segmented control on the Wealth category screens (see renderFilterPills in
      Wealth.tsx). Tokenised for the same reason as the relief set above: the "glass" is a light
      tint on the dark theme but has to become a dark tint on the light theme, or the track, the
@@ -261,6 +265,12 @@ html.fonts-loaded #root {
   --relief-line: rgba(15, 23, 42, 0.16);
   --relief-edge: rgba(255, 255, 255, 0.9);
   --relief-shadow: rgba(15, 23, 42, 0.22);
+  /* The relief tokens invert between themes, but they do not invert SYMMETRICALLY: -hi is white at
+     0.055 on the dark theme and white at 0.95 here. That is right for a moulding or a rim, whose
+     body is a few units wide, and wrong for a large plate — the Cards hero's stack turned into a
+     near-opaque white slab and took the amber due line down with it. Damping the body recovers the
+     text while leaving the engraved edges at full strength, which is where the relief actually is. */
+  --relief-plate-fill: 0.38;
   /* Light theme veils with the page colour instead of ink — a dark veil here would read as a
      grey slab rather than glass. The dark border below is what delineates the track. */
   --pill-track-bg: rgba(248, 250, 252, 0.62);
@@ -1328,6 +1338,32 @@ tr:hover td {
   .nav-link.active > div { animation: none; }
 }
 
+/* ── The launch screen's staggered entrance ──
+   Hero, then the two doors, then the ring: 0 / 60 / 120ms. Applied to the CHILDREN of the marked
+   container rather than to each element inline, so the order is the document order and a piece
+   added or removed can't leave a gap in the sequence.
+   `both` matters: without it each child is painted at full opacity for its delay and then jumps to
+   the keyframe-0 state when the animation starts, which reads as a flicker rather than an entrance. */
+.launch-stagger > * {
+  animation: fade-in-anim 0.45s ease-out both;
+}
+.launch-stagger > *:nth-child(2) { animation-delay: 60ms; }
+.launch-stagger > *:nth-child(3) { animation-delay: 120ms; }
+.launch-stagger > *:nth-child(n + 4) { animation-delay: 180ms; }
+
+/* With motion reduced there is nothing to sequence, so every piece is simply there.
+   AFTER the rules above, not before: same specificity means the later block wins, and declaring
+   `animation: none` first would let the base rule take it back — at which point the keyframes beat
+   the `opacity: 1` here too and the delayed children stay invisible for good. `animation: none`
+   alone is also not enough; without the reset they sit at their keyframe-0 opacity. */
+@media (prefers-reduced-motion: reduce) {
+  .launch-stagger > * {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .nav-link:active {
   transform: scale(0.95) !important;
 }
@@ -1579,14 +1615,6 @@ tr:hover td {
 
 .transaction-grid-row:hover {
   background-color: rgba(255, 255, 255, 0.02);
-}
-
-/* A "Current Outstanding Dues" row on the Dashboard. Same reason as .linked-entry-toggle below:
-   in CSS so the lift can be gated on a real pointer. */
-@media (hover: hover) {
-  .due-row:hover {
-    transform: translateY(-2px);
-  }
 }
 
 /* The "Linked entry" disclosure under a transaction row. Kept in CSS rather than inline JS hover
@@ -2247,3 +2275,49 @@ tr:hover td {
 }
 .askvault-send:active:not(:disabled) { transform: translate(3px, 3px); box-shadow: 0 0 0 #000; }
 .askvault-send:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+
+
+/* The scrolling variant of FilterPills (see TreeUi). A hidden scrollbar cannot be set from an
+   inline style, and a visible one across a segmented control reads as a broken element. */
+[data-pill-scroll]::-webkit-scrollbar { display: none; }
+
+/* ─── The Dashboard coin's currency course (see SpendBackdrop.tsx) ───────────
+   The course is a SEPARATE svg stacked over the coin rather than a <g> inside
+   it, and this is why: the ring turns 0.043° per frame at 60fps, which at its
+   radius is under a tenth of a pixel of travel. Re-rasterising the glyphs at
+   that rate re-quantises their positions every frame, so they hold still and
+   then step — visibly, as a stutter. Lifted out, the ring is rasterised once
+   and the compositor interpolates the transform, which is continuous.
+
+   Two nested elements, not one. The bottom fade the coin's own mask used to
+   give this ring has to come back as a CSS mask — and a mask on the element
+   that ROTATES would turn with it, sweeping the faded sector around the coin.
+   So the outer box carries the mask and stays still; the inner one spins. */
+.coin-course-fade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Matches the -fade gradient in ReliefDefs: full to 80%, then down to 0.12.
+     The hero box is wider than it is tall, so 'meet' scales the drawing to the
+     HEIGHT and it spans the box top to bottom — which is what lets a gradient
+     over the element line up with one over the viewBox. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 80%, rgba(0, 0, 0, 0.12) 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 80%, rgba(0, 0, 0, 0.12) 100%);
+}
+
+.coin-course {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  animation: spin-cw 140s linear infinite;
+  will-change: transform;
+}
+
+/* Continuous, and directly behind the month's total. Anyone who has asked for
+   less motion gets the ring struck in place — the composition is symmetrical,
+   so a stopped course reads as engraved rather than as broken. */
+@media (prefers-reduced-motion: reduce) {
+  .coin-course { animation: none; }
+}

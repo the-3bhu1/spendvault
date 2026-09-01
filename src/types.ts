@@ -95,6 +95,38 @@ export interface CardDetails {
   issuer?: BrandKey;
 }
 
+/**
+ * What a card COSTS TO HOLD, as opposed to what it currently owes.
+ *
+ * Four arrangements are in circulation and this shape carries all of them without a discriminant,
+ * because they are not four kinds of thing — they are four settings of the same three numbers:
+ *
+ *   Lifetime free      no annualFee (joiningFee may still be set — some LTF cards charge to issue)
+ *   First year free    annualFee set, firstYearFree true
+ *   Joining + annual   joiningFee and annualFee both set
+ *   Spend-waived       annualFee set, waiverSpend set
+ *
+ * The WHOLE BLOCK IS ABSENT on a lifetime-free card, and that is the shape rather than an omission:
+ * the fee picker stores nothing when "Lifetime free" is chosen, because there is no amount to store.
+ * So absent means lifetime free, and a card nobody has described reads the same way. Those two were
+ * briefly meant to be distinguishable — hence an earlier "Not set" on the card summary — but once
+ * choosing LTF and never touching the form produce the identical value there is nothing left to tell
+ * apart, and LTF is the right thing to be wrong about: it is the commonest card in the country.
+ *
+ * annualFee is what separates the two branches. Everything else is a detail hanging off it, which is
+ * why a waiver or a first free year on a card with no annual fee is ignored rather than honoured.
+ */
+export interface CardFees {
+  /** One-time, charged when the card was issued. */
+  joiningFee?: number;
+  /** Charged at every renewal. Absent means the card is lifetime free — see above. */
+  annualFee?: number;
+  /** The first renewal is skipped. Only meaningful alongside annualFee. */
+  firstYearFree?: boolean;
+  /** Spend within ONE membership year that waives the NEXT annual fee. Absent means never waived. */
+  waiverSpend?: number;
+}
+
 export interface BalanceEditEntry {
   editedAt: string;        // ISO datetime of the edit
   monthKey: string;        // 'YYYY-MM' the edit applies to
@@ -123,6 +155,17 @@ export interface Account {
   cashbackRates?: CashbackRate[];
   roundOffCashback?: boolean;
   cashbackCreditCycle?: 'same_cycle' | 'next_cycle';
+  /** What the card costs to hold. See CardFees — absent means lifetime free. */
+  cardFees?: CardFees;
+  /**
+   * When the card was issued, 'YYYY-MM-DD'. The anchor for the MEMBERSHIP YEAR, which is the window
+   * a bank actually measures a fee waiver over — not the financial year and not the calendar year.
+   *
+   * Optional, and the card summary degrades rather than guesses when it is missing: it falls back to
+   * the financial year and says so, because a waiver bar measured over the wrong twelve months would
+   * read "waived" while the bank was still charging.
+   */
+  cardOpenedOn?: string;
 
   // Specific to debit_card/ncmc travel
   isNcmcEnabled?: boolean;
@@ -143,6 +186,11 @@ export interface Account {
   investedValue?: number;
   avgNav?: number;
   statementRounding?: RoundingRule;
+  /** Hand-entered statement figures, keyed by cycle ('YYYY-MM'). A bank's rounding is not always
+   *  the rule you told us about — it can round the other way on one cycle, or change its policy —
+   *  and the printed bill is the authority. An entry here wins over the derived figure for that
+   *  cycle and nothing else; clearing it hands the cycle back to statementRounding. */
+  statementAdjustments?: Record<string, number>;
   cashbackDestinationAccountId?: string;
   rewardUnit?: string;
   pointsConversionRate?: number;

@@ -1,5 +1,5 @@
 import { format, parseISO, addMonths, subMonths, addDays, setDate, differenceInCalendarDays } from 'date-fns';
-import type { Account, Transaction, CardNetwork, RoundingRule, CashbackStatement, SplitItem, InvestmentKind, RecurringBill, BrandKey } from './types';
+import type { Account, Transaction, CardNetwork, CashbackStatement, SplitItem, InvestmentKind, RecurringBill, BrandKey } from './types';
 
 /**
  * The message carried by a thrown value, if it has one.
@@ -272,6 +272,13 @@ export const formatAmount = (amount: number, account?: Account) => {
 
 export const getCurrentMonthStr = () => format(new Date(), 'yyyy-MM'); // "2023-10"
 
+// "Tribhuvan's", or "Your" when there's no name to work with. Every category-tree hero opens with
+// it — the root screen's and each category's — and they have to stay in step, so it's built once.
+export const userPossessive = (name?: string) => {
+  const firstName = name?.split(' ')[0];
+  return firstName ? `${firstName}'s` : 'Your';
+};
+
 // Function to calculate credit card billing cycle for a given date
 //
 // A statement closes ON statementDay, and the cut is exclusive: a transaction dated
@@ -310,11 +317,15 @@ export const getBillingCycleDates = (cycle: string, statementDay: number) => {
   return { startDate, endDate };
 };
 
-export const formatBillingCycleRange = (cycle: string, statementDay: number = 1): string => {
+/** `showYear` of false drops the trailing year on a cycle that stays inside one — for callers whose
+ *  row title already names the month and year, where repeating it costs the width that the rest of
+ *  the line needs. A cycle that CROSSES a year still prints both, because there the year is the only
+ *  thing telling the two halves apart. */
+export const formatBillingCycleRange = (cycle: string, statementDay: number = 1, showYear: boolean = true): string => {
   const { startDate, endDate } = getBillingCycleDates(cycle, statementDay);
   const sameYear = startDate.getFullYear() === endDate.getFullYear();
   const startFmt = format(startDate, sameYear ? 'd MMM' : 'd MMM yyyy');
-  const endFmt = format(endDate, 'd MMM yyyy');
+  const endFmt = format(endDate, sameYear && !showYear ? 'd MMM' : 'd MMM yyyy');
   return `${startFmt} – ${endFmt}`;
 };
 
@@ -403,9 +414,13 @@ export const calculateCycleBalance = (
   return calculateCycleBalanceForCycle(account, transactions, currentCycle);
 };
 
-export const getLatestBilledCycle = (statementDay: number): string => {
-  const today = new Date();
-  const currentCycle = getBillingCycleForDate(format(today, 'yyyy-MM-dd'), statementDay);
+export const getLatestBilledCycle = (statementDay: number, now: Date = new Date()): string => {
+  // INJECTABLE, and it has to be. getCardDues takes a `now` and derives the open cycle from it while
+  // taking the billed one from here; reading the wall clock instead meant the two disagreed for any
+  // caller that passed a date, and could return the SAME cycle as both billed and unbilled — which
+  // breaks the adjacency the whole service is built on. Every production caller happens to pass the
+  // real today, so nothing shipped wrong; the parameter was simply a promise the function did not keep.
+  const currentCycle = getBillingCycleForDate(format(now, 'yyyy-MM-dd'), statementDay);
   const currentCycleDate = parseISO(`${currentCycle}-01`);
   return format(subMonths(currentCycleDate, 1), 'yyyy-MM');
 };
@@ -467,6 +482,20 @@ export const rupeesToRewardPoints = (rupees: number, account?: Account) =>
 // OWN points then puts both legs on the same account, and every sum that forgot the rule started
 // counting the redemption as a second charge: a ₹448 purchase paid with ₹362 of credit and ₹86 of
 // Jewels reported ₹448 of card outstanding. One predicate, so a new sum can't quietly omit it.
+/** Whether a card pays cashback at all — the test every cashback surface should use before offering
+ *  a rate, a mode or a vault row for it.
+ *
+ *  `isCashbackEnabled` is the switch on the account form, but it was added after the field it
+ *  replaced, so a card saved by an older build has it undefined while still carrying rates. Falling
+ *  back to "does it have any rate configured" is what Accounts' own edit form does when it seeds the
+ *  switch; doing the same here keeps a legacy card earning instead of silently losing its cashback
+ *  the first time this test is applied to it. */
+export const cardEarnsCashback = (account?: Account | null) =>
+  !!account
+  && (account.type === 'credit_card' || account.type === 'debit_card')
+  && (account.isCashbackEnabled
+    ?? (account.defaultCashbackRate !== undefined || !!account.cashbackRates?.length));
+
 export const affectsRupeeBalance = (t: Transaction) =>
   !t.isTravelTransaction && !t.isRewardTransaction;
 
@@ -582,32 +611,11 @@ export const calculateBalance = (
   return opening + change + adjustment;
 };
 
-export const calculateTotalSpendPerCycle = (transactions: Transaction[], accountId: string, cycle: string, statementDay: number, rounding: RoundingRule = 'none') => {
-  // Same guard, same reason as calculateCycleBalanceForCycle and the statement screen: a points
-  // redemption draws on the card's reward wallet, never on its credit line, so the bank never bills
-  // it. Without this the bill was the FULL purchase price — a ₹448 spend paid with ₹362 of credit
-  // and ₹86 of Jewels stored a ₹362 anchor plus an ₹86 redemption leg on the same card, and summing
-  // both put ₹448 on Upcoming Bills while the statement (which does filter) correctly showed ₹362.
-  const ccTransactions = transactions.filter(t => t.accountId === accountId && affectsRupeeBalance(t));
-  let spend = 0;
-  let payment = 0;
-
-  ccTransactions.forEach(t => {
-    const tCycle = getAppliedBillingCycle(t, statementDay);
-    if (tCycle === cycle) {
-      if (t.type === 'debit') spend += t.amount;
-      if (t.type === 'credit') payment += t.amount;
-    }
-  });
-
-  const rawNet = spend - payment;
-  let netPayable = rawNet;
-  if (rounding === 'round') netPayable = Math.round(rawNet);
-  else if (rounding === 'floor') netPayable = Math.floor(rawNet);
-  else if (rounding === 'ceil') netPayable = Math.ceil(rawNet);
-
-  return { spend, payment, netPayable };
-};
+// calculateTotalSpendPerCycle used to live here: a per-cycle spend/payment/net for one card, with
+// no affectsRupeeBalance filter. That omission is why Bills and the bill-alert banner overstated the
+// bill on any card that had redeemed its own points, while Accounts and the Dashboard did not. Both
+// callers now read services/CardDuesService, which applies the predicate — and the function is gone
+// rather than deprecated, so nothing can reach for the wrong one of two near-identical helpers.
 
 export type CardTexture = 'weave' | 'hairline' | 'guilloche' | 'dots' | 'none';
 export type CardGeometry = 'chevron' | 'slash' | 'facet' | 'arc' | 'none';

@@ -3,57 +3,36 @@ import { format, addMonths } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import { formatCurrency, generateId, formatDateString, getAppliedBillingCycle, getBillingCycleDates, formatBillingCycleRange } from '../utils';
 import type { Account, CashbackStatement, Transaction } from '../types';
-import { Info, Pencil, Check, X, ChevronDown, RotateCcw } from 'lucide-react';
+import { buildRewardRows, getRewardUnit, type RewardRow as StatementRow } from '../services/RewardsService';
+import { Info, Pencil, Check, X, ChevronDown, RotateCcw, Calendar } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 
 /**
- * One reward-earning transaction together with the statement state tracked against it.
- *
- * Rebuilt from data.transactions on every render, then keyed by transaction id, grouped
- * into billing-cycle buckets, and passed around by the confirm/consolidate handlers — which
- * is why it is named rather than repeated inline at each of them.
+ * `showAll` / `onShowAllChange` make the credited-cycles filter a CONTROLLED value. The Rewards hero
+ * in the Cards tree leads with a different figure depending on which way it is set, so the state has
+ * to live above both — but this screen still stands alone, and there it owns the state itself. Hence
+ * the pair being optional rather than required: pass both to drive it, pass neither to let it drive
+ * itself.
  */
-interface StatementRow {
-  expected: number;
-  realized: number;
-  confirmed: boolean;
-  statementId: string | null;
-  transaction: Transaction;
-  account: Account;
-  /**
-   * Where the reward was deposited. Absent on a freshly built row — the merge from
-   * data.cashbackStatements below copies realized/confirmed/statementId but not this — and
-   * grafted on in-place by the confirm handlers so consolidation can read back the target
-   * they just used without waiting for the next render.
-   */
-  realizedIntoAccountId?: string;
-}
-
-export default function Cashback() {
+export default function Cashback({ embedded = false, showAll, onShowAllChange }: {
+  embedded?: boolean;
+  showAll?: boolean;
+  onShowAllChange?: (v: boolean) => void;
+}) {
   const { data, addTransaction, updateCashbackStatement, deleteTransaction, updateTransaction } = useFinance();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState<number>(0);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [confirmingStatement, setConfirmingStatement] = useState<{ txId: string, expected: number, prevId: string | null, accountId: string } | null>(null);
   const [depositAccountId, setDepositAccountId] = useState('');
-  const [showCreditedCycles, setShowCreditedCycles] = useState(false);
+  const [ownShowCredited, setOwnShowCredited] = useState(false);
+  const showCreditedCycles = showAll ?? ownShowCredited;
+  const setShowCreditedCycles = onShowAllChange ?? setOwnShowCredited;
   // Bulk "Confirm All" for a cycle group whose account needs a manual deposit target.
   const [bulkConfirm, setBulkConfirm] = useState<{ sts: StatementRow[]; accountId: string } | null>(null);
   const [bulkDepositAccountId, setBulkDepositAccountId] = useState('');
 
-  const getRewardUnitAndRate = (account: Account | undefined) => {
-    if (!account) return { unit: '', rate: 1 };
-    if (account.rewardUnit) {
-      return { unit: account.rewardUnit, rate: account.pointsConversionRate || 1 };
-    }
-    if (account.cashbackDestinationAccountId) {
-      const dest = data.accounts.find(a => a.id === account.cashbackDestinationAccountId);
-      if (dest && dest.rewardUnit) {
-        return { unit: dest.rewardUnit, rate: dest.pointsConversionRate || 1 };
-      }
-    }
-    return { unit: '', rate: 1 };
-  };
+  const getRewardUnitAndRate = (account: Account | undefined) => getRewardUnit(account, data.accounts);
 
   const formatCashback = (value: number, account: Account | undefined) => {
     const { unit } = getRewardUnitAndRate(account);
@@ -76,52 +55,17 @@ export default function Cashback() {
     return formatBillingCycleRange(getAppliedBillingCycle(tx, statementDay), statementDay);
   };
 
-  const statements: Record<string, StatementRow> = {};
+  // The year a cycle FILES under for the year picker: the year its statement closes in, not the year
+  // its spends started in. A Dec–Jan cycle is a January statement, and the row's own label already
+  // prints that close date, so filing it under the close year is what makes the picker agree with
+  // what you read on the row.
+  const getCycleYear = (tx: Transaction, statementDay?: number) => {
+    if (!statementDay) return new Date(tx.date).getFullYear();
+    const { endDate } = getBillingCycleDates(getAppliedBillingCycle(tx, statementDay), statementDay);
+    return endDate.getFullYear();
+  };
 
-  data.transactions.forEach(tx => {
-    const account = data.accounts.find(a => a.id === tx.accountId);
-    // Deleting an account archives it rather than removing it, so a reward transaction should
-    // always resolve one. Skip the row if it somehow doesn't: every consumer below reads
-    // st.account.name/.id/.statementDay unguarded, so an orphan would blank the whole screen.
-    if (!account) return;
-
-    // Only show "Delayed" rewards or legacy expectedCashback that isn't instant
-    const isDelayed = tx.rewardEarnedType === 'delayed' || (!tx.rewardEarnedType && (tx.expectedCashback || 0) > 0);
-
-    if (isDelayed && tx.type === 'debit' && tx.category !== 'Transfer' && tx.category !== 'CC Payment' && tx.category !== 'NCMC Travel Recharge' && !tx.isTravelTransaction) {
-      // The expectation is whatever the editor computed and stored — never re-derived here. handleSave
-      // applies the chosen Cashback Mode's rate (a named level, or the card default) and deliberately
-      // computes ZERO when no mode is chosen, so a 0 here means "this spend earns nothing", not
-      // "nobody worked it out yet".
-      //
-      // This used to fall back to the card's defaultCashbackRate whenever expected was 0, which
-      // manufactured an estimate the editor had explicitly declined: a ₹362 recharge on a 5% card
-      // showed 18 Jewels pending while its own Cashback Mode read "None". The fallback never did serve
-      // the legacy rows it was written for either — those qualify through the `!rewardEarnedType &&
-      // expectedCashback > 0` clause above, so expected is already non-zero for them.
-      const expected = tx.rewardEarned || tx.expectedCashback || 0;
-
-      if (expected > 0) {
-        statements[tx.id] = {
-          expected: expected,
-          realized: 0,
-          confirmed: false,
-          statementId: null,
-          transaction: tx,
-          account
-        };
-      }
-    }
-  });
-
-  data.cashbackStatements?.forEach(s => {
-    const txId = s.billingCycleYearMonth;
-    if (statements[txId]) {
-      statements[txId].realized = s.realized;
-      statements[txId].confirmed = s.confirmed;
-      statements[txId].statementId = s.id;
-    }
-  });
+  const statements = buildRewardRows(data.transactions, data.accounts, data.cashbackStatements);
 
   const consolidateCycleGroup = (accId: string, sts: StatementRow[]) => {
     const confirmedSts = sts.filter(s => s.confirmed);
@@ -408,10 +352,33 @@ export default function Cashback() {
     return acc;
   }, {} as Record<string, typeof statementArray>);
 
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  // Which year each cycle group belongs to, and the set of years the vault actually holds. Keyed by
+  // the same accKey the groups are, so the year filter below is a lookup rather than a re-derivation.
+  const groupYears = Object.entries(groupedStatements).reduce((acc, [accKey, sts]) => {
+    acc[accKey] = getCycleYear(sts[0].transaction, sts[0].account.statementDay);
+    return acc;
+  }, {} as Record<string, number>);
+  const availableYears = [...new Set(Object.values(groupYears))].sort((a, b) => b - a);
+
+  // SHOWING ALL lists every cycle a card has ever earned on, and once that crosses a year boundary
+  // the list is long enough that "which year am I looking at" stops being obvious from the rows
+  // alone. FILTER: PENDING never needs this — pending work is short and current — so the picker only
+  // exists in the SHOWING ALL row, and 'all' keeps the old undivided behaviour as the default.
+  const [selectedYear, setSelectedYear] = useState<string>('all');
+  const activeYear = showCreditedCycles ? selectedYear : 'all';
+
+  // Cycle-level accordion, kept in TWO independent maps — one per filter — because the two filters
+  // want opposite defaults and a single map let one leak into the other. FILTER: PENDING opens every
+  // cycle it lists (there are few, and all of them want acting on); SHOWING ALL closes every cycle
+  // (it lists a card's whole history). Sharing one map meant expanding a cycle in one view silently
+  // rewrote the other view's default for that cycle, so cycles arrived open in SHOWING ALL and
+  // closed in FILTER: PENDING purely because of what had been touched in the other one. A manual
+  // toggle now only ever moves the view you made it in.
+  const [collapsedGroups, setCollapsedGroups] = useState<{ pending: Record<string, boolean>; all: Record<string, boolean> }>({ pending: {}, all: {} });
+  const collapseScope = showCreditedCycles ? 'all' : 'pending';
 
   const toggleGroup = (name: string, currentCollapsed: boolean) => {
-    setCollapsedGroups(prev => ({ ...prev, [name]: !currentCollapsed }));
+    setCollapsedGroups(prev => ({ ...prev, [collapseScope]: { ...prev[collapseScope], [name]: !currentCollapsed } }));
   };
 
   // Card-level accordion (used only in "Showing All"): each card collapses to just its name so the
@@ -446,6 +413,7 @@ export default function Cashback() {
   sortedEntries.forEach(([accKey, sts]) => {
     const isFullyCredited = sts.every(st => st.confirmed);
     if (!showCreditedCycles && isFullyCredited) return;
+    if (activeYear !== 'all' && String(groupYears[accKey]) !== activeYear) return;
 
     const cardName = accKey.split(' — ')[0];
     const lastCard = cardsData[cardsData.length - 1];
@@ -458,26 +426,53 @@ export default function Cashback() {
 
   return (
     <div className="flex-col gap-6 cashback-tab-root" style={{ maxWidth: '600px', margin: '0 auto', width: '100%' }}>
-      <div className="flex justify-between align-center gap-4">
-        <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>cashback vault</h2>
+      {/* `embedded`: this screen also renders as Rewards inside the Cards tree, which puts an
+          illustrated hero directly above it saying "<Name>'s Rewards". A second title under that read
+          as two screens stacked — hence the title dropping out, while the controls row below stays.
+          The controls row reads filter-on-the-left, scope-on-the-right: the filter button says WHAT
+          is listed, the year picker says HOW MUCH of it, so they take opposite ends rather than
+          crowding one. */}
+      <div className="flex-col gap-3">
+        {!embedded && (
+          <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>cashback vault</h2>
+        )}
         {statementArray.length > 0 && (
-          <button 
-            className="btn flex align-center gap-1 text-mono text-xs" 
-            style={{
-              height: '32px',
-              minHeight: 'auto',
-              padding: '0 0.75rem',
-              borderRadius: '20px',
-              border: '2px solid var(--border-color)',
-              boxShadow: '2px 2px 0 var(--border-color)',
-              background: showCreditedCycles ? 'var(--accent)' : 'var(--bg-hover)',
-              color: showCreditedCycles ? '#fff' : 'var(--text-secondary)',
-              fontWeight: 800
-            }}
-            onClick={() => setShowCreditedCycles(!showCreditedCycles)}
-          >
-            {showCreditedCycles ? '👁️ SHOWING ALL' : 'FILTER: PENDING'}
-          </button>
+          <div className="flex align-center justify-between gap-4">
+            <button
+              className="btn flex align-center gap-1 text-mono text-xs"
+              style={{
+                height: '32px',
+                minHeight: 'auto',
+                padding: '0 0.75rem',
+                borderRadius: '20px',
+                border: '2px solid var(--border-color)',
+                boxShadow: '2px 2px 0 var(--border-color)',
+                background: showCreditedCycles ? 'var(--accent)' : 'var(--bg-hover)',
+                color: showCreditedCycles ? '#fff' : 'var(--text-secondary)',
+                fontWeight: 800,
+                flexShrink: 0
+              }}
+              onClick={() => setShowCreditedCycles(!showCreditedCycles)}
+            >
+              {showCreditedCycles ? '👁️ SHOWING ALL' : 'FILTER: PENDING'}
+            </button>
+            {showCreditedCycles && availableYears.length > 0 && (
+              <div style={{ width: '150px', flexShrink: 0 }}>
+                <CustomPicker
+                  label="Select Year"
+                  hideLabel={true}
+                  value={selectedYear}
+                  options={[
+                    { id: 'all', name: 'All Years', triggerName: 'All Years' },
+                    ...availableYears.map(y => ({ id: String(y), name: String(y), triggerName: String(y) }))
+                  ]}
+                  onChange={setSelectedYear}
+                  iconGetter={() => <Calendar size={18} />}
+                  allowTextWrap={false}
+                />
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -488,12 +483,36 @@ export default function Cashback() {
 
         {statementArray.length === 0 ? (
           <p className="text-center text-muted p-4">No individual cashback transactions tracked yet.</p>
+        ) : cardsData.length === 0 && activeYear !== 'all' ? (
+          /* An empty list under a year filter is the filter's doing, not a milestone — saying
+             "all credited" here would congratulate you for a year you simply have no cycles in. */
+          <div className="text-center p-6 card flex-col align-center gap-3" style={{ background: 'var(--bg-hover)', border: '1px dashed var(--border-color)', borderRadius: '12px' }}>
+            <span style={{ fontSize: '2rem' }}>🗓️</span>
+            <p className="text-muted text-sm font-bold" style={{ margin: 0 }}>No reward cycles in {activeYear}.</p>
+            <button
+              className="btn btn-secondary text-mono text-xs"
+              style={{
+                height: '32px',
+                minHeight: 'auto',
+                padding: '0 0.75rem',
+                borderRadius: '20px',
+                border: '2px solid var(--border-color)',
+                boxShadow: '2px 2px 0 var(--border-color)',
+                background: 'var(--bg-card)',
+                color: 'var(--text-primary)',
+                fontWeight: 800
+              }}
+              onClick={() => setSelectedYear('all')}
+            >
+              SHOW ALL YEARS
+            </button>
+          </div>
         ) : cardsData.length === 0 ? (
           <div className="text-center p-6 card flex-col align-center gap-3" style={{ background: 'var(--bg-hover)', border: '1px dashed var(--border-color)', borderRadius: '12px' }}>
             <span style={{ fontSize: '2rem' }}>🎉</span>
             <p className="text-muted text-sm font-bold" style={{ margin: 0 }}>All cashback has been fully credited & confirmed!</p>
-            <button 
-              className="btn btn-secondary text-mono text-xs" 
+            <button
+              className="btn btn-secondary text-mono text-xs"
               style={{
                 height: '32px',
                 minHeight: 'auto',
@@ -560,8 +579,9 @@ export default function Cashback() {
                 <div className="flex-col" style={{ overflow: 'hidden' }}>
                 {card.cycles.map((cycle, cycleIndex) => {
                   const { accKey: accName, sts } = cycle;
-                  const isFullyCredited = sts.every(st => st.confirmed);
-                  const isCollapsed = collapsedGroups[accName] !== undefined ? collapsedGroups[accName] : isFullyCredited;
+                  // Default per filter, never shared: open in FILTER: PENDING, closed in SHOWING ALL.
+                  const manualCollapsed = collapsedGroups[collapseScope][accName];
+                  const isCollapsed = manualCollapsed !== undefined ? manualCollapsed : showCreditedCycles;
                   const total = sts.reduce((sum, st) => sum + (st.confirmed ? st.realized : st.expected), 0);
 
                   const confirmedSts = sts.filter(s => s.confirmed);

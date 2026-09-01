@@ -10,10 +10,11 @@ import ProfileAvatar from './ProfileAvatar';
 import WealthBackdrop from './WealthBackdrop';
 import { PortfolioBackdrop, AssetsBackdrop, RetirementBackdrop } from './WealthCategoryBackdrops';
 import { LogoAvatar } from './LogoAvatar';
-import { DetailHeroBand, DetailHeroSeal, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
+import { DetailHeroBand, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
+import { CategoryCard, CategoryHero, SubviewHeader, SealedMark, FilterPills, SectionHeading } from './TreeUi';
 import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
 import { calculateEPFProjection, getEPFInterestRate, getFinancialYearForDate } from '../utils/epfEngine';
-import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance, isStatsExcludedCategory, statsAmount, errorMessage } from '../utils';
+import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance, isStatsExcludedCategory, statsAmount, errorMessage, userPossessive } from '../utils';
 import { getCategoryIcon } from './transactionIcons';
 
 type HistoryDataPoint = { date: number; close: number };
@@ -223,7 +224,7 @@ function currentDayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export function Wealth() {
+export function Wealth({ onExit }: { onExit?: () => void }) {
   const { data } = useFinance();
 
   const [prices, setPrices] = useState<Record<string, number>>(() => {
@@ -721,10 +722,8 @@ export function Wealth() {
     stockAccounts.length > 0 ? 'Stocks' : null,
   ].filter(Boolean).join(' + ');
 
-  // "Tribhuvan's", or "Your" when we have no name to work with. Built once because four hero labels
-  // now use it — the tree's total plus each category screen's — and they have to stay in step.
-  const firstName = data.user?.name?.split(' ')[0];
-  const userPossessive = firstName ? `${firstName}'s` : 'Your';
+  // Shared with every other tree, so the tree's total and each category screen's hero can't drift.
+  const possessive = userPossessive(data.user?.name);
 
   // Named for where the user goes to fix it, so the hint tells them what to do, not just what's
   // absent. Only rendered while at least one category exists — a brand-new user gets the full
@@ -902,7 +901,9 @@ export function Wealth() {
     );
   };
 
-  const renderCategoryCard = ({ icon, label, subtext, value, valueNote, onClick, tourClass }: {
+  // Thin adapter over the shared CategoryCard, so the ~3 call sites below keep their object-literal
+  // shape while the card itself lives in TreeUi with Cards' copies.
+  const renderCategoryCard = (props: {
     icon: ReactNode;
     label: string;
     subtext: string;
@@ -910,69 +911,7 @@ export function Wealth() {
     valueNote?: ReactNode;
     onClick: () => void;
     tourClass: string;
-  }) => (
-    // Uses .card rather than a bespoke shell: that's what carries the app's NeoPOP treatment —
-    // 4px radius, the hard `4px 4px 0 #000` edge, and the lift-on-hover / press-down-on-tap
-    // transitions. These cards previously hand-rolled a 1rem-radius, shadowless box and leaned on a
-    // `clickable` class that has no CSS rule, so they read as flat panels from a different app and
-    // gave no feedback on tap despite being the primary navigation on this screen.
-    <div
-      className={`card ${tourClass}`}
-      onClick={onClick}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '1rem',
-        padding: '1.15rem 1.25rem',
-        minHeight: '92px',
-        boxSizing: 'border-box',
-        cursor: 'pointer'
-      }}
-    >
-      {/* Square-cornered tile with its own hard edge, echoing .badge-scalloped — the soft circle it
-          replaced was the only rounded-pill shape on the screen. */}
-      <div style={{
-        width: '44px',
-        height: '44px',
-        borderRadius: '4px',
-        background: 'var(--bg-card-elevated)',
-        border: '1px solid var(--border-color)',
-        boxShadow: '3px 3px 0 #000',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-        color: 'var(--accent)'
-      }}>
-        {icon}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="text-mono uppercase" style={{ fontSize: '0.74rem', fontWeight: 800, letterSpacing: '1.5px', color: 'var(--text-primary)' }}>
-          {label}
-        </div>
-        <div style={{
-          fontSize: '0.72rem',
-          color: 'var(--text-secondary)',
-          marginTop: '0.25rem',
-          lineHeight: 1.4,
-          // The text column is only ~110px wide, so a two-word subtext wraps. Breaking only on
-          // spaces keeps "E-Wallets"-style labels intact; the card's minHeight absorbs the extra
-          // line so all three cards stay the same height.
-          overflowWrap: 'normal',
-          wordBreak: 'keep-all'
-        }}>
-          {subtext}
-        </div>
-      </div>
-      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-        {/* text-serif: every other figure in the app is set in the serif face (the wealth hero above,
-            account balances, holding values). A plain sans number here broke that. */}
-        <div className="text-serif" style={{ fontSize: '1.15rem', color: 'var(--text-primary)' }}>{value}</div>
-        {valueNote}
-      </div>
-      <ChevronRight size={18} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-    </div>
-  );
+  }) => <CategoryCard key={props.label} {...props} />;
 
   const openCategory = (next: WealthCategory) => {
     const appRoot = document.querySelector('.app-root');
@@ -1025,87 +964,15 @@ export function Wealth() {
     else if (category === 'retirement' && !hasRetirement) setCategory(null);
   }, [category, hasPortfolio, hasAssets, hasRetirement]);
 
-  // Shared chrome for EVERY Wealth sub-view — both the category views and the holding detail.
-  // Deliberately carries no horizontal padding: that matches SubviewWrapper, Debts, Splits and
-  // AccountStatement, which all sit the chevron at the page container's own padding with the title
-  // beside it. Wealth used to add 1.5rem of its own here, putting its back button 24px further in
-  // than every other screen's, and the holding detail hand-rolled a second, title-less variant.
-  // `hideTitle` drops the label beside the chevron — for the category screens, whose hero right
-  // below already opens with "<Name>'s <Category>", repeating the same word here was pure noise.
-  // The holding-detail view still passes a title: it has no hero of its own to say where "back" goes.
-  const renderSubviewHeader = (title: string, onBack: () => void, tourClass = '', hideTitle = false) => (
-    // Stacked above the hero explicitly: the hero below overlaps this row's box (see marginTop in
-    // renderCategoryHero), and without this the chevron's hit area would sit underneath it.
-    <div className="flex align-center gap-4" style={{ position: 'relative', zIndex: 2, padding: hideTitle ? 0 : '0 0 0.25rem', boxSizing: 'border-box' }}>
-      <button
-        className={`btn btn-secondary ${tourClass}`}
-        style={{ padding: '0.5rem', flexShrink: 0 }}
-        onClick={onBack}
-      >
-        <ChevronLeft size={20} />
-      </button>
-      {!hideTitle && (
-        <div className="text-mono uppercase" style={{ fontSize: '0.8rem', fontWeight: 800, letterSpacing: '2px', color: 'var(--text-primary)' }}>
-          {title}
-        </div>
-      )}
-    </div>
-  );
+  const renderSubviewHeader = (title: string, onBack: () => void, tourClass = '', hideTitle = false) =>
+    <SubviewHeader title={title} onBack={onBack} tourClass={tourClass} hideTitle={hideTitle} />;
 
-  // The account's mark as the device impressed in the hero's wax seal. The wrapper is sized to the
-  // avatar and nothing more on purpose: the seal centres itself on its parent, so the parent IS the
-  // registration mark (see COMPOSITION in DetailHeroBackdrop). The mark is lifted over the wax, which
-  // is what makes it read as pressed into the seal rather than sitting behind it.
-  //
-  // Only valid inside an identity block that follows a DetailHeroBand and lifts itself by
-  // DETAIL_HERO_LIFT — that pairing is what puts this box inside the panel.
-  const renderSealedMark = (logo: ReactNode) => (
-    <div style={{
-      position: 'relative',
-      width: `${DETAIL_HERO_AVATAR}px`,
-      height: `${DETAIL_HERO_AVATAR}px`,
-      marginBottom: '1rem',
-    }}>
-      <DetailHeroSeal />
-      <div style={{ position: 'relative', zIndex: 1 }}>{logo}</div>
-    </div>
-  );
+  const renderSealedMark = (logo: ReactNode) => <SealedMark>{logo}</SealedMark>;
 
-  // The illustrated hero each category screen opens with: that category's own bas-relief engraving,
-  // the user's avatar and "<Name>'s <Category>" over it, then the figures the category leads with.
-  // Same treatment as the tree screen's hero, and for the same reason — position/overflow because
-  // the drawing is absolutely positioned to this box and bleeds past the horizontal padding, and the
-  // centring because each engraving is concentric about its own centre, so the content only lands on
-  // the motif (inside the medallion, between the columns, inside the wreath) if both are centred in
-  // the same box. See the COMPOSITION note in WealthCategoryBackdrops.
   const renderCategoryHero = (backdrop: ReactNode, label: string, minHeight: string, children: ReactNode) => (
-    <div style={{
-      position: 'relative',
-      overflow: 'hidden',
-      minHeight,
-      // Pulls the whole hero up over the back button's row. That row is otherwise dead space —
-      // the chevron is a small, left-aligned button with nothing beside it (see hideTitle above) —
-      // while the hero's own content is horizontally centred, so the two never collide even
-      // though they now overlap vertically.
-      marginTop: '-28px',
-      padding: '0 1.5rem 0.5rem',
-      boxSizing: 'border-box',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      textAlign: 'center'
-    }}>
-      {backdrop}
-      {/* One lifted wrapper, rather than a position/z-index on every figure inside it. */}
-      <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
-        <ProfileAvatar size={56} />
-        <div className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '2px', color: 'var(--text-primary)', opacity: 0.85, margin: '0.85rem 0 0.8rem' }}>
-          {userPossessive} {label}
-        </div>
-        {children}
-      </div>
-    </div>
+    <CategoryHero backdrop={backdrop} label={label} minHeight={minHeight} userName={data.user?.name}>
+      {children}
+    </CategoryHero>
   );
 
   const CATEGORY_LABELS: Record<WealthCategory, string> = {
@@ -1114,84 +981,25 @@ export function Wealth() {
     retirement: 'Retirement',
   };
 
-  // A filter pill row. Pills are rendered only for classes the user actually holds, and the row
-  // disappears entirely below two — a lone "All" pill filters nothing. `flexible` lets the row span
-  // the available width instead of the fixed 68px-per-pill sizing, which overflows a narrow phone
-  // once there are five pills (Assets can have ALL + four classes).
+  // Wealth's pill rows keep their own tour selectors — AppTour queries .tour-wealth-tabs and
+  // .tour-wealth-tab-btn[data-view] by name, so they stay attached here rather than moving into the
+  // shared component where a second tree would also claim them.
   const renderFilterPills = <T extends string>(
     tabs: { v: T; label: string }[],
     active: T,
     onSelect: (v: T) => void,
     opts: { marginTop: string; flexible?: boolean }
-  ) => {
-    if (tabs.length < 2) return null;
-    const N = tabs.length;
-    const activeIdx = Math.max(0, tabs.findIndex(t => t.v === active));
-    const PAD = 4;
-    return (
-      <div className="tour-wealth-tabs" style={{
-        position: 'relative',
-        display: 'flex',
-        marginTop: opts.marginTop,
-        padding: `${PAD}px`,
-        // No backdrop-filter on the track or the thumb below: this row mounts fresh on every
-        // entry into a category screen, so its backdrop snapshot isn't ready for the first
-        // paint(s) and the control visibly flashed see-through before the blur applied. The
-        // --pill-* tokens carry the frost as a static veil instead, correct from frame one.
-        background: 'var(--pill-track-bg)',
-        borderRadius: '999px',
-        border: '1px solid var(--pill-track-border)',
-        ...(opts.flexible
-          ? { width: '100%', maxWidth: `${N * 68}px` }
-          : { width: `${N * 68}px` }),
-      }}>
-        <div style={{
-          position: 'absolute',
-          top: `${PAD}px`,
-          bottom: `${PAD}px`,
-          width: `calc((100% - ${PAD * 2}px) / ${N})`,
-          left: `calc(${PAD}px + ${activeIdx} * (100% - ${PAD * 2}px) / ${N})`,
-          borderRadius: '999px',
-          background: 'var(--pill-thumb-bg)',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.14)',
-          transition: 'left 0.38s cubic-bezier(0.34, 1.56, 0.64, 1)',
-          pointerEvents: 'none'
-        }} />
-        {tabs.map(({ v, label }) => {
-          const isActive = active === v;
-          return (
-            <button
-              key={v}
-              onClick={() => onSelect(v)}
-              className="tour-wealth-tab-btn"
-              data-view={v}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                position: 'relative',
-                zIndex: 1,
-                padding: '0.5rem 0',
-                border: 'none',
-                background: 'transparent',
-                color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                borderRadius: '999px',
-                cursor: 'pointer',
-                fontSize: '0.72rem',
-                fontWeight: isActive ? 700 : 500,
-                fontFamily: 'var(--font-mono)',
-                letterSpacing: '1px',
-                textTransform: 'uppercase',
-                transition: 'color 0.28s ease',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
-    );
-  };
+  ) => (
+    <FilterPills
+      tabs={tabs}
+      active={active}
+      onSelect={onSelect}
+      marginTop={opts.marginTop}
+      flexible={opts.flexible}
+      tourClass="tour-wealth-tabs"
+      buttonTourClass="tour-wealth-tab-btn"
+    />
+  );
 
   // The metric cycler, rendered at the trailing end of a single-class section header. Tapping the
   // label steps forward; the chevrons step either way, so a three-stop cycle never needs two taps
@@ -1240,42 +1048,13 @@ export function Wealth() {
     );
   };
 
-  // LABEL · count · rule — the heading over every list on this screen. One definition on purpose:
-  // the asset detail's "Recent Activity" heading used to hand-roll the same markup and had drifted a
-  // gap step tighter, so the count sat almost against its label and read as a different system.
-  // `null` drops the count entirely — for a heading over a list the user can't collapse or filter,
-  // where the number says nothing they can't see in the rows right below it.
+  // The heading over every list on this screen. The markup moved to TreeUi when Statements grew
+  // year groups and wanted the same header — this wrapper keeps the call sites below unchanged.
   const renderSectionHeading = (
     label: string,
     count: number | null,
-    opts: { trailing?: ReactNode; chevron?: ReactNode; onClick?: () => void; marginBottom?: string | number } = {}
-  ) => (
-    <div
-      // Tighter gap only when something trails the rule: label + count + rule + pill is a lot for a
-      // narrow phone, and this row is the one place here that can't wrap.
-      className={`flex align-center ${opts.trailing ? 'gap-2' : 'gap-3'}`}
-      style={{
-        cursor: opts.onClick ? 'pointer' : 'default',
-        userSelect: 'none',
-        marginBottom: opts.marginBottom ?? '0.25rem',
-      }}
-      onClick={opts.onClick}
-    >
-      <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px', whiteSpace: 'nowrap' }}>
-        {label}
-      </span>
-      {count !== null && (
-        <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
-          {count}
-        </span>
-      )}
-      {/* minWidth keeps the rule from collapsing to nothing when a long label and the cycler
-        share the row on a narrow phone — it shrinks, but stays a visible connector. */}
-      <div style={{ flex: 1, minWidth: '10px', height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
-      {opts.trailing}
-      {opts.chevron}
-    </div>
-  );
+    opts: { countNoun?: string; trailing?: ReactNode; chevron?: ReactNode; onClick?: () => void; marginBottom?: string | number } = {}
+  ) => <SectionHeading label={label} count={count} {...opts} />;
 
   // A collapsible, labelled group of rows. Collapsing is disabled when a filter has already
   // narrowed the list to this one class — there'd be nothing left on screen.
@@ -1294,7 +1073,12 @@ export function Wealth() {
     const isCollapsed = single ? false : collapsedSections.has(key);
     return (
       <div className={tourClass} style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
-        {renderSectionHeading(label, accounts.length, {
+        {/* No label once a filter has narrowed the screen to this one section: the pill directly
+            above already says "MF", and the header's job is then the count and the cycler. */}
+        {renderSectionHeading(single ? '' : label, accounts.length, {
+          // Every section on this screen counts accounts — the asset classes are accounts in the
+          // data model and the liquid ones are accounts in plain speech too.
+          countNoun: 'account',
           trailing,
           chevron: !single && (
             <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
@@ -1717,7 +1501,14 @@ export function Wealth() {
           lands the avatar and total on the door's hub (see COMPOSITION in WealthBackdrop): the drawing
           is concentric about its own centre, so both must be centred in the same box. It also spends
           the dead space that used to sit below the cards. */}
-          <div className="tour-wealth-summary" style={{ position: 'relative', overflow: 'hidden', minHeight: '400px', padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+              {/* Out of the tree entirely, back to the Dashboard this screen was opened from. The
+                  sub-views below have had a chevron here since they existed; the ROOT had none, so
+                  the one screen you always arrive at from somewhere else was the one with no way
+                  back except the bottom nav. Same control, same place, so it reads as one level up
+                  rather than a different kind of exit. The negative margin below is what lets the
+                  hero overlap this row, exactly as CategoryHero does for the sub-views. */}
+              {onExit && <SubviewHeader title="" onBack={onExit} hideTitle />}
+          <div className="tour-wealth-summary" style={{ position: 'relative', overflow: 'hidden', minHeight: '400px', marginTop: onExit ? '-28px' : undefined, padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
             <WealthBackdrop />
 
             {/* Every hero element is lifted above the backdrop; the sketch is the only thing at z 0. */}
@@ -1726,7 +1517,7 @@ export function Wealth() {
             </div>
 
             <div className="text-mono uppercase" style={{ position: 'relative', zIndex: 1, fontSize: '0.72rem', fontWeight: 700, letterSpacing: '2px', color: 'var(--text-primary)', opacity: 0.85, marginBottom: '0.75rem' }}>
-              {userPossessive} Wealth
+              {possessive} Wealth
             </div>
 
             <div className="text-serif" style={{ position: 'relative', zIndex: 1, fontSize: '2.75rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>

@@ -1,138 +1,16 @@
-// Decorative bas-relief backdrops for the three Wealth category screens.
-//
-// Same idiom as WealthBackdrop — inline SVG (crisp at any density, no network request, tones taken
-// from CSS custom properties so one drawing serves both themes), shaded relief rather than line art,
-// one light source at the top-left — but a DIFFERENT SUBJECT for each category. The tree screen's
-// vault door says "your wealth"; repeating it on the inner screens would say nothing about which
-// category you'd opened, so each gets its own engraving:
+// The three Wealth category engravings. The shared relief language — square viewBox, concentric
+// composition, lit/shadow edges, the legibility well — lives in relief.tsx; what's here is the
+// SUBJECT of each drawing, and each category gets its own:
 //
 //   Portfolio  → a sunburst medallion behind a candlestick colonnade with a rising trend ribbon.
 //   Assets     → a treasury facade: pediment, dentils, fluted colonnade, steps and coin stacks.
-//   Retirement → a laurel wreath around an hourglass, sand running from the upper bulb.
+//   Retirement → a shield around an hourglass, sand falling from the upper bulb into the lower.
 //
-// All three inherit WealthBackdrop's COMPOSITION contract, and it's load-bearing: the viewBox is
-// square, everything is concentric about its centre, and the drawing is scaled with 'meet'. Each
-// hero centres its content, so the drawing's centre lands on the content's centre at any width —
-// which is what puts the avatar, label and total inside the medallion / between the columns / inside
-// the wreath. Break the squareness or the centring and the content drifts off the motif.
-//
-// RELIEF, as in WealthBackdrop: filled bodies shaded by gradient, paired lit/shadow edge strokes
-// (light on the top-left of a form, shadow on its bottom-right), and feDropShadow on the members
-// that physically stand proud. Break the shared light direction and the whole thing flattens out.
+// The tree screen's vault door (WealthBackdrop) says "your wealth"; repeating it on the inner
+// screens would say nothing about which category you'd opened.
 import React from 'react';
-import type { ReactNode } from 'react';
-
-const VB = 400; // square: see COMPOSITION above
-const C = VB / 2; // 200 — the centre of the motif and of the hero content alike
-
-const f = (v: number) => v.toFixed(2);
-const polar = (r: number, a: number) => ({ x: C + r * Math.cos(a), y: C + r * Math.sin(a) });
-const deg = (a: number) => (a * 180) / Math.PI;
-
-// A full ring with a hole punched in it (drawn with fillRule="evenodd"). A moulding needs a body to
-// shade across its width — a stroked circle has no way to provide one.
-const ring = (rIn: number, rOut: number) =>
-  `M ${C - rOut} ${C} A ${rOut} ${rOut} 0 1 0 ${C + rOut} ${C} A ${rOut} ${rOut} 0 1 0 ${C - rOut} ${C} Z ` +
-  `M ${C - rIn} ${C} A ${rIn} ${rIn} 0 1 0 ${C + rIn} ${C} A ${rIn} ${rIn} 0 1 0 ${C - rIn} ${C} Z`;
-
-const arc = (r: number, a0: number, a1: number) => {
-  const p0 = polar(r, a0);
-  const p1 = polar(r, a1);
-  const large = Math.abs(a1 - a0) > Math.PI ? 1 : 0;
-  const sweep = a1 > a0 ? 1 : 0;
-  return `M ${f(p0.x)} ${f(p0.y)} A ${r} ${r} 0 ${large} ${sweep} ${f(p1.x)} ${f(p1.y)}`;
-};
-
-// A tapered radial limb: wide at rIn, narrowing to (near) a point at rOut. Used for sunburst rays.
-const spike = (rIn: number, rOut: number, a: number, halfIn: number, halfOut: number) => {
-  const p1 = polar(rIn, a - halfIn);
-  const p2 = polar(rOut, a - halfOut);
-  const p3 = polar(rOut, a + halfOut);
-  const p4 = polar(rIn, a + halfIn);
-  return `M ${f(p1.x)} ${f(p1.y)} L ${f(p2.x)} ${f(p2.y)} L ${f(p3.x)} ${f(p3.y)} L ${f(p4.x)} ${f(p4.y)} Z`;
-};
-
-// ── Shared defs ──────────────────────────────────────────────────────────────────────────────────
-// Ids are prefixed per drawing. Only one category is ever on screen at a time, but duplicate ids
-// across three mounted SVGs would be a silent trap the first time that changes.
-const ReliefDefs: React.FC<{ p: string; wellRx: number; wellRy: number }> = ({ p, wellRx, wellRy }) => (
-  <>
-    {/* Vertical shading for members lit from above: lintels, plates, plinths. */}
-    <linearGradient id={`${p}-stone-v`} x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stopColor="var(--relief-hi)" />
-      <stop offset="55%" stopColor="var(--relief-mid)" />
-      <stop offset="100%" stopColor="var(--relief-lo)" />
-    </linearGradient>
-
-    {/* Horizontal shading for round members lit from the left: columns, posts, candle bodies. */}
-    <linearGradient id={`${p}-stone-h`} x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stopColor="var(--relief-hi)" />
-      <stop offset="55%" stopColor="var(--relief-mid)" />
-      <stop offset="100%" stopColor="var(--relief-lo)" />
-    </linearGradient>
-
-    {/* Offset focal point, so a disc or a ring reads as domed/toroidal rather than flat. */}
-    <radialGradient id={`${p}-dome`} cx="38%" cy="34%" r="72%">
-      <stop offset="0%" stopColor="var(--relief-hi)" />
-      <stop offset="62%" stopColor="var(--relief-mid)" />
-      <stop offset="100%" stopColor="var(--relief-lo)" />
-    </radialGradient>
-
-    {/* Cast shadows. Two strengths: a long one for members standing well proud of the wall, a tight
-        one for small hardware sitting just off it. */}
-    <filter id={`${p}-cast`} x="-30%" y="-30%" width="180%" height="180%">
-      <feDropShadow dx="2.5" dy="3.5" stdDeviation="3" floodColor="var(--relief-shadow)" />
-    </filter>
-    <filter id={`${p}-cast-tight`} x="-50%" y="-50%" width="220%" height="220%">
-      <feDropShadow dx="1" dy="1.4" stdDeviation="1.1" floodColor="var(--relief-shadow)" />
-    </filter>
-
-    {/* Fades the relief out at the very bottom so it doesn't butt up hard against the rows below. */}
-    <linearGradient id={`${p}-fade`} x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stopColor="#fff" stopOpacity="1" />
-      <stop offset="80%" stopColor="#fff" stopOpacity="1" />
-      <stop offset="100%" stopColor="#fff" stopOpacity="0.12" />
-    </linearGradient>
-
-    {/* Legibility well. Black in a luminance mask means "hide", so a higher stopOpacity mutes more:
-        the centre keeps roughly a fifth of the relief — enough to still read as texture behind the
-        avatar and the total without competing with them — and ramps back to full strength at the
-        well's edge. Done in the mask rather than by weakening the tokens so the frame, columns and
-        wreath, none of which sit under text, stay at full contrast. The well is an ellipse because
-        these heroes are taller than they are busy: Portfolio stacks a total, a day change, a refresh
-        button, a timestamp and a pill row down the same axis. */}
-    <radialGradient id={`${p}-clear`} cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stopColor="#000" stopOpacity="0.82" />
-      <stop offset="42%" stopColor="#000" stopOpacity="0.7" />
-      <stop offset="74%" stopColor="#000" stopOpacity="0.3" />
-      <stop offset="100%" stopColor="#000" stopOpacity="0" />
-    </radialGradient>
-
-    <mask id={`${p}-mask`}>
-      <rect width={VB} height={VB} fill={`url(#${p}-fade)`} />
-      <ellipse cx={C} cy={C} rx={wellRx} ry={wellRy} fill={`url(#${p}-clear)`} />
-    </mask>
-  </>
-);
-
-const ReliefSvg: React.FC<{ p: string; wellRx: number; wellRy: number; children: ReactNode }> = ({
-  p, wellRx, wellRy, children,
-}) => (
-  <svg
-    viewBox={`0 0 ${VB} ${VB}`}
-    // 'meet', not 'slice': the whole drawing has to be visible, so it scales to fit the hero box and
-    // letterboxes rather than filling the box and cropping the motif away.
-    preserveAspectRatio="xMidYMid meet"
-    aria-hidden="true"
-    focusable="false"
-    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
-  >
-    <defs>
-      <ReliefDefs p={p} wellRx={wellRx} wellRy={wellRy} />
-    </defs>
-    <g mask={`url(#${p}-mask)`} strokeLinecap="round">{children}</g>
-  </svg>
-);
+import { ReliefSvg } from './relief';
+import { C, f, polar, ring, spike } from '../utils/reliefGeometry';
 
 // ── Portfolio: the bourse medallion ─────────────────────────────────────────────────────────────
 // A coin-rim medallion, a carved sunburst filling it, and a colonnade of candlesticks standing on a
@@ -391,49 +269,58 @@ export const AssetsBackdrop: React.FC = () => (
   </ReliefSvg>
 );
 
-// ── Retirement: the wreath and the hourglass ────────────────────────────────────────────────────
-// A laurel wreath, tied at the bottom and open at the top, around an hourglass whose sand has half
-// run through. Time and honoured service, which is what a provident fund is — and nothing here is
-// a circle of hardware or a row of columns, so it can't be mistaken for either of the other two.
+// ── Retirement: the shield and the hourglass ────────────────────────────────────────────────────
+// A shield around an hourglass with its sand running. Time and statutory protection, which is what a
+// provident fund is — and nothing here is a circle of hardware or a row of columns, so it can't be
+// mistaken for either of the other two.
+//
+// THE SHIELD IS THE LUCIDE `shield` OUTLINE, verbatim, because it is the same mark the app already
+// uses for an EPF account: ShieldUser on the account row (see transactionIcons) and ShieldCheck on
+// this category's own card. Redrawing it by hand would have produced a shield that is nearly the
+// icon and not quite, which is worse than either — the point of borrowing it is that the engraving
+// and the 18px glyph are recognisably one device.
+//
+// It replaces a laurel wreath. The wreath said "honoured service" and read well, but it said nothing
+// about protection, and it shared its vocabulary with nothing else in the app — where the shield is
+// already this category's mark everywhere the user has been. The rays that filled the wreath's
+// opening and the ribbon that tied its foot went with it: a wreath is open at the top and needs
+// something in the gap, a shield is closed and needs nothing.
 const RT = 'rtb';
-const RT_LEAF_OUT = 166;
-const RT_LEAF_IN = 146;
-const RT_STEM = 156;
-const RT_BOTTOM = Math.PI / 2; // wreath is tied at the bottom
-const RT_SPAN = 2.36; // sweep of each branch; the leftover at the top is the wreath's opening
-const RT_START = 0.16; // clear of the knot
 
-// Two rows of leaves per branch, the inner row offset by half a step so the rows interleave rather
-// than lining up into spokes.
-const RT_LEAVES = [-1, 1].flatMap(side =>
-  [
-    { r: RT_LEAF_OUT, n: 11, offset: 0 },
-    { r: RT_LEAF_IN, n: 10, offset: 0.5 },
-  ].flatMap(row =>
-    Array.from({ length: row.n }, (_, i) => {
-      const t = (i + row.offset) / 10;
-      const a = RT_BOTTOM + side * (RT_START + t * RT_SPAN);
-      const q = polar(row.r, a);
-      return {
-        ...q,
-        // Rotated to the branch's tangent, then tilted outward the way a laurel leaf sits.
-        rot: deg(a) + 90 - 26 * side,
-        rx: row.r === RT_LEAF_OUT ? 15 : 12.5,
-        ry: row.r === RT_LEAF_OUT ? 6.5 : 5.5,
-      };
-    })
-  )
-);
+// Lucide's `shield`, on its own 24-unit grid. Kept as the icon ships it so a future lucide update
+// can be diffed against this string rather than re-derived.
+const RT_SHIELD_D =
+  'M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 ' +
+  '6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z';
+// SCALED UNEVENLY, and that is the one deliberate liberty taken with the borrowed path.
+//
+// The icon is a 4:5 upright, and only viewBox y 0–400 is ever on screen while the hero box is wide
+// enough to show x −30…430. So a uniformly scaled shield hits the top and bottom of the frame long
+// before it reaches the sides: grown until it fills the height it still leaves 76 units of empty
+// margin either side, against 95 before. Stretching x by a fifth takes that to 46 and is what
+// actually fills the frame.
+//
+// The cost, stated so nobody has to rediscover it: a stroke inside this group renders 20% thicker on
+// the shield's vertical flanks than on its horizontal crest. At an 11-unit moulding that is 11
+// against 9.2, which does not read at this size — and it is a far smaller fault than the hole it
+// buys out. Should the hero ever get taller, drop RT_SHIELD_SX back toward RT_SHIELD_SY.
+const RT_SHIELD_SY = 19.2;
+const RT_SHIELD_SX = 23;
+// The icon's own centre is (12, 12).
+const RT_SHIELD_T =
+  `translate(${f(C - 12 * RT_SHIELD_SX)} ${f(C - 12 * RT_SHIELD_SY)}) scale(${RT_SHIELD_SX} ${RT_SHIELD_SY})`;
+/** A width or an offset given in FINAL viewBox units, expressed in the shield's own scaled space.
+ *  Everything inside that group is multiplied by the scale, so a raw 1.6 there would draw a 30-unit
+ *  slab. Divided by the SMALLER factor, so a stroke is never thinner than asked for. */
+const rtS = (v: number) => f(v / RT_SHIELD_SY);
 
-const RT_BRANCHES = [-1, 1].map(side => ({
-  stem: arc(RT_STEM, RT_BOTTOM + side * RT_START, RT_BOTTOM + side * (RT_START + RT_SPAN)),
-}));
-
-// Rays filling the wreath's opening — the light the whole thing is pointed at.
-const RT_RAYS = Array.from({ length: 7 }, (_, i) => {
-  const a = -Math.PI / 2 + (i - 3) * 0.135;
-  return spike(150, 186, a, 0.02, 0.005);
-});
+/** How much bigger the hourglass is than the geometry below describes it.
+ *
+ *  The paths are all written about C at their original size and then scaled as one group, rather
+ *  than each being re-authored — which keeps the bulb profile, the sand and the frame in the exact
+ *  proportions they were tuned in. It also widens the bulb faster than the avatar grows (the avatar
+ *  is a fixed 62 units), so MORE of the sand's funnel clears it than before. */
+const RT_GLASS_S = 1.18;
 
 const RT_PLATE_HALF = 58;
 const RT_PLATE_Y = 126; // ± from centre
@@ -451,67 +338,96 @@ const RT_LOWER_BULB =
   `C ${C + 40} ${C + 60} ${C + 14} ${C + 24} ${C + 4} ${C + 3} ` +
   `L ${C - 4} ${C + 3} ` +
   `C ${C - 14} ${C + 24} ${C - 40} ${C + 60} ${C - 42} ${C + 112} Z`;
-// What's left in the upper bulb: a flat surface, tapering to the neck.
+
+// ── The sand, and why it is drawn the way it is ─────────────────────────────────────────────────
+// IT USED TO BE INVISIBLE, and the cause is worth recording because it will catch the next drawing
+// too: the sand was filled with --relief-hi, which is a SHEEN token — white at 0.055 on the dark
+// theme — not a body colour. Damped on top of that by the legibility well over the middle of the
+// frame, it came out at about one percent of white and the hourglass read as empty. The dome
+// gradient is no better for this: all three of its stops are the same near-transparent sheen, which
+// is right for a form read through its EDGES and useless for one that has to read as a mass.
+//
+// SO THE SAND IS FILLED WITH --relief-line, which is the only token in the set that is a visible
+// tone against its own ground in BOTH themes — white at 0.20 on the dark one, slate at 0.16 on the
+// light. --relief-edge would have been brighter on dark and then invisible on light, where it is
+// near-white on a near-white ground; that inversion is the trap every choice here has to clear.
+//
+// THE TOP SURFACE IS A FUNNEL, not a flat line. A flat surface is what an hourglass that has STOPPED
+// looks like; one that is running has a conical depression drawn down toward the neck, and that cone
+// is the single strongest signal that the thing is in motion. The stream and the grains say the same
+// thing again in case the cone is missed at small sizes.
+//
+// THE SURFACE HAS TO SIT HIGH IN THE BULB, and that is forced rather than chosen. The avatar is an
+// opaque 62-unit disc on the same axis, occupying roughly y 105–167 — which is most of the upper
+// bulb — so a surface drawn at any comfortable "half full" height is simply hidden behind it. At
+// y C−100 the bulb's sidewall is ±40 units (solved off its own cubic), which is outside the avatar's
+// ±31, so the funnel's two outer rims show either side of the disc and only the bottom of the cone
+// is occluded. That is the whole trick: the parts of the funnel that carry the meaning are its
+// slopes, and those are the parts that clear the avatar.
 const RT_SAND_UPPER =
-  `M ${C - 20} ${C - 58} L ${C + 20} ${C - 58} ` +
-  `C ${C + 16} ${C - 34} ${C + 6} ${C - 16} ${C + 4} ${C - 3} ` +
+  `M ${C - 40} ${C - 100} ` +
+  `C ${C - 28} ${C - 84} ${C - 14} ${C - 78} ${C} ${C - 78} ` +
+  `C ${C + 14} ${C - 78} ${C + 28} ${C - 84} ${C + 40} ${C - 100} ` +
+  `C ${C + 38} ${C - 58} ${C + 13} ${C - 23} ${C + 4} ${C - 3} ` +
   `L ${C - 4} ${C - 3} ` +
-  `C ${C - 6} ${C - 16} ${C - 16} ${C - 34} ${C - 20} ${C - 58} Z`;
-// …and the heap it has fallen into.
+  `C ${C - 13} ${C - 23} ${C - 38} ${C - 58} ${C - 40} ${C - 100} Z`;
+// The stream, widening as it falls — a column that fell dead straight would read as a rule drawn
+// down the middle of the glass.
+const RT_SAND_STREAM =
+  `M ${C - 3.4} ${C - 2} L ${C + 3.4} ${C - 2} ` +
+  `L ${C + 5.6} ${C + 74} L ${C - 5.6} ${C + 74} Z`;
+// Grains off the column. Hand-placed, never randomised: a backdrop that reshuffled itself on every
+// render would flicker on any state change the hero makes.
+const RT_GRAINS = [
+  { x: C - 9, y: C + 16, r: 2.2, o: 0.75 },
+  { x: C + 8, y: C + 29, r: 1.8, o: 0.62 },
+  { x: C - 10, y: C + 43, r: 2.4, o: 0.66 },
+  { x: C + 10, y: C + 56, r: 1.7, o: 0.5 },
+  { x: C - 8, y: C + 67, r: 2, o: 0.42 },
+];
+// …and the cone it has fallen into, peaked where the stream lands. Smaller than the mass above it,
+// because the two have to add up: a full upper bulb over a deep heap is more sand than the glass
+// holds, and that reads as wrong even when nobody can say why.
 const RT_SAND_PILE =
-  `M ${C - 34} ${C + 112} C ${C - 26} ${C + 112} ${C - 14} ${C + 88} ${C} ${C + 80} ` +
-  `C ${C + 14} ${C + 88} ${C + 26} ${C + 112} ${C + 34} ${C + 112} Z`;
+  `M ${C - 30} ${C + 112} C ${C - 22} ${C + 112} ${C - 12} ${C + 94} ${C} ${C + 88} ` +
+  `C ${C + 12} ${C + 94} ${C + 22} ${C + 112} ${C + 30} ${C + 112} Z`;
 
 export const RetirementBackdrop: React.FC = () => (
-  <ReliefSvg p={RT} wellRx={132} wellRy={150}>
-    {/* ── Rays in the wreath's opening ── */}
-    {RT_RAYS.map((d, i) => (
-      <path key={`rt-ray-${i}`} d={d} fill={`url(#${RT}-dome)`} stroke="var(--relief-line)" strokeWidth="0.5" opacity="0.9" />
-    ))}
-
-    {/* ── Wreath: stems first, then the leaves standing proud of them ── */}
-    {RT_BRANCHES.map((b, i) => (
-      <g key={`rt-branch-${i}`}>
-        <path d={b.stem} fill="none" stroke="var(--relief-shadow)" strokeWidth="3.4" opacity="0.45" transform="translate(1.2 1.8)" />
-        <path d={b.stem} fill="none" stroke="var(--relief-edge)" strokeWidth="2.4" />
+  // A shallower well than the default, and the sand is the reason. The hourglass sits dead centre —
+  // it has to, the shield is symmetric about the same axis — so the default cut, which keeps under a
+  // fifth there, took the one part of the drawing that says the thing is running. The sand is a
+  // small, bright, isolated form rather than a field of texture, so it survives the shallower cut
+  // without crowding the figures the way a full-strength background would.
+  <ReliefSvg
+    p={RT}
+    wellRx={140}
+    wellRy={158}
+    well={[{ at: 0, hide: 0.55 }, { at: 42, hide: 0.45 }, { at: 74, hide: 0.2 }, { at: 100, hide: 0 }]}
+    // A later, shallower foot fade than the default. The shield's point now reaches y 392, and under
+    // the standard ramp (from 0.8, down to 0.12) it would render at about a tenth and read as cut
+    // off rather than tapered. It needs no help dissolving in any case — it is already a point.
+    fade={{ start: 0.9, floor: 0.32 }}
+  >
+    {/* ── The shield ── A moulding, not an outline: a shadow copy behind, the stone body, and a lit
+        rim on top, which is how every raised member in this file is built. The chased inner line is
+        the border a real escutcheon carries, and it is what stops a single thick stroke reading as a
+        cartoon outline. */}
+    <g transform={RT_SHIELD_T}>
+      <path d={RT_SHIELD_D} fill="none" stroke="var(--relief-shadow)" strokeWidth={rtS(12)} opacity="0.5" transform={`translate(${rtS(2.5)} ${rtS(3.5)})`} />
+      <path
+        d={RT_SHIELD_D} fill="none" stroke={`url(#${RT}-stone-v)`}
+        style={{ strokeOpacity: 'var(--relief-plate-fill)' }} strokeWidth={rtS(11)}
+      />
+      <path d={RT_SHIELD_D} fill="none" stroke="var(--relief-edge)" strokeWidth={rtS(1.7)} />
+      <g transform="translate(12 12) scale(0.9) translate(-12 -12)">
+        <path d={RT_SHIELD_D} fill="none" stroke="var(--relief-line)" strokeWidth={rtS(1.5)} opacity="0.5" />
       </g>
-    ))}
-    <g filter={`url(#${RT}-cast-tight)`}>
-      {RT_LEAVES.map((l, i) => (
-        <ellipse
-          key={`rt-leaf-${i}`}
-          cx={l.x}
-          cy={l.y}
-          rx={l.rx}
-          ry={l.ry}
-          fill={`url(#${RT}-dome)`}
-          stroke="var(--relief-line)"
-          strokeWidth="0.8"
-          transform={`rotate(${f(l.rot)} ${f(l.x)} ${f(l.y)})`}
-        />
-      ))}
     </g>
 
-    {/* ── Knot and ribbon tails where the branches are tied. Each tail widens as it falls away from
-           the knot and ends on a swallowtail notch, which is what reads as ribbon rather than as a
-           stray curl — an earlier pair curved back over themselves and read as neither. ── */}
-    <g filter={`url(#${RT}-cast-tight)`}>
-      {[-1, 1].map(side => (
-        <path
-          key={`rt-tail-${side}`}
-          d={
-            `M ${C + side * 3} ${C + 170} ` +
-            `C ${C + side * 20} ${C + 174} ${C + side * 34} ${C + 178} ${C + side * 50} ${C + 176} ` +
-            `L ${C + side * 44} ${C + 183} L ${C + side * 52} ${C + 189} ` +
-            `C ${C + side * 32} ${C + 190} ${C + side * 16} ${C + 184} ${C + side * 3} ${C + 178} Z`
-          }
-          fill={`url(#${RT}-dome)`}
-          stroke="var(--relief-line)"
-          strokeWidth="0.9"
-        />
-      ))}
-      <circle cx={C} cy={C + 172} r="9" fill={`url(#${RT}-dome)`} stroke="var(--relief-edge)" strokeWidth="1.1" />
-    </g>
+    {/* ── The hourglass ── One scale about the centre for the whole instrument, so the frame, the
+        glass and the sand keep the proportions they were tuned in. Stroke weights scale with it,
+        which is right: a bigger member carries a heavier moulding. */}
+    <g transform={`translate(${C} ${C}) scale(${RT_GLASS_S}) translate(${-C} ${-C})`}>
 
     {/* ── Hourglass frame: plates and side posts, standing well proud of the wall ── */}
     <g filter={`url(#${RT}-cast)`}>
@@ -539,12 +455,33 @@ export const RetirementBackdrop: React.FC = () => (
       </g>
     ))}
 
-    {/* ── Sand: still above, running, and heaped below ── */}
-    <path d={RT_SAND_UPPER} fill="var(--relief-hi)" stroke="var(--relief-line)" strokeWidth="0.7" opacity="0.85" />
-    <line x1={C - 20} y1={C - 58} x2={C + 20} y2={C - 58} stroke="var(--relief-edge)" strokeWidth="1.1" />
-    <line x1={C} y1={C - 1} x2={C} y2={C + 74} stroke="var(--relief-edge)" strokeWidth="1.3" opacity="0.55" strokeDasharray="3 5" />
+    {/* ── Sand: draining above, falling through, heaping below ── */}
     <g filter={`url(#${RT}-cast-tight)`}>
-      <path d={RT_SAND_PILE} fill="var(--relief-hi)" stroke="var(--relief-line)" strokeWidth="0.7" opacity="0.85" />
+      {/* Still in the top bulb, its surface drawn down into a funnel. The rim highlights are the two
+          short lines: a funnel's high points are its outer edges, so that is where the light is. */}
+      <path d={RT_SAND_UPPER} fill="var(--relief-line)" fillOpacity="0.85" stroke="var(--relief-edge)" strokeWidth="1.5" />
+      {[-1, 1].map(side => (
+        <line
+          key={`rt-rim-${side}`}
+          x1={C + side * 40} y1={C - 100} x2={C + side * 15} y2={C - 82}
+          stroke="var(--relief-edge)" strokeWidth="1.5" opacity="0.9"
+        />
+      ))}
+
+      {/* The fall itself. */}
+      <path d={RT_SAND_STREAM} fill="var(--relief-line)" fillOpacity="0.8" stroke="var(--relief-edge)" strokeWidth="1.3" />
+      {RT_GRAINS.map(g => (
+        <ellipse
+          key={`rt-grain-${g.x}-${g.y}`}
+          cx={g.x} cy={g.y} rx={g.r} ry={f(g.r * 1.35)}
+          fill="var(--relief-line)" stroke="var(--relief-edge)" strokeWidth="1" opacity={g.o}
+        />
+      ))}
+
+      {/* The cone it has fallen into, peaked where the stream lands. */}
+      <path d={RT_SAND_PILE} fill="var(--relief-line)" fillOpacity="0.85" stroke="var(--relief-edge)" strokeWidth="1.5" />
+    </g>
+
     </g>
   </ReliefSvg>
 );

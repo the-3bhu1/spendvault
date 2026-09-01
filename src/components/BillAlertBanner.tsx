@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { format, addMonths } from 'date-fns';
+import { format } from 'date-fns';
 import { BellRing, X } from 'lucide-react';
 import { useFinance } from '../FinanceContext';
-import { calculateTotalSpendPerCycle, getLatestBilledCycle } from '../utils';
+import { getActiveCardDues } from '../services/CardDuesService';
 
 interface BillAlertBannerProps {
   onNavigateToBills: () => void;
@@ -37,22 +37,12 @@ export default function BillAlertBanner({ onNavigateToBills }: BillAlertBannerPr
     .map(bill => ({ name: bill.name, daysLeft: getDaysLeft(bill.nextDueDate) }))
     .filter(b => b.daysLeft <= URGENCY_DAYS);
 
-  // CC bills
-  const todayDate = new Date();
-  const ccAlerts = data.accounts
-    .filter(acc => acc.type === 'credit_card' && acc.dueDay)
-    .map(acc => {
-      let dueDate = new Date(todayDate.getFullYear(), todayDate.getMonth(), acc.dueDay!);
-      if (dueDate < todayDate) dueDate = addMonths(dueDate, 1);
-      const statementDay = acc.statementDay || 1;
-      const lastCycle = getLatestBilledCycle(statementDay);
-      const { netPayable } = calculateTotalSpendPerCycle(data.transactions, acc.id, lastCycle, statementDay, acc.statementRounding);
-      if (netPayable <= 0) return null;
-      const daysLeft = getDaysLeft(format(dueDate, 'yyyy-MM-dd'));
-      if (daysLeft > URGENCY_DAYS) return null;
-      return { name: `${acc.name} Payment`, daysLeft };
-    })
-    .filter(Boolean) as { name: string; daysLeft: number }[];
+  // CC bills. The statement figure and the due date both come from CardDuesService, so this banner
+  // can't warn about an amount the Dashboard and Accounts disagree with — which it used to, on any
+  // card that had redeemed its own points.
+  const ccAlerts = getActiveCardDues(data.accounts, data.transactions)
+    .filter(d => d.daysToDue !== undefined && d.billed > 0 && d.daysToDue <= URGENCY_DAYS)
+    .map(d => ({ name: `${d.account.name} Payment`, daysLeft: d.daysToDue! }));
 
   const allAlerts = [...manualAlerts, ...ccAlerts];
   const overdueCount = allAlerts.filter(a => a.daysLeft < 0).length;

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, InvestmentKind } from '../types';
-import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource } from '../utils';
+import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, cardEarnsCashback, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource } from '../utils';
 import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X, Ticket } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
@@ -1827,7 +1827,11 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
 
         {(() => {
           const activeAcc = data.accounts.find(a => a.id === newTx.accountId);
-          const isCard = activeAcc?.type === 'credit_card' || activeAcc?.type === 'debit_card';
+          // A card that does not pay cashback has no business showing a Cashback Earned panel, let
+          // alone a mode picker whose only real option reads "Default (0%)". The switch is off on the
+          // account, so this block is not a thing the user can fill in — it is a thing they have to
+          // scroll past on every spend.
+          const isCard = cardEarnsCashback(activeAcc);
           const isBank = activeAcc?.type === 'bank_account';
           const isEWallet = activeAcc?.type === 'e_wallet';
           const showInstantUI = isBank || isEWallet;

@@ -1,9 +1,8 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { Home, Wallet, ReceiptText, Gift, Users, Sparkles, LayoutGrid, ChevronRight, Calendar, HandCoins, LogOut, TrendingUpDown, MessageSquare, X } from 'lucide-react';
+import { Home, Wallet, ReceiptText, Users, Sparkles, LayoutGrid, ChevronRight, Calendar, HandCoins, LogOut, MessageSquare, X } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import Accounts from './components/Accounts';
 import Transactions from './components/Transactions';
-import Cashback from './components/Cashback';
 import Settings from './components/Settings';
 import Splits from './components/Splits';
 import SplashScreen from './components/SplashScreen';
@@ -13,6 +12,7 @@ import ProfileAvatar from './components/ProfileAvatar';
 import UpcomingBills from './components/UpcomingBills';
 import Debts from './components/Debts';
 import { Wealth } from './components/Wealth';
+import CreditCards from './components/CreditCards';
 import AskVault from './components/AskVault';
 
 import { useFinance } from './FinanceContext';
@@ -26,13 +26,15 @@ import SmsReader from './services/SmsService';
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 
-export type Tab = 'dashboard' | 'accounts' | 'transactions' | 'cashback' | 'insights' | 'settings' | 'splits' | 'bills' | 'debts' | 'wealth';
+export type Tab = 'dashboard' | 'accounts' | 'transactions' | 'insights' | 'settings' | 'splits' | 'bills' | 'debts' | 'wealth' | 'cards';
 
 function App() {
   const { data, pendingTransfer, addToSmsQueue, isAuthenticated, setAuthenticated } = useFinance();
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [showSplash, setShowSplash] = useState(true);
-  const [selectedAccountForStatement, setSelectedAccountForStatement] = useState<Account | null>(null);
+  // The account AND the cycle to open it at: a Statements row names a specific closed month, and
+  // carrying only the account would land every one of them on today's cycle instead.
+  const [selectedAccountForStatement, setSelectedAccountForStatement] = useState<{ account: Account; cycle?: string } | null>(null);
   const [isHubOpen, setIsHubOpen] = useState(false);
   const [isAskVaultOpen, setIsAskVaultOpen] = useState(false);
   const mainTabs: Tab[] = ['dashboard', 'accounts', 'transactions', 'settings'];
@@ -48,8 +50,12 @@ function App() {
   const autoLogSmsRef = useRef(data.user?.autoLogSms);
   autoLogSmsRef.current = data.user?.autoLogSms;
 
-  // Define which tabs should reset to top vs resume
-  const resettingTabs = ['dashboard', 'insights', 'wealth', 'cashback', 'splits', 'bills', 'debts'];
+  // Define which tabs should reset to top vs resume.
+  // 'cards' replaces the retired 'cashback' here, and it belongs in this list for the same reason
+  // 'wealth' does: a tree unmounts on tab change, so it comes back at its root with its own scroll
+  // memory cleared, and its mount effect scrolls to the top itself. Saving a position this side could
+  // only ever be overridden by that — a passive child effect runs after this layout effect.
+  const resettingTabs = ['dashboard', 'insights', 'wealth', 'cards', 'splits', 'bills', 'debts'];
 
   // Restore scroll position synchronously, before the browser paints the new
   // tab. useLayoutEffect runs after the DOM updates (display toggled to block)
@@ -292,9 +298,12 @@ function App() {
     if (activeTab === 'splits' && !featureTours.splits) return 'splits';
     if (activeTab === 'debts' && !featureTours.debts) return 'debts';
     if (activeTab === 'bills' && !featureTours.bills) return 'bills';
-    if (activeTab === 'cashback' && !featureTours.cashback) return 'cashback';
     if (activeTab === 'insights' && !featureTours.insights) return 'insights';
     if (activeTab === 'wealth' && !featureTours.wealth && !featureTours.portfolio) return 'wealth';
+    // Both of these now open from a dashboard plaque rather than from the hub, which changes nothing
+    // here: the gate has always been the TAB, and the plaque sets the same tab the hub entry did.
+    // 'cards' is new, and it absorbed what the retired cashback tour taught — see AppTour.
+    if (activeTab === 'cards' && !featureTours.cards) return 'cards';
 
     return null;
   })();
@@ -386,46 +395,10 @@ function App() {
                 <ChevronRight size={18} className="text-muted" />
               </div>
 
-              {data.accounts.some(acc => 
-                acc.type === 'credit_card' && 
-                (acc.isCashbackEnabled === true || (acc.isCashbackEnabled === undefined && (acc.defaultCashbackRate !== undefined || (acc.cashbackRates && acc.cashbackRates.length > 0))))
-              ) && (
-                <div
-                  className="card flex align-center gap-4 clickable"
-                  onClick={() => { setActiveTab('cashback'); setIsHubOpen(false); }}
-                  style={{ padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}
-                >
-                  <div className="flex-center" style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'linear-gradient(135deg, #10b981, #3b82f6)', color: 'white', flexShrink: 0 }}>
-                    <Gift size={22} />
-                  </div>
-                  <div className="flex-col flex-1">
-                    <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Rewards</span>
-                    <span className="text-xs text-muted">Cashback & Reward Points</span>
-                  </div>
-                  <ChevronRight size={18} className="text-muted" />
-                </div>
-              )}
-
-              {/* Wealth now covers liquid Assets too, not just investments, so the entry has to
-                  appear for anyone holding anything at all. Credit cards are the sole exclusion —
-                  they're a liability and contribute no category. */}
-              {data.accounts.some(acc => !acc.archived && acc.type !== 'credit_card') && (
-                <div
-                  className="card flex align-center gap-4 clickable"
-                  onClick={() => { setActiveTab('wealth'); setIsHubOpen(false); }}
-                  style={{ padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)' }}
-                >
-                  <div className="flex-center" style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'linear-gradient(135deg, #06b6d4, #10b981)', color: 'white', flexShrink: 0 }}>
-                    <TrendingUpDown size={22} />
-                  </div>
-                  <div className="flex-col flex-1">
-                    <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Wealth</span>
-                    <span className="text-xs text-muted">Portfolio, Assets & Retirement</span>
-                  </div>
-                  <ChevronRight size={18} className="text-muted" />
-                </div>
-              )}
-
+              {/* Rewards and Wealth used to sit here. Both now have a door of their own on the
+                  dashboard — Rewards as a category inside the Cards tree, Wealth as its own plaque —
+                  and an entry in two places is an entry that will disagree with itself. What is left
+                  is what the hub is for: the features with no tab and no plaque. */}
               <div
                 className="card flex align-center gap-4 clickable"
                 onClick={() => { setActiveTab('insights'); setIsHubOpen(false); }}
@@ -448,7 +421,7 @@ function App() {
       <main className="container flex-col gap-8 main-content" style={{ marginTop: 0 }}>
         {/* Persistent Tabs (preserve scroll) */}
         <div className="fade-in" style={{ display: activeTab === 'accounts' ? 'block' : 'none' }}>
-          <Accounts onViewStatement={(acc) => setSelectedAccountForStatement(acc)} />
+          <Accounts onViewStatement={(acc) => setSelectedAccountForStatement({ account: acc })} />
         </div>
         
         <div className="fade-in" style={{ display: activeTab === 'transactions' ? 'block' : 'none' }}>
@@ -458,12 +431,15 @@ function App() {
         {/* Dynamic/Resetting Tabs (unmount on change to reset scroll) */}
         {activeTab === 'dashboard' && (
           <div className="fade-in">
-            <Dashboard onViewStatement={(acc) => setSelectedAccountForStatement(acc)} />
+            <Dashboard
+              onOpenCards={() => setActiveTab('cards')}
+              onOpenWealth={() => setActiveTab('wealth')}
+            />
           </div>
         )}
 
-        {activeTab === 'cashback' && <div className="fade-in"><Cashback /></div>}
-        {activeTab === 'wealth' && <div className="fade-in" style={{ height: '100%' }}><Wealth /></div>}
+        {activeTab === 'wealth' && <div className="fade-in" style={{ height: '100%' }}><Wealth onExit={() => setActiveTab('dashboard')} /></div>}
+        {activeTab === 'cards' && <div className="fade-in" style={{ height: '100%' }}><CreditCards onExit={() => setActiveTab('dashboard')} onViewStatement={(acc, cycle) => setSelectedAccountForStatement({ account: acc, cycle })} /></div>}
         {activeTab === 'insights' && <div className="fade-in"><Insights /></div>}
         {activeTab === 'settings' && <div className="fade-in"><Settings /></div>}
         {activeTab === 'splits' && <div className="fade-in"><Splits /></div>}
@@ -472,7 +448,7 @@ function App() {
       </main>
 
       {selectedAccountForStatement && (
-        <AccountStatement account={selectedAccountForStatement} transactions={data.transactions} onClose={() => setSelectedAccountForStatement(null)} />
+        <AccountStatement account={selectedAccountForStatement.account} initialCycle={selectedAccountForStatement.cycle} transactions={data.transactions} onClose={() => setSelectedAccountForStatement(null)} />
       )}
 
       {isAskVaultOpen && (

@@ -1,28 +1,44 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { format, parseISO, differenceInCalendarMonths } from 'date-fns';
-import { CreditCard, Calendar, ChevronLeft, ArrowDown, ArrowUp, RotateCcw, Undo2, X } from 'lucide-react';
+import { useLayoutEffect, useRef, useState } from 'react';
+import { format, parseISO } from 'date-fns';
+import { CreditCard, Calendar, ChevronLeft } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
-import { getCategoryIcon } from './transactionIcons';
 import RollingNumber from './RollingNumber';
 import {
   getBillingCycleForDate, getCardGradients, formatBillingCycleRange, affectsRupeeBalance, resolveCardIssuer,
-  getAppliedBillingCycle, getNaturalBillingCycle, shiftBillingCycle, isNearStatementCut,
+  getAppliedBillingCycle, formatCurrency,
 } from '../utils';
-import { hapticTap } from '../utils/haptics';
+import { useCycleMove } from '../hooks/useCycleMove';
+import { CycleLedgerRow, CycleMoveSheet, CycleMoveToast } from './CycleMove';
 import { CardSurface } from './CardSurface';
 import { CardChip } from './CardChip';
 import { CardBrandLogo } from './CardBrandLogo';
 import type { Account, Transaction } from '../types';
 import { CardNetworkLogo } from './CardNetworkLogo';
 import { useFinance } from '../FinanceContext';
+import { getCardCycleFigures, getCardDues, cycleStatus, isCycleOverdue, CYCLE_STATUS_LABEL } from '../services/CardDuesService';
+import { useLongPress } from '../hooks/useLongPress';
+import { StatementAdjustSheet } from './StatementAdjust';
 
 interface AccountStatementProps {
   account: Account;
   transactions: Transaction[];
   onClose: () => void;
+  // Which cycle to land on. Omitted means the one still running, which is what every entry point
+  // wanted until the Statements list started opening this screen from a row that names a specific
+  // closed month — that row has to arrive at the month it shows, not at today's.
+  initialCycle?: string;
 }
 
-export default function AccountStatement({ account, transactions, onClose }: AccountStatementProps) {
+/** Matches the Statements list's icon colours, so the same state reads the same on both screens. */
+const STATUS_TONE: Record<string, string> = {
+  overdue: 'var(--danger)',
+  overpaid: 'var(--success)',
+  settled: 'var(--success)',
+  partial: 'var(--accent)',
+  unpaid: 'var(--text-secondary)',
+};
+
+export default function AccountStatement({ account, transactions, onClose, initialCycle }: AccountStatementProps) {
   const context = useFinance();
   const allAccounts = context ? [...context.data.accounts].sort((a, b) => a.id.localeCompare(b.id)) : [];
   const accountIndex = allAccounts.findIndex(acc => acc.id === account.id);
@@ -45,31 +61,19 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
     };
     requestAnimationFrame(step);
   };
-  const formatCredCurrency = (amount: number, font = 'serif') => {
-    const parts = Math.abs(amount).toLocaleString('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-    }).split('.');
-
-    return (
-      <span style={{ fontFamily: font, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-        {amount < 0 ? '-' : ''}{parts[0]}<span style={{ fontSize: '0.85em', opacity: 0.9 }}>.{parts[1]}</span>
-      </span>
-    );
-  };
-
-  const acc = account;
+  // The LIVE account, not the prop. The prop is a snapshot taken when this screen was opened, so a
+  // statement figure corrected below would be written to the store and then not appear here.
+  const acc = context?.data.accounts.find(a => a.id === account.id) ?? account;
   const statementDay = acc.statementDay || 1;
   const currentCycle = getBillingCycleForDate(format(new Date(), 'yyyy-MM-dd'), statementDay);
   // Reads the manual override for debits as well as payments — see getAppliedBillingCycle. The
   // card's outstanding balance (calculateCycleBalanceForCycle) and the bill reminder
-  // (calculateTotalSpendPerCycle) go through the same helper, so a charge moved here moves
-  // everywhere at once rather than leaving this screen disagreeing with the card it belongs to.
+  // (CardDuesService) go through the same helper, so a charge moved here moves everywhere at once
+  // rather than leaving this screen disagreeing with the card it belongs to.
   const getTransactionCycle = (tx: Transaction) => getAppliedBillingCycle(tx, statementDay);
 
   // Declared up here rather than beside the other view state below: cycleOptions reads it.
-  const [selectedCycle, setSelectedCycle] = useState(currentCycle);
+  const [selectedCycle, setSelectedCycle] = useState(initialCycle ?? currentCycle);
   // This is only ever opened for credit_card accounts (see Accounts.tsx's onViewStatement gating), so
   // no CATEGORY is excluded from the due calculation — a prior version dropped
   // 'transfer'/'ncmc travel recharge'/'mutual funds' (borrowed from a spend-analytics pattern meant for
@@ -114,111 +118,46 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
   const selectedDate = parseISO(`${selectedCycle}-01`);
   const selectedMonthName = format(selectedDate, 'MMMM');
 
-  // ---- Long-press a charge to move it between cycles ------------------------------------------
-  //
-  // Long-press, not swipe. Swipe-right on a transaction row already means DELETE everywhere else
-  // in the app (Transactions.tsx, and the tour teaches it), and borrowing a destructive gesture
-  // for a reversible one is the worst trade available. Long-press's other meaning — drag to
-  // reorder — doesn't exist on this screen, so there's nothing here to confuse it with.
-  //
-  // Movable: purchases, refunds, reversals — anything whose cycle depends on when the bank got
-  // round to POSTING it. Two categories are excluded, and neither is long-pressable nor tagged,
-  // because for both the cycle is decided rather than observed:
-  //
-  // - CC Payment: you choose the statement it reduces when you log it ("Apply Payment To"). The log
-  //   form also re-derives the field on every save, so a move here would be overwritten anyway.
-  // - Cashback: generated to the card's own policy — same cycle or next, per cashbackCreditCycle —
-  //   and Cashback.tsx dates the credit off that rule. A bank that pays in the following cycle pays
-  //   in the following cycle; it doesn't slip to a third one the way a merchant's batch can.
-  const FIXED_CYCLE_CATEGORIES = new Set(['cc payment', 'cashback']);
-  const canMoveCycle = (tx: Transaction) =>
-    !FIXED_CYCLE_CATEGORIES.has((tx.category || '').toLowerCase());
-
-  const LONG_PRESS_MS = 450;
-  const PRESS_CANCEL_PX = 10;
-  const pressTimer = useRef<number | null>(null);
-  const pressOrigin = useRef<{ x: number; y: number } | null>(null);
-  const undoTimer = useRef<number | null>(null);
-  const [moveTarget, setMoveTarget] = useState<Transaction | null>(null);
-  const [undoState, setUndoState] = useState<{ tx: Transaction; message: string } | null>(null);
-  const updateTransaction = context?.updateTransaction;
-
-  const cancelPress = () => {
-    if (pressTimer.current !== null) {
-      clearTimeout(pressTimer.current);
-      pressTimer.current = null;
-    }
-    pressOrigin.current = null;
-  };
-
-  const startPress = (tx: Transaction, x: number, y: number) => {
-    if (!canMoveCycle(tx) || !updateTransaction) return;
-    cancelPress();
-    pressOrigin.current = { x, y };
-    pressTimer.current = window.setTimeout(() => {
-      pressTimer.current = null;
-      hapticTap();
-      setMoveTarget(tx);
-    }, LONG_PRESS_MS);
-  };
-
-  // A press that turns into a scroll is a scroll. The rows sit in a scrollable viewport once the
-  // list is expanded, and a finger flicking it starts out identical to a press being held.
-  const trackPress = (x: number, y: number) => {
-    if (!pressOrigin.current) return;
-    if (Math.hypot(x - pressOrigin.current.x, y - pressOrigin.current.y) > PRESS_CANCEL_PX) cancelPress();
-  };
-
-  useEffect(() => () => {
-    if (pressTimer.current !== null) clearTimeout(pressTimer.current);
-    if (undoTimer.current !== null) clearTimeout(undoTimer.current);
-  }, []);
-
-  // `target` of undefined clears the override and hands the charge back to its own date. Callers
-  // only ever pass the natural cycle's neighbours — see the sheet below for why that's clamped.
-  const applyCycleMove = (tx: Transaction, target: string | undefined) => {
-    if (!updateTransaction) return;
-    // cycleMovedManually is what tells the log form this cycle was chosen by a person and must
-    // survive a later save. Without it the form clears the field — which is correct for the stamps
-    // an old build left on card credits, and would silently undo this move.
-    updateTransaction({
-      ...tx,
-      appliedBillingCycleYearMonth: target,
-      cycleMovedManually: target ? true : undefined,
-    });
-    setMoveTarget(null);
-    // The row vanishing off this statement IS the confirmation the move worked, which only reads
-    // as success rather than loss if it comes with a way back.
-    if (undoTimer.current !== null) clearTimeout(undoTimer.current);
-    setUndoState({
-      tx,
-      message: target
-        ? `Moved to ${format(parseISO(`${target}-01`), 'MMMM')}`
-        : 'Reset to transaction date',
-    });
-    undoTimer.current = window.setTimeout(() => setUndoState(null), 6000);
-  };
-
-  const undoCycleMove = () => {
-    if (!undoState || !updateTransaction) return;
-    updateTransaction(undoState.tx);
-    if (undoTimer.current !== null) clearTimeout(undoTimer.current);
-    setUndoState(null);
-  };
+  // Long-press a charge to move it between cycles. The rules, the timers and the writes all live
+  // in useCycleMove, because Level 3 of the Cards tree offers the same gesture over the same field —
+  // see the note at the top of that file.
+  const { moveTarget, closeMove, undoState, applyCycleMove, undoCycleMove, press } = useCycleMove();
 
   const cycleTxs = relevantAccountTransactions
     .filter(t => getTransactionCycle(t) === selectedCycle)
     .sort((a, b) => b.date.localeCompare(a.date));
 
-  const totalSpends = cycleTxs.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0);
-  const totalPayments = cycleTxs.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
-  const rawNetAmount = totalSpends - totalPayments;
-  let netAmount = rawNetAmount;
-  const rounding = acc.statementRounding || 'none';
+  // Derived by the service, not re-summed here. This screen and the Statements list are one tap
+  // apart and must not be able to disagree about the same cycle — and the arithmetic is no longer
+  // "debits minus credits": cashback and refunds are netted INTO the statement the way a bank nets
+  // them, while payments are recorded against it. One place decides which credit is which.
+  const figures = getCardCycleFigures(acc, transactions, selectedCycle);
+  // WHAT THE CYCLE BILLED, not what is left owing on it. The headline used to be the net of
+  // payments, which meant a statement you had already cleared showed ₹0.00 directly above the list
+  // of the very charges that made it up — the screen contradicting its own ledger, and no way to
+  // find out what a settled month had cost you. What is still owed is the line underneath.
+  const chargedAmount = figures.charged;
+  const stillDue = figures.due;
+  // The same word the Statements row's icon means, off the same ladder — the two screens are one tap
+  // apart and used to disagree, this one saying "Paid in full" under a row drawn with a red triangle.
+  const status = cycleStatus(
+    figures,
+    isCycleOverdue(getCardDues(acc, transactions), selectedCycle, figures.due)
+  );
 
-  if (rounding === 'round') netAmount = Math.round(rawNetAmount);
-  else if (rounding === 'floor') netAmount = Math.floor(rawNetAmount);
-  else if (rounding === 'ceil') netAmount = Math.ceil(rawNetAmount);
+  // Hold the figure to correct it by hand — the same gesture the ledger rows below use to move a
+  // charge.
+  const [adjusting, setAdjusting] = useState(false);
+  const adjustPress = useLongPress(() => setAdjusting(true));
+  const applyAdjustment = (value: number | undefined) => {
+    const next = { ...(acc.statementAdjustments || {}) };
+    if (value === undefined) delete next[selectedCycle];
+    else next[selectedCycle] = value;
+    // Dropped entirely when the last entry goes, so an account that has been corrected and then
+    // un-corrected serialises identically to one that never was.
+    context.updateAccount({ ...acc, statementAdjustments: Object.keys(next).length ? next : undefined });
+    setAdjusting(false);
+  };
 
   /* Layout effect, not a plain effect: the "View all" button renders only when this says the
      list is clipped, so the measurement has to settle BEFORE paint or the button pops in a
@@ -457,18 +396,51 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
           flexDirection: 'column',
         }}>
           <div className="flex-col align-center" style={{ flexShrink: 0 }}>
-            <span className="text-mono text-xs text-muted font-bold uppercase" style={{ opacity: 0.5, marginBottom: '0.5rem' }}>Statement Amount</span>
+            <span className="text-mono text-xs text-muted font-bold uppercase" style={{ opacity: 0.5, marginBottom: '0.5rem' }}>
+              Statement Amount
+              {/* Said out loud, always. A hand-entered figure that looks exactly like a derived one
+                  is the only outcome here worse than being a rupee out. */}
+              {figures.adjusted && <span style={{ color: 'var(--warning)', marginLeft: '0.5rem' }}>· Adjusted</span>}
+            </span>
             <div
               className="text-serif"
+              {...adjustPress}
               style={{
                 fontSize: '1rem',
                 lineHeight: 1,
+                cursor: 'pointer',
+                WebkitTouchCallout: 'none',
+                WebkitUserSelect: 'none',
+                userSelect: 'none',
                 transition: 'transform 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
                 transform: showAllTransactions ? 'scale(0.85)' : 'scale(1)'
               }}
             >
-              <RollingNumber value={netAmount} fontSize="2.5rem" />
+              <RollingNumber value={chargedAmount} fontSize="2.5rem" />
             </div>
+            {/* How the figure above was arrived at, when it is not simply the month's purchases.
+                A bank prints this as a summary block; here it is one line, because the only part
+                that is ever surprising is that the headline is smaller than what you spent. */}
+            {figures.credits > 0 && (
+              <span
+                className="text-mono text-xs uppercase"
+                style={{ marginTop: '0.5rem', letterSpacing: '0.5px', color: 'var(--text-secondary)', opacity: 0.85 }}
+              >
+                {formatCurrency(figures.spend)} spent − {formatCurrency(figures.credits)} credited
+              </span>
+            )}
+            {status !== 'empty' && (
+              <span
+                className="text-mono text-xs font-bold uppercase"
+                style={{ marginTop: '0.4rem', letterSpacing: '0.5px', color: STATUS_TONE[status] }}
+              >
+                {CYCLE_STATUS_LABEL[status]}
+                {/* The remainder rides with the word rather than replacing it. This screen is the
+                    record, and "Overdue" without the figure sends you back to the ledger to add up
+                    what is left. */}
+                {stillDue > 0 && ` · ${formatCurrency(stillDue)} still due`}
+              </span>
+            )}
           </div>
 
           {cycleTxs.length > 0 && (
@@ -494,104 +466,16 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
                   <p className="text-center text-muted" style={{ opacity: 0.5 }}>no transactions recorded yet.</p>
                 </div>
               ) : (
-                cycleTxs.map((tx, idx) => {
-                  const naturalCycle = getNaturalBillingCycle(tx, statementDay);
-                  // Already moved by hand: say where it came from, so a 15 Aug row sitting among
-                  // September's dates reads as deliberate rather than as a sorting bug.
-                  //
-                  // Both tags track the gesture exactly: a row that can't be long-pressed must not
-                  // be marked, or the mark points at a control that isn't there. A CC payment
-                  // sitting outside its date's cycle is not a correction needing explanation — it's
-                  // the normal result of "Apply Payment To", chosen when the payment was logged, so
-                  // tagging it told the person who set it something they already knew.
-                  const isMoved = canMoveCycle(tx) && getTransactionCycle(tx) !== naturalCycle;
-                  // Near enough to this cycle's cut that the bank may post it after the statement
-                  // generates. Doubles as the affordance — an unmarked long-press is undiscoverable.
-                  const nearCut = canMoveCycle(tx) && !isMoved
-                    && naturalCycle === selectedCycle
-                    && isNearStatementCut(tx.date, statementDay);
-                  return (
-                  <div
+                cycleTxs.map((tx, idx) => (
+                  <CycleLedgerRow
                     key={tx.id}
-                    className="flex justify-between align-center fade-in"
-                    style={{
-                      borderBottom: '1px solid var(--border-color)',
-                      opacity: 0.9,
-                      padding: '0.85rem 0',
-                      animationDelay: `${idx * 0.05}s`,
-                      // Android pops text-selection handles on a long press otherwise, on top of
-                      // the sheet.
-                      userSelect: 'none',
-                      WebkitUserSelect: 'none',
-                      WebkitTouchCallout: 'none',
-                    }}
-                    onContextMenu={e => e.preventDefault()}
-                    onTouchStart={e => startPress(tx, e.touches[0].clientX, e.touches[0].clientY)}
-                    onTouchMove={e => trackPress(e.touches[0].clientX, e.touches[0].clientY)}
-                    onTouchEnd={cancelPress}
-                    onTouchCancel={cancelPress}
-                    onMouseDown={e => startPress(tx, e.clientX, e.clientY)}
-                    onMouseMove={e => trackPress(e.clientX, e.clientY)}
-                    onMouseUp={cancelPress}
-                    onMouseLeave={cancelPress}
-                  >
-                    <div className="flex align-center" style={{ gap: '0.75rem', flex: 1, minWidth: 0 }}>
-                      <div style={{
-                        width: '38px',
-                        height: '38px',
-                        borderRadius: '10px',
-                        background: 'var(--bg-hover)',
-                        border: '1px solid var(--border-color)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: 'var(--text-primary)',
-                        flexShrink: 0,
-                      }}>
-                        {getCategoryIcon(tx.category, 20)}
-                      </div>
-                      <div className="flex-col" style={{ minWidth: 0 }}>
-                        <span style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{tx.description}</span>
-                        <div className="flex align-center" style={{ gap: '0.4rem', minWidth: 0 }}>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{tx.category.toLowerCase()}</span>
-                          {(isMoved || nearCut) && (
-                            <span
-                              className="text-mono uppercase"
-                              style={{
-                                fontSize: '0.58rem',
-                                letterSpacing: '0.4px',
-                                whiteSpace: 'nowrap',
-                                flexShrink: 0,
-                                padding: '0.08rem 0.35rem',
-                                borderRadius: '4px',
-                                color: isMoved ? 'var(--accent)' : 'var(--text-secondary)',
-                                background: 'var(--bg-hover)',
-                                // Dashed while it's only a possibility; solid once you've decided.
-                                border: isMoved
-                                  ? '1px solid var(--accent)'
-                                  : '1px dashed var(--border-color)',
-                                opacity: isMoved ? 0.95 : 0.75,
-                              }}
-                            >
-                              {isMoved
-                                ? `from ${format(parseISO(`${naturalCycle}-01`), 'MMM')}`
-                                : 'may settle next'}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex-col align-end" style={{ flexShrink: 0, marginLeft: '0.75rem' }}>
-                      <span className="text-mono" style={{ fontWeight: 700, fontSize: '1.1rem', color: tx.type === 'credit' ? '#10b981' : 'var(--text-primary)' }}>
-                        {tx.type === 'credit' ? '+ ' : ''}{formatCredCurrency(tx.amount, 'var(--font-mono)')}
-                      </span>
-                      <span className="text-mono text-xs text-secondary" style={{ marginTop: '2px' }}>
-                        {new Date(tx.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }).toUpperCase()}
-                      </span>
-                    </div>
-                  </div>
-                  );
-                })
+                    tx={tx}
+                    statementDay={statementDay}
+                    selectedCycle={selectedCycle}
+                    index={idx}
+                    press={press(tx)}
+                  />
+                ))
               )}
             </div>
 
@@ -631,132 +515,28 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
         </div>
       </div>
 
-      {/* Move sheet. Both destinations are measured from the charge's NATURAL cycle, never from
-          wherever it currently sits, so the reachable set stays {previous, natural, next} no matter
-          how many times it's moved — otherwise three taps would put a purchase three months out
-          with nothing on screen explaining why. Options it already occupies are dropped, so the
-          sheet never offers a move that does nothing. */}
-      {moveTarget && (() => {
-        const natural = getNaturalBillingCycle(moveTarget, statementDay);
-        const applied = getTransactionCycle(moveTarget);
-        const monthName = (c: string) => format(parseISO(`${c}-01`), 'MMMM');
-        // Up is later, down is earlier — the direction the cycle picker above already sorts in
-        // (newest cycle at the top), so "up" moves the charge the same way the list reads.
-        const choices = [
-          {
-            cycle: shiftBillingCycle(natural, 1) as string | undefined,
-            icon: <ArrowUp size={20} />,
-            label: `Move to ${monthName(shiftBillingCycle(natural, 1))} statement`,
-            sub: 'Posted after this cycle was cut',
-          },
-          {
-            cycle: shiftBillingCycle(natural, -1) as string | undefined,
-            icon: <ArrowDown size={20} />,
-            label: `Move to ${monthName(shiftBillingCycle(natural, -1))} statement`,
-            sub: 'Posted before this cycle opened',
-          },
-          {
-            cycle: undefined,
-            icon: <RotateCcw size={20} />,
-            label: 'Reset to transaction date',
-            sub: `Bills in ${monthName(natural)}, as dated`,
-          },
-        ]
-          .filter(c => (c.cycle ?? natural) !== applied)
-          // Nearest destination first, measured from the cycle you're looking at. On the open cycle
-          // holding a charge that was pushed forward, that puts "Reset" (one month back) above
-          // "Move to July" (two) — the likely correction ahead of the distant one. Ties keep the
-          // declared order, so an unmoved charge still offers next-then-previous, up-then-down.
-          .sort((a, b) =>
-            Math.abs(differenceInCalendarMonths(parseISO(`${a.cycle ?? natural}-01`), selectedDate))
-            - Math.abs(differenceInCalendarMonths(parseISO(`${b.cycle ?? natural}-01`), selectedDate))
-          );
+      {moveTarget && (
+        <CycleMoveSheet
+          tx={moveTarget}
+          statementDay={statementDay}
+          selectedCycle={selectedCycle}
+          onApply={applyCycleMove}
+          onCancel={closeMove}
+        />
+      )}
 
-        return (
-          <div className="modal-overlay" onClick={() => setMoveTarget(null)}>
-            <div className="modal-content" onClick={e => e.stopPropagation()}>
-              <div className="modal-header">
-                {/* "Transaction", not "Charge": refunds move too, and a refund isn't a charge. */}
-                <h3>Move Transaction</h3>
-                <button onClick={() => setMoveTarget(null)}><X /></button>
-              </div>
-              <div className="modal-body flex-col gap-3">
-                <div className="flex-col" style={{ gap: '0.15rem', marginBottom: '0.25rem' }}>
-                  <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {moveTarget.description}
-                  </span>
-                  <span className="text-mono text-xs text-secondary">
-                    {formatCredCurrency(moveTarget.amount, 'var(--font-mono)')}
-                    {' · '}
-                    {new Date(moveTarget.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }).toUpperCase()}
-                    {' · billed in '}{monthName(applied)}
-                  </span>
-                </div>
+      {undoState && <CycleMoveToast message={undoState.message} onUndo={undoCycleMove} />}
 
-                {choices.map(choice => (
-                  <button
-                    key={choice.cycle ?? 'reset'}
-                    className="btn btn-secondary w-100 flex-row align-center gap-3"
-                    style={{ justifyContent: 'flex-start', padding: '1rem', textAlign: 'left' }}
-                    onClick={() => applyCycleMove(moveTarget, choice.cycle)}
-                  >
-                    {choice.icon}
-                    <span className="flex-col" style={{ gap: '0.15rem', minWidth: 0 }}>
-                      <span>{choice.label}</span>
-                      {/* .btn imposes uppercase + 1px letter-spacing on everything inside it, which
-                          on a full sentence read louder and wider than the label above it even at a
-                          smaller font-size. Opted out here so the explanation stays subordinate to
-                          the action, in the sentence case it's written in. */}
-                      <span style={{
-                        fontSize: '0.7rem',
-                        fontWeight: 400,
-                        color: 'var(--text-secondary)',
-                        textTransform: 'none',
-                        letterSpacing: 'normal',
-                      }}>{choice.sub}</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <div className="modal-footer">
-                <button className="btn btn-secondary w-100" style={{ padding: '1rem' }} onClick={() => setMoveTarget(null)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {undoState && (
-        <div
-          className="fade-in flex align-center justify-between"
-          style={{
-            position: 'fixed',
-            left: '1rem',
-            right: '1rem',
-            bottom: `calc(1.25rem + var(--safe-area-inset-bottom))`,
-            // Above .modal-overlay (9000) so it isn't buried if another sheet opens over it.
-            zIndex: 9100,
-            gap: '1rem',
-            padding: '0.75rem 0.85rem 0.75rem 1rem',
-            borderRadius: '12px',
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-color)',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
-          }}
-        >
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {undoState.message}
-          </span>
-          <button
-            className="flex align-center"
-            onClick={undoCycleMove}
-            style={{ gap: '0.35rem', flexShrink: 0, background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer', padding: '0.15rem 0.25rem' }}
-          >
-            <Undo2 size={15} /> Undo
-          </button>
-        </div>
+      {adjusting && (
+        <StatementAdjustSheet
+          cycle={selectedCycle}
+          statementDay={statementDay}
+          charged={chargedAmount}
+          computed={figures.computed}
+          adjusted={figures.adjusted}
+          onApply={applyAdjustment}
+          onCancel={() => setAdjusting(false)}
+        />
       )}
     </div>
   );

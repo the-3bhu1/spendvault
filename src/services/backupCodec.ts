@@ -41,10 +41,14 @@ export const KEY_MAP: Record<string, string> = {
   openingBalances: 'ob', statementDay: 'sd', dueDay: 'dd', creditLimit: 'clim',
   defaultCashbackRate: 'dr', cashbackRates: 'cr', roundOffCashback: 'ro',
   currentEmployer: 'ce',
-  cashbackCreditCycle: 'cc', travelOpeningBalances: 'tob', statementRounding: 'sr',
+  cashbackCreditCycle: 'cc', travelOpeningBalances: 'tob', statementRounding: 'sr', statementAdjustments: 'sa',
   isCashbackEnabled: 'ice',
   cardDetails: 'D', cardholderName: 'ch', cardNumber: 'cn', rate: 'rt',
   expiryMonth: 'em', expiryYear: 'ey', cvv: 'cv', network: 'nt', issuer: 'isr',
+  // What a card costs to hold, and the date the membership year is measured from. 'af' is the
+  // annual fee — mind that 'sa'/'saa' are already taken and unrelated.
+  cardFees: 'CF', joiningFee: 'jf', annualFee: 'af', firstYearFree: 'fyf', waiverSpend: 'wvs',
+  cardOpenedOn: 'cod',
   // Hub / SplitEvent / SplitItem keys
   people: 'pp', items: 'it', involvedPeople: 'ip', includeMe: 'im',
   splitType: 'st', paidBy: 'pb', shares: 'sh', customDays: 'cd',
