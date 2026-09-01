@@ -449,10 +449,19 @@ export default function CreditCards({ onExit, onViewStatement }: {
   // needs no slot of its own.
   const scrollRef = useRef<{ tree: number; category: number }>({ tree: 0, category: 0 });
 
-  const dues = useMemo(
-    () => getActiveCardDues(data.accounts, data.transactions),
-    [data.accounts, data.transactions]
-  );
+  /* Ordered to match the Accounts screen, which lists a type's accounts in the order they were
+     added and never sorts within the group. A card sat in a different position on every screen that
+     named it otherwise, and position is how you find a card once you know your own wallet — the
+     name is only how you check.
+
+     Re-sorted HERE rather than in the service. getActiveCardDues ranks by urgency, and Bills and the
+     bill-alert banner both read it for exactly that: those two are lists of what falls due next, so
+     for them the order IS the content. This screen is the roster. */
+  const dues = useMemo(() => {
+    const position = new Map(data.accounts.map((a, i) => [a.id, i]));
+    return [...getActiveCardDues(data.accounts, data.transactions)]
+      .sort((a, b) => (position.get(a.account.id) ?? 0) - (position.get(b.account.id) ?? 0));
+  }, [data.accounts, data.transactions]);
   const totals = useMemo(() => sumCardDues(dues), [dues]);
 
   // Every cycle that has been CUT, newest first. The open cycle is excluded on purpose: it has no
@@ -534,9 +543,17 @@ export default function CreditCards({ onExit, onViewStatement }: {
   const activeCard = selectedCardId ? dues.find(d => d.account.id === selectedCardId) ?? null : null;
   const possessive = userPossessive(data.user?.name);
 
-  // The card whose bill lands first and still has something on it. Nothing to say when every
-  // statement is settled — and "next due" on a paid-off set of cards would be a date with no bill.
-  const nextDue = dues.find(d => d.billed > 0 && d.daysToDue !== undefined) ?? null;
+  /* The card whose bill lands first and still has something on it. Nothing to say when every
+     statement is settled — and "next due" on a paid-off set of cards would be a date with no bill.
+
+     Picks the soonest EXPLICITLY. This used to be `dues.find(...)`, which was only ever right
+     because the list arrived sorted by urgency — a fact from another module, holding up a line of
+     copy that names a specific card. Now that the list is in wallet order it would have named
+     whichever card was added first, and the same silent break was one re-sort away regardless. */
+  const nextDue = dues.reduce<CardDues | null>((soonest, d) => {
+    if (d.billed <= 0 || d.daysToDue === undefined) return soonest;
+    return !soonest || d.daysToDue < (soonest.daysToDue as number) ? d : soonest;
+  }, null);
 
   // WHAT THE MY CARDS HERO LEADS WITH, and why it is not the outstanding total.
   //
