@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { useFinance } from '../FinanceContext';
 import { Sparkles, ArrowRight, ArrowLeft, X, ShieldCheck, Eye, Smartphone, Zap, Gift, TrendingUp, CreditCard, MessageSquare, type LucideIcon } from 'lucide-react';
@@ -36,6 +36,19 @@ interface TourStep {
    * a string that also has to read well on screen.
    */
   demoCycle?: string;
+  /**
+   * Scroll the target up to just under the top bar before measuring it. For a step whose target
+   * lives below a tall hero: the spotlight lands correctly either way, but on the part of the page
+   * the reader cannot see, and the card then has to be placed in whatever gap is left.
+   * Opt-in, because a step whose target is already in view is better left where the reader put it.
+   */
+  scrollIntoView?: boolean;
+  /**
+   * Spotlight only the FIRST element the selector matches, rather than the union of all of them.
+   * For a selector that marks a repeating row: the union of six of them is taller than the screen,
+   * which leaves the step card nowhere to sit and highlights nothing in particular.
+   */
+  spotlightFirstMatch?: boolean;
 }
 
 export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, setIsHubOpen, isAskVaultOpen, setIsAskVaultOpen }: AppTourProps) {
@@ -44,6 +57,28 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
   const [spotlightRect, setSpotlightRect] = useState<DOMRect | null>(null);
   const [isTourModalOpen, setIsTourModalOpen] = useState(false);
   const [isHubTourOpenActive, setIsHubTourOpenActive] = useState(false);
+  // Whether the current step has already had its one scroll — see the spotlight effect.
+  const hasScrolledForStepRef = useRef(false);
+
+  /* The step card's real height, so it can be kept on screen. Its placement used to assume a flat
+     260px, which is under half what a long step actually measures — fine while every card sat above
+     its spotlight with room to spare, wrong the moment one is placed BELOW a target near the top of
+     the screen, where the assumption is what decides whether the Next button is reachable. */
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [cardHeight, setCardHeight] = useState(0);
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    // Observed rather than measured per render: the height changes when the STEP does, and a step
+    // change is a text swap inside an element that never unmounts, so there is nothing else to key
+    // a re-measure on.
+    const measure = () => setCardHeight(prev => (prev === el.offsetHeight ? prev : el.offsetHeight));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   // Initialize/load demo data immediately on mount
   useEffect(() => {
@@ -224,6 +259,15 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
         title: "Claim Your Rewards",
         description: "Each card shows the cashback it has earned but not yet been paid. Tap the ✓ once your bank credits it — SpendVault then merges that cycle's rewards into a single credit and logs it into your ledger, handling the date and category for you.",
         selector: ".tour-cashback-statement",
+        /* Rewards opens below a 400px hero, so this step used to spotlight rows sitting at the very
+           bottom of the screen — the card the text describes was a sliver under the nav bar, and the
+           step card had to squeeze into the gap above it. Scrolling the first card up to the top bar
+           puts the thing being explained and the explanation on screen together.
+
+           First match only: the class is on every card's group, and the union of them all is taller
+           than the screen. One card, with its cashback rows, is what the text is describing anyway. */
+        scrollIntoView: true,
+        spotlightFirstMatch: true,
         // The tour can navigate TABS on its own; it cannot navigate a tree. The Cards screen listens
         // for this event so a step can open one of its categories — the same trick the splits tour
         // uses to close a detail view.
@@ -586,20 +630,41 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       return;
     }
 
+    // A step arriving (or its target re-rendering under it) earns one scroll; the repeat
+    // measurements below do not.
+    hasScrolledForStepRef.current = false;
+
     const updateSpotlight = () => {
       // Support comma-separated multi-selectors: compute union bounding rect of all matches
       const selectors = selector.split(',').map(s => s.trim()).filter(Boolean);
-      const rects: DOMRect[] = [];
+      const targets: Element[] = [];
       selectors.forEach(sel => {
-        document.querySelectorAll(sel).forEach(el => {
-          rects.push(el.getBoundingClientRect());
-        });
+        document.querySelectorAll(sel).forEach(el => targets.push(el));
       });
+      const spotlit = stepInfo.spotlightFirstMatch ? targets.slice(0, 1) : targets;
 
-      if (rects.length === 0) {
+      if (spotlit.length === 0) {
         setSpotlightRect(null);
         return;
       }
+
+      /* Bring the target under the top bar before measuring, once per step. Once, because a reader
+         who scrolls away mid-step meant to — the later re-measurements exist to catch a late-
+         rendering target, not to drag the page back. Instant rather than smooth so the very first
+         measurement below reads the settled position: a 300ms animated scroll would be measured
+         mid-flight and the spotlight would trail the content down the screen. */
+      if (stepInfo.scrollIntoView && !hasScrolledForStepRef.current) {
+        const scroller = document.querySelector('.app-root');
+        if (scroller) {
+          const headerHeight = document.querySelector('.navbar')?.getBoundingClientRect().height || 0;
+          const desiredTop = scroller.getBoundingClientRect().top + headerHeight + 12;
+          const delta = spotlit[0].getBoundingClientRect().top - desiredTop;
+          if (Math.abs(delta) > 4) scroller.scrollTop += delta;
+          hasScrolledForStepRef.current = true;
+        }
+      }
+
+      const rects = spotlit.map(el => el.getBoundingClientRect());
 
       // Union rect: smallest box containing all matched elements
       const top = Math.min(...rects.map(r => r.top));
@@ -711,9 +776,11 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
 
     const left = Math.max(16, Math.min(window.innerWidth - cardWidth - 16, spotlightRect.left + (spotlightRect.width / 2) - (cardWidth / 2)));
     const spaceBelow = window.innerHeight - spotlightRect.bottom;
+    // Measured, falling back to the old flat assumption only on the very first paint.
+    const maxOffset = window.innerHeight - (cardHeight || 260) - 16;
 
     if (spaceBelow < 280) {
-      const bottomVal = Math.max(16, Math.min(window.innerHeight - 260, window.innerHeight - spotlightRect.top + 16));
+      const bottomVal = Math.max(16, Math.min(maxOffset, window.innerHeight - spotlightRect.top + 16));
       return {
         position: 'fixed',
         bottom: `${bottomVal}px`,
@@ -723,7 +790,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
         transform: 'none'
       };
     } else {
-      const topVal = Math.max(16, Math.min(window.innerHeight - 260, spotlightRect.bottom + 16));
+      const topVal = Math.max(16, Math.min(maxOffset, spotlightRect.bottom + 16));
       return {
         position: 'fixed',
         top: `${topVal}px`,
@@ -764,6 +831,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
 
       {/* Tour card containing info */}
       <div
+        ref={cardRef}
         className={`tour-card fade-in ${!stepInfo.selector ? 'centered' : ''} ${isTourModalOpen ? 'tour-hidden' : ''}`}
         style={getCardStyle()}
       >
