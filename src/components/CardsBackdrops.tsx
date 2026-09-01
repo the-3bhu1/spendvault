@@ -360,8 +360,9 @@ const MC_KEY = { x: MC_T_L + 62, y: MC_SCR.y + MC_SCR.h + 20, w: 34, h: 21, dx: 
 
 // The slot the receipt is printing out of, at the head of the case. Sized and placed AROUND the
 // ribbon below rather than independently: paper wider than the slot it came out of is the one
-// mistake this pairing can make, and the slip is 96 across sitting on centre MC_T_L + 104.
-const MC_SLOT = { x: MC_T_L + 48, y: MC_T_T - 4, w: 110, h: 8 };
+// mistake this pairing can make. The slip is 116 across on centre MC_T_L + 137, so it spans
+// MC_T_L + 79…195 and the slot has to contain that.
+const MC_SLOT = { x: MC_T_L + 74, y: MC_T_T - 4, w: 126, h: 8 };
 
 /** A torn paper edge: notches along the run from (x0,y0) to (x1,y1), emitted as path commands so it
  *  can close a ribbon rather than stand on its own. The notches bite along the run's NORMAL, so the
@@ -464,33 +465,32 @@ const ribbon = (c: Cubic, halfW: number, depths: number[]) => {
   return `${d} Z`;
 };
 
-// Solved against the void rather than eyeballed. Swept and rotated with the case, this ribbon
-// occupies screen x −28…97, y 15…211 — inside the upper-left hole (x −30…120, y 0…190, plus the
-// machine's own body below it) and clear of both the avatar at x 184 and the total's column at
-// x 121. Re-run those bounds before touching any number here; the hole is the only reason the
-// drawing can carry an object this size at all.
+// THE ARC IS A HOOK, not a bow, and it runs the full height of the left void. The spine leaves the
+// head of the machine, climbs almost vertically, turns over the top and comes back DOWN to the
+// right — screen (54, 210) → (60, 131) → (90, 74) → (129, 59) → (164, 109). That last leg is the
+// whole point: a till slip has been on a roll for a mile and the paper remembers it, so the free
+// end falls back on itself instead of pointing away. Two earlier versions missed this — one ran
+// straight from slot to tip and read as a plank, the next bowed but never turned over, which is a
+// banner rather than a receipt.
 //
-// IT CURLS, which is the fourth control point's whole job. A till slip leaves the head of the
-// machine, bows out under its own weight and then turns back on itself, because it has been on a
-// roll for a mile and the paper remembers it. The first version ran almost straight from slot to
-// tip: constant width and a crease made it paper, but paper held out like a plank. The end tangent
-// here points up and LEFT while the belly of the curve is out to the right, so the slip bulges away
-// from the machine and hooks back over — the shape you see on a counter, and the thing that reads as
-// weight rather than as a strap.
+// Solved against the void rather than eyeballed, and the numbers are the constraint. Swept and
+// rotated with the case, the ribbon occupies screen x −5…219, y 3…221: it grazes the top of the
+// frame, clears a padded avatar box (x 172…228, y 87…148) at every one of 160 sampled edge points,
+// and stops 17 units short of the card graphic at x 236. There is no slack left in it — re-run
+// those bounds before moving any control point or the half-width.
 const MC_R_CURVE: Cubic = [
-  [MC_T_L + 104, MC_T_T + 2],
-  [MC_T_L + 110, MC_T_T - 64],
-  [MC_T_L + 166, MC_T_T - 114],
-  [MC_T_L + 160, MC_T_T - 170],
+  [MC_T_L + 137, MC_T_T + 14],
+  [MC_T_L + 143, MC_T_T - 98],
+  [MC_T_L + 246, MC_T_T - 186],
+  [MC_T_L + 263, MC_T_T - 70],
 ];
-// 96 units across. It was 58, which is a cash-register coupon rather than a card slip: against a
-// 236-unit case it read as a ribbon rather than as something with a merchant name and a total
-// printed on it. A real slip is most of the width of the terminal that prints it — 96 keeps it
-// clearly narrower than the case while giving the print across it somewhere to live.
-const MC_R_HALF = 48;
-// Deepened with the width. Teeth are spaced across the torn end, so the same depths on a slip that
-// is two-thirds wider read as a nick rather than a tear.
-const MC_RECEIPT = ribbon(MC_R_CURVE, MC_R_HALF, [8, 3.5, 9, 4.5, 7, 3]);
+// 116 units across, against a 236-unit case — half the width of the machine that prints it, which
+// is about the ratio a real slip has. It was 58, then 96: both read as a ribbon or a strap, because
+// what makes paper look like paper at this scale is being wide enough to carry print across.
+const MC_R_HALF = 58;
+// Deepened with the width. Teeth are SPACED across the torn end, so holding the depths while the
+// end doubles in length turns a tear into a row of nicks.
+const MC_RECEIPT = ribbon(MC_R_CURVE, MC_R_HALF, [10, 4, 11, 5, 8.5, 3.5]);
 
 /** A point across the slip at t, given as a fraction of its half-width either side of the fold. */
 const mcAcross = (t: number, k: number) => {
@@ -521,9 +521,9 @@ const MC_R_CREASE = Array.from({ length: 15 }, (_, i) => {
 const MC_R_SIGN_RULE = mcAcross(0.2, 0.62);
 const MC_R_SIGN = (() => {
   const a = mcAcross(0.26, 0.72);
-  // Amplitude rises with the slip: the same 3.6 across a run two-thirds longer flattens into a
-  // ruled line with a wobble, which is a strikethrough, not a signature.
-  return squiggle(a.x1, a.y1, a.x2, a.y2, 5, 4.8);
+  // Amplitude rises with the slip: the same 3.6 across a run twice as long flattens into a ruled
+  // line with a wobble, which is a strikethrough, not a signature.
+  return squiggle(a.x1, a.y1, a.x2, a.y2, 5, 5.6);
 })();
 
 // Illegible print across the slip, struck along its own normals so the lines lie ON the paper as it
