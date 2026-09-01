@@ -64,13 +64,34 @@ const SP = 'spb';
 // whose device is deliberately behind the type. The well handles the type; the veil handles the
 // gradient from rim to centre.
 //
-// Offsets are fractions of r = 200, so 55% ≈ r 110 (the guilloche's inner ring) and 80% ≈ r 160 (its
-// outer edge, where the fade has to be fully out of the way).
+// Offsets are fractions of r = 200, so 62% ≈ r 124 — just past the weave's inner edge, which is
+// where the fade has to be fully out of the way.
+//
+// LIFTED, along with the well below. Between them the two mutes used to leave 8% of the engraving at
+// the dead centre, which is not "quiet behind the type", it is gone — and the vault dial had to be
+// drawn at twice the stroke weight of anything else on the coin just to survive it. The pair now
+// keeps about 27% there. That is still firmly subordinate to a figure at full white, but it is a
+// drawing you can see rather than one you can infer, which is the whole point of striking the device
+// behind the denomination.
+//
+// The two changes are one change. Lifting the floor without widening the well would have made a
+// bright pocket with a hard rim; widening without lifting would have spread a hole. Together they
+// read as a halo — the fall-off happens AROUND the figure over r 90 or so, rather than in a tight
+// well behind it.
 const VEIL = [
-  { at: '0%', keep: 0.5 },
-  { at: '30%', keep: 0.6 },
-  { at: '55%', keep: 0.82 },
-  { at: '80%', keep: 1 },
+  { at: '0%', keep: 0.72 },
+  { at: '30%', keep: 0.78 },
+  { at: '50%', keep: 0.92 },
+  { at: '62%', keep: 1 },
+];
+
+// The well's own depth, overriding the shared default in relief.tsx (0.82 at the centre). See the
+// note above: this is the other half of the halo.
+const WELL = [
+  { at: 0, hide: 0.62 },
+  { at: 45, hide: 0.52 },
+  { at: 78, hide: 0.24 },
+  { at: 100, hide: 0 },
 ];
 
 // ── The rim and its legend ───────────────────────────────────────────────────────────────────────
@@ -91,34 +112,84 @@ const LEGEND_CIRCUMFERENCE = 2 * Math.PI * LEGEND_R;
 // radius set the word at a size that reads as engraved lettering rather than as a texture.
 const LEGEND = Array.from({ length: 6 }, () => 'SPENDVAULT').join(' · ') + ' · ';
 
-// A full circle as one path, starting at 12 o'clock and running clockwise, for the legend to flow
-// along. Two half-arcs, because a single arc command cannot describe a closed circle.
-const legendPath =
-  `M ${C} ${C - LEGEND_R} ` +
-  `A ${LEGEND_R} ${LEGEND_R} 0 1 1 ${C} ${C + LEGEND_R} ` +
-  `A ${LEGEND_R} ${LEGEND_R} 0 1 1 ${C} ${C - LEGEND_R}`;
+// A full circle as one path, starting at 12 o'clock and running clockwise, for text to flow along.
+// Two half-arcs, because a single arc command cannot describe a closed circle. Clockwise is what
+// puts the glyphs' feet toward the centre and their caps outward — the legend and the currency
+// course below both read that way.
+const circlePath = (r: number) =>
+  `M ${C} ${C - r} ` +
+  `A ${r} ${r} 0 1 1 ${C} ${C + r} ` +
+  `A ${r} ${r} 0 1 1 ${C} ${C - r}`;
 
 // ── The field ────────────────────────────────────────────────────────────────────────────────────
 // The bead is the raised ring that bounds the design; the field is the struck surface inside it.
 const BEAD = 166;
 const FIELD = 162;
 
-// ── The guilloche ────────────────────────────────────────────────────────────────────────────────
-// Engine-turning: rings of overlapping circles whose centres sit on a circle. Three counts, because
-// two produced a weave only where they crossed and read as a chain of loops either side of it; a
-// third ring at a different count and radius closes the annulus into one continuous lattice.
+// ── The annulus: a milled weave, and a course of currencies ──────────────────────────────────────
+// The band between the dial and the bead is split in two at r 122. Below the divider, engine-turning
+// — rings of overlapping circles whose centres sit on a circle, several counts against each other to
+// make the weave. Above it, the world's currency symbols set on a path, turning.
+//
+// The weave used to own the whole annulus at rho 24/15/10. It now owns a quarter of it at rho 9/8/6,
+// which is what makes the two bands read as different KINDS of thing rather than as two sizes of the
+// same thing: a fine milled ground, with lettering struck over it. On a coin that is the correct
+// relationship — the field is textured, the legend is read.
+//
+// Shrinking the circles is what forces the counts UP, from 26/34/46 to 40/52/68. A ring only
+// interlaces while its circles overlap, i.e. while 2·rho exceeds the centre spacing 2πR/n; at the old
+// counts these smaller circles would sit clear of each other and the band would read as three rows of
+// beads. Every row below satisfies it, the tightest with about 12% to spare.
 //
 // The band is bounded by arithmetic, not by taste: each ring reaches R ± rho, so the innermost
-// (124 ± 24) floors the weave at r 100 and the outermost (154 ± 11) tops it out at 165, just inside
-// the bead. r 100 is the number that matters — it clears the dial's collar and its index with a
-// margin, so the lattice frames the device instead of colliding with it.
+// (109 ± 9) floors the weave at r 100 — clearing the dial's collar and its index with a margin — and
+// the outermost (116 ± 6) tops it out at exactly the divider, which is what makes r 122 an edge the
+// weave stops at rather than a line drawn over the top of it.
 const GUILLOCHE = [
-  { n: 26, R: 124, rho: 24, op: 0.24, w: 0.85 },
-  { n: 34, R: 140, rho: 18, op: 0.26, w: 0.8 },
-  { n: 46, R: 154, rho: 11, op: 0.3, w: 0.75 },
+  { n: 40, R: 109, rho: 9, op: 0.85, w: 0.7 },   // 100 → 118 · spacing 17.1
+  { n: 52, R: 113, rho: 8, op: 0.9, w: 0.65 },   // 105 → 121 · spacing 13.7
+  { n: 68, R: 116, rho: 6, op: 0.95, w: 0.6 },   // 110 → 122 · spacing 10.7
 ];
 const GUILLOCHE_IN = 100;
 const GUILLOCHE_OUT = 164;
+// Where the weave stops and the course begins.
+const COURSE_IN = 122;
+
+// The currency course. Text on a path stands its caps OFF the path outward, so the baseline goes low
+// enough in the band that the cap band is centred in it — the same correction the rim legend makes
+// above, and for the same reason. At 30 units these are twice the size the first draft set them, and
+// that size is the point: they are the band's subject now, not a texture in it.
+const COURSE_SIZE = 30;
+const COURSE_CAP = COURSE_SIZE * 0.72;
+const COURSE_R = COURSE_IN + (GUILLOCHE_OUT - COURSE_IN - COURSE_CAP) / 2;
+
+// NOT set in the mono face the rest of the drawing uses. Overpass Mono carries exactly four of these
+// — $ € £ ¥ — and falls back for the other eight, THE RUPEE INCLUDED. At 15 units that was invisible;
+// at 30 it is not.
+const COURSE_FONT = "system-ui, 'Segoe UI', Roboto, 'Noto Sans', sans-serif";
+const COURSE_SYMBOLS = ['₹', '$', '€', '£', '¥', '₩', '₽', '₺', '₦', '฿', '₪', '₱'];
+
+// Each symbol placed at its own angle, rather than one string flowed along a path with textLength.
+// The path version is how the rim legend is built and it was the obvious way to do this too, but it
+// spaces a RING wrong, for a reason worth recording:
+//
+//   lengthAdjust="spacing" distributes the slack into the gaps BETWEEN characters. For n characters
+//   there are n−1 such gaps — and going round a circle there is an nth gap, from the last character
+//   back to the first, which gets none of it. Every junction on the ring was opened up by about 7
+//   units except the one either side of the wrap, which stayed at its natural width. So the first
+//   glyph — the rupee, and it had to be the rupee, it leads the set — sat hard against the pellet to
+//   its left while every other symbol was centred between its own two.
+//
+// Placing each glyph at i · 30° cannot have that bug: the spacing is the construction, not a
+// side-effect of fitting a string to a length. It also stops the fallback faces from mattering. On a
+// path their advance widths feed into the same fit, so eight substituted glyphs pulled the tracking
+// around unevenly; here every symbol is centred on its own angle whatever face draws it.
+//
+// rotate() about the coin's centre does the positioning AND the orientation in one transform: a glyph
+// written at the top of the circle and swung round by a lands with its baseline tangent and its caps
+// pointing outward, which is what text on a clockwise path does and what makes the symbols face the
+// centre. The pellets take the half-steps between, at i · 30° + 15°.
+const COURSE_STEP = 360 / COURSE_SYMBOLS.length;
 
 // ── The vault dial ───────────────────────────────────────────────────────────────────────────────
 // A safe's combination dial, face on: a graduated collar, a domed knob with gripping spokes, a hub,
@@ -130,12 +201,15 @@ const GUILLOCHE_OUT = 164;
 // mechanism. What keeps it from infecting the rest of the drawing is that every radius here is short
 // and contained inside the dial's own collar.
 //
-// At the coin's own centre, under the total. Its opacities run at or near 1 and its strokes are the
-// heaviest in the drawing, which is not an inconsistency but a correction: this is the only part
-// standing under BOTH mutes at once — the well hides ~82% of the relief at the centre and ~70% out to
-// r 84, and the veil is at its thinnest over the same ground. At the rim's values the dial vanished
-// completely. Weight, rather than opacity, is what buys it back: a heavier stroke survives a mute that
-// a brighter thin one does not, and it costs the figure less.
+// At the coin's own centre, under the total. Its strokes are still the heaviest in the drawing,
+// because this is the only part standing under BOTH mutes at once and weight is what survives a mute
+// that brightness does not.
+//
+// WALKED BACK, though — collar 1.8 → 1.2, majors 2.4 → 1.8, minors 1.5 → 1.1, spokes 3.8 → 2.8. The
+// old weights were compensating for a well that hid 82% of the relief at the centre; the halo leaves
+// 27%, and a compensation carried past the problem it was correcting for is just a heavy dial. The
+// ratios are kept — majors still read as majors against the minors — so the mechanism reads the same,
+// only at a weight that belongs next to the fine weave outside it rather than shouting over it.
 //
 // The radius is set from the type rather than from the
 // field: the hero's figure runs to roughly 220 units wide at its largest step, so a collar at r 78
@@ -147,10 +221,18 @@ const DIAL_CY = C;
 const DIAL_R = 78;
 
 export const SpendBackdrop: React.FC = () => (
-  // The well is sized to the text block — month label and figure — rather than to the field. It has
-  // to mute the rings directly behind the type without flattening the ones that give the rest of the
-  // surface its texture.
-  <ReliefSvg p={SP} wellRx={142} wellRy={104}>
+  <>
+  {/* The well is sized to the text block — month label and figure — rather than to the field. It has
+      to mute the rings directly behind the type without flattening the ones that give the rest of the
+      surface its texture.
+      WIDENED from 112×64, which was the block "Aug '26" and the total occupy and nothing more. A well
+      cut to the exact size of the type makes a pocket with a rim; the fall-off has to happen outside
+      the figure to read as a halo around it, which is what the extra 20 across and 18 down buy. It
+      pairs with the shallower WELL depth and the lifted VEIL above — see the note there; all three
+      are one change and moving any of them alone undoes it.
+      It stops well short of the weave either way: 132 against an inner edge at r 100 sounds like an
+      overlap, but the well's own gradient is already down to a few percent by its rim. */}
+  <ReliefSvg p={SP} wellRx={132} wellRy={82} well={WELL}>
     {/* The veil. A local mask, nested inside the one ReliefSvg already applies — the two multiply,
         which is exactly the wanted result: full-strength engraving at the rim, thinning toward the
         centre, and thinner still inside the ellipse where the type sits. */}
@@ -177,7 +259,7 @@ export const SpendBackdrop: React.FC = () => (
           textLength + lengthAdjust="spacing" force the repeated word to occupy the circle exactly, so
           the ring closes cleanly whatever the font resolves to. The tracking comes out of that fit
           rather than from a letter-spacing value, for the same reason. */}
-      <path id={`${SP}-legend-path`} d={legendPath} fill="none" />
+      <path id={`${SP}-legend-path`} d={circlePath(LEGEND_R)} fill="none" />
       <text
         fill="var(--relief-line)"
         opacity="0.62"
@@ -217,17 +299,20 @@ export const SpendBackdrop: React.FC = () => (
           })}
         </g>
       ))}
-      {/* The two circles that bound the weave. Without them the interlace frays into the field instead
-          of sitting in a band. */}
-      <circle cx={C} cy={C} r={GUILLOCHE_IN} fill="none" stroke="var(--relief-line)" strokeWidth="1" opacity="0.24" />
-      <circle cx={C} cy={C} r={GUILLOCHE_OUT} fill="none" stroke="var(--relief-line)" strokeWidth="1" opacity="0.28" />
+      {/* The three circles that bound the annulus. The outer two stop the band fraying into the field;
+          the middle one at r 122 is the divider, and it is the line that makes this read as two
+          courses rather than as one busy band. Lighter than the other two on purpose — it separates
+          two parts of the same design, where they separate the design from what is outside it. */}
+      <circle cx={C} cy={C} r={GUILLOCHE_IN} fill="none" stroke="var(--relief-line)" strokeWidth="1" opacity="0.8" />
+      <circle cx={C} cy={C} r={COURSE_IN} fill="none" stroke="var(--relief-line)" strokeWidth="1" opacity="0.7" />
+      <circle cx={C} cy={C} r={GUILLOCHE_OUT} fill="none" stroke="var(--relief-line)" strokeWidth="1" opacity="0.85" />
 
       {/* ── The vault dial ── */}
       <g>
         {/* Graduated collar: the ring the index is read against. Ticks are the only radii in the
             drawing, and they live entirely inside this collar. 24 of them, majors at the quarters —
             a safe's dial is finely divided, and at r 78 that many marks still resolve on a phone. */}
-        <circle cx={DIAL_CX} cy={DIAL_CY} r={DIAL_R} fill="none" stroke="var(--relief-line)" strokeWidth="1.8" opacity="1" />
+        <circle cx={DIAL_CX} cy={DIAL_CY} r={DIAL_R} fill="none" stroke="var(--relief-line)" strokeWidth="1.2" opacity="1" />
         <circle cx={DIAL_CX} cy={DIAL_CY} r={f(DIAL_R * 0.86)} fill="none" stroke="var(--relief-edge)" strokeWidth="0.9" opacity="0.8" />
         <g opacity="0.95">
           {Array.from({ length: 24 }, (_, i) => {
@@ -240,7 +325,7 @@ export const SpendBackdrop: React.FC = () => (
                 key={i}
                 x1={f(DIAL_CX + r1 * Math.cos(a))} y1={f(DIAL_CY + r1 * Math.sin(a))}
                 x2={f(DIAL_CX + r2 * Math.cos(a))} y2={f(DIAL_CY + r2 * Math.sin(a))}
-                stroke="var(--relief-line)" strokeWidth={major ? 2.4 : 1.5}
+                stroke="var(--relief-line)" strokeWidth={major ? 1.8 : 1.1}
               />
             );
           })}
@@ -266,7 +351,7 @@ export const SpendBackdrop: React.FC = () => (
                 key={k}
                 x1={f(DIAL_CX + r1 * Math.cos(a))} y1={f(DIAL_CY + r1 * Math.sin(a))}
                 x2={f(DIAL_CX + r2 * Math.cos(a))} y2={f(DIAL_CY + r2 * Math.sin(a))}
-                stroke="var(--relief-line)" strokeWidth="3.8" strokeLinecap="round"
+                stroke="var(--relief-line)" strokeWidth="2.8" strokeLinecap="round"
               />
             );
           })}
@@ -296,4 +381,54 @@ export const SpendBackdrop: React.FC = () => (
       })}
     </g>
   </ReliefSvg>
+
+  {/* ── The currency course ──
+      Stacked OVER the coin as its own element rather than drawn inside it, and the reason is
+      measured rather than stylistic: at 140s a revolution this ring travels under a tenth of a pixel
+      between frames at the hero's size. Re-rasterising the glyphs at that rate re-quantises their
+      positions every frame, so they hold still and then step. Lifted out, the ring is rasterised
+      once and the compositor interpolates the transform, which is continuous. The nesting — a still
+      box carrying the fade, a spinning one inside it — is in index.css, along with why.
+
+      What it gives up by leaving the coin's SVG is the well and the veil, and under the halo values
+      above that is close to nothing: the well's ellipse is 132×82 and the course starts at r 122, so
+      the two only meet in two slivers at 3 and 9 o'clock where the well is already down to a few
+      percent, and the veil is at full strength from r 124 out. The bottom fade is the only part that
+      genuinely had to be rebuilt, and the CSS gradient reproduces it. */}
+  <div className="coin-course-fade" aria-hidden="true">
+    <svg
+      className="coin-course"
+      viewBox={`0 0 ${VB} ${VB}`}
+      preserveAspectRatio="xMidYMid meet"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <g fill="var(--relief-line)" opacity="0.95" textAnchor="middle">
+        {COURSE_SYMBOLS.map((sym, i) => (
+          <text
+            key={sym}
+            x={C}
+            y={f(C - COURSE_R)}
+            transform={`rotate(${f(i * COURSE_STEP)} ${C} ${C})`}
+            style={{ fontFamily: COURSE_FONT, fontSize: `${COURSE_SIZE}px`, fontWeight: 700 }}
+          >
+            {sym}
+          </text>
+        ))}
+        {COURSE_SYMBOLS.map((_, i) => (
+          <text
+            key={`pellet-${i}`}
+            x={C}
+            y={f(C - COURSE_R)}
+            transform={`rotate(${f(i * COURSE_STEP + COURSE_STEP / 2)} ${C} ${C})`}
+            opacity="0.6"
+            style={{ fontFamily: COURSE_FONT, fontSize: `${COURSE_SIZE}px`, fontWeight: 700 }}
+          >
+            ·
+          </text>
+        ))}
+      </g>
+    </svg>
+  </div>
+  </>
 );

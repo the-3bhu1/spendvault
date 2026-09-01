@@ -26,7 +26,11 @@ const tx = (over: Partial<Transaction>): Transaction => ({
 /** Dashboard.tsx:39-81 as it stood before the extraction. */
 const oldDashboardDues = (acc: Account, txs: Transaction[]) => {
   const statementDay = acc.statementDay || 1;
-  const billedCycle = getLatestBilledCycle(statementDay);
+  // Pinned to NOW like the service it is being compared against. Left on the wall clock this
+  // transcription answers about a different instant, and the whole comparison silently stops
+  // being like-for-like the moment the real date crosses a cycle boundary — which is exactly how
+  // this surfaced, on 1 September against a NOW of 22 August.
+  const billedCycle = getLatestBilledCycle(statementDay, NOW);
   const unbilledCycle = format(addMonths(parseISO(`${billedCycle}-01`), 1), 'yyyy-MM');
   let billed = 0, unbilled = 0;
   txs.forEach(t => {
@@ -116,7 +120,7 @@ describe('parity with the old Dashboard/Accounts derivation', () => {
 
   it('derives the same two cycles the old code did', () => {
     const acc = card();
-    const billed = getLatestBilledCycle(acc.statementDay!);
+    const billed = getLatestBilledCycle(acc.statementDay!, NOW);
     const dues = getCardDues(acc, [], NOW);
     expect(dues.billedCycle).toBe(billed);
     expect(dues.unbilledCycle).toBe(format(addMonths(parseISO(`${billed}-01`), 1), 'yyyy-MM'));
@@ -131,7 +135,7 @@ describe('the two intended departures from the old Bills derivation', () => {
       tx({ date: '2026-08-01', amount: 362 }),
       tx({ date: '2026-08-01', amount: 86, isRewardTransaction: true }),
     ];
-    const cycle = getLatestBilledCycle(acc.statementDay!);
+    const cycle = getLatestBilledCycle(acc.statementDay!, NOW);
     // The old Bills helper counted the points leg as a second charge — the exact failure the
     // affectsRupeeBalance predicate was written for.
     expect(oldBillsNetPayable(txs, acc.id, cycle, acc.statementDay!, acc.statementRounding)).toBe(448);
@@ -163,7 +167,7 @@ describe('cycle figures, totals and ordering', () => {
   it('keeps the signed net alongside the clamped payable', () => {
     const acc = card({ statementRounding: 'floor' });
     const txs = [tx({ date: '2026-08-01', amount: 100 }), tx({ date: '2026-08-02', amount: 103.2, type: 'credit' })];
-    const f = getCardCycleFigures(acc, txs, getLatestBilledCycle(17));
+    const f = getCardCycleFigures(acc, txs, getLatestBilledCycle(17, NOW));
     expect(f.spend).toBe(100);
     expect(f.payment).toBe(103.2);
     expect(f.net).toBeCloseTo(-3.2);

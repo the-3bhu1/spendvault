@@ -11,7 +11,7 @@ import WealthBackdrop from './WealthBackdrop';
 import { PortfolioBackdrop, AssetsBackdrop, RetirementBackdrop } from './WealthCategoryBackdrops';
 import { LogoAvatar } from './LogoAvatar';
 import { DetailHeroBand, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
-import { CategoryCard, CategoryHero, SubviewHeader, SealedMark, FilterPills } from './TreeUi';
+import { CategoryCard, CategoryHero, SubviewHeader, SealedMark, FilterPills, SectionHeading } from './TreeUi';
 import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
 import { calculateEPFProjection, getEPFInterestRate, getFinancialYearForDate } from '../utils/epfEngine';
 import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance, isStatsExcludedCategory, statsAmount, errorMessage, userPossessive } from '../utils';
@@ -224,7 +224,7 @@ function currentDayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export function Wealth() {
+export function Wealth({ onExit }: { onExit?: () => void }) {
   const { data } = useFinance();
 
   const [prices, setPrices] = useState<Record<string, number>>(() => {
@@ -1047,42 +1047,13 @@ export function Wealth() {
     );
   };
 
-  // LABEL · count · rule — the heading over every list on this screen. One definition on purpose:
-  // the asset detail's "Recent Activity" heading used to hand-roll the same markup and had drifted a
-  // gap step tighter, so the count sat almost against its label and read as a different system.
-  // `null` drops the count entirely — for a heading over a list the user can't collapse or filter,
-  // where the number says nothing they can't see in the rows right below it.
+  // The heading over every list on this screen. The markup moved to TreeUi when Statements grew
+  // year groups and wanted the same header — this wrapper keeps the call sites below unchanged.
   const renderSectionHeading = (
     label: string,
     count: number | null,
-    opts: { trailing?: ReactNode; chevron?: ReactNode; onClick?: () => void; marginBottom?: string | number } = {}
-  ) => (
-    <div
-      // Tighter gap only when something trails the rule: label + count + rule + pill is a lot for a
-      // narrow phone, and this row is the one place here that can't wrap.
-      className={`flex align-center ${opts.trailing ? 'gap-2' : 'gap-3'}`}
-      style={{
-        cursor: opts.onClick ? 'pointer' : 'default',
-        userSelect: 'none',
-        marginBottom: opts.marginBottom ?? '0.25rem',
-      }}
-      onClick={opts.onClick}
-    >
-      <span className="text-mono uppercase" style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '1.5px', whiteSpace: 'nowrap' }}>
-        {label}
-      </span>
-      {count !== null && (
-        <span className="text-mono" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', opacity: 0.6 }}>
-          {count}
-        </span>
-      )}
-      {/* minWidth keeps the rule from collapsing to nothing when a long label and the cycler
-        share the row on a narrow phone — it shrinks, but stays a visible connector. */}
-      <div style={{ flex: 1, minWidth: '10px', height: '1px', background: 'var(--border-color)', opacity: 0.5 }} />
-      {opts.trailing}
-      {opts.chevron}
-    </div>
-  );
+    opts: { countNoun?: string; trailing?: ReactNode; chevron?: ReactNode; onClick?: () => void; marginBottom?: string | number } = {}
+  ) => <SectionHeading label={label} count={count} {...opts} />;
 
   // A collapsible, labelled group of rows. Collapsing is disabled when a filter has already
   // narrowed the list to this one class — there'd be nothing left on screen.
@@ -1101,7 +1072,12 @@ export function Wealth() {
     const isCollapsed = single ? false : collapsedSections.has(key);
     return (
       <div className={tourClass} style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
-        {renderSectionHeading(label, accounts.length, {
+        {/* No label once a filter has narrowed the screen to this one section: the pill directly
+            above already says "MF", and the header's job is then the count and the cycler. */}
+        {renderSectionHeading(single ? '' : label, accounts.length, {
+          // Every section on this screen counts accounts — the asset classes are accounts in the
+          // data model and the liquid ones are accounts in plain speech too.
+          countNoun: 'account',
           trailing,
           chevron: !single && (
             <ChevronDown size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0, transition: 'transform 0.2s ease', transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
@@ -1524,7 +1500,14 @@ export function Wealth() {
           lands the avatar and total on the door's hub (see COMPOSITION in WealthBackdrop): the drawing
           is concentric about its own centre, so both must be centred in the same box. It also spends
           the dead space that used to sit below the cards. */}
-          <div className="tour-wealth-summary" style={{ position: 'relative', overflow: 'hidden', minHeight: '400px', padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+              {/* Out of the tree entirely, back to the Dashboard this screen was opened from. The
+                  sub-views below have had a chevron here since they existed; the ROOT had none, so
+                  the one screen you always arrive at from somewhere else was the one with no way
+                  back except the bottom nav. Same control, same place, so it reads as one level up
+                  rather than a different kind of exit. The negative margin below is what lets the
+                  hero overlap this row, exactly as CategoryHero does for the sub-views. */}
+              {onExit && <SubviewHeader title="" onBack={onExit} hideTitle />}
+          <div className="tour-wealth-summary" style={{ position: 'relative', overflow: 'hidden', minHeight: '400px', marginTop: onExit ? '-28px' : undefined, padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
             <WealthBackdrop />
 
             {/* Every hero element is lifted above the backdrop; the sketch is the only thing at z 0. */}

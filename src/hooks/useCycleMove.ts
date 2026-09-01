@@ -30,8 +30,9 @@ const FIXED_CYCLE_CATEGORIES = new Set(['cc payment', 'cashback']);
 export const canMoveCycle = (tx: Transaction) =>
   !FIXED_CYCLE_CATEGORIES.has((tx.category || '').toLowerCase());
 
-const LONG_PRESS_MS = 450;
-const PRESS_CANCEL_PX = 10;
+// Shared with the statement figure's own hold — see useLongPress, which owns them now so the two
+// gestures on this screen cannot drift apart.
+import { LONG_PRESS_MS, PRESS_CANCEL_PX } from './useLongPress';
 
 /** The handlers a ledger row spreads onto itself to become long-pressable. */
 export type CyclePressHandlers = Pick<

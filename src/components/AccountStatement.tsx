@@ -5,7 +5,7 @@ import { CustomPicker } from './CustomPicker';
 import RollingNumber from './RollingNumber';
 import {
   getBillingCycleForDate, getCardGradients, formatBillingCycleRange, affectsRupeeBalance, resolveCardIssuer,
-  getAppliedBillingCycle,
+  getAppliedBillingCycle, formatCurrency,
 } from '../utils';
 import { useCycleMove } from '../hooks/useCycleMove';
 import { CycleLedgerRow, CycleMoveSheet, CycleMoveToast } from './CycleMove';
@@ -15,14 +15,30 @@ import { CardBrandLogo } from './CardBrandLogo';
 import type { Account, Transaction } from '../types';
 import { CardNetworkLogo } from './CardNetworkLogo';
 import { useFinance } from '../FinanceContext';
+import { getCardCycleFigures, getCardDues, cycleStatus, isCycleOverdue, CYCLE_STATUS_LABEL } from '../services/CardDuesService';
+import { useLongPress } from '../hooks/useLongPress';
+import { StatementAdjustSheet } from './StatementAdjust';
 
 interface AccountStatementProps {
   account: Account;
   transactions: Transaction[];
   onClose: () => void;
+  // Which cycle to land on. Omitted means the one still running, which is what every entry point
+  // wanted until the Statements list started opening this screen from a row that names a specific
+  // closed month — that row has to arrive at the month it shows, not at today's.
+  initialCycle?: string;
 }
 
-export default function AccountStatement({ account, transactions, onClose }: AccountStatementProps) {
+/** Matches the Statements list's icon colours, so the same state reads the same on both screens. */
+const STATUS_TONE: Record<string, string> = {
+  overdue: 'var(--danger)',
+  overpaid: 'var(--success)',
+  settled: 'var(--success)',
+  partial: 'var(--accent)',
+  unpaid: 'var(--text-secondary)',
+};
+
+export default function AccountStatement({ account, transactions, onClose, initialCycle }: AccountStatementProps) {
   const context = useFinance();
   const allAccounts = context ? [...context.data.accounts].sort((a, b) => a.id.localeCompare(b.id)) : [];
   const accountIndex = allAccounts.findIndex(acc => acc.id === account.id);
@@ -45,7 +61,9 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
     };
     requestAnimationFrame(step);
   };
-  const acc = account;
+  // The LIVE account, not the prop. The prop is a snapshot taken when this screen was opened, so a
+  // statement figure corrected below would be written to the store and then not appear here.
+  const acc = context?.data.accounts.find(a => a.id === account.id) ?? account;
   const statementDay = acc.statementDay || 1;
   const currentCycle = getBillingCycleForDate(format(new Date(), 'yyyy-MM-dd'), statementDay);
   // Reads the manual override for debits as well as payments — see getAppliedBillingCycle. The
@@ -55,7 +73,7 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
   const getTransactionCycle = (tx: Transaction) => getAppliedBillingCycle(tx, statementDay);
 
   // Declared up here rather than beside the other view state below: cycleOptions reads it.
-  const [selectedCycle, setSelectedCycle] = useState(currentCycle);
+  const [selectedCycle, setSelectedCycle] = useState(initialCycle ?? currentCycle);
   // This is only ever opened for credit_card accounts (see Accounts.tsx's onViewStatement gating), so
   // no CATEGORY is excluded from the due calculation — a prior version dropped
   // 'transfer'/'ncmc travel recharge'/'mutual funds' (borrowed from a spend-analytics pattern meant for
@@ -109,15 +127,37 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
     .filter(t => getTransactionCycle(t) === selectedCycle)
     .sort((a, b) => b.date.localeCompare(a.date));
 
-  const totalSpends = cycleTxs.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0);
-  const totalPayments = cycleTxs.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
-  const rawNetAmount = totalSpends - totalPayments;
-  let netAmount = rawNetAmount;
-  const rounding = acc.statementRounding || 'none';
+  // Derived by the service, not re-summed here. This screen and the Statements list are one tap
+  // apart and must not be able to disagree about the same cycle — and the arithmetic is no longer
+  // "debits minus credits": cashback and refunds are netted INTO the statement the way a bank nets
+  // them, while payments are recorded against it. One place decides which credit is which.
+  const figures = getCardCycleFigures(acc, transactions, selectedCycle);
+  // WHAT THE CYCLE BILLED, not what is left owing on it. The headline used to be the net of
+  // payments, which meant a statement you had already cleared showed ₹0.00 directly above the list
+  // of the very charges that made it up — the screen contradicting its own ledger, and no way to
+  // find out what a settled month had cost you. What is still owed is the line underneath.
+  const chargedAmount = figures.charged;
+  const stillDue = figures.due;
+  // The same word the Statements row's icon means, off the same ladder — the two screens are one tap
+  // apart and used to disagree, this one saying "Paid in full" under a row drawn with a red triangle.
+  const status = cycleStatus(
+    figures,
+    isCycleOverdue(getCardDues(acc, transactions), selectedCycle, figures.due)
+  );
 
-  if (rounding === 'round') netAmount = Math.round(rawNetAmount);
-  else if (rounding === 'floor') netAmount = Math.floor(rawNetAmount);
-  else if (rounding === 'ceil') netAmount = Math.ceil(rawNetAmount);
+  // Hold the figure to correct it by hand — the same gesture the ledger rows below use to move a
+  // charge.
+  const [adjusting, setAdjusting] = useState(false);
+  const adjustPress = useLongPress(() => setAdjusting(true));
+  const applyAdjustment = (value: number | undefined) => {
+    const next = { ...(acc.statementAdjustments || {}) };
+    if (value === undefined) delete next[selectedCycle];
+    else next[selectedCycle] = value;
+    // Dropped entirely when the last entry goes, so an account that has been corrected and then
+    // un-corrected serialises identically to one that never was.
+    context.updateAccount({ ...acc, statementAdjustments: Object.keys(next).length ? next : undefined });
+    setAdjusting(false);
+  };
 
   /* Layout effect, not a plain effect: the "View all" button renders only when this says the
      list is clipped, so the measurement has to settle BEFORE paint or the button pops in a
@@ -356,18 +396,51 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
           flexDirection: 'column',
         }}>
           <div className="flex-col align-center" style={{ flexShrink: 0 }}>
-            <span className="text-mono text-xs text-muted font-bold uppercase" style={{ opacity: 0.5, marginBottom: '0.5rem' }}>Statement Amount</span>
+            <span className="text-mono text-xs text-muted font-bold uppercase" style={{ opacity: 0.5, marginBottom: '0.5rem' }}>
+              Statement Amount
+              {/* Said out loud, always. A hand-entered figure that looks exactly like a derived one
+                  is the only outcome here worse than being a rupee out. */}
+              {figures.adjusted && <span style={{ color: 'var(--warning)', marginLeft: '0.5rem' }}>· Adjusted</span>}
+            </span>
             <div
               className="text-serif"
+              {...adjustPress}
               style={{
                 fontSize: '1rem',
                 lineHeight: 1,
+                cursor: 'pointer',
+                WebkitTouchCallout: 'none',
+                WebkitUserSelect: 'none',
+                userSelect: 'none',
                 transition: 'transform 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
                 transform: showAllTransactions ? 'scale(0.85)' : 'scale(1)'
               }}
             >
-              <RollingNumber value={netAmount} fontSize="2.5rem" />
+              <RollingNumber value={chargedAmount} fontSize="2.5rem" />
             </div>
+            {/* How the figure above was arrived at, when it is not simply the month's purchases.
+                A bank prints this as a summary block; here it is one line, because the only part
+                that is ever surprising is that the headline is smaller than what you spent. */}
+            {figures.credits > 0 && (
+              <span
+                className="text-mono text-xs uppercase"
+                style={{ marginTop: '0.5rem', letterSpacing: '0.5px', color: 'var(--text-secondary)', opacity: 0.85 }}
+              >
+                {formatCurrency(figures.spend)} spent − {formatCurrency(figures.credits)} credited
+              </span>
+            )}
+            {status !== 'empty' && (
+              <span
+                className="text-mono text-xs font-bold uppercase"
+                style={{ marginTop: '0.4rem', letterSpacing: '0.5px', color: STATUS_TONE[status] }}
+              >
+                {CYCLE_STATUS_LABEL[status]}
+                {/* The remainder rides with the word rather than replacing it. This screen is the
+                    record, and "Overdue" without the figure sends you back to the ledger to add up
+                    what is left. */}
+                {stillDue > 0 && ` · ${formatCurrency(stillDue)} still due`}
+              </span>
+            )}
           </div>
 
           {cycleTxs.length > 0 && (
@@ -453,6 +526,18 @@ export default function AccountStatement({ account, transactions, onClose }: Acc
       )}
 
       {undoState && <CycleMoveToast message={undoState.message} onUndo={undoCycleMove} />}
+
+      {adjusting && (
+        <StatementAdjustSheet
+          cycle={selectedCycle}
+          statementDay={statementDay}
+          charged={chargedAmount}
+          computed={figures.computed}
+          adjusted={figures.adjusted}
+          onApply={applyAdjustment}
+          onCancel={() => setAdjusting(false)}
+        />
+      )}
     </div>
   );
 }

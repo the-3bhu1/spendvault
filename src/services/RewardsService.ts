@@ -118,18 +118,36 @@ export interface PendingRewards {
   byUnit: { unit: string; amount: number }[];
 }
 
-/** What is still owed to the user, by unit. */
-export const summarisePendingRewards = (rows: RewardRow[], accounts: Account[]): PendingRewards => {
+/** Which rows a summary covers, and which figure it reads off each of them. */
+export type RewardScope = 'pending' | 'lifetime';
+
+/**
+ * Summarise rewards by unit.
+ *
+ *   'pending'  — rows not yet confirmed, at the EXPECTED amount: what is still owed.
+ *   'lifetime' — every row ever earned, at the REALIZED amount once confirmed and at the expected
+ *                one until then. A reward can land at a different figure than the one predicted for
+ *                it, and once it has landed, the figure that actually arrived is the true one.
+ *
+ * So the two scopes are not disjoint: lifetime CONTAINS pending. That is deliberate — the Rewards
+ * hero shows both at once, and "earned all-time" that excluded what is still in flight would be a
+ * figure that drops every time a card pays out.
+ *
+ * One function rather than two so the pair cannot drift apart, which is the same reason this whole
+ * service exists.
+ */
+export const summariseRewards = (rows: RewardRow[], accounts: Account[], scope: RewardScope): PendingRewards => {
   const units = new Map<string, number>();
   let rupees = 0;
   let count = 0;
 
   for (const row of rows) {
-    if (row.confirmed) continue;
+    if (scope === 'pending' && row.confirmed) continue;
     count += 1;
+    const amount = row.confirmed ? row.realized : row.expected;
     const { unit } = getRewardUnit(row.account, accounts);
-    if (!unit) rupees += row.expected;
-    else units.set(unit, (units.get(unit) ?? 0) + row.expected);
+    if (!unit) rupees += amount;
+    else units.set(unit, (units.get(unit) ?? 0) + amount);
   }
 
   return {
@@ -137,4 +155,33 @@ export const summarisePendingRewards = (rows: RewardRow[], accounts: Account[]):
     rupees,
     byUnit: [...units.entries()].map(([unit, amount]) => ({ unit, amount })).sort((a, b) => b.amount - a.amount),
   };
+};
+
+/** What is still owed to the user, by unit. */
+export const summarisePendingRewards = (rows: RewardRow[], accounts: Account[]): PendingRewards =>
+  summariseRewards(rows, accounts, 'pending');
+
+/**
+ * One card's rewards, optionally narrowed to a date window.
+ *
+ * Built on summariseRewards rather than beside it, so the card summary screen and the Rewards screen
+ * cannot disagree about what a reward is worth — which is the whole reason this service exists. The
+ * scope is always 'lifetime': the card screen asks "what has this card earned", and a figure that
+ * dropped every time a reward actually landed would be answering a different question.
+ *
+ * The WINDOW filters on the spend's own date, matching CardYearService — a reward belongs to the
+ * year you earned it in, not the year the bank got round to paying it. Both bounds inclusive,
+ * 'YYYY-MM-DD' compared as strings.
+ */
+export const summariseCardRewards = (
+  rows: RewardRow[],
+  accounts: Account[],
+  accountId: string,
+  window?: { start: string; end: string }
+): PendingRewards => {
+  const mine = rows.filter(row =>
+    row.account.id === accountId &&
+    (!window || (row.transaction.date >= window.start && row.transaction.date <= window.end))
+  );
+  return summariseRewards(mine, accounts, 'lifetime');
 };

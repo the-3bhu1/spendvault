@@ -146,6 +146,10 @@ html.fonts-loaded #root {
   --relief-line: rgba(255, 255, 255, 0.20);
   --relief-edge: rgba(255, 255, 255, 0.34);
   --relief-shadow: rgba(0, 0, 0, 0.65);
+  /* How much of a large filled FORM's body to keep — see --relief-plate-fill under the light theme,
+     which is where this token earns its existence. Relief reads through its edges, so this damps
+     bodies only and leaves every stroke alone. */
+  --relief-plate-fill: 1;
   /* The frosted segmented control on the Wealth category screens (see renderFilterPills in
      Wealth.tsx). Tokenised for the same reason as the relief set above: the "glass" is a light
      tint on the dark theme but has to become a dark tint on the light theme, or the track, the
@@ -183,6 +187,12 @@ html.fonts-loaded #root {
   --relief-line: rgba(15, 23, 42, 0.16);
   --relief-edge: rgba(255, 255, 255, 0.9);
   --relief-shadow: rgba(15, 23, 42, 0.22);
+  /* The relief tokens invert between themes, but they do not invert SYMMETRICALLY: -hi is white at
+     0.055 on the dark theme and white at 0.95 here. That is right for a moulding or a rim, whose
+     body is a few units wide, and wrong for a large plate — the Cards hero's stack turned into a
+     near-opaque white slab and took the amber due line down with it. Damping the body recovers the
+     text while leaving the engraved edges at full strength, which is where the relief actually is. */
+  --relief-plate-fill: 0.38;
   /* Light theme veils with the page colour instead of ink — a dark veil here would read as a
      grey slab rather than glass. The dark border below is what delineates the track. */
   --pill-track-bg: rgba(248, 250, 252, 0.62);
@@ -2126,3 +2136,49 @@ tr:hover td {
 }
 .askvault-send:active:not(:disabled) { transform: translate(3px, 3px); box-shadow: 0 0 0 #000; }
 .askvault-send:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+
+
+/* The scrolling variant of FilterPills (see TreeUi). A hidden scrollbar cannot be set from an
+   inline style, and a visible one across a segmented control reads as a broken element. */
+[data-pill-scroll]::-webkit-scrollbar { display: none; }
+
+/* ─── The Dashboard coin's currency course (see SpendBackdrop.tsx) ───────────
+   The course is a SEPARATE svg stacked over the coin rather than a <g> inside
+   it, and this is why: the ring turns 0.043° per frame at 60fps, which at its
+   radius is under a tenth of a pixel of travel. Re-rasterising the glyphs at
+   that rate re-quantises their positions every frame, so they hold still and
+   then step — visibly, as a stutter. Lifted out, the ring is rasterised once
+   and the compositor interpolates the transform, which is continuous.
+
+   Two nested elements, not one. The bottom fade the coin's own mask used to
+   give this ring has to come back as a CSS mask — and a mask on the element
+   that ROTATES would turn with it, sweeping the faded sector around the coin.
+   So the outer box carries the mask and stays still; the inner one spins. */
+.coin-course-fade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Matches the -fade gradient in ReliefDefs: full to 80%, then down to 0.12.
+     The hero box is wider than it is tall, so 'meet' scales the drawing to the
+     HEIGHT and it spans the box top to bottom — which is what lets a gradient
+     over the element line up with one over the viewBox. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 80%, rgba(0, 0, 0, 0.12) 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 80%, rgba(0, 0, 0, 0.12) 100%);
+}
+
+.coin-course {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  animation: spin-cw 140s linear infinite;
+  will-change: transform;
+}
+
+/* Continuous, and directly behind the month's total. Anyone who has asked for
+   less motion gets the ring struck in place — the composition is symmetrical,
+   so a stopped course reads as engraved rather than as broken. */
+@media (prefers-reduced-motion: reduce) {
+  .coin-course { animation: none; }
+}

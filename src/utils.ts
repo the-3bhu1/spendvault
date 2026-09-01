@@ -317,11 +317,15 @@ export const getBillingCycleDates = (cycle: string, statementDay: number) => {
   return { startDate, endDate };
 };
 
-export const formatBillingCycleRange = (cycle: string, statementDay: number = 1): string => {
+/** `showYear` of false drops the trailing year on a cycle that stays inside one — for callers whose
+ *  row title already names the month and year, where repeating it costs the width that the rest of
+ *  the line needs. A cycle that CROSSES a year still prints both, because there the year is the only
+ *  thing telling the two halves apart. */
+export const formatBillingCycleRange = (cycle: string, statementDay: number = 1, showYear: boolean = true): string => {
   const { startDate, endDate } = getBillingCycleDates(cycle, statementDay);
   const sameYear = startDate.getFullYear() === endDate.getFullYear();
   const startFmt = format(startDate, sameYear ? 'd MMM' : 'd MMM yyyy');
-  const endFmt = format(endDate, 'd MMM yyyy');
+  const endFmt = format(endDate, sameYear && !showYear ? 'd MMM' : 'd MMM yyyy');
   return `${startFmt} – ${endFmt}`;
 };
 
@@ -410,9 +414,13 @@ export const calculateCycleBalance = (
   return calculateCycleBalanceForCycle(account, transactions, currentCycle);
 };
 
-export const getLatestBilledCycle = (statementDay: number): string => {
-  const today = new Date();
-  const currentCycle = getBillingCycleForDate(format(today, 'yyyy-MM-dd'), statementDay);
+export const getLatestBilledCycle = (statementDay: number, now: Date = new Date()): string => {
+  // INJECTABLE, and it has to be. getCardDues takes a `now` and derives the open cycle from it while
+  // taking the billed one from here; reading the wall clock instead meant the two disagreed for any
+  // caller that passed a date, and could return the SAME cycle as both billed and unbilled — which
+  // breaks the adjacency the whole service is built on. Every production caller happens to pass the
+  // real today, so nothing shipped wrong; the parameter was simply a promise the function did not keep.
+  const currentCycle = getBillingCycleForDate(format(now, 'yyyy-MM-dd'), statementDay);
   const currentCycleDate = parseISO(`${currentCycle}-01`);
   return format(subMonths(currentCycleDate, 1), 'yyyy-MM');
 };
@@ -456,6 +464,20 @@ export const rupeesToRewardPoints = (rupees: number, account?: Account) =>
 // OWN points then puts both legs on the same account, and every sum that forgot the rule started
 // counting the redemption as a second charge: a ₹448 purchase paid with ₹362 of credit and ₹86 of
 // Jewels reported ₹448 of card outstanding. One predicate, so a new sum can't quietly omit it.
+/** Whether a card pays cashback at all — the test every cashback surface should use before offering
+ *  a rate, a mode or a vault row for it.
+ *
+ *  `isCashbackEnabled` is the switch on the account form, but it was added after the field it
+ *  replaced, so a card saved by an older build has it undefined while still carrying rates. Falling
+ *  back to "does it have any rate configured" is what Accounts' own edit form does when it seeds the
+ *  switch; doing the same here keeps a legacy card earning instead of silently losing its cashback
+ *  the first time this test is applied to it. */
+export const cardEarnsCashback = (account?: Account | null) =>
+  !!account
+  && (account.type === 'credit_card' || account.type === 'debit_card')
+  && (account.isCashbackEnabled
+    ?? (account.defaultCashbackRate !== undefined || !!account.cashbackRates?.length));
+
 export const affectsRupeeBalance = (t: Transaction) =>
   !t.isTravelTransaction && !t.isRewardTransaction;
 

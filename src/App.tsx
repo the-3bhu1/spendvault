@@ -32,7 +32,9 @@ function App() {
   const { data, pendingTransfer, addToSmsQueue, isAuthenticated, setAuthenticated } = useFinance();
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [showSplash, setShowSplash] = useState(true);
-  const [selectedAccountForStatement, setSelectedAccountForStatement] = useState<Account | null>(null);
+  // The account AND the cycle to open it at: a Statements row names a specific closed month, and
+  // carrying only the account would land every one of them on today's cycle instead.
+  const [selectedAccountForStatement, setSelectedAccountForStatement] = useState<{ account: Account; cycle?: string } | null>(null);
   const [isHubOpen, setIsHubOpen] = useState(false);
   const [isAskVaultOpen, setIsAskVaultOpen] = useState(false);
   const mainTabs: Tab[] = ['dashboard', 'accounts', 'transactions', 'settings'];
@@ -419,7 +421,7 @@ function App() {
       <main className="container flex-col gap-8 main-content" style={{ marginTop: 0 }}>
         {/* Persistent Tabs (preserve scroll) */}
         <div className="fade-in" style={{ display: activeTab === 'accounts' ? 'block' : 'none' }}>
-          <Accounts onViewStatement={(acc) => setSelectedAccountForStatement(acc)} />
+          <Accounts onViewStatement={(acc) => setSelectedAccountForStatement({ account: acc })} />
         </div>
         
         <div className="fade-in" style={{ display: activeTab === 'transactions' ? 'block' : 'none' }}>
@@ -436,8 +438,8 @@ function App() {
           </div>
         )}
 
-        {activeTab === 'wealth' && <div className="fade-in" style={{ height: '100%' }}><Wealth /></div>}
-        {activeTab === 'cards' && <div className="fade-in" style={{ height: '100%' }}><CreditCards /></div>}
+        {activeTab === 'wealth' && <div className="fade-in" style={{ height: '100%' }}><Wealth onExit={() => setActiveTab('dashboard')} /></div>}
+        {activeTab === 'cards' && <div className="fade-in" style={{ height: '100%' }}><CreditCards onExit={() => setActiveTab('dashboard')} onViewStatement={(acc, cycle) => setSelectedAccountForStatement({ account: acc, cycle })} /></div>}
         {activeTab === 'insights' && <div className="fade-in"><Insights /></div>}
         {activeTab === 'settings' && <div className="fade-in"><Settings /></div>}
         {activeTab === 'splits' && <div className="fade-in"><Splits /></div>}
@@ -446,7 +448,7 @@ function App() {
       </main>
 
       {selectedAccountForStatement && (
-        <AccountStatement account={selectedAccountForStatement} transactions={data.transactions} onClose={() => setSelectedAccountForStatement(null)} />
+        <AccountStatement account={selectedAccountForStatement.account} initialCycle={selectedAccountForStatement.cycle} transactions={data.transactions} onClose={() => setSelectedAccountForStatement(null)} />
       )}
 
       {isAskVaultOpen && (

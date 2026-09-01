@@ -211,7 +211,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       },
       {
         title: "Three Categories",
-        description: "Dues is what you owe right now. Statements is every cycle that has already been cut, newest first. Rewards is cashback and points waiting to be credited. Tap any category to open it — then tap any card for its own statement screen, with a cycle picker and that cycle's ledger.",
+        description: "My Cards is one tile per card — tap one for its whole story: dues, fees, how far you are into a spend-based fee waiver, and what it has spent and earned back this year. Statements is every cycle that has already been cut, newest first, with a cycle picker and that cycle's ledger. Rewards is cashback and points waiting to be credited.",
         selector: ".tour-cards-categories",
         cardPosition: 'top',
         demoCycle: ".tour-cards-categories .card",

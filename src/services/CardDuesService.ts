@@ -60,9 +60,66 @@ export interface CardCycleFigures {
   net: number;
   /** What's owed: net floored at zero. NOT rounded — see `statementAmount`. */
   payable: number;
-  /** `payable` put through the card's rounding rule. Only meaningful for a CLOSED cycle. */
+  /** What is STILL OWED on a closed cycle — the printed statement less what has been paid against
+   *  it. Identical to `due`, and kept as a second name only because the dues, bills, dashboard and
+   *  utilisation surfaces have always called it this. */
   statementAmount: number;
+  /** Credits that SETTLE the bill rather than reduce it: CC payments and transfers into the card.
+   *  A bank does not subtract these from the statement it prints — it prints the amount and then
+   *  records what you paid against it. */
+  settlement: number;
+  /** Every other credit — cashback paid in rupees, refunds, reversals. A bank DOES net these into
+   *  the statement, because they are adjustments to what you were charged rather than money you
+   *  sent to clear it. This is the whole reason `payment` is not a single number any more. */
+  credits: number;
+  /** THE STATEMENT FIGURE, the way a bank generates one: spend less the credits above, then put
+   *  through the card's rounding rule. Not `spend` — netting cashback in is what makes ₹2,832.40 of
+   *  purchases against ₹1,293.48 of cashback print as ₹1,538 rather than ₹2,832. And not net of
+   *  `settlement`, which is what `due` is for. */
+  charged: number;
+  /** What is still owed on the printed statement: `charged` less what has been paid against it.
+   *  Deliberately derived from the ROUNDED figure rather than from raw arithmetic — the bank bills
+   *  you ₹1,538 and you clear it by paying ₹1,538, and the 92 paise the rounding threw away must not
+   *  come back as a balance. (`statementAmount` rounds in the other order and is left alone because
+   *  the dues and utilisation surfaces are built on it.) */
+  due: number;
+  /** What `charged` would be with no hand-entered figure — what the sheet offers to reset to. */
+  computed: number;
+  /** True when `charged` is a hand-entered figure rather than a derived one. Every surface showing
+   *  the figure has to be able to SAY so: a number that quietly disagrees with the ledger under it
+   *  is the one thing worse than a number that is a rupee out. */
+  adjusted: boolean;
+  /** Something was billed on this cycle and it has been paid off. Distinguishes a settled cycle from
+   *  an empty one, which a zero remainder alone cannot. */
+  settled: boolean;
+  /** Meaningfully more was paid against the statement than it billed. A stronger claim than
+   *  `settled` and worth saying separately: the money is not lost, it sits as credit on the card,
+   *  but a row that only said "settled" would give the user no reason to go looking for it. */
+  overpaid: boolean;
 }
+
+/** How far past the statement a payment has to land before it counts as an OVERpayment.
+ *
+ *  A whole rupee, because the statement is rounded and what is paid against it is not. A ₹16,859.84
+ *  bill rounds to ₹16,860 and gets cleared by ₹16,860.16 of payments — sixteen paise of residue from
+ *  a returned transfer — and a bare `settlement > charged` read that as an overpayment and put a
+ *  double tick on a perfectly ordinary settled statement. Nothing under a rupee is news. */
+const OVERPAY_MIN = 1;
+/** Float slack for the settled test alone: 0.1 + 0.2 is not 0.3, and a statement cleared to the
+ *  paisa must not fail by a billionth. Far too small to forgive a real shortfall. */
+const SETTLE_EPS = 0.005;
+
+/** Money sent to clear the bill, rather than anything that was bought or credited. These are the
+ *  app's own "pure ledger movement" categories (see STATS_EXCLUDED_CATEGORIES); anything else on the
+ *  card is either a purchase or an adjustment to one.
+ *
+ *  SIGNED BY DIRECTION, and that is the whole point. A credit here is money paid INTO the card; a
+ *  debit is money the bank sent back OUT of it — a payment returned because it arrived before the
+ *  purchase it was meant for had posted. The two legs are a matched pair that nets to nothing, and
+ *  counting the return as a PURCHASE (which is what "every debit is spend" did) inflated both the
+ *  month's spend and the statement by the size of the payment: ₹17,747 of tickets read as ₹35,247
+ *  spent and a ₹34,359 bill. Neither number happened. */
+const SETTLEMENT_CATEGORIES = new Set(['cc payment', 'transfer']);
 
 export interface CardDues {
   account: Account;
@@ -103,6 +160,55 @@ const applyRounding = (value: number, rounding: RoundingRule = 'none') => {
   return value;
 };
 
+/** Where a cycle stands, as one word. ONE ladder, shared by every surface that shows a statement:
+ *  the Statements row draws an icon from it and the statement screen prints the label, and the two
+ *  said different things — "Paid in full" against a green tick, "₹1,900 due" against a red triangle
+ *  — for as long as each derived its own.
+ *
+ *  PRECEDENCE IS LOAD-BEARING, and it is the reason this is a ladder rather than a set of flags:
+ *
+ *  `open` is NOT on the ladder and cycleStatus never returns it: a cycle still accruing has not
+ *  been billed, so none of the tests below apply to it and the caller that knows it is looking at
+ *  the running cycle says so outright. It lives in this type because it is part of the same
+ *  vocabulary — every surface that names a cycle's state should name that one the same way.
+ *
+ *  - `empty` first, because it is not a payment state at all. A month you did not use the card in
+ *    has no balance to be early or late with, and every test below would read that zero as "paid".
+ *  - `overdue` above `partial`: a cycle half cleared but a month past its date is a problem, and an
+ *    "in progress" reading would bury it.
+ *  - `overpaid` above `settled`, because settled is true of it too, and the weaker of two true
+ *    statements is the wrong one to show. */
+export type CycleStatus = 'open' | 'empty' | 'overdue' | 'overpaid' | 'settled' | 'partial' | 'unpaid';
+
+export const CYCLE_STATUS_LABEL: Record<CycleStatus, string> = {
+  open: 'Open',
+  empty: 'Nothing billed',
+  overdue: 'Overdue',
+  overpaid: 'Overpaid',
+  settled: 'Settled',
+  partial: 'Partially paid',
+  unpaid: 'Unpaid',
+};
+
+export const cycleStatus = (
+  f: Pick<CardCycleFigures, 'charged' | 'due' | 'settled' | 'overpaid'>,
+  overdue: boolean
+): CycleStatus => {
+  if (f.charged === 0) return 'empty';
+  if (overdue) return 'overdue';
+  if (f.overpaid) return 'overpaid';
+  if (f.settled) return 'settled';
+  return f.due < f.charged ? 'partial' : 'unpaid';
+};
+
+/** Whether a cycle's own due date has gone by, without a due-date calculator for arbitrary past
+ *  cycles. Only the latest closed statement can have a date still ahead — the card knows that one.
+ *  Every OLDER cycle that still owes something is past due by construction: a newer statement has
+ *  since been cut, so that one's date went by a month or more ago. */
+export const isCycleOverdue = (dues: Pick<CardDues, 'billedCycle' | 'daysToDue'>, cycle: string, due: number) =>
+  due > 0
+  && (cycle < dues.billedCycle || (cycle === dues.billedCycle && dues.daysToDue !== undefined && dues.daysToDue < 0));
+
 /** The two sides of one cycle for one card. */
 export const getCardCycleFigures = (
   account: Account,
@@ -111,19 +217,50 @@ export const getCardCycleFigures = (
 ): CardCycleFigures => {
   const statementDay = account.statementDay || 1;
   let spend = 0;
-  let payment = 0;
+  let settlement = 0;
+  let credits = 0;
 
   for (const t of transactions) {
     if (t.accountId !== account.id) continue;
     if (!affectsRupeeBalance(t)) continue;
     if (getAppliedBillingCycle(t, statementDay) !== cycle) continue;
-    if (t.type === 'debit') spend += t.amount;
-    else payment += t.amount;
+    if (SETTLEMENT_CATEGORIES.has((t.category || '').toLowerCase())) settlement += t.type === 'debit' ? -t.amount : t.amount;
+    else if (t.type === 'debit') spend += t.amount;
+    else credits += t.amount;
   }
 
+  const payment = settlement + credits;
+  // Unchanged by the signing above: moving a returned payment out of `spend` and into a negative
+  // `settlement` shifts it across the minus sign, so `net` — and therefore the card's balance,
+  // dues and utilisation — comes out exactly where it always did. Only the SPLIT changed.
   const net = spend - payment;
   const payable = Math.max(0, net);
-  return { cycle, spend, payment, net, payable, statementAmount: applyRounding(payable, account.statementRounding) };
+  // A bank's rounding is not always the rule you told us about — it can differ by a rupee, or the
+  // bank can simply change it — so a cycle may carry a hand-entered figure that wins outright. See
+  // the note on statementAdjustments; `computed` is kept alongside so the sheet can offer it back.
+  const computed = applyRounding(Math.max(0, spend - credits), account.statementRounding);
+  const adjustment = account.statementAdjustments?.[cycle];
+  const charged = adjustment ?? computed;
+  const due = Math.max(0, charged - settlement);
+  return {
+    cycle, spend, payment, settlement, credits, net, payable,
+    // ONE REMAINDER FOR THE WHOLE APP. This used to round the remainder — round(spend − credits −
+    // payments) — while the statements screen rounded the BILL and subtracted payments from it. The
+    // two agree whenever payments are whole rupees and diverge the moment one carries paise: a
+    // ₹1,000.60 statement floored to ₹1,000 against a ₹500.50 payment is ₹499.50 owed, and the old
+    // order reported ₹500, a figure nobody was ever charged. The bank rounds the bill, then you pay
+    // against the rounded bill; that is the order, and now every screen uses it.
+    statementAmount: due,
+    charged,
+    computed,
+    adjusted: adjustment !== undefined,
+    due,
+    settled: charged > 0 && settlement >= charged - SETTLE_EPS,
+    // Against something billed, deliberately: a lone credit landing in a month with no purchases is
+    // almost always a payment logged into the wrong cycle, not an overpayment, and flagging it as
+    // one would put a warning on the most ordinary mistake in the ledger.
+    overpaid: charged > 0 && settlement - charged >= OVERPAY_MIN,
+  };
 };
 
 /**
@@ -138,7 +275,7 @@ export const getCardDues = (
   const statementDay = account.statementDay || 1;
   const todayStr = format(now, 'yyyy-MM-dd');
 
-  const billedCycle = getLatestBilledCycle(statementDay);
+  const billedCycle = getLatestBilledCycle(statementDay, now);
   // The open cycle, by the same helper every other surface uses. Equal to billedCycle + 1 month;
   // derived from today rather than by adding a month so the two can't drift if that helper changes.
   const unbilledCycle = getBillingCycleForDate(todayStr, statementDay);

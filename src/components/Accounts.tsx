@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { format, addMonths, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown } from 'lucide-react';
+import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown, CalendarDays } from 'lucide-react';
 import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols, isCacheFresh, searchMFByName, searchStockByName, fetchCommodityPriceINR, getCachedCommodityPriceINR, isCommodityCacheFresh, getCommodityVendorFound } from '../services/MarketDataService';
 import type { MFSearchResult, StockSearchResult } from '../services/MarketDataService';
 import { getCommodityVendor } from '../services/GeminiConfig';
@@ -9,15 +9,65 @@ import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import { getAccountEmoji } from './transactionIcons';
 import ConfirmDialog from './ConfirmDialog';
-import type { Account, AccountType, CardDetails, CardNetwork, BrandKey, RoundingRule } from '../types';
+import type { Account, AccountType, CardDetails, CardFees, CardNetwork, BrandKey, RoundingRule } from '../types';
 import { CardBrandLogo, brandLabel, BRAND_INK } from './CardBrandLogo';
 import { resolveCardIssuer } from '../utils';
-import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, calculateCycleBalanceForCycle, getBillingCycleForDate, getOrdinalSuffix, affectsRupeeBalance } from '../utils';
+import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, calculateCycleBalanceForCycle, getBillingCycleForDate, getOrdinalSuffix, affectsRupeeBalance, cardEarnsCashback } from '../utils';
 import { scrollToFirstError } from '../utils/formErrors';
 import { CardNetworkLogo, NETWORK_LABELS } from './CardNetworkLogo';
 import { ViewCardOverlay } from './ViewCardOverlay';
 
 import { EPFDetailsView } from './EPFDetailsModal';
+
+/**
+ * How a card charges, as the one choice that decides which fee fields exist.
+ *
+ * A SHAPE FIRST, THEN THE AMOUNTS. Loose "joining fee" and "annual fee" boxes made the commonest
+ * card in the country — lifetime free — a card you describe by leaving two things blank, which is
+ * indistinguishable from not having filled the form in. Picking the shape says it outright, and it
+ * is also what makes the amounts safe to require: a mode with an annual fee in its name cannot be
+ * saved without one.
+ *
+ * First-year-free is NOT a fourth mode. It is a property of a card that has an annual fee — "free
+ * for the first year, ₹1,000 after" — so it rides as a checkbox on both fee-charging modes rather
+ * than doubling the list.
+ */
+type FeeMode = 'ltf' | 'annual' | 'joining_annual';
+
+const FEE_MODE_OPTIONS = [
+  { id: 'ltf', name: 'Lifetime free', subtext: 'No joining fee, no annual fee' },
+  { id: 'annual', name: 'Annual fee', subtext: 'Charged every renewal' },
+  { id: 'joining_annual', name: 'Joining + annual fee', subtext: 'One-time at issue, then every renewal' },
+];
+
+/**
+ * Which mode an existing card is in.
+ *
+ * Reads the annual fee first because that is what separates lifetime free from everything else, and
+ * only then asks whether a joining fee was charged. A card saved under 'annual' has no joiningFee
+ * key at all — see buildCardFees — so this round-trips what the form wrote.
+ */
+const feeModeOf = (fees?: CardFees): FeeMode => {
+  if (!fees?.annualFee) return 'ltf';
+  return fees.joiningFee !== undefined ? 'joining_annual' : 'annual';
+};
+
+/**
+ * The fee block to store, built from the mode rather than from whatever the inputs happen to hold.
+ *
+ * Wholesale, not field by field. Switching from 'joining_annual' to 'annual' has to actually DROP
+ * the joining fee — left behind it would keep reading as a joining-fee card for ever, and the user
+ * has already said otherwise. 'ltf' clears the block entirely, which is what makes "no fee data"
+ * and "lifetime free" distinguishable everywhere downstream (see CardFees in types.ts).
+ */
+const buildCardFees = (mode: FeeMode, draft?: CardFees): CardFees | undefined => {
+  if (mode === 'ltf') return undefined;
+  const fees: CardFees = { annualFee: draft?.annualFee };
+  if (mode === 'joining_annual') fees.joiningFee = draft?.joiningFee ?? 0;
+  if (draft?.firstYearFree) fees.firstYearFree = true;
+  if (draft?.waiverSpend !== undefined) fees.waiverSpend = draft.waiverSpend;
+  return fees;
+};
 
 export default function Accounts({ onViewStatement }: { onViewStatement: (acc: Account) => void }) {
   const { data, setPendingTransfer, addAccount, updateAccount, archiveAccount, restoreAccount } = useFinance();
@@ -26,7 +76,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const [viewingCard, setViewingCard] = useState<Account | null>(null);
   const [viewingEPFAccount, setViewingEPFAccount] = useState<Account | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [datePickerTarget, setDatePickerTarget] = useState<{ type: 'joining' | 'revision'; index?: number } | null>(null);
+  const [datePickerTarget, setDatePickerTarget] = useState<{ type: 'joining' | 'revision' | 'cardOpened'; index?: number } | null>(null);
+  // How the open card charges. Held beside newAccount rather than derived from it on every render:
+  // picking 'Joining + annual' has to show the joining-fee box BEFORE anything is typed into it,
+  // and a mode derived from the amounts would flip straight back while the box was still empty.
+  const [feeMode, setFeeMode] = useState<FeeMode>('ltf');
   const [prices, setPrices] = useState<Record<string, number>>(() => {
     const cached: Record<string, number> = {};
     data.accounts
@@ -171,6 +225,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const [isEditingCardDetails, setIsEditingCardDetails] = useState(false);
   const [issuerQuery, setIssuerQuery] = useState('');
   const [issuerDropdownOpen, setIssuerDropdownOpen] = useState(false);
+  // The dropdown is closed by the input's own blur, so anything that opens it has to make sure the
+  // input is focused — otherwise there is no blur to come. See the clear button below.
+  const issuerInputRef = useRef<HTMLInputElement>(null);
 
   // Banks a card can be attributed to. Co-brand keys (swiggy, jupiter, ...) and
   // 'axismark' are deliberately absent — those aren't issuers.
@@ -184,11 +241,32 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     indusind: ['indus ind'],
   };
   const selectedIssuer = newAccount.cardDetails?.issuer;
+  // What the name alone would give, ignoring any explicit choice — used to tell
+  // the user whether the mark they see is inferred or one they set.
+  const detectedIssuer = resolveCardIssuer(newAccount.name, undefined);
+  const effectiveIssuer = resolveCardIssuer(newAccount.name, newAccount.cardDetails);
+  // What the field is seeded with when the editor opens: the explicit choice if
+  // there is one, otherwise whatever the name detected.
+  const issuerSeedLabel = effectiveIssuer ? brandLabel(effectiveIssuer) : '';
   // A field reading "HDFC Bank" shouldn't narrow the list to HDFC the moment
-  // it's focused — you open it precisely to see what else is on offer.
-  const issuerFilter = selectedIssuer && issuerQuery === brandLabel(selectedIssuer)
+  // it's focused — you open it precisely to see what else is on offer. Keyed on
+  // the SEED rather than on the explicit pick, so a detected bank the user never
+  // typed doesn't filter the list down to itself either.
+  const issuerFilter = issuerSeedLabel && issuerQuery === issuerSeedLabel
     ? ''
     : issuerQuery.trim().toLowerCase();
+  // Which bank's mark to show inside the field, and it is keyed on WHAT THE FIELD SAYS rather than
+  // on whether a choice was stored. Gated on the stored choice, a bank that had only been detected
+  // from the name seeded the text but drew no plate, so the same field looked like two different
+  // controls depending on how the value got there.
+  //
+  // Deriving it from the text also makes every other state fall out for free: it disappears while
+  // you are part-way through typing, comes back if you type a full name by hand, and — the reason
+  // this isn't just `effectiveIssuer` — goes away when the field is cleared. Keyed on the detection,
+  // the plate would survive the ✕, because the detection is a property of the card's NAME and
+  // clearing the field cannot undo it.
+  const issuerCandidates: (BrandKey | undefined)[] = [selectedIssuer, effectiveIssuer, ...ISSUER_OPTIONS];
+  const shownIssuer = issuerCandidates.find((b): b is BrandKey => !!b && brandLabel(b) === issuerQuery);
   const issuerSuggestions = ISSUER_OPTIONS.filter(bank =>
     !issuerFilter ||
     [bank, brandLabel(bank).toLowerCase(), ...(ISSUER_ALIASES[bank] || [])].some(s => s.includes(issuerFilter))
@@ -212,10 +290,6 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setIssuerQuery(brandLabel(bank));
     setIssuerDropdownOpen(false);
   };
-  // What the name alone would give, ignoring any explicit choice — used to tell
-  // the user whether the mark they see is inferred or one they set.
-  const detectedIssuer = resolveCardIssuer(newAccount.name, undefined);
-  const effectiveIssuer = resolveCardIssuer(newAccount.name, newAccount.cardDetails);
   const [collapsedTypes, setCollapsedTypes] = useState<Set<string>>(new Set());
   // Archived accounts are tucked away collapsed by default — they're history, not everyday accounts.
   const [archivedCollapsed, setArchivedCollapsed] = useState(true);
@@ -286,6 +360,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setSymbolInput('');
     setSymbolResults([]);
     setSymbolDropdownOpen(false);
+    setFeeMode('ltf');
     setIsModalOpen(true);
   };
 
@@ -295,7 +370,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setErrors({});
     setNewAccount({
       ...acc,
-      isCashbackEnabled: acc.isCashbackEnabled ?? (acc.defaultCashbackRate !== undefined || (acc.cashbackRates && acc.cashbackRates.length > 0))
+      isCashbackEnabled: cardEarnsCashback(acc)
     });
     setNewCbName('');
     setNewCbRate('');
@@ -319,12 +394,18 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     } else {
       setExpiryInput('');
     }
-    setIssuerQuery(cd?.issuer ? brandLabel(cd.issuer) : '');
+    // Seeded from the EFFECTIVE issuer, not just an explicit one. A card whose bank was only ever
+    // inferred from its name showed that bank everywhere else and then opened this editor with the
+    // field empty, which reads as the value having been lost. Seeding it does not make the inference
+    // explicit — only chooseIssuer writes cardDetails.issuer — so Save still stores nothing extra.
+    const seeded = resolveCardIssuer(acc.name, cd);
+    setIssuerQuery(seeded ? brandLabel(seeded) : '');
     setIssuerDropdownOpen(false);
     setShowCvv(false);
     setSymbolInput(acc.marketSymbol || '');
     setSymbolResults([]);
     setSymbolDropdownOpen(false);
+    setFeeMode(feeModeOf(acc.cardFees));
 
     setIsModalOpen(true);
   };
@@ -355,6 +436,17 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       }
       if (!newAccount.statementDay || newAccount.statementDay < 1 || newAccount.statementDay > 31) {
         newErrors.statementDay = 'Statement Generation Day is required';
+      }
+      // A mode with a fee in its name has to carry the amount. This is the whole reason the shape is
+      // chosen before the numbers: without it, picking 'Annual fee' and typing nothing would save a
+      // card that every downstream screen correctly reports as lifetime free — the user having just
+      // said the opposite.
+      const fees = newAccount.cardFees;
+      if (feeMode !== 'ltf' && (fees?.annualFee === undefined || isNaN(fees.annualFee) || fees.annualFee <= 0)) {
+        newErrors.annualFee = 'Annual Fee is required';
+      }
+      if (feeMode === 'joining_annual' && (fees?.joiningFee === undefined || isNaN(fees.joiningFee) || fees.joiningFee <= 0)) {
+        newErrors.joiningFee = 'Joining Fee is required';
       }
       if (!newAccount.dueDay || newAccount.dueDay < 1 || newAccount.dueDay > 31) {
         newErrors.dueDay = 'Payment Due Day is required';
@@ -581,6 +673,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       statementDay: newAccount.type === 'credit_card' ? newAccount.statementDay : undefined,
       dueDay: newAccount.type === 'credit_card' ? newAccount.dueDay : undefined,
       cashbackCreditCycle: newAccount.type === 'credit_card' ? (newAccount.cashbackCreditCycle || 'next_cycle') : undefined,
+      cardOpenedOn: newAccount.type === 'credit_card' ? newAccount.cardOpenedOn : undefined,
+      // Dropped entirely when every field is blank, so a card nobody filled the form in for carries
+      // no cardFees key at all rather than an object of undefineds — which is what lets the summary
+      // screen tell "not told" from "told, and it's free".
+      cardFees: newAccount.type === 'credit_card' ? buildCardFees(feeMode, newAccount.cardFees) : undefined,
       cashbackDestinationAccountId: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.cashbackDestinationAccountId : undefined,
       isNcmcEnabled: newAccount.isNcmcEnabled,
       travelOpeningBalances: updatedTravelOpeningBalances,
@@ -1460,6 +1557,122 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                 </div>
               )}
 
+              {/* ── What the card costs to hold ──────────────────────────────────────────────────
+                  A MODE, then only the amounts that mode implies. No section heading and no
+                  explanatory line: the picker's own options spell out what each shape means, and a
+                  form that captions its own controls is a form that does not trust them. */}
+              {newAccount.type === 'credit_card' && (
+                <>
+                  {/* The anchor for the membership year, which is the window a fee waiver is measured
+                      over and the year the card summary totals spend and cashback across. Optional —
+                      without it that screen falls back to the financial year and says so. */}
+                  <div className="input-group">
+                    <label>Card Opened On</label>
+                    <button
+                      type="button"
+                      className="input-field flex align-center justify-between"
+                      style={{ textAlign: 'left', cursor: 'pointer' }}
+                      onClick={() => setDatePickerTarget({ type: 'cardOpened' })}
+                    >
+                      <span style={{ color: newAccount.cardOpenedOn ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                        {newAccount.cardOpenedOn ? format(parseISO(newAccount.cardOpenedOn), 'd MMM yyyy') : 'Not set'}
+                      </span>
+                      <CalendarDays size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                    </button>
+                  </div>
+
+                  {/* Not wrapped in an .input-group — CustomPicker renders its own, and nesting the
+                      two stacks their bottom margins into a visible gap. */}
+                  <CustomPicker
+                    label="Card Fees"
+                    value={feeMode}
+                    options={FEE_MODE_OPTIONS}
+                    onChange={val => {
+                      const next = val as FeeMode;
+                      setFeeMode(next);
+                      // The draft is trimmed to the new shape as the mode changes rather than at
+                      // save time, so the fields on screen and the value behind them never
+                      // disagree — switching away from a joining fee visibly drops it.
+                      setNewAccount(prev => ({ ...prev, cardFees: buildCardFees(next, prev.cardFees) }));
+                      if (errors.annualFee) setErrors(e => ({ ...e, annualFee: '' }));
+                      if (errors.joiningFee) setErrors(e => ({ ...e, joiningFee: '' }));
+                    }}
+                    iconGetter={id => id === 'ltf' ? '🎁' : id === 'annual' ? '🔁' : '🧾'}
+                  />
+
+                  {feeMode === 'joining_annual' && (
+                    <div className="input-group">
+                      <label>Joining Fee — ₹</label>
+                      <input
+                        type="number"
+                        className={`input-field ${errors.joiningFee ? 'border-danger' : ''}`}
+                        placeholder="e.g. 500"
+                        value={newAccount.cardFees?.joiningFee ?? ''}
+                        onChange={e => {
+                          setNewAccount({
+                            ...newAccount,
+                            cardFees: { ...newAccount.cardFees, joiningFee: e.target.value !== '' ? parseFloat(e.target.value) : undefined },
+                          });
+                          if (errors.joiningFee) setErrors(prev => ({ ...prev, joiningFee: '' }));
+                        }}
+                      />
+                      {errors.joiningFee && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.joiningFee}</span>}
+                    </div>
+                  )}
+
+                  {feeMode !== 'ltf' && (
+                    <>
+                      <div className="input-group">
+                        <label>Annual Fee — ₹</label>
+                        <input
+                          type="number"
+                          className={`input-field ${errors.annualFee ? 'border-danger' : ''}`}
+                          placeholder="e.g. 1000"
+                          value={newAccount.cardFees?.annualFee ?? ''}
+                          onChange={e => {
+                            setNewAccount({
+                              ...newAccount,
+                              cardFees: { ...newAccount.cardFees, annualFee: e.target.value !== '' ? parseFloat(e.target.value) : undefined },
+                            });
+                            if (errors.annualFee) setErrors(prev => ({ ...prev, annualFee: '' }));
+                          }}
+                        />
+                        {errors.annualFee && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.annualFee}</span>}
+                      </div>
+
+                      <div className="input-group">
+                        <label>Annual Fee Waived On Yearly Spend — ₹</label>
+                        <input
+                          type="number"
+                          className="input-field"
+                          placeholder="Blank = never waived"
+                          value={newAccount.cardFees?.waiverSpend ?? ''}
+                          onChange={e => setNewAccount({
+                            ...newAccount,
+                            cardFees: { ...newAccount.cardFees, waiverSpend: e.target.value !== '' ? parseFloat(e.target.value) : undefined },
+                          })}
+                        />
+                      </div>
+
+                      <div className="input-group">
+                        <label className="flex align-center" style={{ cursor: 'pointer', margin: '0.5rem 0', fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
+                          <input
+                            type="checkbox"
+                            style={{ margin: 0, width: '16px', height: '16px' }}
+                            checked={newAccount.cardFees?.firstYearFree || false}
+                            onChange={e => setNewAccount({
+                              ...newAccount,
+                              cardFees: { ...newAccount.cardFees, firstYearFree: e.target.checked || undefined },
+                            })}
+                          />
+                          <span style={{ display: 'inline-flex', alignItems: 'center', transform: 'translateY(1px)' }}>First year free?</span>
+                        </label>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+
               {newAccount.type === 'debit_card' && (
                 <>
                   <div className="input-group">
@@ -2155,7 +2368,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                 } else {
                                   setExpiryInput('');
                                 }
-                                setIssuerQuery(newAccount.cardDetails?.issuer ? brandLabel(newAccount.cardDetails.issuer) : '');
+                                // Effective, not explicit — see the note at the other seed site.
+                                setIssuerQuery(issuerSeedLabel);
                                 setIssuerDropdownOpen(false);
                               }}
                               title="Edit Details"
@@ -2419,10 +2633,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                   form for an option almost nobody picks. */}
                               <div style={{ position: 'relative' }}>
                                 <div style={{ position: 'relative' }}>
-                                  {selectedIssuer && (
+                                  {shownIssuer && (
                                     <span
                                       style={{
-                                        ...issuerPlate(selectedIssuer),
+                                        ...issuerPlate(shownIssuer),
                                         position: 'absolute',
                                         left: '0.5rem',
                                         top: '50%',
@@ -2432,10 +2646,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                         pointerEvents: 'none',
                                       }}
                                     >
-                                      <CardBrandLogo brand={selectedIssuer} fit />
+                                      <CardBrandLogo brand={shownIssuer} fit />
                                     </span>
                                   )}
                                   <input
+                                    ref={issuerInputRef}
                                     className="input-field"
                                     placeholder="Search bank — e.g. HDFC"
                                     value={issuerQuery}
@@ -2464,7 +2679,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                       boxSizing: 'border-box',
                                       height: '48px',
                                       fontWeight: 'normal',
-                                      paddingLeft: selectedIssuer ? 'calc(72px + 1.1rem)' : undefined,
+                                      paddingLeft: shownIssuer ? 'calc(72px + 1.1rem)' : undefined,
                                       paddingRight: issuerQuery ? '2.3rem' : undefined,
                                     }}
                                   />
@@ -2474,6 +2689,26 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                       onClick={() => {
                                         setIssuerQuery('');
                                         setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, issuer: undefined } as CardDetails });
+                                        // And REOPEN it, focusing the input as we do.
+                                        //
+                                        // Both halves are needed. The mousedown above preventDefaults
+                                        // so a click here cannot move focus — which is what makes
+                                        // picking from the list work, but it also means onFocus will
+                                        // not fire to reopen the list, and choosing a bank had closed
+                                        // it. Hence the explicit open.
+                                        //
+                                        // And the focus(): the field can be cleared without ever
+                                        // having been focused, in which case opening the list leaves
+                                        // one with nothing to close it — blur is the only thing that
+                                        // does, and blur cannot fire on an element that was never
+                                        // focused. Clicking away then left the list hanging. Focusing
+                                        // also matches what clearing means: you are about to type.
+                                        //
+                                        // Backspacing to empty never had either problem — every
+                                        // keystroke goes through onChange, and the input is focused
+                                        // by definition.
+                                        setIssuerDropdownOpen(true);
+                                        issuerInputRef.current?.focus();
                                       }}
                                       style={{ position: 'absolute', right: '0.5rem', top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', padding: '0.35rem', opacity: 0.5, cursor: 'pointer', color: 'var(--text-muted)' }}
                                       title="Clear issuing bank"
@@ -2586,19 +2821,27 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
         <CustomDatePicker
           isOpen={!!datePickerTarget}
           onClose={() => setDatePickerTarget(null)}
-          label={datePickerTarget.type === 'joining' ? 'Select Date of Joining' : 'Select Revision Effective Date'}
+          label={
+            datePickerTarget.type === 'joining' ? 'Select Date of Joining'
+              : datePickerTarget.type === 'cardOpened' ? 'Select Card Opening Date'
+                : 'Select Revision Effective Date'
+          }
           value={
             datePickerTarget.type === 'joining'
               ? (newAccount.joiningDate || newAccount.baseBalanceDate || format(new Date(), 'yyyy-MM-dd'))
-              : (() => {
-                const rev = newAccount.salaryRevisions?.[datePickerTarget.index || 0];
-                if (!rev || !rev.effectiveDate) return format(new Date(), 'yyyy-MM-dd');
-                return rev.effectiveDate.length === 7 ? `${rev.effectiveDate}-01` : rev.effectiveDate;
-              })()
+              : datePickerTarget.type === 'cardOpened'
+                ? (newAccount.cardOpenedOn || format(new Date(), 'yyyy-MM-dd'))
+                : (() => {
+                  const rev = newAccount.salaryRevisions?.[datePickerTarget.index || 0];
+                  if (!rev || !rev.effectiveDate) return format(new Date(), 'yyyy-MM-dd');
+                  return rev.effectiveDate.length === 7 ? `${rev.effectiveDate}-01` : rev.effectiveDate;
+                })()
           }
           onChange={selectedDate => {
             if (datePickerTarget.type === 'joining') {
               setNewAccount({ ...newAccount, joiningDate: selectedDate, baseBalanceDate: selectedDate });
+            } else if (datePickerTarget.type === 'cardOpened') {
+              setNewAccount({ ...newAccount, cardOpenedOn: selectedDate });
             } else if (datePickerTarget.type === 'revision' && datePickerTarget.index !== undefined) {
               const nextRevs = [...(newAccount.salaryRevisions || [])];
               if (nextRevs[datePickerTarget.index]) {

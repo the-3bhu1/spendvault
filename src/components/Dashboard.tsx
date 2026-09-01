@@ -97,8 +97,32 @@ export default function Dashboard({ onOpenCards, onOpenWealth }: {
           style={{
             position: 'relative',
             overflow: 'hidden',
-            minHeight: '360px',
-            margin: '0 -1.5rem',
+            /* The coin is scaled with 'meet' on a square viewBox, so it takes the SMALLER of this
+               box's two sides — and this box has always been wider than it is tall. A flat 360px
+               height therefore struck the same 349px coin on every phone, and a wider screen bought
+               nothing but wider margins either side of it.
+               Height follows width instead, and what it is solved for is the GUTTER. The rim sits at
+               r 194 of a 200 viewBox, so the drawing spans 97% of the box's smaller side; dividing
+               the container's content width by that 0.97 makes the rim land exactly ON that width —
+               which is where the plaques below start. It used to be a flat 103vw, putting the rim on
+               the screen edges instead, and the coin read as cropped by the phone rather than set on
+               the page with everything else.
+               `100vw - 1rem` IS the content width: .container pads 0.5rem a side on mobile. That
+               figure has to stay in step with .container, like .detail-hero-bleed's does.
+               The -1.5rem bleed STAYS, and is now load-bearing for a different reason than it was:
+               it keeps the box wider than it is tall, so the height above is the side the drawing is
+               actually sized by. Remove it and the (narrower) width takes over and the coin shrinks.
+               Capped, because on a desktop-width container this would be a hero taller than the
+               window. Past ~447px wide the cap takes over and the coin stops growing.
+               Keeping height the smaller side also keeps the currency course's CSS fade aligned with
+               the SVG one — see .coin-course-fade in index.css. */
+            minHeight: 'min(calc((100vw - 1rem) / 0.97), 460px)',
+            /* The negative TOP pulls the coin up under the title. The drawing already carries 6px
+               of empty viewBox above its rim, and the column's own 32px gap sat on top of that, so
+               the hero read as floating rather than as struck under the heading. Pulling the box up
+               takes everything below it along, so the space under the coin is unchanged — this
+               tightens the title-to-coin joint only. */
+            margin: '-1.25rem -1.5rem 0',
             padding: '1.5rem',
             display: 'flex',
             flexDirection: 'column',
@@ -119,7 +143,13 @@ export default function Dashboard({ onOpenCards, onOpenWealth }: {
               it lifts the figure by half of it: onto the centre. Derived from the label's own values
               rather than a measured pixel count, so it tracks if either changes. */}
           <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', paddingBottom: 'calc(0.8rem * 1.5 + 0.7rem)' }}>
-            <div className="text-mono uppercase" style={{ fontSize: '0.8rem', fontWeight: 700, letterSpacing: '3.5px', color: 'var(--text-secondary)', marginBottom: '0.7rem' }}>
+            {/* Same ink as the figure it scopes. RollingNumber sets no colour and inherits
+                --text-primary, so this matches by naming that token rather than by omitting one —
+                the label would otherwise inherit it too, which reads as an accident waiting to be
+                "fixed" back to secondary. The month stays subordinate on size, weight and tracking,
+                which is enough: dimming it as well made the coin's denomination look like two
+                different pieces of type. */}
+            <div className="text-mono uppercase" style={{ fontSize: '0.8rem', fontWeight: 700, letterSpacing: '3.5px', color: 'var(--text-primary)', marginBottom: '0.7rem' }}>
               {monthLabel}
             </div>
             {/* Whole rupees: this is a glance surface, and the paise belong on the screens where a

@@ -16,6 +16,8 @@
 
 import { resolveBrandDomain } from './GeminiService';
 import { hasGeminiKey } from './GeminiConfig';
+import { resolveCardIssuer } from '../utils';
+import type { BrandKey } from '../types';
 
 const LOGO_DEV_TOKEN_KEY = 'logo_dev_token';
 
@@ -147,6 +149,9 @@ const LIQUID_REGISTRY: BrandEntry[] = [
   { match: ['indusind'], domain: 'indusind.com' },
   { match: ['yes bank'], domain: 'yesbank.in' },
   { match: ['federal'], domain: 'federalbank.co.in' },
+  // CSB was the one bank offered in the card-details issuer picker with no entry here, which meant
+  // a card explicitly attributed to it resolved nothing and fell through to the guess.
+  { match: ['csb', 'catholic syrian'], domain: 'csb.co.in' },
   { match: ['rbl'], domain: 'rblbank.com' },
   { match: ['idbi'], domain: 'idbibank.in' },
   { match: ['indian bank'], domain: 'indianbank.in' },
@@ -712,6 +717,38 @@ export function getLiquidLogoUrl(account: AccountLike): string | null {
   if (registry) return logoFromDomain(registry);
 
   if (account.type === 'cash' || account.type === 'offset') return null;
+
+  const aiDomain = domainCache[liquidAiKey(account.name)];
+  if (aiDomain) return logoFromDomain(aiDomain);
+
+  const guess = liquidBrandGuess(account.name);
+  return guess ? logoFromDomain(guess) : null;
+}
+
+/**
+ * Best-known logo for a CREDIT CARD — its row in the Cards tree, and its detail hero.
+ *
+ * Same chain as getLiquidLogoUrl with ONE step inserted: when the card's name resolves nothing, the
+ * issuing bank named in its saved details gets a turn before liquidBrandGuess does. The order is the
+ * whole point of having a separate function.
+ *
+ * Without it, a card called "Signature" — one word, four or more letters, in no registry — reaches
+ * the guess, which assumes signature.com and renders a real but entirely unrelated company's logo on
+ * the row. A wrong mark shown confidently is worse than a monogram, and worse still when the card's
+ * own details say "Axis Bank" and we ignored them.
+ *
+ * The name still wins over the issuer, which is deliberate: a co-branded card is the co-brand's
+ * (Jupiter, not CSB) — that is the mark printed on the plastic and the one on its detail hero.
+ */
+export function getCardLogoUrl(account: AccountLike & { cardDetails?: { issuer?: BrandKey } }): string | null {
+  const registry = resolveLiquidDomain(account.name);
+  if (registry) return logoFromDomain(registry);
+
+  // The BrandKey doubles as the registry keyword for every bank the issuer picker offers
+  // ('hdfc', 'axis', 'csb', …), so it can be looked up directly.
+  const issuer = resolveCardIssuer(account.name, account.cardDetails);
+  const issuerDomain = issuer ? resolveLiquidDomain(issuer) : null;
+  if (issuerDomain) return logoFromDomain(issuerDomain);
 
   const aiDomain = domainCache[liquidAiKey(account.name)];
   if (aiDomain) return logoFromDomain(aiDomain);
