@@ -169,7 +169,7 @@ the "Other" source below covers one-off rewards.
   limit. Use a real rewards account instead when the source is a wallet with a running balance worth
   tracking (CRED coins, super.money, a card's own points).
 - In the ledger the SPEND is the row you see, with the reward redemption collapsed under it as a
-  linked entry ("Part-paid with rewards", or "Paid from funding account + rewards" on a CC Payment).
+  linked entry ("Part-paid with rewards", or "Funding + rewards" on a CC Payment).
   Tapping that redemption opens the spend it belongs to, with the split panel in view — the amount
   redeemed is edited there, next to the full price. Deleting it un-splits instead: the payment stays
   and the primary account absorbs the reward portion.

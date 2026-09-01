@@ -374,28 +374,36 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                        card issuer — see the gate in LogTransactionForm). */
                     const hidesCashbackLeg = counterparts!.some(c => (c.tx.category || '').toLowerCase() === 'cashback');
                     const cashbackSuffix = hidesCashbackLeg ? ' + cashback' : '';
+                    /* Every label here has to survive on ONE line at 0.72rem mono inside a card that
+                       is already inset from both screen edges — roughly 30 characters on a narrow
+                       phone. So a label that takes a suffix drops its prose form for a list: "Paid
+                       from funding account + rewards + cashback" wrapped, and a two-line toggle
+                       reads as a paragraph rather than a control. The bare forms keep the prose,
+                       since they have the room for it. */
                     if (hidesRewardLeg) {
-                      return (cats.includes('cc payment')
-                        ? 'Paid from funding account + rewards'
-                        : 'Part-paid with rewards') + cashbackSuffix;
+                      return cats.includes('cc payment')
+                        ? `Funding + rewards${cashbackSuffix}`
+                        : (hidesCashbackLeg ? 'Rewards + cashback' : 'Part-paid with rewards');
                     }
                     // Investment legs all share one category, so the wording comes from the leg's kind.
                     const invKinds = counterparts!.filter(c => isInvestmentCategory(c.tx.category)).map(c => c.tx.investmentKind);
-                    if (invKinds.includes('mutual_funds')) return 'Mutual fund auto-debited from bank';
-                    if (invKinds.includes('stocks')) return 'Stock purchase debited from wallet';
-                    if (invKinds.includes('commodity')) return 'Commodity purchase debited from bank';
-                    if (invKinds.length > 0) return 'Investment auto-logged from funding account';
+                    if (invKinds.includes('mutual_funds')) return 'Mutual fund debited from bank';
+                    if (invKinds.includes('stocks')) return 'Stock debited from wallet';
+                    if (invKinds.includes('commodity')) return 'Commodity debited from bank';
+                    if (invKinds.length > 0) return 'Investment funding entry';
                     if (cats.includes('transfer')) {
-                      return hidesCashbackLeg
-                        ? 'Transfer entry + instant cashback'
-                        : 'Transfer entry on destination account';
+                      return hidesCashbackLeg ? 'Transfer + cashback' : 'Transfer entry';
                     }
                     // The grouping below always parents a CC Payment pair on the card's credit leg
                     // (creditParent || pool[0], and the credit leg is always present) — so the hidden
                     // counterpart here is always the funding/debit side, never the card. A reward leg
                     // among them is handled above.
-                    if (cats.includes('cc payment')) return 'Paid from funding account' + cashbackSuffix;
-                    if (cats.includes('ncmc travel recharge')) return 'Travel wallet top-up entry' + cashbackSuffix;
+                    if (cats.includes('cc payment')) {
+                      return hidesCashbackLeg ? 'Funding + cashback' : 'Paid from funding account';
+                    }
+                    if (cats.includes('ncmc travel recharge')) {
+                      return hidesCashbackLeg ? 'Top-up + cashback' : 'Travel wallet top-up';
+                    }
                     // A plain purchase that earned instant cashback has no other leg to describe,
                     // so the cashback IS the group rather than a footnote on it.
                     if (hidesCashbackLeg) return 'Instant cashback logged';

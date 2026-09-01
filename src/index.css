@@ -1624,6 +1624,17 @@ tr:hover td {
   transition: background 0.2s;
 }
 
+/* One line, always. The labels are written to fit (see the toggle in Transactions.tsx), but a
+   long account name, a larger system font or a narrower phone can still overrun one — and a
+   two-line toggle stops reading as a control and starts reading as a paragraph. Truncating is the
+   better failure: the row below it says the same thing in full once expanded. */
+.linked-entry-toggle > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (hover: hover) {
   .linked-entry-toggle:hover {
     background: var(--bg-hover);
