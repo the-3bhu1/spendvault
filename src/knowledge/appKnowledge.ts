@@ -70,7 +70,7 @@ Actions (each account is a card on the Accounts tab):
   but KEPT so old transactions still show its name (with a "deleted" badge) instead of "Unknown".
 - Restore an archived account: Accounts tab → the "Archived" section at the bottom of the list → Restore.
 - View statement (credit cards): the "Statement" button on the card opens it here; tapping the card's
-  row in Cards → Dues (or a cycle in Cards → Statements) opens the same statement as a full screen in
+  cycle in Cards → Statements opens the same statement as a full screen in
   that tree. Either way a cycle picker switches between past and current billing cycles, and
   long-pressing a spend moves it to the neighbouring statement — see "Credit cards & billing cycles".
 - View saved card details: the "Card" button flips the card to reveal number/expiry/CVV; tap a field to
@@ -236,7 +236,7 @@ A card has a statement day and a due day.
   - The app flags this instead of guessing: on either statement surface, an entry dated within 3 days
     of the cut carries a dashed "MAY SETTLE NEXT" tag. There are two such surfaces and they behave
     identically: the statement opened by the "Statement" button on the Accounts tab, and the statement
-    screen inside Cards (Dues or Statements → a card).
+    screen inside Cards (Statements → a cycle).
   - To correct it: LONG-PRESS that entry in the statement's transaction list. A sheet offers "Move
     to <next month> statement", "Move to <previous month> statement", and (once moved) "Reset to
     transaction date". An undo appears for a few seconds after each move.
@@ -250,20 +250,41 @@ A card has a statement day and a due day.
 # Cards (the Dashboard's Cards plaque)
 The home screen shows total outstanding across every live card — billed, unbilled, credit utilisation
 against the cards' limits, and which card's bill lands soonest — then up to three categories:
-1. **Dues** — what is owed right now: billed, unbilled and total per card, filterable to one card. A
-   card at ₹0 keeps its row; its cut and due dates are still information.
+1. **My Cards** — one tile per card, painted in that card's own colours, showing what it owes and
+   when its bill is due. A card at ₹0 keeps its tile; its cut and due dates are still information.
+   The hero above them leads with the combined credit limit, the number of cards held, what they
+   cost in annual fees, and what they have earned back.
 2. **Statements** — every cycle that has already been CUT, newest first, with the statement amount and
    how many entries are on it. The cycle in progress is deliberately absent: it has no printed
-   statement and its figure moves with every charge, which is what Dues is for. The hero total is the
-   sum of what's listed, so filtering to one card narrows it too.
+   statement and its figure moves with every charge, which is what My Cards is for. The hero total
+   is the sum of what's listed, so filtering to one card narrows it too.
 3. **Rewards** — the cashback vault (see "Cashback / Rewards"). The category row shows a COUNT of
    rewards awaiting credit, not a rupee figure, because cards can pay in different units.
-Tapping a card in Dues, or a cycle in Statements, opens that card's STATEMENT SCREEN: the card's name,
-network and last four digits, its outstanding with the billed/unbilled split and utilisation, a row of
-month pills for its recent cycles (Statements opens the one you tapped), the selected cycle's date
-range labelled "Open cycle" or "Closed statement", that cycle's spends / payments / statement total,
-and its full ledger. Long-press any entry there to move it between statements.
+Tapping a tile in My Cards opens that card's SUMMARY SCREEN — the card as a whole rather than any one
+month: its name, network and last four digits, its outstanding with the billed/unbilled split, credit
+utilisation and when the bill is due; a "View card" button that opens the rotatable card; what the card
+costs to hold; how far this membership year's spend has got toward a fee waiver, if it has one; and
+what the card has been spent and earned back, this year and all-time.
+
+Tapping a cycle in Statements opens that card's STATEMENT SCREEN instead: month pills for its recent
+cycles, the selected cycle's date range labelled "Open cycle" or "Closed statement", that cycle's
+spends / credits / statement total, and its full ledger. Long-press any entry there to move it between
+statements; long-press the statement AMOUNT to correct the figure by hand when the printed bill and the
+derived one disagree (a sheet offers the typed figure, and "Reset" hands the cycle back to the card's
+rounding rule). A corrected cycle says so on screen.
 Archived cards are excluded from all of this, as they are from balances everywhere else.
+
+## What a card costs to hold
+A credit card's fees are set when adding or editing it on the Accounts tab. "Card Fees" is a picker
+with three shapes — Lifetime free, Annual fee, or Joining + annual fee — and only the amounts that
+shape implies are asked for; picking a fee-charging shape and leaving the amount blank will not save.
+Alongside the amounts sit "First year free?" and "Annual Fee Waived On Yearly Spend", which is the
+spend inside one membership year that cancels the next annual fee.
+"Card Opened On" anchors the MEMBERSHIP YEAR — the twelve months from the card's own anniversary,
+which is the window a bank actually measures a fee waiver over. A card's summary screen reports its
+waiver progress, spend and rewards over that year and prints its exact dates. Without an opening date
+the app falls back to the financial year and says so on screen rather than quoting the wrong window.
+A card with no fees recorded is treated as lifetime free.
 
 # Cashback / Rewards
 Cards can earn cashback at a default rate or per-mode rates (e.g. UPI, swipe). The app tracks expected

@@ -185,8 +185,25 @@ function buildSummary(data: FinanceData): string {
         else if (cyc === billedCycle) billed += t.type === 'debit' ? t.amount : -t.amount;
       });
       billed = Math.max(0, billed); unbilled = Math.max(0, unbilled);
+      // WHAT THE CARD COSTS travels with what it owes, on the same line. The My Cards screen answers
+      // "what do I pay to hold this?" and the assistant could not: nothing here emitted a limit or a
+      // fee, so every fee question fell through to "I can't see that in your data". An absent
+      // cardFees block means lifetime free — see CardFees in types.ts — so it is stated outright
+      // rather than left off, which would read as "not known".
+      const fees = cc.cardFees;
+      const feeParts: string[] = [];
+      if (!fees?.annualFee) feeParts.push('lifetime free');
+      else {
+        feeParts.push(`annual fee ${formatCurrency(fees.annualFee)}`);
+        if (fees.firstYearFree) feeParts.push('first year free');
+        if (fees.joiningFee) feeParts.push(`joining fee ${formatCurrency(fees.joiningFee)}`);
+        if (fees.waiverSpend) feeParts.push(`waived on ${formatCurrency(fees.waiverSpend)} of spend in a membership year`);
+      }
       out.push(`  - ${cc.name}: billed ${formatCurrency(billed)}, unbilled ${formatCurrency(unbilled)}, total ${formatCurrency(billed + unbilled)}` +
-        (cc.dueDay ? `, due day ${cc.dueDay}` : ''));
+        (cc.dueDay ? `, due day ${cc.dueDay}` : '') +
+        (cc.creditLimit ? `, limit ${formatCurrency(cc.creditLimit)}` : '') +
+        `, fees: ${feeParts.join(', ')}` +
+        (cc.cardOpenedOn ? `, opened ${cc.cardOpenedOn}` : ', opening date not set'));
     });
   }
 
