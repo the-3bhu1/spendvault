@@ -17,6 +17,7 @@ import {
   getLatestBilledCycle,
   isStatsExcludedCategory,
   isCountableTransaction,
+  isExternalRewardSource,
   getInvestmentAccountStats,
   isPointsDenominated,
   affectsRupeeBalance,
@@ -363,7 +364,19 @@ function buildSlice(data: FinanceData, query: string): string {
     .map(t => {
       const acct = data.accounts.find(a => a.id === t.accountId)?.name || 'Unknown';
       const tagStr = (t.tags && t.tags.length) ? ` | ${t.tags.map(tg => `#${tg}`).join(' ')}` : '';
-      return `${t.date} | ${t.description} | ${t.type === 'debit' ? '-' : '+'}${formatCurrency(t.amount)} | ${t.category} | ${acct}${tagStr}`;
+      // A reward split stores the anchor at what was PAID (handleSave writes `total − rewardUsed`),
+      // so the row's amount is NOT the price. Left unsaid, the assistant quotes ₹362 for a ₹448
+      // purchase and is simply wrong about it. A split on a real reward account at least has its leg
+      // somewhere in the data; a "one-time reward" split has no leg at all, so this line is the only
+      // place that portion exists. Named source, because "which coupon" is the follow-up question.
+      const split = (t.rewardUsed || 0) > 0 && t.rewardUsedAccountId
+        ? ` | ${formatCurrency(t.rewardUsed as number)} of the ${formatCurrency((t.amount || 0) + (t.rewardUsed as number))} price paid by rewards from ${
+            isExternalRewardSource(t.rewardUsedAccountId)
+              ? 'a one-time reward (coupon/voucher — no account, no balance)'
+              : data.accounts.find(a => a.id === t.rewardUsedAccountId)?.name || 'a reward account'
+          }`
+        : '';
+      return `${t.date} | ${t.description} | ${t.type === 'debit' ? '-' : '+'}${formatCurrency(t.amount)} | ${t.category} | ${acct}${tagStr}${split}`;
     });
 
   const header = filtered

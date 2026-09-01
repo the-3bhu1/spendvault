@@ -262,8 +262,16 @@ The home screen shows total outstanding across every live card — billed, unbil
 against the cards' limits, and which card's bill lands soonest — then up to three categories:
 1. **My Cards** — one tile per card, painted in that card's own colours, showing what it owes and
    when its bill is due. A card at ₹0 keeps its tile; its cut and due dates are still information.
-   The hero above them leads with the combined credit limit, the number of cards held, what they
-   cost in annual fees, and what they have earned back.
+   Cards are listed in WALLET ORDER — the same order as the Accounts tab, the order they were added —
+   not by whose bill falls due first, so a card sits in the same position on every screen that names
+   it. (Bills and the bill-due banner still rank by urgency: those two ARE lists of what falls due
+   next.) The hero above them leads with the combined credit limit and the number of cards held — or,
+   when no card has a limit recorded, with total outstanding and which card owes it — then two
+   figures: "LTF", how many of the cards are LIFETIME FREE, as a COUNT ("All", "None", or "2 of 5")
+   and not a rupee fee total; and "Earned", what the wallet has earned back all-time. A card with no
+   annual fee recorded counts as lifetime free. What one card costs, and how far its waiver has got,
+   is on that card's own summary screen — the hero deliberately doesn't sum fees, because a total
+   across the wallet doesn't say whether the next renewal charges you.
 2. **Statements** — every cycle that has already been CUT, newest first, with the statement amount and
    how many entries are on it. The cycle in progress is deliberately absent: it has no printed
    statement and its figure moves with every charge, which is what My Cards is for. The hero total
