@@ -2436,6 +2436,44 @@ tr:hover td {
   box-sizing: border-box;
 }
 
+/* A sheet reached by HOLDING something opens under the finger while the finger is still
+   down — and the phone's own long-press fires LATER than ours (450ms, see LONG_PRESS_MS).
+   So Android runs its text selection on whatever of the new sheet has landed under the
+   touch: you hold the statement figure, the sheet opens, and its "Statement Amount" title
+   comes up selected under a Copy / Share / Select all bar. preventDefault on contextmenu,
+   which both gestures already do, is the desktop half of this and does nothing for touch.
+   Nothing in these sheets is prose worth copying, so they opt out of selection entirely —
+   apart from the field, which has to stay selectable to be editable. */
+.sheet-held,
+.sheet-held * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.sheet-held input,
+.sheet-held textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Two spacings stacked on one seam: the card's own grid `gap` AND `.input-group`'s
+   1rem `margin-bottom`, which put 32px between the amount field and the picker where
+   every other form in the app has 16px. The grid gap is the one that belongs here —
+   it is what spaces the card's rows — so the margin steps aside. */
+.split-card > .input-group {
+  margin-bottom: 0;
+}
+
+/* Cards sit in a flex row, so the tallest one sets the height of them all — a card
+   whose source shows a "= 500 Chips" hint is taller than one that doesn't. Without
+   this the shorter card spends that difference growing the space BETWEEN its own two
+   fields, so the same panel looks differently spaced depending on which card you are
+   looking at. Start-aligned, the slack collects harmlessly under the last field. */
+.split-card {
+  align-content: start;
+}
+
 /* Nothing marks the card a ledger tap arrived at: OPENING at it is the answer, and
    a ring around it reads as a selection or an error state to be dismissed. Which
    card of how many is the dots' job. */

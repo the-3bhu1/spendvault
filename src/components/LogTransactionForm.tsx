@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import type { Account, Transaction, TransactionType, InvestmentKind, RewardSplitLeg } from '../types';
+import type { Transaction, TransactionType, InvestmentKind, RewardSplitLeg } from '../types';
 import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, cardEarnsCashback, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance } from '../utils';
 import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X, Plus, Ticket } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
@@ -58,14 +58,16 @@ interface SplitDraft {
   unit: 'points' | 'rupee';
 }
 
-const blankSplit = (): SplitDraft => ({ accountId: '', amount: 0, input: '', unit: 'points' });
+/* Rupees until the user says otherwise. A blank card has no source yet, so the first thing typed
+   into it is read as money — and picking a points wallet afterwards must not retroactively decide
+   that those digits were Chips. PTS is only ever reached through the toggle. */
+const blankSplit = (): SplitDraft => ({ accountId: '', amount: 0, input: '', unit: 'rupee' });
 
 /** How the stored anchor reads as carousel cards. Leg ids are recovered for a legacy row that never
  *  recorded them, by looking for the linked leg sitting on each source's account — with ids in hand
  *  the save reuses those legs rather than deleting and rebuilding them. */
 const splitDraftsFrom = (
   anchor: Partial<Transaction> | undefined,
-  accounts: Account[],
   transactions: Transaction[],
 ): SplitDraft[] => {
   const linkedIds = anchor?.linkedTransactionIds || (anchor?.linkedTransactionId ? [anchor.linkedTransactionId] : []);
@@ -75,15 +77,11 @@ const splitDraftsFrom = (
       && linkedIds.includes(t.id)
       && t.category !== 'Cashback'
       && t.accountId === split.accountId)?.id;
-    const source = accounts.find(a => a.id === split.accountId);
-    // Counted in a unit, not "has a points ledger" — a rewards wallet with a unit and a rate is
-    // entered in Chips or Miles even though its balance and its legs are rupees.
-    const points = isUnitDenominated(source);
-    const shown = points ? rupeesToRewardPoints(split.amount, source) : split.amount;
-    // 'points' whatever this source is, like a blank card: a rupee wallet has no toggle and reads as
-    // rupees anyway (unitOf), so the stored preference only takes effect if the card is later pointed
-    // at a points wallet — where entering the issuer's own figure is the natural thing to do.
-    return { accountId: split.accountId, amount: split.amount, legId, unit: 'points', input: shown === 0 ? '' : String(shown) };
+    // 'rupee' whatever this source is, like a blank card: the unit a split was typed in isn't
+    // stored, so an edit reopens in the one unit every source shares rather than guessing that a
+    // points wallet was entered in its issuer's figure. The toggle is still a click away, and the
+    // hint line underneath already reads the amount back in Chips or Miles.
+    return { accountId: split.accountId, amount: split.amount, legId, unit: 'rupee', input: split.amount === 0 ? '' : String(split.amount) };
   });
 };
 
@@ -280,10 +278,9 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     syncInputStrings(sanitizedTx);
     /* The carousel's cards. Read off the ANCHOR (which for a bank-leg edit is the card leg, not this
        row) so leg ids resolve against the links that actually hold the legs, and each card's field is
-       rendered in ITS source's unit — a ₹86 redemption from a points wallet shows 430, not 86, since
-       the panel's label would otherwise read "(Jewels)" over a rupee figure. */
+       rendered in rupees, the unit every source shares — see splitDraftsFrom. */
     const splitAnchorTx = isSplitBankLeg && rewardSplitAnchor ? rewardSplitAnchor : sanitizedTx;
-    const seededSplits = splitDraftsFrom(splitAnchorTx, data.accounts, data.transactions);
+    const seededSplits = splitDraftsFrom(splitAnchorTx, data.transactions);
     setSplits(seededSplits);
     setActiveSplit(0);
     // What each source had already redeemed when the form opened. Per account, because the balance
@@ -1281,6 +1278,21 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   // Typed value -> canonical rupees. Points divide by the rate; rupees pass straight through.
   const inputToRupeesFor = (split: SplitDraft, n: number) =>
     unitOf(split) === 'points' ? rewardPointsToRupees(n, sourceAccountOf(split)) : n;
+
+  /* The amount read back in the unit you are NOT typing in, or null when there is no second unit to
+     read it in — a rupee wallet, or nothing entered yet. */
+  const counterpartHintFor = (split: SplitDraft) => {
+    if (!isUnitDenominated(sourceAccountOf(split)) || !(split.amount > 0)) return null;
+    return unitOf(split) === 'points'
+      ? `= ${formatCurrency(split.amount)}`
+      : `= ${rupeesToRewardPoints(split.amount, sourceAccountOf(split))} ${rewardUnitLabelOf(split)}`;
+  };
+  /* One card carrying that extra line while its neighbour doesn't put their pickers at different
+     heights, so swiping between two sources shifted the whole panel under your thumb. If ANY card
+     shows the line, every card reserves its space — an empty slot on the cards that have nothing to
+     say. Reserved per panel rather than always, so a split funded entirely from rupee wallets (which
+     can never have a counterpart) keeps the tighter card it has always had. */
+  const anySplitShowsHint = splits.some(sp => counterpartHintFor(sp) !== null);
 
   /* Sources still on offer for one card: everything eligible, minus what the OTHER cards already
      spend from — including "Other", which is a single one-off by definition and would be
@@ -2402,7 +2414,6 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
               }}
             >
               {splits.map((split, i) => {
-                const points = isUnitDenominated(sourceAccountOf(split));
                 const unit = unitOf(split);
                 const amountError = errors[`rewardUsed_${i}`];
                 return (
@@ -2432,12 +2443,16 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                         }}
                         placeholder={unit === 'points' ? '0' : '0.00'}
                       />
-                      {/* The counterpart value, same treatment as the instant-cashback percent hint. */}
-                      {points && split.amount > 0 && (
+                      {/* The counterpart value, same treatment as the instant-cashback percent hint.
+                          The empty twin holds the line's space open on a card that has no counterpart
+                          to show, so every card in the panel puts its picker at the same height. */}
+                      {counterpartHintFor(split) !== null ? (
                         <span className="text-xs text-muted text-mono" style={{ marginTop: '0.25rem', opacity: 0.8 }}>
-                          {unit === 'points'
-                            ? `= ${formatCurrency(split.amount)}`
-                            : `= ${rupeesToRewardPoints(split.amount, sourceAccountOf(split))} ${rewardUnitLabelOf(split)}`}
+                          {counterpartHintFor(split)}
+                        </span>
+                      ) : anySplitShowsHint && (
+                        <span aria-hidden className="text-xs text-mono" style={{ marginTop: '0.25rem', visibility: 'hidden' }}>
+                          &nbsp;
                         </span>
                       )}
                       {amountError && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{amountError}</span>}
@@ -2487,14 +2502,6 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                       iconGetter={id => (id === '' ? getAccountTypeIcon('rewards', 18) : getAccountIcon(id))}
                       error={errors[`rewardSource_${i}`]}
                     />
-                    {/* Said where the choice is made: this share DOES get its own ledger entry, like
-                        every other source, but it is the one entry that draws on nothing. */}
-                    {isExternalRewardSource(split.accountId) && (
-                      <div className="col-span-2 text-xs text-muted" style={{ opacity: 0.75 }}>
-                        Logged as its own entry under this row, drawing on no account — nothing is
-                        deducted anywhere, so a coupon needs no wallet set up for it.
-                      </div>
-                    )}
                   </div>
                 );
               })}
