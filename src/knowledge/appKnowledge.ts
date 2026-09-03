@@ -64,7 +64,11 @@ An account is any place money sits or is owed. Built-in types:
   own accounts, e.g. a share of a bill a friend paid, or a contribution funded by money someone owed
   them. Entries come in pairs (the spend as a debit, the money that funded it as a credit), so a
   settled ledger nets to zero and the spend still lands in the month's category totals. Shown in the
-  Accounts tab under "Offset Ledgers" and counted under Wealth → Assets → Other.
+  Accounts tab under "Offset Ledgers" and LISTED under Wealth → Assets → Other, always at the bottom
+  of that group, but NOT counted in the Assets total: its balance is a bookkeeping residue rather
+  than money, and a pair still missing its other half would otherwise move the total by an amount no
+  real balance ever changed by. The row is marked "Not in total", and a footnote under the list says
+  how many offset ledgers were excluded. It is the ONLY kind of account excluded from that total.
 Add or remove custom account types in Settings → Account Types (a type that's in use can't be deleted).
 "offset" was a custom type in older versions and is built-in now; existing Offset Ledger accounts are
 migrated automatically on upgrade, so it no longer appears in the custom list.
@@ -169,7 +173,10 @@ the "Other" source below covers one-off rewards.
   the price. Each source produces its OWN debit leg, so a two-wallet split lists two redemptions under
   the spend in the ledger, and the "×" removes only the card on screen (the last one closes the panel).
 - Unit toggle (₹ | PTS): when the reward source is a card's own points wallet, the "Rewards Used" field
-  can be typed in either unit and a "= ..." line underneath shows the converted value. Typing 430 in
+  can be typed in either unit and a "= ..." line underneath shows the converted value. It always
+  STARTS in ₹, including after picking a points wallet — picking a source never re-reads digits
+  already typed as points. PTS is only ever reached by tapping the toggle, and that choice then
+  sticks for that card. Typing 430 in
   PTS mode and typing 86 in ₹ mode are the same redemption when the rate is 5 Jewels = ₹1 — pick
   whichever the issuer's app showed you. A rupee-denominated rewards wallet has nothing to convert, so
   it shows no toggle. The conversion rate is set per account (Accounts → edit the card → reward unit
@@ -191,7 +198,10 @@ the "Other" source below covers one-off rewards.
 - In the ledger the SPEND is the row you see, with the reward redemption collapsed under it as a
   linked entry ("Part-paid with rewards", or "Funding + rewards" on a CC Payment). Two sources are
   listed as two separate entries in there, and the toggle counts them ("Part-paid with 2 rewards",
-  "Funding + 2 rewards").
+  "Funding + 2 rewards"). Inside an expanded group the legs are ordered: the primary account's own
+  leg first, then the reward redemptions largest-first by rupee value (so a 500-Chip redemption worth
+  ₹50 outranks a ₹10 coupon), and any instant-cashback credit last — the legs above it add up to the
+  row's total, which cashback is not part of.
   Tapping a redemption opens the spend it belongs to, with the split panel in view and that source's
   card ringed — the amount redeemed is edited there, next to the full price. Deleting it un-splits
   instead: the payment stays and the primary account absorbs that source's portion, while any other
@@ -431,9 +441,11 @@ followed by up to three category cards, each with a chevron that opens its own s
 The headline Wealth total = Portfolio current value + Assets liquid balance + Retirement balance. It is
 GROSS wealth: credit cards are excluded entirely (they're a liability) and tracked Debts are NOT
 subtracted, so this figure is not a net-worth number. A rewards wallet denominated in points/miles
-(it has a reward unit) is listed under Assets → Other but excluded from the ₹ total, since points
-can't be added to rupees; an NCMC debit card's travel-wallet balance IS counted, on top of its main
-balance.
+(it has a reward unit) IS counted, at its rupee worth: its ledger is kept in rupees and the unit
+figure is that value read at the wallet's rate, so counting it adds no estimate — and the same money
+in a rewards wallet that names no unit was always counted, so excluding it made the total disagree
+with itself. Its row states both ("500 Chips" with "= ₹50" beneath). An NCMC debit card's
+travel-wallet balance IS counted too, on top of its main balance. Only an Offset Ledger is left out.
 
 A category with no accounts is hidden — no card, no sub-view — and a muted hint below the cards names
 what's missing and points to the Accounts tab. A user with nothing at all sees a single empty state.
@@ -476,9 +488,16 @@ five most recent transactions. Income and Spends there follow the same rule as t
 screen's: transfers, card bill payments, investment legs, lending & borrowing, NCMC recharges and
 Passive Logs are excluded, so the two figures state money genuinely earned and spent through that
 account rather than every rupee that crossed it — which is also why they do NOT add up to the balance
-change stated above them (that one counts every movement). A points wallet says Earned and Redeemed
-instead, reads in points, is excluded from the Assets total, and has no 1M window; an NCMC card also
-shows its travel wallet. To see every transaction on an account, or to edit one, use the Transactions
+change stated above them (that one counts every movement).
+A REWARDS WALLET IS THE EXCEPTION to that rule, and says "Earned" and "Redeemed" rather than Income
+and Spends. Those two count EVERY movement of the wallet, exclusions ignored, because they ask a
+different question: what came into the wallet and what left it. Redeeming rewards against a card
+bill is category "CC Payment", which the rule above excludes — so under it "Redeemed" always read
+zero for the commonest redemption there is, while the redemption itself sat in the same screen's
+Recent Activity. This applies to every rewards wallet, whether or not it names a unit.
+A points wallet additionally reads in its own unit, states its rupee worth beneath the headline
+("= ₹50"), and has no 1M window — its trend needs at least two months of history, so a wallet
+created this month shows no chart at all. An NCMC card also shows its travel wallet. To see every transaction on an account, or to edit one, use the Transactions
 and Accounts tabs.
 
 ## Retirement sub-view
