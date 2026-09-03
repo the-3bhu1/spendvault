@@ -371,19 +371,51 @@ const RT_SAND_UPPER =
   `C ${C + 38} ${C - 58} ${C + 13} ${C - 23} ${C + 4} ${C - 3} ` +
   `L ${C - 4} ${C - 3} ` +
   `C ${C - 13} ${C - 23} ${C - 38} ${C - 58} ${C - 40} ${C - 100} Z`;
-// The stream, widening as it falls — a column that fell dead straight would read as a rule drawn
-// down the middle of the glass.
-const RT_SAND_STREAM =
-  `M ${C - 3.4} ${C - 2} L ${C + 3.4} ${C - 2} ` +
-  `L ${C + 5.6} ${C + 74} L ${C - 5.6} ${C + 74} Z`;
-// Grains off the column. Hand-placed, never randomised: a backdrop that reshuffled itself on every
-// render would flicker on any state change the hero makes.
+// THE FALL IS GRAINS, ALL OF IT, and two earlier versions are why.
+//
+// It began as one filled quad running the whole 76 units from neck to heap — 7 units wide at the top,
+// 11 at the bottom, plus a 1.3 stroke, all multiplied by RT_GLASS_S. At that size a solid column IS a
+// bar: the widening its note relied on to save it ("a column that fell dead straight would read as a
+// rule drawn down the middle of the glass") is 4 units over 76, which nobody reads as taper. Five
+// grains at r≈2 beside a slab of that area cannot be seen next to it either.
+//
+// The second version cut that column to a 20-unit thread at the neck and made the rest grains, on the
+// argument that real sand is continuous for the first few millimetres before it breaks up. True of
+// sand, and useless here: 20 units tall by 6 wide is a bar with the same proportions as the original,
+// just shorter, and it sat at the mouth where the eye lands first. A form reads as a bar or as a
+// grain by its ASPECT, not by its length — and nothing 3× taller than it is wide reads as a grain.
+//
+// So there is no continuous member at all now. The grains simply start tight under the neck (5-unit
+// pitch, barely off the axis, near-full opacity, which is what "not yet dispersed" looks like when
+// it is made of countable things) and loosen as they fall. Nothing in the drawing is a rectangle any
+// more, which is the only way the bar cannot come back.
+const RT_FALL_TOP = 6;  // the first grain, just clear of the neck
+const RT_FALL_BOT = 83; // the last, just clear of the heap's peak at C+88
+// Hand-placed, never randomised: a backdrop that reshuffled itself on every render would flicker on
+// any state change the hero makes.
+//
+// Placed to three rules, none of them decorative. They ALTERNATE across the axis, because a single
+// file of dots is the bar again with gaps in it. Their spread WIDENS as they descend (±2 at the neck,
+// ±6.5 at the heap), which is what a stream losing its coherence does — and it is this, rather than
+// any solid thread, that now carries "the sand is still joined up as it leaves the neck". And they
+// THIN downward, so the eye is carried from neck to heap rather than meeting a uniform speckle.
+// They stay off the axis by at least 1.5 units: the legibility well is cut deepest dead centre, so a
+// grain sitting exactly on the midline is the one least likely to survive it.
 const RT_GRAINS = [
-  { x: C - 9, y: C + 16, r: 2.2, o: 0.75 },
-  { x: C + 8, y: C + 29, r: 1.8, o: 0.62 },
-  { x: C - 10, y: C + 43, r: 2.4, o: 0.66 },
-  { x: C + 10, y: C + 56, r: 1.7, o: 0.5 },
-  { x: C - 8, y: C + 67, r: 2, o: 0.42 },
+  { x: C - 1.8, y: C + 6, r: 2.4, o: 0.92 },
+  { x: C + 2.0, y: C + 11, r: 2.2, o: 0.90 },
+  { x: C - 2.4, y: C + 16, r: 2.5, o: 0.88 },
+  { x: C + 1.8, y: C + 21, r: 2.1, o: 0.86 },
+  { x: C - 3.2, y: C + 26, r: 2.2, o: 0.82 },
+  { x: C + 3.0, y: C + 31, r: 1.9, o: 0.78 },
+  { x: C - 4.2, y: C + 37, r: 2.4, o: 0.74 },
+  { x: C + 1.8, y: C + 43, r: 1.8, o: 0.70 },
+  { x: C + 5.2, y: C + 50, r: 2.2, o: 0.66 },
+  { x: C - 5.6, y: C + 57, r: 2.0, o: 0.60 },
+  { x: C + 2.4, y: C + 64, r: 2.5, o: 0.54 },
+  { x: C - 3.0, y: C + 71, r: 1.9, o: 0.48 },
+  { x: C + 6.0, y: C + 77, r: 2.1, o: 0.42 },
+  { x: C - 6.5, y: C + 83, r: 1.7, o: 0.36 },
 ];
 // …and the cone it has fallen into, peaked where the stream lands. Smaller than the mass above it,
 // because the two have to add up: a full upper bulb over a deep heap is more sand than the glass
@@ -468,15 +500,20 @@ export const RetirementBackdrop: React.FC = () => (
         />
       ))}
 
-      {/* The fall itself. */}
-      <path d={RT_SAND_STREAM} fill="var(--relief-line)" fillOpacity="0.8" stroke="var(--relief-edge)" strokeWidth="1.3" />
-      {RT_GRAINS.map(g => (
-        <ellipse
-          key={`rt-grain-${g.x}-${g.y}`}
-          cx={g.x} cy={g.y} rx={g.r} ry={f(g.r * 1.35)}
-          fill="var(--relief-line)" stroke="var(--relief-edge)" strokeWidth="1" opacity={g.o}
-        />
-      ))}
+      {/* The fall itself — grains the whole way, no continuous member. See the note above. */}
+      {RT_GRAINS.map(g => {
+        /* A grain draws out as it falls, because it is going faster the further it has fallen. The
+           ellipse stretches with depth rather than every grain being struck from one die — which is
+           what separates a fall from a column of identical dots, and it costs one number. */
+        const depth = Math.min(1, Math.max(0, (g.y - (C + RT_FALL_TOP)) / (RT_FALL_BOT - RT_FALL_TOP)));
+        return (
+          <ellipse
+            key={`rt-grain-${g.x}-${g.y}`}
+            cx={g.x} cy={g.y} rx={g.r} ry={f(g.r * (1.35 + depth * 0.9))}
+            fill="var(--relief-line)" stroke="var(--relief-edge)" strokeWidth="1" opacity={g.o}
+          />
+        );
+      })}
 
       {/* The cone it has fallen into, peaked where the stream lands. */}
       <path d={RT_SAND_PILE} fill="var(--relief-line)" fillOpacity="0.85" stroke="var(--relief-edge)" strokeWidth="1.5" />
