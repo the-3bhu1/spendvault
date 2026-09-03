@@ -1065,6 +1065,12 @@ export default function CreditCards({ onExit, onViewStatement }: {
               active={statementsFilter}
               onSelect={setStatementsFilter}
               marginTop="1.25rem"
+              /* Down a touch, onto the receipt motif. NOT via marginTop: this hero centres its
+                 content in a minHeight (see CategoryHero), so margin above the row grows the
+                 centred stack and spends half of itself lifting the avatar and the total — 5.6px
+                 of margin moved the row 3px and pulled everything above it up by the rest. This
+                 offsets the row alone and leaves the composition above it untouched. */
+              offsetY={10}
               flexible
               pillWidth={92}
               // Lets the row scroll once the pills stop fitting; whether they fit is measured.

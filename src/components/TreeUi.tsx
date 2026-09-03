@@ -217,7 +217,8 @@ export const CategoryHero: React.FC<{
  * once there are five pills.
  */
 export function FilterPills<T extends string>({
-  tabs, active, onSelect, marginTop, flexible, pillWidth = 68, scrollable, tourClass = '', buttonTourClass = '',
+  tabs, active, onSelect, marginTop, flexible, pillWidth = 68, scrollable, offsetY = 0,
+  tourClass = '', buttonTourClass = '',
 }: {
   tabs: { v: T; label: string }[];
   active: T;
@@ -231,6 +232,10 @@ export function FilterPills<T extends string>({
   /** Lets the row SCROLL when its pills no longer fit. See the note below — whether it actually
    *  scrolls is measured, not counted. */
   scrollable?: boolean;
+  /** Nudge the row down (px) without moving anything around it. For a row inside a hero that
+   *  centres its content in a fixed minHeight, where margin would push the rest of the hero
+   *  around instead — see the note at the Statements call site. */
+  offsetY?: number;
   tourClass?: string;
   buttonTourClass?: string;
 }) {
@@ -280,6 +285,30 @@ export function FilterPills<T extends string>({
   }, [scrollable, N]);
   const scrolls = !!scrollable && trackW > 0 && setWidth > trackW + 1;
   const activeIdxForScroll = Math.max(0, tabs.findIndex(t => t.v === active));
+
+  /* Where the sliding thumb sits, on a measured-fit row that currently fits. Its cells are sized to
+     their labels there (see the pill styles), so the `(100% - 2·PAD) / N` arithmetic the thumb used
+     — which is only true of equal cells — would leave it the wrong width over the wrong pill. The
+     pill itself is the only thing that knows, so it is asked. Re-measured on resize, since a label's
+     share of the slack moves with the track. Null until the first measurement lands, and until then
+     the thumb falls back to the equal-cell arithmetic, which is still exactly right for the plain
+     fixed rows that never opted into measuring. */
+  const [thumbBox, setThumbBox] = useState<{ left: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = trackRef.current;
+    if (!el || !scrollable || scrolls) {
+      setThumbBox(null);
+      return;
+    }
+    const measure = () => {
+      const pill = el.querySelector<HTMLElement>(`button[data-view="${CSS.escape(active)}"]`);
+      if (pill) setThumbBox({ left: pill.offsetLeft, width: pill.offsetWidth });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [scrollable, scrolls, active, N]);
 
   // ENDLESS ROW. The pills are laid out THREE times over and the view is parked in the middle copy;
   // whenever scrolling carries it into the first or last copy, scrollLeft jumps by exactly one set.
@@ -427,6 +456,9 @@ export function FilterPills<T extends string>({
   return (
     <div className={tourClass} style={{
       position: 'relative',
+      // Rides on the `relative` the thumb and the ghost already need, so the row shifts with its
+      // own absolute children and nothing around it reflows.
+      ...(offsetY ? { top: `${offsetY}px` } : {}),
       display: 'flex',
       marginTop,
       padding: `${PAD}px`,
@@ -463,12 +495,18 @@ export function FilterPills<T extends string>({
           position: 'absolute',
           top: `${PAD}px`,
           bottom: `${PAD}px`,
-          width: `calc((100% - ${PAD * 2}px) / ${N})`,
-          left: `calc(${PAD}px + ${activeIdx} * (100% - ${PAD * 2}px) / ${N})`,
+          ...(thumbBox
+            ? { left: `${thumbBox.left}px`, width: `${thumbBox.width}px` }
+            : {
+              width: `calc((100% - ${PAD * 2}px) / ${N})`,
+              left: `calc(${PAD}px + ${activeIdx} * (100% - ${PAD * 2}px) / ${N})`,
+            }),
           borderRadius: '999px',
           background: 'var(--pill-thumb-bg)',
           boxShadow: '0 2px 10px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.14)',
-          transition: 'left 0.38s cubic-bezier(0.34, 1.56, 0.64, 1)',
+          // `width` joins the slide now that the thumb resizes to the pill it lands on. Same curve,
+          // so the two read as one movement rather than a slide with a stretch bolted on.
+          transition: 'left 0.38s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.38s cubic-bezier(0.34, 1.56, 0.64, 1)',
           pointerEvents: 'none'
         }} />
       )}
@@ -516,7 +554,21 @@ export function FilterPills<T extends string>({
                 // same: 2 × padding, whatever those labels happen to be. Capped, because one
                 // absurdly long card name should truncate rather than push the row off the ring.
                 ? { flex: 'none', padding: '0.5rem 0.95rem', maxWidth: '170px' }
-                : { flex: 1, minWidth: 0, padding: '0.5rem 0' }),
+                : scrollable
+                  /* The same row when its pills DO fit. `flex: 1` here meant equal cells, which put
+                     the label-sizing argument above into reverse the moment the row stopped
+                     scrolling: ALL floated in the middle of a wide cell while JUPITER nearly filled
+                     its own, so the track's left edge sat 74px from the first label and its right
+                     edge 31px from the last. Same row, same pills, visibly lopsided — and only in
+                     this mode, which is why it read as the row behaving differently when it stopped
+                     scrolling.
+                     `1 1 auto` keeps the label-sized base and lets every pill grow from it by an
+                     EQUAL share of the slack (equal grow factors, so free space divides N ways).
+                     The track still fills edge to edge, and the space around every label — the first
+                     and the last included — is identical by construction, exactly as it is when the
+                     row scrolls. */
+                  ? { flex: '1 1 auto', minWidth: 0, padding: '0.5rem 0.95rem' }
+                  : { flex: 1, minWidth: 0, padding: '0.5rem 0' }),
               position: 'relative',
               zIndex: 1,
               border: 'none',
