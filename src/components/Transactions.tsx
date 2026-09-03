@@ -1299,7 +1299,42 @@ export default function Transactions() {
                                         || isInvestmentCategory(other.category)
                                       );
                                       const parent = isCreditParentGroup ? (creditParent || pool[0]) : (debitParent || pool[0]);
-                                      const counterpartsList = uncollapsedInGroup.filter(other => other.id !== parent.id);
+                                      /* Display order inside an expanded group, by three rules:
+                                         1. the primary account's own leg leads. It is the movement the
+                                            row is actually about — the figure the log form calls
+                                            "Primary Account Debit" — and a reward redemption or a
+                                            cashback credit is a modifier on it, not a peer.
+                                         2. the other legs that FUNDED it follow, descending by value,
+                                            so they read biggest-first and the largest share of what is
+                                            left sits closest to the primary leg.
+                                         3. a cashback credit goes last, whatever it is worth.
+                                         Before any of this there was no rule at all: the legs came out
+                                         in the `order` they were WRITTEN in, which put the reward legs
+                                         above the account that paid the bulk of the bill.
+
+                                         Rule 3 is what keeps the group's arithmetic legible. Ranks 0
+                                         and 1 are the bill: 4,883 + 50 + 10 is exactly the ₹4,943
+                                         anchor above them. A cashback leg is NOT part of that sum — it
+                                         is what the payment earned back — so sorting it among them by
+                                         value (₹29.80 landing between a ₹50 redemption and a ₹10
+                                         coupon, as it did) breaks a column that otherwise reconciles,
+                                         and flips the sign mid-column while it is at it: cashback is
+                                         the one credit among debits, so grouping by direction lets the
+                                         eye read "what this cost" without checking every row's sign.
+
+                                         Rule 2 reads `amount`, which is rupees on every leg — a points
+                                         redemption included, since the "−500 Chips" on screen is the
+                                         account's rate applied at render (see formatAmount). So it
+                                         compares money with money, and a wallet's unit never decides
+                                         where its row sits: ₹50 shown as 500 Chips still outranks a
+                                         ₹10 coupon. */
+                                      const legRank = (o: Transaction) =>
+                                        (o.category || '').toLowerCase() === 'cashback' ? 2
+                                          : rewardSplitOfLeg(parent, o) ? 1
+                                            : 0;
+                                      const counterpartsList = uncollapsedInGroup
+                                        .filter(other => other.id !== parent.id)
+                                        .sort((a, b) => legRank(a) - legRank(b) || b.amount - a.amount);
 
                                       counterpartsList.forEach(cp => {
                                         collapsedTxIds.add(cp.id);
