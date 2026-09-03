@@ -36,7 +36,7 @@ export const StatementAdjustSheet: React.FC<{
   const isNoOp = valid && parsed === computed;
 
   return (
-    <div className="modal-overlay" onClick={onCancel}>
+    <div className="modal-overlay sheet-held" onClick={onCancel}>
       <div className="modal-content" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h3>Statement Amount</h3>

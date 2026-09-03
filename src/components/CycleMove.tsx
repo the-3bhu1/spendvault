@@ -187,7 +187,7 @@ export const CycleMoveSheet: React.FC<{
     );
 
   return (
-    <div className="modal-overlay" onClick={onCancel}>
+    <div className="modal-overlay sheet-held" onClick={onCancel}>
       <div className="modal-content" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           {/* "Transaction", not "Charge": refunds move too, and a refund isn't a charge. */}
