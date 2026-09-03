@@ -14,7 +14,7 @@ import { DetailHeroBand, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHe
 import { CategoryCard, CategoryHero, SubviewHeader, SealedMark, FilterPills, SectionHeading } from './TreeUi';
 import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
 import { calculateEPFProjection, getEPFInterestRate, getFinancialYearForDate } from '../utils/epfEngine';
-import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance, isStatsExcludedCategory, statsAmount, errorMessage, userPossessive } from '../utils';
+import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance, isStatsExcludedCategory, statsAmount, errorMessage, userPossessive, rupeesToRewardPoints } from '../utils';
 import { getCategoryIcon } from './transactionIcons';
 
 type HistoryDataPoint = { date: number; close: number };
@@ -382,9 +382,17 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
     [liquidGroups]
   );
 
-  // A rewards account with a `rewardUnit` is denominated in points/miles, not rupees — adding it
-  // to a ₹ total would be meaningless, so it contributes 0 (the row still shows its point balance).
+  // A rewards account with a `rewardUnit` is READ in points/miles/Chips rather than in rupees, so it
+  // contributes 0 to the ₹ totals on this screen (the row still shows its own balance in its own
+  // unit). What it is NOT is a second ledger: unlike a card's points wallet, a rewards wallet has one
+  // set of transactions and they are rupees, so everything below reads that ledger and converts at
+  // the account's rate — asking calculateBalance for a separate points balance, as this screen used
+  // to, found the empty `rewardOpeningBalances` map and reported a wallet holding 500 Chips as 0.
   const isPointsDenominated = (a: Account) => a.type === 'rewards' && !!a.rewardUnit;
+  /** A rupee figure as this account states it: converted for a unit-denominated wallet, untouched
+   *  for everything else (and for a wallet with a unit but no rate, where the rate is 1). */
+  const inAccountUnit = (account: Account, rupees: number) =>
+    isPointsDenominated(account) ? rupeesToRewardPoints(rupees, account) : rupees;
 
   const getLiquidBalanceAt = (account: Account, month: string) => {
     if (isPointsDenominated(account)) return 0;
@@ -850,7 +858,7 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
 
   const renderLiquidRow = (account: Account) => {
     const points = isPointsDenominated(account);
-    const bal = calculateBalance(account, data.transactions, currentMonth);
+    const bal = liquidBalanceAt(account, currentMonth);
     const travelBal = account.isNcmcEnabled
       ? calculateBalance(account, data.transactions, currentMonth, true)
       : null;
@@ -1147,16 +1155,11 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
   // legs; every other account's moves on rupee legs. Travel legs are excluded for the same reason
   // the hero shows the payments balance on its own: mixing the two wallets makes the flows below
   // fail to reconcile with the figure above them.
-  const liquidLedgerFilter = (account: Account) => {
-    const points = isPointsDenominated(account);
-    return (t: Transaction) =>
-      t.accountId === account.id && (points ? !!t.isRewardTransaction : affectsRupeeBalance(t));
-  };
+  const liquidLedgerFilter = (account: Account) => (t: Transaction) =>
+    t.accountId === account.id && affectsRupeeBalance(t);
 
   const liquidBalanceAt = (account: Account, month: string) =>
-    isPointsDenominated(account)
-      ? calculateBalance(account, data.transactions, month, false, true)
-      : calculateBalance(account, data.transactions, month);
+    inAccountUnit(account, calculateBalance(account, data.transactions, month));
 
   const monthTimestamp = (month: string) => {
     const [y, m] = month.split('-').map(Number);
@@ -1167,11 +1170,9 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
   // at the account's first sign of life, so a three-month-old account draws three points rather than
   // six, five of them a flat line at its opening balance.
   const buildBalanceSeries = (account: Account, range: Exclude<BalanceRange, '1m'>): HistoryDataPoint[] => {
-    const openingKeys = Object.keys(
-      isPointsDenominated(account)
-        ? (account.rewardOpeningBalances || {})
-        : (account.openingBalances || {})
-    );
+    // Always the wallet's own opening map: a rewards wallet keeps its figures there like every other
+    // liquid account, whatever unit they are read in.
+    const openingKeys = Object.keys(account.openingBalances || {});
     const txMonths = data.transactions
       .filter(liquidLedgerFilter(account))
       .map(t => t.date.slice(0, 7));
@@ -1204,7 +1205,10 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
   const buildDailyBalanceSeries = (account: Account): HistoryDataPoint[] => {
     const deltas = new Map<string, number>();
     for (const t of data.transactions.filter(liquidLedgerFilter(account))) {
-      deltas.set(t.date, (deltas.get(t.date) || 0) + (t.type === 'credit' ? t.amount : -t.amount));
+      // Same unit as the running balance below, which is the account's own — mixing a ₹20 redemption
+      // into a balance counted in Chips would walk the line 10 times too shallow.
+      const amount = inAccountUnit(account, t.amount);
+      deltas.set(t.date, (deltas.get(t.date) || 0) + (t.type === 'credit' ? amount : -amount));
     }
 
     const now = new Date();
@@ -1236,6 +1240,9 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
     // Points have no paise and no ₹ sign; everything else formats as money.
     const fmt = (n: number) =>
       points ? `${Math.round(n).toLocaleString('en-IN')} ${unit}` : formatCurrency(n);
+    /** A rupee amount off a transaction, stated in whatever this account counts in — the balances
+     *  above already are, so the flows and the ledger rows have to be too. */
+    const val = (rupees: number) => inAccountUnit(account, rupees);
 
     const balance = liquidBalanceAt(account, currentMonth);
     const monthChange = balance - liquidBalanceAt(account, previousMonthStr(currentMonth));
@@ -1443,9 +1450,9 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
           A points wallet earns and redeems rather than earning and spending, so it says so. */}
         <div style={{ marginTop: series.length > 1 ? '0.5rem' : '1rem' }}>
           {metricStrip(<>
-            {metricCell(points ? 'Earned' : 'Income', fmt(inflow), inflow > 0 ? 'var(--success)' : undefined)}
+            {metricCell(points ? 'Earned' : 'Income', fmt(val(inflow)), inflow > 0 ? 'var(--success)' : undefined)}
             {metricDivider}
-            {metricCell(points ? 'Redeemed' : 'Spends', fmt(outflow), outflow > 0 ? '#ef4444' : undefined)}
+            {metricCell(points ? 'Redeemed' : 'Spends', fmt(val(outflow)), outflow > 0 ? '#ef4444' : undefined)}
           </>, { gutter: DETAIL_GUTTER, heading: monthLabel })}
         </div>
 
@@ -1477,7 +1484,7 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
                       </div>
                     </div>
                     <div style={{ fontSize: '0.9rem', fontWeight: 700, flexShrink: 0, color: credit ? '#22c55e' : 'var(--text-primary)' }}>
-                      {credit ? '+' : '−'} {fmt(t.amount)}
+                      {credit ? '+' : '−'} {fmt(val(t.amount))}
                     </div>
                   </div>
                 );

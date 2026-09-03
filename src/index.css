@@ -2406,3 +2406,78 @@ tr:hover td {
 @media (prefers-reduced-motion: reduce) {
   .coin-course { animation: none; }
 }
+
+/* ---- Split-payment carousel (LogTransactionForm) --------------------------
+   A reward split can draw on several wallets at once, one card per source. The
+   cards live on a horizontally snapping scroller rather than a transform track:
+   each card is exactly the panel's width, so the geometry does the paging, the
+   drag keeps the platform's own feel, and "which card is showing" needs no
+   bookkeeping beyond scrollLeft. */
+.split-carousel {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  /* Nothing here scrolls vertically, and letting the browser pan the page
+     mid-swipe is what makes a carousel feel like it is fighting the scroll. */
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.split-card {
+  flex: 0 0 100%;
+  width: 100%;
+  /* A grid child's min-content width can otherwise push the card wider than the
+     panel — one long account name and the snap points stop lining up. */
+  min-width: 0;
+  scroll-snap-align: start;
+  /* Breathing room inside the snap width, so the fields don't touch the panel's
+     own edge as a card slides past it. */
+  padding: 0.35rem;
+  box-sizing: border-box;
+}
+
+/* Nothing marks the card a ledger tap arrived at: OPENING at it is the answer, and
+   a ring around it reads as a selection or an error state to be dismissed. Which
+   card of how many is the dots' job. */
+
+@media (prefers-reduced-motion: reduce) {
+  .split-carousel { scroll-behavior: auto; }
+}
+
+.split-card > * {
+  min-width: 0;
+}
+
+.split-dots {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.7rem 0 0.1rem;
+}
+
+.split-dot {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  min-height: auto;
+  border: none;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  opacity: 0.35;
+  cursor: pointer;
+  transition: opacity 0.2s ease, width 0.2s ease, background 0.2s ease;
+}
+
+.split-dot--active {
+  width: 18px;
+  border-radius: 4px;
+  background: var(--accent);
+  opacity: 1;
+}
+
+/* A card with an unresolved error is worth finding without swiping every card. */
+.split-dot--error {
+  background: var(--danger);
+  opacity: 1;
+}

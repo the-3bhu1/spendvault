@@ -53,7 +53,13 @@ An account is any place money sits or is owed. Built-in types:
   monthly accrued interest for current FY (credited on March 31st), and 1-year projections. Options
   include Statutory Wage Ceiling (₹15,000 cap) vs Actual Basic + DA. Requires a "Current Employer"
   name field (shown in the EPF passbook header and detail view).
-- rewards — a reward-points wallet (points, not rupees), with a reward unit and conversion rate.
+- rewards — a reward wallet (CRED coins, super.money, Cheq Chips). Give it a REWARD UNIT NAME and a
+  POINTS-TO-₹1 RATE and the wallet is counted in that unit: the balance field is typed in it (500
+  Chips, not ₹500), the Accounts card and the split picker show "500 Chips", and every rupee figure
+  the wallet touches — a redemption, a cashback deposit, the Wealth total — is converted at the rate
+  (10 Chips = ₹1, so 500 Chips is worth ₹50). Leave the unit blank and it is a plain rupee wallet.
+  Unlike a card, a rewards wallet has ONE balance: it is not a points ledger sitting beside a rupee
+  one, it is the same balance read in a different unit.
 - offset — an Offset Ledger: a bookkeeping account for spending that never touched one of the user's
   own accounts, e.g. a share of a bill a friend paid, or a contribution funded by money someone owed
   them. Entries come in pairs (the spend as a debit, the money that funded it as a credit), so a
@@ -84,7 +90,7 @@ Actions (each account is a card on the Accounts tab):
   that IS filled must be valid: a 16-digit number (15 for Amex), a 3-digit CVV (4 for Amex), and an
   expiry with BOTH month and year, month 01–12. Saving is blocked until a filled field is valid.
 - Send to Bank: rewards and e-wallet accounts have a "Send to Bank" button that transfers their full
-  balance to a bank account.
+  balance to a bank account (in rupees — a wallet counted in a unit sends what that unit is worth).
 - Refresh a holding's price: stock/fund/commodity cards have a per-holding Fetch/Refresh button.
 Opening balances are stored per month ('YYYY-MM'); editing one applies from that month forward.
 
@@ -107,7 +113,7 @@ Actions (Transactions tab):
 - Exclude from stats: this control appears in the editor only after you enable Settings → Smart
   Features → Passive Logs. You can exclude a transaction fully, or a partial amount; Dashboard and
   Insights then skip that amount. The two boxes (Excluded Amount / Active Share) add up to the FULL
-  price of the entry, rewards included. On a reward split the exclusion is stored across both legs —
+  price of the entry, rewards included. On a reward split the exclusion is stored across every leg —
   a ₹448 purchase paid with ₹86 of rewards can exclude the whole ₹448, which excludes ₹362 on the
   purchase and ₹86 on the reward leg, so the purchase contributes ₹0 to Spends. Exclude a smaller
   figure and the primary account's portion absorbs it first (₹400 excluded = ₹362 + ₹38).
@@ -134,11 +140,13 @@ deleting one keeps the legs in sync / removes them together. By category:
   and a credit on the card (reducing its outstanding). The card credit is applied to the chosen
   billing cycle (current or previous statement).
   - With a reward split: if reward points are used toward the payment, a THIRD leg debits the rewards
-    account for the points used; the bank leg covers the rest.
+    account for the points used and the bank leg covers the rest — and a fourth leg, and so on, if the
+    payment draws on more than one reward source.
   - Which reward accounts can be used: a card's OWN points wallet (e.g. Jupiter's Jewels) only offsets
     THAT card's bill — issuer points aren't fungible between cards, so another card's points wallet
-    won't appear in the "From Rewards" picker. Rupee-denominated "rewards" wallets are universal and
-    can be used against any payment or purchase. Switching category (or investment type) clears an
+    won't appear in the "From Rewards" picker. Standalone "rewards" wallets are universal and can be
+    used against any payment or purchase, whether they are counted in rupees (CRED coins) or in their
+    own unit (Cheq Chips at 10 = ₹1 — the picker shows "500 Chips" and the ₹ | PTS toggle appears). Switching category (or investment type) clears an
     in-progress split.
   - The split panel and "Apply Payment To" cycle picker appear as soon as the category is CC Payment —
     you don't have to pick the paying account first.
@@ -147,9 +155,19 @@ deleting one keeps the legs in sync / removes them together. By category:
 a bill, a recharge). Investments are the only exclusion. It does not require owning a reward account:
 the "Other" source below covers one-off rewards.
 - On an ordinary purchase the split is a PAIR of entries, not three: the chosen account is debited for
-  the part you actually paid, and a second leg debits the reward account for the rest. The Amount field
+  the part you actually paid, and a second leg debits the reward source for the rest. The Amount field
   always means the FULL price — the panel shows the derived "Primary Account Debit" underneath, and
   reopening the entry shows the full price again, not the reduced figure.
+- SEVERAL reward sources on one payment: once a source is picked and given an amount, a "+" appears
+  beside the panel's "×" and adds another card. The cards slide sideways (swipe, or tap a pagination
+  dot underneath) and each carries its own "Rewards Used" field, its own source picker and its own
+  unit — so a ₹448 bill can be part-paid with ₹50 of CRED coins AND ₹36 of super.money at once. How
+  many is not fixed at two: every eligible reward account can be a card, and a source already used by
+  another card drops out of the other pickers, so one account is only ever spent from once per
+  payment ("Other" likewise appears once). The "Primary Account Debit" line underneath always shows
+  the full price minus every source together, and the save is refused if the sources together exceed
+  the price. Each source produces its OWN debit leg, so a two-wallet split lists two redemptions under
+  the spend in the ledger, and the "×" removes only the card on screen (the last one closes the panel).
 - Unit toggle (₹ | PTS): when the reward source is a card's own points wallet, the "Rewards Used" field
   can be typed in either unit and a "= ..." line underneath shows the converted value. Typing 430 in
   PTS mode and typing 86 in ₹ mode are the same redemption when the rate is 5 Jewels = ₹1 — pick
@@ -161,25 +179,31 @@ the "Other" source below covers one-off rewards.
   re-saved or lowered — its own already-recorded redemption counts as available.
 - "Other" (last option in the "From Rewards" picker) is for a ONE-TIME reward that isn't worth its own
   account — a coupon, a voucher, a scratch-card credit, a referral discount. It behaves like any other
-  split on the amounts (the Amount field is the full price, the primary account is debited for the
-  rest), but there is NO second leg and no reward balance anywhere: nothing is deducted from any
-  account, so nothing has to be set up first. The ledger row shows the amount actually paid, with a
-  small "₹40 REWARD" pill beside the category recording the part a reward covered. Because there is no
-  balance behind it, the "Only ... available" check doesn't apply — the transaction total is the only
+  source: the Amount field is the full price, the primary account is debited for the rest, and the
+  reward gets its OWN entry in the ledger, collapsed under the spend like any redemption ("One-time
+  reward" where the entry would name an account). What makes it different is that it draws on nothing
+  — no reward balance anywhere is deducted, so nothing has to be set up first — and because there is
+  no balance behind it the "Only ... available" check doesn't apply; the transaction total is the only
   limit. Use a real rewards account instead when the source is a wallet with a running balance worth
   tracking (CRED coins, super.money, a card's own points).
+  Splits logged before one-time rewards got their own entry show a small "₹40 REWARD" pill beside the
+  category instead; re-saving such an entry replaces the pill with the ledger entry.
 - In the ledger the SPEND is the row you see, with the reward redemption collapsed under it as a
-  linked entry ("Part-paid with rewards", or "Funding + rewards" on a CC Payment).
-  Tapping that redemption opens the spend it belongs to, with the split panel in view — the amount
-  redeemed is edited there, next to the full price. Deleting it un-splits instead: the payment stays
-  and the primary account absorbs the reward portion.
+  linked entry ("Part-paid with rewards", or "Funding + rewards" on a CC Payment). Two sources are
+  listed as two separate entries in there, and the toggle counts them ("Part-paid with 2 rewards",
+  "Funding + 2 rewards").
+  Tapping a redemption opens the spend it belongs to, with the split panel in view and that source's
+  card ringed — the amount redeemed is edited there, next to the full price. Deleting it un-splits
+  instead: the payment stays and the primary account absorbs that source's portion, while any other
+  source keeps funding its own share.
 - A redemption is NOT a charge on the card. It never appears on the card's statement, in its
   outstanding balance, or in its billed/unbilled dues — those count only what the credit line actually
   lent. So a ₹448 purchase paid with ₹362 of credit and ₹86 worth of points shows ₹362 on the
   statement, and the points balance drops instead. The redemption is visible in the ledger, as the
   linked entry under the spend.
-- Reward points are always tracked in the account's own unit, while the ledger, spending totals and
-  Insights charts count the RUPEE value of what the points paid for. So a ₹448 purchase split with 430
+- Reward points are always tracked in the account's own unit — a card's points wallet and a rewards
+  wallet that names a unit alike — while the ledger, spending totals and Insights charts count the
+  RUPEE value of what the points paid for. So a ₹448 purchase split with 430
   Jewels still shows as ₹448 of spending, and the Jewels balance drops by 430.
 - Investments: logging an investment purchase. Credits the investment account with the
   holdings/units/grams and debits the paying bank account for the cost (+ charges). Legacy categories

@@ -18,6 +18,12 @@ import {
   isStatsExcludedCategory,
   isCountableTransaction,
   isExternalRewardSource,
+  accountNameOf,
+  isUnitDenominated,
+  formatRewardBalance,
+  rupeesToRewardPoints,
+  getRewardSplits,
+  rewardSplitTotal,
   getInvestmentAccountStats,
   isPointsDenominated,
   affectsRupeeBalance,
@@ -140,9 +146,20 @@ function buildSummary(data: FinanceData): string {
       return;
     }
 
+    /* A rewards WALLET has one ledger and it is in rupees — the deposits it takes, the redemptions it
+       funds, the liquidations out of it. Its unit, when it names one, is what that balance is counted
+       in at its rate, so the figure is converted for the label and the rupee worth is stated beside
+       it: "500 Chips (worth ₹50 at 10 Chips = ₹1)". This used to ask calculateBalance for the
+       account's SEPARATE points ledger (`isRewardPoints: isReward`), which a wallet does not have —
+       so every rewards wallet was reported to the assistant as "0 pts". */
     const isReward = a.type === 'rewards';
-    const bal = calculateBalance(a, data.transactions, currentMonth, false, isReward, data.cashbackStatements);
-    let line = `  - ${a.name} [${a.type}]: ${isReward ? `${bal} ${a.rewardUnit || 'pts'}` : formatCurrency(bal)}`;
+    const bal = calculateBalance(a, data.transactions, currentMonth, false, false, data.cashbackStatements);
+    let line = `  - ${a.name} [${a.type}]: ${
+      isReward ? formatRewardBalance(a, rupeesToRewardPoints(bal, a)) : formatCurrency(bal)
+    }`;
+    if (isReward && isUnitDenominated(a)) {
+      line += ` (worth ${formatCurrency(bal)}, ${a.pointsConversionRate || 1} ${a.rewardUnit || 'points'} = ₹1)`;
+    }
     // A card with its own points programme (Jupiter's Jewels, Amex MR, Edge Miles) carries a SECOND
     // balance denominated in points, on top of its rupee outstanding — same shape as the NCMC travel
     // purse below. `isReward` only catches standalone rewards ACCOUNTS, so without this a card's
@@ -362,18 +379,24 @@ function buildSlice(data: FinanceData, query: string): string {
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, filtered ? SLICE_CAP : RECENT_FALLBACK)
     .map(t => {
-      const acct = data.accounts.find(a => a.id === t.accountId)?.name || 'Unknown';
+      const acct = accountNameOf(t.accountId, data.accounts);
       const tagStr = (t.tags && t.tags.length) ? ` | ${t.tags.map(tg => `#${tg}`).join(' ')}` : '';
-      // A reward split stores the anchor at what was PAID (handleSave writes `total − rewardUsed`),
-      // so the row's amount is NOT the price. Left unsaid, the assistant quotes ₹362 for a ₹448
-      // purchase and is simply wrong about it. A split on a real reward account at least has its leg
-      // somewhere in the data; a "one-time reward" split has no leg at all, so this line is the only
-      // place that portion exists. Named source, because "which coupon" is the follow-up question.
-      const split = (t.rewardUsed || 0) > 0 && t.rewardUsedAccountId
-        ? ` | ${formatCurrency(t.rewardUsed as number)} of the ${formatCurrency((t.amount || 0) + (t.rewardUsed as number))} price paid by rewards from ${
-            isExternalRewardSource(t.rewardUsedAccountId)
-              ? 'a one-time reward (coupon/voucher — no account, no balance)'
-              : data.accounts.find(a => a.id === t.rewardUsedAccountId)?.name || 'a reward account'
+      /* A reward split stores the anchor at what was PAID (handleSave writes `total − rewards`), so
+         the row's amount is NOT the price. Left unsaid, the assistant quotes ₹362 for a ₹448 purchase
+         and is simply wrong about it. A split on a real reward account at least has its leg somewhere
+         in the data; a "one-time reward" split has no leg at all, so this line is the only place that
+         portion exists. Every source is named, because "which wallet" (and "which coupon") is the
+         follow-up question — and because a bill part-paid from two wallets otherwise reads as if one
+         of them covered the lot. */
+      const splitSources = getRewardSplits(t);
+      const splitTotal = rewardSplitTotal(t);
+      const split = splitSources.length > 0
+        ? ` | ${formatCurrency(splitTotal)} of the ${formatCurrency((t.amount || 0) + splitTotal)} price paid by rewards from ${
+            splitSources.map(sp => `${formatCurrency(sp.amount)} ${
+              isExternalRewardSource(sp.accountId)
+                ? 'from a one-time reward (coupon/voucher — no account, no balance)'
+                : `from ${data.accounts.find(a => a.id === sp.accountId)?.name || 'a reward account'}`
+            }`).join(' + ')
           }`
         : '';
       return `${t.date} | ${t.description} | ${t.type === 'debit' ? '-' : '+'}${formatCurrency(t.amount)} | ${t.category} | ${acct}${tagStr}${split}`;

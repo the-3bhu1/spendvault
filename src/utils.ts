@@ -1,5 +1,5 @@
 import { format, parseISO, addMonths, subMonths, addDays, setDate, differenceInCalendarDays } from 'date-fns';
-import type { Account, Transaction, CardNetwork, CashbackStatement, SplitItem, InvestmentKind, RecurringBill, BrandKey } from './types';
+import type { Account, Transaction, CardNetwork, CashbackStatement, SplitItem, InvestmentKind, RecurringBill, RewardSplitLeg, BrandKey } from './types';
 
 /**
  * The message carried by a thrown value, if it has one.
@@ -443,6 +443,30 @@ import { calculateEPFProjection } from './utils/epfEngine';
 export const isPointsDenominated = (account?: Account) =>
   !!(account?.isCashbackEnabled && account?.rewardType === 'points');
 
+/**
+ * Is this account's balance COUNTED IN A UNIT — Jewels, Chips, Miles — rather than in rupees?
+ *
+ * Deliberately a different question from `isPointsDenominated`, which asks whether the account keeps
+ * a SEPARATE reward-points ledger beside its money. Only a card does: its rupee balance is what the
+ * credit line lent and its points balance is a second, parallel figure (`rewardOpeningBalances`, fed
+ * by confirmed statement realizations). A `rewards` WALLET has one balance and one ledger — the
+ * deposits it receives, the redemptions it funds, the liquidations out of it — and that ledger is in
+ * rupees like every other amount in the app. Naming a unit and a rate on it does not create a second
+ * balance; it says what the one balance is COUNTED IN, at that rate.
+ *
+ * Conflating the two is what made a "Cheq Chips" wallet with 500 Chips at 10/₹1 read as ₹500
+ * everywhere: the unit only reached the Accounts card, which prints it as a caption, while every
+ * other surface asked `rewardType === 'points'` (a card-only field) and fell through to rupees.
+ *
+ * So: this predicate drives DISPLAY and ENTRY — the ₹ | PTS toggle, the picker's balance line, the
+ * account form's balance field — while `isPointsDenominated` keeps driving STORAGE, which balance map
+ * is read, and whether a leg belongs to the points ledger (`isRewardTransaction`). A wallet's
+ * redemption leg stays an ordinary rupee debit, because a wallet's balance is ordinary rupees.
+ */
+export const isUnitDenominated = (account?: Account) =>
+  isPointsDenominated(account)
+  || !!(account?.type === 'rewards' && account?.rewardUnit && account?.rewardType === 'points');
+
 // A reward split whose source is a one-off the user doesn't track anywhere — a coupon, a voucher, a
 // scratch-card credit, a friend's referral code — held in `rewardUsedAccountId` as a sentinel rather
 // than a real account id. It is deliberately NOT an account: standing one up for a ₹40 coupon that
@@ -461,8 +485,19 @@ export const EXTERNAL_REWARD_SOURCE_ID = '__external_reward__';
 export const isExternalRewardSource = (accountId?: string) =>
   accountId === EXTERNAL_REWARD_SOURCE_ID;
 
+/** What a one-time reward is CALLED where a row's account is named. Its redemption leg carries the
+ *  sentinel in `accountId` — matching no account, which is the point — so every surface that would
+ *  otherwise print "Unknown" says this instead. */
+export const EXTERNAL_REWARD_NAME = 'One-time reward';
+
+/** The name of the account a row sits on, including the row that sits on none. */
+export const accountNameOf = (accountId: string | undefined, accounts: Account[]) =>
+  isExternalRewardSource(accountId)
+    ? EXTERNAL_REWARD_NAME
+    : (accounts.find(a => a.id === accountId)?.name || 'Unknown');
+
 export const rewardPointsRate = (account?: Account) =>
-  isPointsDenominated(account) ? (account?.pointsConversionRate || 1) : 1;
+  isUnitDenominated(account) ? (account?.pointsConversionRate || 1) : 1;
 
 /** Points spent -> the rupee value they paid off. 430 Jewels at 5/₹1 -> ₹86. */
 export const rewardPointsToRupees = (points: number, account?: Account) =>
@@ -471,6 +506,115 @@ export const rewardPointsToRupees = (points: number, account?: Account) =>
 /** Rupee value -> the points it costs. ₹86 at 5/₹1 -> 430 Jewels. */
 export const rupeesToRewardPoints = (rupees: number, account?: Account) =>
   Math.round((rupees * rewardPointsRate(account)) * 100) / 100;
+
+// ---- Reward splits: one anchor, many sources ------------------------------------------------
+// A split is a list, not a pair. `rewardSplits` is authoritative when present; the legacy
+// `rewardUsed` + `rewardUsedAccountId` pair is the same thing with one entry, and is what every row
+// logged before this looks like. Reading through these accessors — never off the raw fields — is what
+// lets the two shapes coexist with no migration: a 2015-vintage single split and a three-source one
+// both come back as an array of `{ accountId, amount }`.
+//
+// The rule for WRITING is the mirror image, and lives in `withRewardSplits`: the list goes to
+// `rewardSplits`, its sum to `rewardUsed`, and its first source to `rewardUsedAccountId`. That keeps
+// `!!rewardUsedAccountId` ("this row anchors a split") and `total - rewardUsed` ("what the primary
+// account actually paid") true for every consumer that has always relied on them.
+
+/** Every reward source on this row, oldest first. Empty when there is no split. */
+export const getRewardSplits = (tx?: Partial<Transaction>): RewardSplitLeg[] => {
+  if (!tx) return [];
+  if (tx.rewardSplits && tx.rewardSplits.length > 0) {
+    return tx.rewardSplits.filter(s => !!s.accountId && (s.amount || 0) > 0);
+  }
+  return (tx.rewardUsedAccountId && (tx.rewardUsed || 0) > 0)
+    ? [{ accountId: tx.rewardUsedAccountId, amount: tx.rewardUsed as number }]
+    : [];
+};
+
+/** Total rupees redeemed on this row, across every source. The list is what is summed, so an anchor
+ *  assembled mid-save (or in a test) reads correctly before `rewardUsed` has been recomputed; a row
+ *  with a total but no readable source falls back to the stored figure rather than reporting zero,
+ *  since that total is what the amount arithmetic has always subtracted. */
+export const rewardSplitTotal = (tx?: Partial<Transaction>): number => {
+  const splits = getRewardSplits(tx);
+  if (splits.length === 0) return tx?.rewardUsed || 0;
+  return Math.round(splits.reduce((sum, s) => sum + (s.amount || 0), 0) * 100) / 100;
+};
+
+/** Whether `accountId` is one of this row's reward sources — the multi-source form of the
+ *  `p.rewardUsedAccountId === child.accountId` discriminator described in
+ *  docs/LINKED_TRANSACTIONS.md. */
+export const isRewardSourceOf = (tx: Partial<Transaction> | undefined, accountId?: string): boolean =>
+  !!accountId && getRewardSplits(tx).some(s => s.accountId === accountId);
+
+/** WHICH of `anchor`'s splits produced `leg`, as an index, or -1. Prefers the recorded `legId`, which
+ *  survives a source switch and tells two sibling legs apart; falls back to the account for a legacy
+ *  row that has no leg ids. Callers must have established that `leg` is linked to `anchor` and is not
+ *  the anchor itself — a card redeeming its OWN points puts both on the same account.
+ *
+ *  The index, not just the split, because it is also the position the log form's split carousel
+ *  opens at when a reward leg is tapped in the ledger. */
+export const rewardSplitIndexOfLeg = (
+  anchor: Partial<Transaction> | undefined,
+  leg: Pick<Transaction, 'id' | 'accountId'>,
+): number => {
+  const splits = getRewardSplits(anchor);
+  const byId = splits.findIndex(s => s.legId === leg.id);
+  if (byId >= 0) return byId;
+  return splits.findIndex(s => !s.legId && s.accountId === leg.accountId);
+};
+
+/** The split that produced `leg`, if any. See rewardSplitIndexOfLeg for how it is matched. */
+export const rewardSplitOfLeg = (
+  anchor: Partial<Transaction> | undefined,
+  leg: Pick<Transaction, 'id' | 'accountId'>,
+): RewardSplitLeg | undefined => {
+  const i = rewardSplitIndexOfLeg(anchor, leg);
+  return i >= 0 ? getRewardSplits(anchor)[i] : undefined;
+};
+
+/** The ids of the legs this row's splits generated (external sources contribute none). */
+export const rewardLegIdsOf = (tx?: Partial<Transaction>): string[] =>
+  getRewardSplits(tx).map(s => s.legId).filter((id): id is string => !!id);
+
+/* Fit a split's sources to a new TOTAL, when something other than the sources themselves decided
+   what that total must be — the Option-B rebalance below, where the bank leg was edited and the
+   rewards have to absorb the difference. With one source it is a straight assignment. With several
+   the difference has to land somewhere, and it lands on the LAST source: the sources are held in the
+   order they were added, so the last is the one most recently tacked on, and flexing it leaves the
+   primary redemption the user set up first exactly as they set it. It cascades backwards only when
+   the last source runs out of room (a shrink deeper than it can absorb), and a source flexed to zero
+   is dropped by the caller — a ₹0 leg is not a redemption. */
+export function redistributeRewardSplits(splits: RewardSplitLeg[], target: number): RewardSplitLeg[] {
+  if (splits.length === 0) return [];
+  const total = Math.round(Math.max(0, target) * 100) / 100;
+  const round = (n: number) => Math.round(Math.max(0, n) * 100) / 100;
+  if (splits.length === 1) return [{ ...splits[0], amount: total }];
+
+  const head = splits.slice(0, -1);
+  let used = 0;
+  const kept = head.map(s => {
+    const amount = round(Math.min(s.amount, total - used));
+    used = round(used + amount);
+    return { ...s, amount };
+  });
+  return [...kept, { ...splits[splits.length - 1], amount: round(total - used) }];
+}
+
+/** Write a split list onto a row, keeping the legacy pair in step. Pass an empty list to clear the
+ *  split entirely — `rewardSplits` is dropped rather than left as `[]`, so `getRewardSplits` never
+ *  has to treat an empty array as meaningful. */
+export const withRewardSplits = <T extends Partial<Transaction>>(tx: T, splits: RewardSplitLeg[]): T => {
+  const live = splits.filter(s => !!s.accountId && (s.amount || 0) > 0);
+  if (live.length === 0) {
+    return { ...tx, rewardUsed: 0, rewardUsedAccountId: '', rewardSplits: undefined };
+  }
+  return {
+    ...tx,
+    rewardUsed: Math.round(live.reduce((sum, s) => sum + s.amount, 0) * 100) / 100,
+    rewardUsedAccountId: live[0].accountId,
+    rewardSplits: live,
+  };
+};
 
 // Does this transaction move the account's own RUPEE balance? An account can carry up to three
 // separate balances — its money, an NCMC travel purse, and a reward-points wallet — and a leg belongs
@@ -610,6 +754,38 @@ export const calculateBalance = (
 
   return opening + change + adjustment;
 };
+
+/**
+ * A reward source's balance IN ITS OWN UNIT — the figure to show beside its name, and the ceiling a
+ * redemption is checked against.
+ *
+ * The two kinds of reward balance are read differently, which is the whole reason this exists as one
+ * function: a card's points wallet is a separate ledger that `calculateBalance` already returns in
+ * points, while a `rewards` wallet's single balance is rupees and is converted here at its rate. Left
+ * to each caller, half of them asked for the wrong one — a wallet holding 500 Chips at 10/₹1 was
+ * reported as ₹500 in the split picker while the Accounts card called the same number 500 CHIPS.
+ *
+ * Returns plain rupees for an account with no unit at all (CRED coins, super.money), since
+ * `rupeesToRewardPoints` is the identity at a rate of 1.
+ */
+export const rewardUnitBalance = (
+  account: Account | undefined,
+  transactions: Transaction[],
+  monthStr: string,
+  cashbackStatements: CashbackStatement[] = [],
+) => {
+  if (!account) return 0;
+  return isPointsDenominated(account)
+    ? calculateBalance(account, transactions, monthStr, false, true, cashbackStatements)
+    : rupeesToRewardPoints(calculateBalance(account, transactions, monthStr, false, false, cashbackStatements), account);
+};
+
+/** How a reward balance reads: "500 Chips" for a unit-denominated source, "₹21" for a rupee wallet.
+ *  Takes the figure already in the account's own unit — i.e. what `rewardUnitBalance` returns. */
+export const formatRewardBalance = (account: Account | undefined, unitBalance: number) =>
+  isUnitDenominated(account)
+    ? `${unitBalance} ${account?.rewardUnit || 'Points'}`
+    : formatCurrency(unitBalance);
 
 // calculateTotalSpendPerCycle used to live here: a per-cycle spend/payment/net for one card, with
 // no affectsRupeeBalance filter. That omission is why Bills and the bill-alert banner overstated the

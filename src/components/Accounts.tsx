@@ -12,7 +12,7 @@ import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardFees, CardNetwork, BrandKey, RoundingRule } from '../types';
 import { CardBrandLogo, brandLabel, BRAND_INK } from './CardBrandLogo';
 import { resolveCardIssuer } from '../utils';
-import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, calculateCycleBalanceForCycle, getBillingCycleForDate, getOrdinalSuffix, affectsRupeeBalance, cardEarnsCashback } from '../utils';
+import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, calculateCycleBalanceForCycle, getBillingCycleForDate, getOrdinalSuffix, affectsRupeeBalance, cardEarnsCashback, isUnitDenominated, rewardUnitBalance, rewardPointsToRupees, rupeesToRewardPoints } from '../utils';
 import { scrollToFirstError } from '../utils/formErrors';
 import { CardNetworkLogo, NETWORK_LABELS } from './CardNetworkLogo';
 import { ViewCardOverlay } from './ViewCardOverlay';
@@ -378,7 +378,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setEditingCashbackRateId(null);
     setIsEditingCardDetails(false);
 
-    const currentBalance = acc.type === 'epf' ? (acc.baseBalance || 0) : calculateBalance(acc, data.transactions, month);
+    /* A unit-denominated rewards wallet is entered in its own unit (500 Chips, not the ₹50 those
+       Chips are worth) — that is the figure the user reads off the app that issued them, and the
+       label below says which unit it is. The rupee value is what gets stored; see handleSave. */
+    const currentBalance = acc.type === 'epf'
+      ? (acc.baseBalance || 0)
+      : (isUnitDenominated(acc) && acc.type === 'rewards'
+        ? rewardUnitBalance(acc, data.transactions, month, data.cashbackStatements)
+        : calculateBalance(acc, data.transactions, month));
     setOpeningBalanceInput(currentBalance.toString());
 
     const currentTravelBalance = calculateBalance(acc, data.transactions, month, true);
@@ -540,6 +547,16 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     const updatedBalanceEditHistory = [...(newAccount.balanceEditHistory || [])];
 
     const hasInternalRewards = (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.isCashbackEnabled && newAccount.rewardType === 'points';
+    /* A rewards wallet that names a unit and a rate is counted in that unit: the balance field above
+       is read as Chips (or Miles, or Points) and stored as the rupees they are worth, so every sum in
+       the app keeps working in one currency. `rewardType: 'points'` is what records it — the same flag
+       a card uses, and the one isUnitDenominated reads — so the account is built here with it set,
+       and the entry conversion below keys off the same condition rather than a second, driftable one. */
+    const walletCountsInUnits = newAccount.type === 'rewards'
+      && !!newAccount.rewardUnit?.trim()
+      && (newAccount.pointsConversionRate || 0) > 0;
+    const entersBalanceInUnits = walletCountsInUnits;
+    const unitAccountForEntry = { ...newAccount, rewardType: 'points' } as Account;
     const updatedRewardOpeningBalances = hasInternalRewards ? { ...(newAccount.rewardOpeningBalances || {}) } : undefined;
     let updatedRewardBalanceAdjustments = hasInternalRewards ? { ...(newAccount.rewardBalanceAdjustments || {}) } : undefined;
 
@@ -573,7 +590,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
           }
         }, 0);
 
-        const enteredCurrentBalance = parseFloat(openingBalanceInput) || 0;
+        // Back into rupees, which is what the balance maps hold. Identity for every other account:
+        // rewardPointsToRupees divides by a rate of 1 unless the account is unit-denominated. The
+        // account being saved is what decides the unit — the rate may have just been edited.
+        const enteredCurrentBalance = entersBalanceInUnits
+          ? rewardPointsToRupees(parseFloat(openingBalanceInput) || 0, unitAccountForEntry)
+          : (parseFloat(openingBalanceInput) || 0);
         const previousBalance = calculateBalance(originalAcc, data.transactions, month);
         updatedBalanceAdjustments[month] = enteredCurrentBalance - opening - standardChange;
 
@@ -642,7 +664,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       }
     } else {
       // In add mode, set opening balance as input and reset adjustment for standard
-      updatedOpeningBalances[month] = (newAccount.type === 'mutual_funds' || newAccount.type === 'stocks') ? 0 : (parseFloat(openingBalanceInput) || 0);
+      updatedOpeningBalances[month] = (newAccount.type === 'mutual_funds' || newAccount.type === 'stocks')
+        ? 0
+        : (entersBalanceInUnits
+          ? rewardPointsToRupees(parseFloat(openingBalanceInput) || 0, unitAccountForEntry)
+          : (parseFloat(openingBalanceInput) || 0));
       updatedBalanceAdjustments[month] = 0;
 
       if (newAccount.isNcmcEnabled && updatedTravelOpeningBalances) {
@@ -697,7 +723,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       avgNav: newAccount.type === 'mutual_funds' ? newAccount.avgNav : undefined,
       rewardUnit: (newAccount.type === 'rewards' || hasInternalRewards) ? (newAccount.rewardUnit?.trim() || undefined) : undefined,
       pointsConversionRate: (newAccount.type === 'rewards' || hasInternalRewards) ? newAccount.pointsConversionRate : undefined,
-      rewardType: (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.isCashbackEnabled ? (newAccount.rewardType || 'rupee') : undefined,
+      rewardType: (newAccount.type === 'credit_card' || newAccount.type === 'debit_card') && newAccount.isCashbackEnabled
+        ? (newAccount.rewardType || 'rupee')
+        : (walletCountsInUnits ? 'points' : undefined),
       rewardOpeningBalances: updatedRewardOpeningBalances,
       rewardBalanceAdjustments: updatedRewardBalanceAdjustments,
       baseBalance: newAccount.type === 'epf' ? (parseFloat(openingBalanceInput) || 0) : undefined,
@@ -1046,7 +1074,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               }}>
                                 {acc.type === 'rewards' && acc.rewardUnit ? (
                                   <span className="flex-col" style={{ alignItems: 'flex-start', gap: '6px', lineHeight: '1' }}>
-                                    <span>{bal}</span>
+                                    {/* `bal` is rupees; the caption underneath names a unit, so the
+                                        figure has to be converted or the two disagree by the rate. */}
+                                    <span>{rupeesToRewardPoints(bal, acc)}</span>
                                     <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 800, opacity: 0.7 }}>{acc.rewardUnit}</span>
                                   </span>
                                 ) : (
@@ -1081,7 +1111,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                   <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
                                     {acc.type === 'rewards' && acc.rewardUnit ? (
                                       <span className="flex-col" style={{ alignItems: 'flex-end', gap: '6px', lineHeight: '1' }}>
-                                        <span>{openingBal}</span>
+                                        {/* Stored in rupees, captioned with a unit — convert, as the
+                                            current balance beside it does. */}
+                                        <span>{rupeesToRewardPoints(openingBal, acc)}</span>
                                         <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1.5px', fontWeight: 800, opacity: 0.7 }}>{acc.rewardUnit}</span>
                                       </span>
                                     ) : (
@@ -1569,7 +1601,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
               />
               {newAccount.type !== 'mutual_funds' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && (
                 <div className="input-group">
-                  <label>{editId ? 'Current Balance (Current Month)' : 'Opening Balance (Current Month)'}</label>
+                  {/* Named in the unit it is actually typed in, for a wallet that has one — the
+                      field means 500 Chips, not ₹500, and nothing else on the form would say so. */}
+                  <label>
+                    {editId ? 'Current Balance' : 'Opening Balance'}
+                    {' '}({newAccount.type === 'rewards' && newAccount.rewardUnit?.trim() && (newAccount.pointsConversionRate || 0) > 0
+                      ? newAccount.rewardUnit.trim()
+                      : 'Current Month'})
+                  </label>
                   <input
                     type="number"
                     className={`input-field ${errors.openingBalance ? 'border-danger' : ''}`}
@@ -1796,7 +1835,13 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         min="0.0001"
                       />
                       <p className="text-xs text-muted" style={{ marginTop: '0.25rem' }}>
-                        Used to automatically convert cashback rupees to points, and display estimated Rupee value in statements.
+                        This wallet's balance is counted in {newAccount.rewardUnit?.trim() || 'points'} at this rate, and converted
+                        wherever it meets rupees — redemptions, cashback deposits, totals.
+                        {(newAccount.pointsConversionRate || 0) > 0 && (parseFloat(openingBalanceInput) || 0) > 0 && (
+                          <> {parseFloat(openingBalanceInput)} {newAccount.rewardUnit?.trim() || 'points'} ={' '}
+                            {formatCurrency(rewardPointsToRupees(parseFloat(openingBalanceInput) || 0, { ...newAccount, rewardType: 'points' } as Account))}.
+                          </>
+                        )}
                       </p>
                     </div>
                   )}

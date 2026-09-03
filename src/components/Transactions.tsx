@@ -2,31 +2,37 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account, InvestmentKind } from '../types';
-import { formatCurrency, formatAmount, formatDateString, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, getInvestmentKind, isCountableTransaction, isExternalRewardSource } from '../utils';
+import { formatCurrency, formatAmount, formatDateString, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, getInvestmentKind, isCountableTransaction, isExternalRewardSource, getRewardSplits, rewardSplitIndexOfLeg, rewardSplitOfLeg, accountNameOf } from '../utils';
 import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, ChevronRight, ChevronDown, Hash, Shapes, Layers, Sparkles, Loader2, Filter, ArrowUp } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
 import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, getInvestmentKindIcon } from './transactionIcons';
 import { LogTransactionForm } from './LogTransactionForm';
 
-// The anchor a reward-redemption leg belongs to, or null if `tx` isn't one. A leg carries no editable
-// identity of its own — its amount IS the anchor's `rewardUsed`, its account IS the anchor's
-// `rewardUsedAccountId`, and description/category/date are derived and propagated down — so tapping
-// one has to edit the anchor instead. Matched on the anchor's own fields rather than
+// The anchor a reward-redemption leg belongs to — and WHICH of its sources this leg is — or null if
+// `tx` isn't one. A leg carries no editable identity of its own: its amount is its source's amount on
+// the anchor, its account is that source's account, and description/category/date are derived and
+// propagated down — so tapping one has to edit the anchor instead. The index comes back with it
+// because a split can be funded from several wallets, each with its own leg in the ledger: the form
+// has to open at the card the tap came from, or it would land on the first source every time.
+//
+// Matched through rewardSplitOfLeg (leg id first, account for a legacy row) rather than on
 // `isRewardTransaction`, which is only set when the reward source is points-denominated (a rupee
 // wallet like CRED coins leaves it false). The `p.id !== tx.id` guard is load-bearing: a card
 // redeeming its OWN points has leg.accountId === anchor.accountId, so without it the anchor, whose
 // linkedTransactionIds point back at the leg, would resolve to itself.
-function rewardSplitAnchorOf(tx: Transaction, transactions: Transaction[]): Transaction | null {
+function rewardSplitAnchorOf(
+  tx: Transaction,
+  transactions: Transaction[],
+): { anchor: Transaction; index: number } | null {
   const linkedIds = tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []);
   if (!linkedIds.length) return null;
-  return transactions.find(p =>
+  const anchor = transactions.find(p =>
     p.id !== tx.id
     && linkedIds.includes(p.id)
-    && !!p.rewardUsedAccountId
-    && p.rewardUsedAccountId === tx.accountId
-    && (p.rewardUsed || 0) > 0
-  ) || null;
+    && !!rewardSplitOfLeg(p, tx)
+  );
+  return anchor ? { anchor, index: Math.max(0, rewardSplitIndexOfLeg(anchor, tx)) } : null;
 }
 
 
@@ -256,20 +262,28 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
               )}
             </div>
             <div className="flex align-center gap-2" style={{ marginTop: '2px', flexWrap: 'wrap', rowGap: '4px' }}>
-              <span className="text-mono text-muted text-xs truncate" style={{ fontWeight: 600, flexShrink: 0, maxWidth: '100%' }}>{acc?.name || 'Unknown'}{acc?.archived ? ' (deleted)' : ''}</span>
+              {/* A one-time reward's redemption leg sits on no account at all, so this is where it
+                  would otherwise read "Unknown" — accountNameOf gives it its name. */}
+              <span className="text-mono text-muted text-xs truncate" style={{ fontWeight: 600, flexShrink: 0, maxWidth: '100%' }}>{accountNameOf(tx.accountId, data.accounts)}{acc?.archived ? ' (deleted)' : ''}</span>
               <span className="metric-pill truncate" style={{ flexShrink: 0, maxWidth: '100%' }}>{tx.category}</span>
               {/* 'Investments' alone doesn't say fund vs. stock vs. metal — the kind pill fills that in. */}
               {invKind && (
                 <span className="metric-pill truncate" style={{ flexShrink: 0, maxWidth: '100%' }}>{investmentKindLabel(invKind)}</span>
               )}
-              {/* A split funded by a one-time reward creates no redemption leg, so this row has no
-                  "Part-paid with rewards" entry to expand into — the amount just reads lower than
-                  what was actually bought. This pill is the only trace the discount leaves. */}
-              {(tx.rewardUsed || 0) > 0 && isExternalRewardSource(tx.rewardUsedAccountId) && (
-                <span className="metric-pill truncate" style={{ flexShrink: 0, maxWidth: '100%' }}>
-                  {formatCurrency(tx.rewardUsed!)} reward
-                </span>
-              )}
+              {/* A one-time reward now gets a redemption leg of its own, collapsed under this row
+                  like every other source — so this pill is only for the splits written BEFORE that,
+                  which have nothing to expand into and would otherwise leave no trace of the
+                  discount at all. A source with a leg needs no pill; the leg is the trace. */}
+              {(() => {
+                const oneTime = getRewardSplits(tx)
+                  .filter(sp => isExternalRewardSource(sp.accountId) && !sp.legId)
+                  .reduce((sum, sp) => sum + sp.amount, 0);
+                return oneTime > 0 ? (
+                  <span className="metric-pill truncate" style={{ flexShrink: 0, maxWidth: '100%' }}>
+                    {formatCurrency(oneTime)} reward
+                  </span>
+                ) : null;
+              })()}
               {(tx.tags || []).slice(0, 2).map(tag => (
                 <span key={tag} className="tag-pill truncate" style={{ flexShrink: 0, maxWidth: '100%' }}>#{tag}</span>
               ))}
@@ -364,9 +378,11 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                     // actively misleading for a 3-leg split, describing only the bank leg while a
                     // rewards leg sat hidden beside it. Reward splits never coexist with the
                     // investment / transfer / NCMC groups below, so checking first costs nothing.
-                    const hidesRewardLeg = (tx.rewardUsed || 0) > 0
-                      && !!tx.rewardUsedAccountId
-                      && counterparts!.some(c => c.tx.accountId === tx.rewardUsedAccountId);
+                    const rewardLegCount = counterparts!.filter(c => !!rewardSplitOfLeg(tx, c.tx)).length;
+                    const hidesRewardLeg = rewardLegCount > 0;
+                    // Two wallets funding one bill are two separate entries in there, and the toggle
+                    // is the only hint of how many before it is opened.
+                    const rewardWord = rewardLegCount > 1 ? `${rewardLegCount} rewards` : 'rewards';
                     /* Same argument one category over: an instant-cashback leg is money that
                        arrived and is hidden in here, and no category below hints at it. Reachable
                        on far more rows than it used to be, now that instant cashback is offered on
@@ -382,8 +398,10 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                        since they have the room for it. */
                     if (hidesRewardLeg) {
                       return cats.includes('cc payment')
-                        ? `Funding + rewards${cashbackSuffix}`
-                        : (hidesCashbackLeg ? 'Rewards + cashback' : 'Part-paid with rewards');
+                        ? `Funding + ${rewardWord}${cashbackSuffix}`
+                        : (hidesCashbackLeg
+                          ? `${rewardLegCount > 1 ? `${rewardLegCount} rewards` : 'Rewards'} + cashback`
+                          : `Part-paid with ${rewardWord}`);
                     }
                     // Investment legs all share one category, so the wording comes from the leg's kind.
                     const invKinds = counterparts!.filter(c => isInvestmentCategory(c.tx.category)).map(c => c.tx.investmentKind);
@@ -577,12 +595,15 @@ export default function Transactions() {
 
   // Set when a tap on a reward leg was redirected to its anchor, so the form can scroll to the split.
   const [focusSplitOnOpen, setFocusSplitOnOpen] = useState(false);
+  /** Which reward source of the split to open at, when a tap on one of its legs sent us here. */
+  const [focusSplitIndex, setFocusSplitIndex] = useState(0);
 
   const openAddModal = () => {
     setEditId(null);
     setModalPrefill(undefined);
     setModalPaySrc('');
     setFocusSplitOnOpen(false);
+    setFocusSplitIndex(0);
     setIsModalOpen(true);
   };
 
@@ -600,13 +621,15 @@ export default function Transactions() {
   // The form reconstructs the whole edit context (split anchor, counterpart account, billing-cycle
   // target) from the id, so opening only has to say which transaction.
   const openEditModal = useCallback((tx: Transaction) => {
-    const anchor = rewardSplitAnchorOf(tx, data.transactions);
-    setEditId((anchor || tx).id);
+    const split = rewardSplitAnchorOf(tx, data.transactions);
+    setEditId((split?.anchor || tx).id);
     setModalPrefill(undefined);
     setModalPaySrc('');
-    // The anchor carries rewardUsed > 0, so the form already opens with the split panel expanded;
-    // this only asks it to scroll there, so the redemption is what you land on.
-    setFocusSplitOnOpen(!!anchor);
+    // The anchor carries the split, so the form already opens with the panel expanded; this asks it
+    // to scroll there and — since the split may be funded from several wallets — to open at and ring
+    // the source THIS leg was, so the redemption you tapped is the one you land on.
+    setFocusSplitOnOpen(!!split);
+    setFocusSplitIndex(split?.index ?? 0);
     setIsModalOpen(true);
   }, [data.transactions]);
 
@@ -1257,10 +1280,7 @@ export default function Transactions() {
                                       // redeeming its OWN points has leg.accountId === anchor.accountId,
                                       // so without it the anchor would flag itself.
                                       const isRewardLeg = (o: Transaction) => uncollapsedInGroup.some(p =>
-                                        p.id !== o.id
-                                        && !!p.rewardUsedAccountId
-                                        && p.rewardUsedAccountId === o.accountId
-                                        && (p.rewardUsed || 0) > 0
+                                        p.id !== o.id && !!rewardSplitOfLeg(p, o)
                                       );
                                       const eligible = uncollapsedInGroup.filter(other => !isRewardLeg(other));
                                       // Never leave the group headless: if every member looks like a
@@ -1377,6 +1397,7 @@ export default function Transactions() {
           initialData={transferPrefill ?? modalPrefill}
           initialPaymentSourceAccountId={pendingTransfer ? pendingTransfer.fromAccountId : modalPaySrc}
           focusSplit={focusSplitOnOpen}
+          focusSplitIndex={focusSplitIndex}
           sms={{ processing: processingSms, onDiscard: () => removeFromSmsQueue(0) }}
           onClose={() => {
             setIsModalOpen(false);

@@ -24,6 +24,11 @@ export const KEY_MAP: Record<string, string> = {
   id: 'i', amount: 'a', date: 'd', description: 's', type: 'y',
   accountId: 'x', category: 'k', excludeFromStats: 'e', excludedAmount: 'ea',
   rewardUsed: 'r', rewardUsedAccountId: 'w', isTravelTransaction: 'l',
+  // Every source of a multi-wallet reward split. 'rs' is the list; each entry reuses the existing
+  // 'x' (accountId) and 'a' (amount) codes, and 'rlg' names the leg it debits. `rewardUsed` and
+  // `rewardUsedAccountId` above are still written beside it (the total, and the first source), so a
+  // backup restored into an older build keeps a working single-source split.
+  rewardSplits: 'rs', legId: 'rlg',
   rewardEarned: 're', rewardEarnedType: 'ret', rewardEarnedAccountId: 'rea',
   order: 'or', linkedTransactionId: 'lt', linkedTransactionIds: 'lts',
   cashbackLevelId: 'cl', linkedTxId: 'lx',

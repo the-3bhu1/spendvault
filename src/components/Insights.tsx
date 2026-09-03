@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useFinance } from '../FinanceContext';
-import { formatCurrency, formatDateString, STATS_EXCLUDED_CATEGORIES, CATEGORY_PALETTE, ACCOUNT_PALETTE, getDistinctChartColors, isCountableTransaction } from '../utils';
+import { formatCurrency, formatDateString, STATS_EXCLUDED_CATEGORIES, CATEGORY_PALETTE, ACCOUNT_PALETTE, getDistinctChartColors, isCountableTransaction, accountNameOf } from '../utils';
 import { TrendingUp, TrendingDown, Star, Trophy, Calendar, ArrowUpRight, ArrowDownRight, Zap, Activity, Hash, Target, Pencil, Trash2, Check, X } from 'lucide-react';
 
 
@@ -152,8 +152,10 @@ export default function Insights() {
           spend += effectiveAmount;
           if (effectiveAmount > 0) {
             cat[t.category] = (cat[t.category] || 0) + effectiveAmount;
-            const account = data.accounts.find(a => a.id === t.accountId);
-            acc[account?.name || 'Unknown'] = (acc[account?.name || 'Unknown'] || 0) + effectiveAmount;
+            // A one-time reward's redemption leg belongs to no account, so it is named rather than
+            // pooled into an "Unknown" slice of the by-account breakdown.
+            const label = accountNameOf(t.accountId, data.accounts);
+            acc[label] = (acc[label] || 0) + effectiveAmount;
             if (!HIGHLIGHT_EXCLUDED_CATEGORIES.has(t.category.toLowerCase())) {
               catHighlight[t.category] = (catHighlight[t.category] || 0) + effectiveAmount;
               if (!biggest || effectiveAmount > (biggest.amount - (biggest.excludedAmount || (biggest.excludeFromStats ? biggest.amount : 0)))) biggest = t;
@@ -898,10 +900,10 @@ export default function Insights() {
             {/* Account legend — same pattern as categories */}
             <div className="flex-col gap-4">
               {accPieData.map((entry, index) => {
-                const txCount = insights.monthTxs.filter((t: Transaction) => {
-                  const account = data.accounts.find(a => a.id === t.accountId);
-                  return (account?.name || 'Unknown') === entry.name && t.type === 'debit' && isCountableTransaction(t);
-                }).length;
+                const txCount = insights.monthTxs.filter((t: Transaction) => (
+                  accountNameOf(t.accountId, data.accounts) === entry.name
+                  && t.type === 'debit' && isCountableTransaction(t)
+                )).length;
                 const percentage = ((entry.value / (insights.totalSpend || 1)) * 100).toFixed(1);
                 const color = accColors[index];
 

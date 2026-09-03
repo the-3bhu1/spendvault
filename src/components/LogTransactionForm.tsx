@@ -1,14 +1,14 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import type { Transaction, TransactionType, InvestmentKind } from '../types';
-import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, cardEarnsCashback, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource } from '../utils';
-import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X, Ticket } from 'lucide-react';
+import type { Account, Transaction, TransactionType, InvestmentKind, RewardSplitLeg } from '../types';
+import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, cardEarnsCashback, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance } from '../utils';
+import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X, Plus, Ticket } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, getInvestmentKindIcon, sortByAccountType } from './transactionIcons';
 import { scrollToFirstError } from '../utils/formErrors';
-import { shouldCreateRewardLeg } from '../services/RewardLegService';
+import { existingLegIdForSplit, isRewardSplitChildRow } from '../services/RewardLegService';
 
 // THE log/edit-transaction form. Single implementation, shared by every entry point:
 //   - the main Ledger (add, edit, SMS-driven prefill, Wealth "liquidate" prefill)
@@ -31,6 +31,10 @@ export interface LogTransactionFormProps {
   /** Scroll to the reward-split panel once seeded. Set when a tap on a reward leg was redirected
    *  here, to its anchor — the redemption is what the user meant to reach. */
   focusSplit?: boolean;
+  /** WHICH source card to open the split carousel at, and ring, when `focusSplit` is set. A split
+   *  can be funded from several wallets and each has its own leg in the ledger, so landing on the
+   *  panel is no longer enough — the card has to be the one that was tapped. */
+  focusSplitIndex?: number;
   /** Ledger-only SMS queue integration. Omitted (Bills) means the form never touches the queue. */
   sms?: { processing: boolean; onDiscard: () => void };
   onSuccess?: () => void;
@@ -39,6 +43,49 @@ export interface LogTransactionFormProps {
 // The unit toggle and the remove button sit side by side in the split panel's header, so their
 // height comes from one place — eyeballed padding on each drifted by a pixel or two.
 const SPLIT_CONTROL_HEIGHT = '28px';
+
+/* One card in the split carousel: a reward source, what it pays, and the leg it already has.
+   `input` and `unit` are the typed state — a points source is entered in its own unit (430 Jewels)
+   while `amount` stays the canonical rupee value, exactly as the single-source panel did, only now
+   each source carries its own unit because they can differ (Jewels beside CRED coins). */
+interface SplitDraft {
+  accountId: string;
+  amount: number;
+  /** The leg this source already debits, when it has one. Seeded from the anchor so an edit reuses
+   *  the leg instead of building a second — see existingLegIdForSplit. */
+  legId?: string;
+  input: string;
+  unit: 'points' | 'rupee';
+}
+
+const blankSplit = (): SplitDraft => ({ accountId: '', amount: 0, input: '', unit: 'points' });
+
+/** How the stored anchor reads as carousel cards. Leg ids are recovered for a legacy row that never
+ *  recorded them, by looking for the linked leg sitting on each source's account — with ids in hand
+ *  the save reuses those legs rather than deleting and rebuilding them. */
+const splitDraftsFrom = (
+  anchor: Partial<Transaction> | undefined,
+  accounts: Account[],
+  transactions: Transaction[],
+): SplitDraft[] => {
+  const linkedIds = anchor?.linkedTransactionIds || (anchor?.linkedTransactionId ? [anchor.linkedTransactionId] : []);
+  return getRewardSplits(anchor).map(split => {
+    const legId = split.legId ?? transactions.find(t =>
+      t.id !== anchor?.id
+      && linkedIds.includes(t.id)
+      && t.category !== 'Cashback'
+      && t.accountId === split.accountId)?.id;
+    const source = accounts.find(a => a.id === split.accountId);
+    // Counted in a unit, not "has a points ledger" — a rewards wallet with a unit and a rate is
+    // entered in Chips or Miles even though its balance and its legs are rupees.
+    const points = isUnitDenominated(source);
+    const shown = points ? rupeesToRewardPoints(split.amount, source) : split.amount;
+    // 'points' whatever this source is, like a blank card: a rupee wallet has no toggle and reads as
+    // rupees anyway (unitOf), so the stored preference only takes effect if the card is later pointed
+    // at a points wallet — where entering the issuer's own figure is the natural thing to do.
+    return { accountId: split.accountId, amount: split.amount, legId, unit: 'points', input: shown === 0 ? '' : String(shown) };
+  });
+};
 
 const blankTx = (): Partial<Transaction> => ({
   date: format(new Date(), 'yyyy-MM-dd'),
@@ -52,7 +99,6 @@ const blankTx = (): Partial<Transaction> => ({
 const buildInputStrings = (tx: Partial<Transaction>) => ({
   amount: tx.amount === 0 ? '' : (tx.amount?.toString() || ''),
   rewardEarned: (tx.rewardEarned === 0 || tx.rewardEarned === undefined) ? '' : tx.rewardEarned.toString(),
-  rewardUsed: (tx.rewardUsed === 0 || tx.rewardUsed === undefined) ? '' : tx.rewardUsed.toString(),
   excludedAmount: (tx.excludedAmount === 0 || tx.excludedAmount === undefined) ? '' : tx.excludedAmount.toString(),
   counterpartAmount: tx.counterpartAmount === undefined ? '' : tx.counterpartAmount.toString(),
   // The complement of the exclusion against the full price. `amount` here is already the FULL price
@@ -75,6 +121,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   initialData,
   initialPaymentSourceAccountId = '',
   focusSplit = false,
+  focusSplitIndex = 0,
   sms,
   onSuccess
 }) => {
@@ -91,11 +138,13 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   const [cashbackPercentMode, setCashbackPercentMode] = useState(false);
   const [cashbackPercentStr, setCashbackPercentStr] = useState('');
   const [showRewardSplit, setShowRewardSplit] = useState(false);
-  // Which unit the "Rewards Used" field is typed in. Defaults to points: redeeming from a card's
-  // own balance is something you do in that card's own units ("I spent 430 Jewels"), and the rupee
-  // value is the derived quantity. newTx.rewardUsed always holds the RUPEE value regardless, since
-  // that is what every consumer of the field does arithmetic with.
-  const [rewardUnitMode, setRewardUnitMode] = useState<'points' | 'rupee'>('points');
+  /* The split's sources, one per carousel card, in the order they were added. This is the panel's
+     source of truth; `newTx.rewardUsed` / `rewardUsedAccountId` are written from it at save time by
+     withRewardSplits. Each card's unit is its own (see SplitDraft): redeeming from a card's own
+     balance is something you do in that card's units ("I spent 430 Jewels") while a rupee wallet has
+     nothing to convert, and two sources on one split can disagree. */
+  const [splits, setSplits] = useState<SplitDraft[]>([]);
+  const [activeSplit, setActiveSplit] = useState(0);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
   const [newTagTargetType, setNewTagTargetType] = useState<'active' | 'event'>('active');
@@ -106,7 +155,14 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   // without adding it back a ₹60 redemption from a now-empty wallet would look like an overdraw and
   // the transaction could never be re-saved — or even reduced. Read from the anchor at seed time
   // rather than from the live field, which by then holds whatever the user has typed.
-  const committedRewardRef = useRef<{ rupees: number; accountId: string }>({ rupees: 0, accountId: '' });
+  const committedRewardRef = useRef<Record<string, number>>({});
+  const splitScrollRef = useRef<HTMLDivElement>(null);
+  /* Where a programmatic scroll of the carousel is headed, while it is still travelling. Without it
+     the two halves of the paging fight each other: the effect below scrolls smoothly toward the new
+     card, `onScroll` fires on every frame of that animation, rounds a half-way scrollLeft back to the
+     card being left, and the effect dutifully scrolls back — so pressing + built the second card and
+     stayed on the first. Cleared on arrival, or by the timeout if the browser stops a pixel short. */
+  const splitScrollTargetRef = useRef<number | null>(null);
   const rewardSplitRef = useRef<HTMLDivElement>(null);
   const passiveLogRef = useRef<HTMLDivElement>(null);
   const modalBodyRef = useRef<HTMLDivElement>(null);
@@ -143,15 +199,18 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     // "Primary Account Debit" line derives back to the real bank portion, matching the logging form),
     // and both the bank and reward legs show the CARD in their auto-credit picker. The stored bank
     // amount stays the portion; only the form shows the total. See docs/LINKED_TRANSACTIONS.md.
-    const rewardSplitAnchor = linkedTxs.find(t => t.category?.toLowerCase() === 'cc payment' && (t.rewardUsed || 0) > 0 && !!t.rewardUsedAccountId);
-    const isSplitAnchor = tx.category?.toLowerCase() === 'cc payment' && (tx.rewardUsed || 0) > 0 && !!tx.rewardUsedAccountId;
-    const isSplitRewardLeg = !!rewardSplitAnchor && rewardSplitAnchor.rewardUsedAccountId === tx.accountId;
+    const rewardSplitAnchor = linkedTxs.find(t => t.category?.toLowerCase() === 'cc payment' && getRewardSplits(t).length > 0);
+    const isSplitAnchor = tx.category?.toLowerCase() === 'cc payment' && getRewardSplits(tx).length > 0;
+    const isSplitRewardLeg = !!rewardSplitAnchor && !!rewardSplitOfLeg(rewardSplitAnchor, tx);
     const isSplitBankLeg = !!rewardSplitAnchor && !isSplitRewardLeg && !isSplitAnchor;
 
     if (isSplitBankLeg && rewardSplitAnchor) {
       sanitizedTx.amount = rewardSplitAnchor.amount;               // show the full bill (192), not the stored portion (148)
-      sanitizedTx.rewardUsed = rewardSplitAnchor.rewardUsed;       // 44
+      // The whole split, every source of it (44 across one wallet or two), so the "Primary Account
+      // Debit" line derives back to what this leg really pays.
+      sanitizedTx.rewardUsed = rewardSplitAnchor.rewardUsed;
       sanitizedTx.rewardUsedAccountId = rewardSplitAnchor.rewardUsedAccountId;
+      sanitizedTx.rewardSplits = rewardSplitAnchor.rewardSplits;
     }
 
     // A split on an ordinary purchase (as opposed to a CC Payment) stores the REDUCED figure on the
@@ -163,17 +222,19 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     // CC Payment, which is why it went unnoticed.
     const isPlainSplitAnchor = tx.type === 'debit'
       && tx.category?.toLowerCase() !== 'cc payment'
-      && (tx.rewardUsed || 0) > 0
-      && !!tx.rewardUsedAccountId;
+      && getRewardSplits(tx).length > 0;
     if (isPlainSplitAnchor) {
-      sanitizedTx.amount = (tx.amount || 0) + (tx.rewardUsed || 0);
+      sanitizedTx.amount = (tx.amount || 0) + rewardSplitTotal(tx);
       // The exclusion is stored per row for the same reason the amount is, so reassemble it too:
       // the field means "how much of this purchase was passive", and the reward leg holds whatever
       // part of that the anchor could not absorb. Without this a ₹448 purchase excluded in full
       // reopens reading 362 and re-saving quietly un-excludes the reward leg.
       if (sanitizedTx.excludeFromStats && sanitizedTx.excludedAmount !== undefined) {
-        const leg = linkedTxs.find(t => t.accountId === tx.rewardUsedAccountId);
-        sanitizedTx.excludedAmount += leg?.excludedAmount || 0;
+        // Every reward leg's share, not just the first source's: handleSave spreads the exclusion
+        // across the anchor and each leg in turn, so reassembling it has to collect all of them.
+        sanitizedTx.excludedAmount += linkedTxs
+          .filter(t => !!rewardSplitOfLeg(tx, t))
+          .reduce((sum, leg) => sum + (leg.excludedAmount || 0), 0);
       }
     }
 
@@ -187,12 +248,12 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       sanitizedTx.excludedAmount = sanitizedTx.amount || 0;
     }
 
-    const isRewardChild = linkedTxs.some(p => p.rewardUsedAccountId && p.rewardUsedAccountId === tx.accountId);
+    const isRewardChild = linkedTxs.some(p => !!rewardSplitOfLeg(p, tx));
     let paySrc = '';
     if ((isSplitBankLeg || isSplitRewardLeg) && rewardSplitAnchor) {
       paySrc = rewardSplitAnchor.accountId; // the card being paid
     } else if (!isRewardChild && !isCashbackChild) {
-      const counterpartTx = linkedTxs.find(t => t.category !== 'Cashback' && t.accountId !== tx.rewardUsedAccountId);
+      const counterpartTx = linkedTxs.find(t => t.category !== 'Cashback' && !rewardSplitOfLeg(tx, t));
       if (counterpartTx) paySrc = counterpartTx.accountId;
     }
     setPaymentSourceAccountId(paySrc);
@@ -214,21 +275,20 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     setSelectedCashbackLevelId(tx.cashbackLevelId || '');
     setCashbackPercentMode(false);
     setCashbackPercentStr('');
-    setShowRewardSplit(isSplitBankLeg || (tx.rewardUsed || 0) > 0);
+    setShowRewardSplit(isSplitBankLeg || getRewardSplits(sanitizedTx).length > 0);
     setNewTx(sanitizedTx);
     syncInputStrings(sanitizedTx);
-    // rewardUsed is stored in rupees, but the field defaults to the points unit — so re-render it in
-    // points when the source is a card's own balance, or the form would show ₹86 under a "(Jewels)"
-    // label. buildInputStrings can't do this itself: it has no view of which account was used.
-    committedRewardRef.current = {
-      rupees: Number(sanitizedTx.rewardUsed) || 0,
-      accountId: sanitizedTx.rewardUsedAccountId || ''
-    };
-    const seedRewardSrc = data.accounts.find(a => a.id === sanitizedTx.rewardUsedAccountId);
-    if (isPointsDenominated(seedRewardSrc) && (sanitizedTx.rewardUsed || 0) > 0) {
-      const pts = rupeesToRewardPoints(sanitizedTx.rewardUsed || 0, seedRewardSrc);
-      setInputStrings(prev => ({ ...prev, rewardUsed: String(pts) }));
-    }
+    /* The carousel's cards. Read off the ANCHOR (which for a bank-leg edit is the card leg, not this
+       row) so leg ids resolve against the links that actually hold the legs, and each card's field is
+       rendered in ITS source's unit — a ₹86 redemption from a points wallet shows 430, not 86, since
+       the panel's label would otherwise read "(Jewels)" over a rupee figure. */
+    const splitAnchorTx = isSplitBankLeg && rewardSplitAnchor ? rewardSplitAnchor : sanitizedTx;
+    const seededSplits = splitDraftsFrom(splitAnchorTx, data.accounts, data.transactions);
+    setSplits(seededSplits);
+    setActiveSplit(0);
+    // What each source had already redeemed when the form opened. Per account, because the balance
+    // check hands a source's own committed amount back to it and to nothing else.
+    committedRewardRef.current = Object.fromEntries(seededSplits.map(sp => [sp.accountId, sp.amount]));
     setTempCreatedActiveTags([]);
     setTempCreatedEventTags([]);
   };
@@ -255,11 +315,40 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   // past seeding: the panel only exists once `showRewardSplit` is true, which the seed above sets.
   useEffect(() => {
     if (!focusSplit) return;
+    // Open AT the card that was tapped: with several sources the panel alone doesn't say which
+    // redemption the ledger row stood for, and landing on it is the whole of the answer. No ring
+    // around it — a border there reads as a selection or an error the user has to go and dismiss.
+    setActiveSplit(prev => (focusSplitIndex > 0 ? focusSplitIndex : prev));
     const t = window.setTimeout(() => {
       rewardSplitRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 120);
     return () => window.clearTimeout(t);
-  }, [focusSplit]);
+  }, [focusSplit, focusSplitIndex]);
+
+  // A card can go away under the pointer (removed here, or dropped by a re-seed), and an index past
+  // the end would leave the carousel on a page that isn't there and no dot lit.
+  useEffect(() => {
+    if (splits.length > 0 && activeSplit > splits.length - 1) setActiveSplit(splits.length - 1);
+  }, [splits.length, activeSplit]);
+
+  /* Keep the carousel showing the card the rest of the form thinks is active — a dot tap, a newly
+     added source, the card a validation error lives on, or the leg a ledger tap arrived from. Scroll
+     position is the only place "which card" is really stored (the scroller pages by geometry), so
+     this is what writes it. Skipped while the user is mid-swipe, since then the scroller is already
+     where it wants to be and `activeSplit` is following IT. */
+  useEffect(() => {
+    const el = splitScrollRef.current;
+    if (!el || !showRewardSplit) return;
+    const target = activeSplit * el.clientWidth;
+    if (Math.abs(el.scrollLeft - target) < 4) {
+      splitScrollTargetRef.current = null;
+      return;
+    }
+    splitScrollTargetRef.current = target;
+    el.scrollTo({ left: target, behavior: 'smooth' });
+    const t = window.setTimeout(() => { splitScrollTargetRef.current = null; }, 700);
+    return () => window.clearTimeout(t);
+  }, [activeSplit, showRewardSplit, splits.length]);
 
   const resolveCcPaymentCycle = (date: string, statementDay?: number) => {
     const safeStatementDay = statementDay || 1;
@@ -449,6 +538,10 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     if (categoryOrKindChanged) {
       setPaymentSourceAccountId('');
       setShowRewardSplit(false);
+      // Every source with it, not just the panel: a leftover card would be saved as a redemption on
+      // a category that may not even allow one.
+      setSplits([]);
+      setActiveSplit(0);
       setCcPaymentCycleTarget('previous_statement');
     }
 
@@ -473,14 +566,13 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       numberOfShares: nextShares,
       excludeFromStats: hidesPassiveToggle ? false : newTx.excludeFromStats,
       excludedAmount: hidesPassiveToggle ? undefined : newTx.excludedAmount,
-      ...(categoryOrKindChanged ? { rewardUsed: 0, rewardUsedAccountId: '' } : {})
+      ...(categoryOrKindChanged ? { rewardUsed: 0, rewardUsedAccountId: '', rewardSplits: undefined } : {})
     });
     setInputStrings(s => ({
       ...s,
       allottedAmount: (nextAllotted === undefined || nextAllotted === 0) ? '' : nextAllotted.toString(),
       investmentCharges: (nextCharges === undefined || nextCharges === 0) ? '' : nextCharges.toString(),
       numberOfShares: nextShares === undefined ? '' : nextShares.toString(),
-      ...(categoryOrKindChanged ? { rewardUsed: '' } : {})
     }));
     if (errors.category || errors.investmentKind) {
       const newErr = { ...errors };
@@ -527,35 +619,56 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     if (newTx.rewardEarnedAccountId && (Number(newTx.rewardEarned) || 0) <= 0) {
       newErrors.rewardEarned = 'Cashback amount is required when deposit account is selected';
     }
-    if (showRewardSplit && (Number(newTx.rewardUsed) || 0) > 0 && !newTx.rewardUsedAccountId) {
-      newErrors.rewardUsedAccountId = 'Reward source is required';
-    }
-    if (showRewardSplit && newTx.rewardUsedAccountId && (Number(newTx.rewardUsed) || 0) <= 0) {
-      newErrors.rewardUsed = 'Reward amount is required when a reward source is selected';
-    }
-    // Can't redeem more than the account holds. Compared in the account's own unit, and the message
-    // names the figure because the collapsed picker shows only the account name. Skipped for a
-    // one-time reward: it has no tracked balance, so there is no ceiling to test the amount against.
-    if (showRewardSplit && newTx.rewardUsedAccountId && !isExternalRewardSource(newTx.rewardUsedAccountId) && rewardRupees > 0) {
-      // On an edit, this split's own existing leg has already been taken out of the balance — hand it
-      // back before comparing, or re-saving (or even lowering) an untouched redemption would fail.
-      // Only when the source account is unchanged: money spent from the old account is no help
-      // against a different one's balance.
-      const reusable = committedRewardRef.current.accountId === newTx.rewardUsedAccountId
-        ? committedRewardRef.current.rupees
-        : 0;
-      const available = rewardBalance + (isPointsSource ? rupeesToRewardPoints(reusable, rewardSourceAcc) : reusable);
-      const needed = isPointsSource ? rewardPoints : rewardRupees;
-      if (needed - available > 0.001) {
-        newErrors.rewardUsed = `Only ${formatRewardBalance(available)} available`;
+    /* Every card in the split carousel, checked on its own terms — each source has its own balance,
+       its own unit and its own pair of error slots (`rewardUsed_i` / `rewardSource_i`), so a
+       shortfall on the second wallet can't be reported against the first. */
+    if (showRewardSplit) {
+      splits.forEach((sp, i) => {
+        const amount = Number(sp.amount) || 0;
+        if (amount > 0 && !sp.accountId) {
+          newErrors[`rewardSource_${i}`] = 'Reward source is required';
+        }
+        if (sp.accountId && amount <= 0) {
+          newErrors[`rewardUsed_${i}`] = 'Reward amount is required when a reward source is selected';
+        }
+        // One source, once. Two cards on the same account would produce two legs on it that nothing
+        // could tell apart — not the ledger, not the next edit — and their balance checks would each
+        // think the whole balance was theirs to spend.
+        if (sp.accountId && splits.findIndex(o => o.accountId === sp.accountId) !== i) {
+          newErrors[`rewardSource_${i}`] = 'Already used by another source on this split';
+        }
+        // Can't redeem more than the account holds. Compared in the account's own unit, and the
+        // message names the figure because the collapsed picker shows only the account name. Skipped
+        // for a one-time reward: it has no tracked balance, so there is no ceiling to test against.
+        if (sp.accountId && !isExternalRewardSource(sp.accountId) && amount > 0) {
+          const acc = sourceAccountOf(sp);
+          const points = isUnitDenominated(acc);
+          // On an edit, what this source had already redeemed has been taken out of its balance —
+          // hand it back before comparing, or re-saving (or even lowering) an untouched redemption
+          // would fail. Per account, so money spent from a source that has since been swapped out is
+          // no help against the new one's balance.
+          const reusable = committedRewardRef.current[sp.accountId] || 0;
+          const available = rewardBalanceOf(sp) + (points ? rupeesToRewardPoints(reusable, acc) : reusable);
+          const needed = points ? rupeesToRewardPoints(amount, acc) : amount;
+          if (needed - available > 0.001) {
+            newErrors[`rewardUsed_${i}`] = `Only ${formatRewardBalanceOf(sp, available)} available`;
+          }
+        }
+      });
+      /* The rewards together can never pay more than the price they come out of. This used to be
+         checked for a one-time reward alone — the one source with no balance to bound it — but with
+         several sources it is the SUM that has to fit, and mainAccountAmount floors at zero, so an
+         overshoot would clamp the primary debit to ₹0 and quietly swallow the difference. */
+      if (rewardTotal - (Number(newTx.amount) || 0) > 0.001) {
+        const last = Math.max(0, splits.length - 1);
+        newErrors[`rewardUsed_${last}`] = splits.length > 1
+          ? `Together they exceed the ${formatCurrency(Number(newTx.amount) || 0)} total`
+          : `Cannot exceed the ${formatCurrency(Number(newTx.amount) || 0)} total`;
       }
-    }
-    // A one-time reward has no balance to bound it, so the transaction total is the only ceiling
-    // left. Without this, ₹500 of "Other" against a ₹100 purchase would clamp the primary debit to
-    // ₹0 (mainAccountAmount floors at zero) and quietly swallow the difference.
-    if (showRewardSplit && isExternalRewardSource(newTx.rewardUsedAccountId)
-      && rewardRupees - (Number(newTx.amount) || 0) > 0.001) {
-      newErrors.rewardUsed = `Cannot exceed the ${formatCurrency(Number(newTx.amount) || 0)} total`;
+      // Only the active card is on screen, so an error on any other one has to bring it into view or
+      // the form would refuse to save with nothing to show for it.
+      const firstBad = splits.findIndex((_, i) => newErrors[`rewardUsed_${i}`] || newErrors[`rewardSource_${i}`]);
+      if (firstBad >= 0) setActiveSplit(firstBad);
     }
 
     if (newTx.accountId && newTx.type === 'debit' && !newTx.isTravelTransaction && newTx.category?.toLowerCase() === 'ncmc travel recharge') {
@@ -687,26 +800,50 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     // amount left the leg stranded at its old figure, so the reward account stayed over-debited).
     // Unreachable while splits were CC-Payment-only.
     //
-    // A split funded by a one-time reward ("Other") is a split in every respect EXCEPT this: there is
-    // no account to debit, so it creates no reward leg. The two facts are therefore separate — the
-    // split still has to anchor on the card leg below, or a Debit-POV CC Payment would leave the
-    // anchor on the ₹148 bank leg and reopen showing ₹148 as the total.
-    const hasRewardSplit = showRewardSplit && (Number(newTx.rewardUsed) || 0) > 0 && !!newTx.rewardUsedAccountId && !editId;
+    // A split funded by a one-time reward ("Other") gets a leg like any other source — its account is
+    // the external sentinel, which matches no account, so the leg debits nothing anywhere. It used to
+    // create none, and the redemption showed up only as a pill on this row: nothing to expand,
+    // nothing to tap through to the split panel, and a two-source split that listed one leg.
+    const liveSplits = showRewardSplit
+      ? splits.filter(sp => !!sp.accountId && (Number(sp.amount) || 0) > 0)
+      : [];
+    const hasRewardSplit = liveSplits.length > 0 && !editId;
     /* An edit can need a leg built too, and used to get none: the `!editId` above meant that giving an
-       existing row a real reward source — switching it off a one-time reward, or adding a split to a
-       row that never had one — recorded the redemption on the anchor while the reward account was
-       never debited. updateTransaction syncs an existing leg but has never created one, which is the
-       same gap the instant-cashback block below already compensates for. The gate lives in
-       RewardLegService beside the retarget/delete half of the same decision. */
-    const willCreateRewardLeg = showRewardSplit
-      && (Number(newTx.rewardUsed) || 0) > 0
-      && shouldCreateRewardLeg({
+       existing row a real reward source — switching it off a one-time reward, adding a split to a row
+       that never had one, or (now) tacking a second wallet onto an existing split — recorded the
+       redemption on the anchor while the reward account was never debited. updateTransaction syncs
+       existing legs but has never created one, which is the same gap the instant-cashback block below
+       already compensates for. The gate lives in RewardLegService beside the retarget/delete half of
+       the same decision, and is asked once PER SOURCE: adding a wallet to a split must build exactly
+       one leg and leave its siblings' legs alone.
+       A funding CHILD of someone else's split (the bank leg, whose form carries the anchor's
+       reconstructed sources) builds nothing at all — the legs it can see belong to the anchor. */
+    const isSplitChildRow = isRewardSplitChildRow(editId, data.transactions);
+    const claimedLegIds: string[] = [];
+    const rewardSplitPlan = liveSplits.map(source => {
+      if (isSplitChildRow) {
+        if (source.legId) claimedLegIds.push(source.legId);
+        return { source, legId: source.legId, isNew: false };
+      }
+      const existing = existingLegIdForSplit({
         editId,
-        source: newTx.rewardUsedAccountId,
+        split: { accountId: source.accountId, amount: source.amount, legId: source.legId },
         linkedIds: currentLinkedIds,
         transactions: data.transactions,
+        claimedLegIds,
       });
-    const rewardCounterpartId = willCreateRewardLeg ? generateId() : null;
+      const legId = existing ?? generateId();
+      claimedLegIds.push(legId);
+      return { source, legId, isNew: !existing };
+    });
+    /** What the anchor will record: one entry per source, each pointing at its own leg. */
+    const anchorSplits: RewardSplitLeg[] = rewardSplitPlan.map(({ source, legId }) => ({
+      accountId: source.accountId,
+      amount: Number(source.amount) || 0,
+      legId,
+    }));
+    const rewardUsedTotal = Math.round(anchorSplits.reduce((sum, sp) => sum + sp.amount, 0) * 100) / 100;
+    const newRewardLegIds = rewardSplitPlan.filter(p => p.isNew).map(p => p.legId as string);
     // Anchoring, by contrast, IS CC-specific: a reward split anchors on the CARD leg (whose amount is
     // the full bill), per docs/LINKED_TRANSACTIONS.md. Logged from Credit POV the card IS the main tx,
     // so it holds the anchor (rewardUsed + the reward leg) naturally. Logged from Debit POV the card is
@@ -791,7 +928,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         counterpartDesc = newTx.type === 'credit' ? `Transfer to ${account?.name}` : `Transfer from ${account?.name}`;
       }
 
-      const rewardUsedForTransfer = showRewardSplit ? (Number(newTx.rewardUsed) || 0) : 0;
+      const rewardUsedForTransfer = rewardUsedTotal;
       const bankPortion = Number(newTx.amount) - rewardUsedForTransfer;
       // The receiving/credit leg (e.g. CC bill reduction) must reflect the FULL payment
       // (bank portion + rewards portion). Only the funding/debit leg is reduced by rewards.
@@ -822,13 +959,12 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         counterpartAmount: legAmount !== Number(newTx.amount) ? Number(newTx.amount) : undefined,
         category: isCCPayment ? 'CC Payment' : 'Transfer',
         isRecurring: false,
-        // The reward leg's id is only in this list when there IS a reward leg — a one-time reward
-        // has none, and pushing a null in would break every sync that walks this array.
+        // Every source of the split hangs off the card, this POV's anchor.
         linkedTransactionIds: isCardAnchorLeg
-          ? [mainTxId, ...(rewardCounterpartId ? [rewardCounterpartId] : [])]
+          ? [mainTxId, ...newRewardLegIds]
           : [mainTxId],
-        rewardUsed: isCardAnchorLeg ? rewardUsedForTransfer : undefined,
-        rewardUsedAccountId: isCardAnchorLeg ? newTx.rewardUsedAccountId : undefined,
+        // The card leg is the anchor from this POV, so the redemption list lives on it.
+        ...(isCardAnchorLeg ? withRewardSplits({} as Partial<Transaction>, anchorSplits) : {}),
         appliedBillingCycleYearMonth: isCCPayment && counterpartType === 'credit' && destAccount?.type === 'credit_card'
           ? resolveCcPaymentCycle(newTx.date as string, destAccount.statementDay)
           : undefined
@@ -837,36 +973,39 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       if (isCCPayment && newTx.type === 'credit') finalCategory = 'CC Payment';
     }
 
-    const rewardUsed = showRewardSplit ? (Number(newTx.rewardUsed) || 0) : 0;
-    if (willCreateRewardLeg) {
-      const rewardLegId = rewardCounterpartId as string;
+    const rewardUsed = rewardUsedTotal;
+    // One leg per NEW source. The rewards pay down the CARD's bill, not the funding bank: the card is
+    // the main account when logged as a Credit (Receive), or the paymentSourceAccountId ("Pay To
+    // Card") when logged as a Debit (Spend) — mirror the targetCardName logic used for the bank leg
+    // above.
+    const paidCardName = (newTx.type === 'credit' ? account : data.accounts.find(a => a.id === paymentSourceAccountId))?.name;
+    rewardSplitPlan.filter(p => p.isNew).forEach(({ source, legId }) => {
       // Debit POV: link the reward leg to the card anchor and keep it OFF the bank main tx's link list
       // (the card is the hub). Credit POV: the main tx IS the card, so link to it as before.
-      if (!anchorOnCounterpart) currentLinkedIds.push(rewardLegId);
-      const rewardsSourceAcc = data.accounts.find(a => a.id === newTx.rewardUsedAccountId);
-      const isInternalPoints = isPointsDenominated(rewardsSourceAcc);
-      // The rewards pay down the CARD's bill, not the funding bank. The card is the main account
-      // when logged as a Credit (Receive), or the paymentSourceAccountId ("Pay To Card") when logged
-      // as a Debit (Spend) — mirror the targetCardName logic used for the bank leg above.
-      const paidCardName = (newTx.type === 'credit' ? account : data.accounts.find(a => a.id === paymentSourceAccountId))?.name;
+      if (!anchorOnCounterpart) currentLinkedIds.push(legId as string);
+      const rewardsSourceAcc = data.accounts.find(a => a.id === source.accountId);
       addTransaction({
-        id: rewardLegId,
+        id: legId as string,
         date: newTx.date as string,
         description: isCCPayment ? `Rewards used for ${paidCardName || account?.name || 'CC'}` : `Rewards applied to: ${newTx.description}`,
-        // Non-empty and not the external sentinel — willCreateRewardLeg tested both, which is what
-        // this cast stands in for now that the check no longer narrows the type inline.
-        accountId: newTx.rewardUsedAccountId as string,
+        // A one-time reward's leg carries the external sentinel here. It matches no account, which is
+        // exactly what makes the row safe: no balance moves, nothing had to be set up first, and the
+        // redemption is still a row you can see, expand and tap through to the split it belongs to.
+        accountId: source.accountId,
         type: 'debit',
         // Rupees, like every other amount in the ledger — a points figure here would be summed as
         // money by the day totals and spend stats. calculateBalance applies the rate when it reads
         // this leg into the points balance. See docs/LINKED_TRANSACTIONS.md.
-        amount: rewardUsed,
+        amount: Number(source.amount) || 0,
         category: isCCPayment ? 'CC Payment' : (newTx.category as string),
         isRecurring: false,
-        isRewardTransaction: isInternalPoints,
+        // Deliberately isPointsDenominated, not isUnitDenominated: this flag routes the leg into an
+        // account's SEPARATE points ledger, which only a card has. A rewards wallet counted in Chips
+        // still has one rupee ledger, and this leg is what draws it down.
+        isRewardTransaction: isPointsDenominated(rewardsSourceAcc),
         linkedTransactionIds: [(anchorOnCounterpart && cardAnchorId) ? cardAnchorId : mainTxId]
       });
-    }
+    });
 
     const mainAccountAmount = isInvestment 
       ? (newTx.type === 'debit' ? (allottedAmount + (investmentCharges || 0)) : allottedAmount) 
@@ -884,9 +1023,18 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       ? (newTx.excludedAmount ?? (Number(newTx.amount) || 0))
       : 0;
     const anchorExcluded = passiveOn ? Math.min(totalExcluded, mainAccountAmount) : 0;
-    const rewardLegExcluded = passiveOn
-      ? Math.min(rewardUsed, Math.max(0, totalExcluded - mainAccountAmount))
-      : 0;
+    /* Whatever the anchor could not absorb runs down the reward legs in the order the sources were
+       added, each taking up to what it paid. With one source that is the old "the leg carries the
+       rest"; with two, a ₹448 purchase excluded in full and split ₹50 + ₹36 puts ₹362 on the anchor,
+       ₹50 on the first leg and ₹36 on the second — so the three rows still sum to the price. */
+    let unassignedExclusion = passiveOn ? Math.max(0, totalExcluded - mainAccountAmount) : 0;
+    const legExclusions = rewardSplitPlan
+      .filter(p => !!p.legId)
+      .map(({ source, legId }) => {
+        const take = Math.min(Number(source.amount) || 0, unassignedExclusion);
+        unassignedExclusion = Math.round((unassignedExclusion - take) * 100) / 100;
+        return { legId: legId as string, excluded: take };
+      });
 
     // On edit, updateTransaction syncs an EXISTING linked cashback leg but won't create one.
     // So create the leg here when instant cashback is configured but no cashback leg exists yet
@@ -991,9 +1139,9 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       rewardEarned: finalRewardEarned,
       rewardEarnedType: newTx.rewardEarnedType,
       rewardEarnedAccountId: newTx.rewardEarnedAccountId,
-      // Debit POV split: the anchor (rewardUsed) lives on the card counterpart, not this bank main tx.
-      rewardUsed: anchorOnCounterpart ? 0 : rewardUsed,
-      rewardUsedAccountId: anchorOnCounterpart ? undefined : newTx.rewardUsedAccountId,
+      // Debit POV split: the anchor (the redemption list) lives on the card counterpart, not this
+      // bank main tx, which stays a plain funding child.
+      ...withRewardSplits({} as Partial<Transaction>, anchorOnCounterpart ? [] : anchorSplits),
       isTravelTransaction: newTx.isTravelTransaction,
       counterpartAmount: (isTransfer && paymentSourceAccountId && newTx.counterpartAmount !== undefined && newTx.counterpartAmount > 0 && newTx.counterpartAmount !== Number(newTx.amount))
         ? Number(newTx.counterpartAmount)
@@ -1023,13 +1171,9 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
        at leg creation because the same call has to serve both paths: on an edit the leg already
        exists and is re-synced by updateTransaction above, which preserves the fields this writes.
        Both are functional state updates, so this one reads the result of the save. */
-    const rewardLegId = rewardCounterpartId
-      ?? (editId && newTx.rewardUsedAccountId
-        ? (data.transactions.find(t => currentLinkedIds.includes(t.id) && t.accountId === newTx.rewardUsedAccountId)?.id ?? null)
-        : null);
-    if (rewardLegId) {
-      setRewardLegExclusion(rewardLegId, rewardLegExcluded > 0 ? rewardLegExcluded : undefined);
-    }
+    legExclusions.forEach(({ legId, excluded }) => {
+      setRewardLegExclusion(legId, excluded > 0 ? excluded : undefined);
+    });
 
     // Logging a tracked bill rolls it to its next occurrence. Only ever reachable from the Upcoming
     // Bills "LOG" button, which is what puts recurringBillId on the prefill — the Ledger's own add
@@ -1048,8 +1192,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       if (sms.processing) removeFromSmsQueue(0);
       // Auto-sweep duplicate counterpart SMS generated by Transfer / CC Payment
       if ((isTransfer || isCCPayment) && paymentSourceAccountId && !editId) {
-        const rewardUsedForTransfer = showRewardSplit ? (Number(newTx.rewardUsed) || 0) : 0;
-        const bankPortion = Number(newTx.amount) - rewardUsedForTransfer;
+        const bankPortion = Number(newTx.amount) - rewardUsedTotal;
         const counterpartType = newTx.type === 'credit' ? 'debit' : 'credit';
         removeSmsByMatch(bankPortion, counterpartType, paymentSourceAccountId);
       }
@@ -1095,13 +1238,14 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   // only offsets THAT card's own bill — issuer points aren't fungible across cards — so the
   // points option is tied to the CARD leg of this log: on a CC Payment that's whichever side
   // holds the card (Account when logged as a Credit, the counterpart when logged as a Debit);
-  // on a plain purchase it's the account being charged. Plain 'rewards' wallets (CRED coins,
-  // super.money) are already rupee-denominated, so they stay universal.
+  // on a plain purchase it's the account being charged. Standalone 'rewards' wallets stay universal
+  // whatever they are counted in — CRED coins in rupees, Cheq Chips in Chips — because a wallet's
+  // balance is its own money either way, not an issuer's points tied to one card.
   const cardLegAccountId = isCCPayment
     ? (newTx.type === 'credit' ? newTx.accountId : paymentSourceAccountId)
     : newTx.accountId;
   const splitSourceAccounts = data.accounts.filter(a =>
-    (!a.archived || a.id === newTx.rewardUsedAccountId)
+    (!a.archived || splits.some(sp => sp.accountId === a.id))
     && (a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points' && !!cardLegAccountId && a.id === cardLegAccountId))
   );
   // Investments are excluded: paying part of a fund/stock/metal buy out of reward points isn't a
@@ -1116,25 +1260,75 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   const canSplitWithRewards = !isInvestmentCategory(newTx.category)
     && (isCCPayment || newTx.type === 'debit');
 
-  // The chosen reward source decides whether points apply at all: a card's own balance is counted in
-  // its own unit, a plain rupee wallet (CRED coins, super.money) is already money. With no account
-  // picked yet there's no rate to convert with, so the field stays plain rupees.
-  const rewardSourceAcc = data.accounts.find(a => a.id === newTx.rewardUsedAccountId);
-  const isPointsSource = isPointsDenominated(rewardSourceAcc);
-  const rewardUnitLabel = rewardSourceAcc?.rewardUnit || 'Points';
-  // A rupee wallet has nothing to toggle, so it stays pinned to rupees whatever the mode last was.
-  const activeRewardUnit: 'points' | 'rupee' = isPointsSource ? rewardUnitMode : 'rupee';
-  const rewardRupees = Number(newTx.rewardUsed) || 0;
-  const rewardPoints = rupeesToRewardPoints(rewardRupees, rewardSourceAcc);
-  // The balance the picker shows for this account. Reused by the shortfall message, which has to
-  // name the figure itself: the collapsed trigger deliberately shows only the account name.
-  const rewardBalance = rewardSourceAcc
-    ? calculateBalance(rewardSourceAcc, data.transactions, getCurrentMonthStr(), false, isPointsSource, data.cashbackStatements)
-    : 0;
-  const formatRewardBalance = (v: number) => isPointsSource ? `${v} ${rewardUnitLabel}` : formatCurrency(v);
+  /* Each source decides its own unit and its own ceiling: a card's own balance is counted in its own
+     unit, a plain rupee wallet (CRED coins, super.money) is already money, and a one-time reward has
+     no balance at all. So everything the panel needs is a function OF a card rather than one set of
+     values for "the" reward account — that shape is what made a second source impossible. */
+  const rewardTotal = Math.round(splits.reduce((sum, sp) => sum + (Number(sp.amount) || 0), 0) * 100) / 100;
+  const sourceAccountOf = (split: SplitDraft) => data.accounts.find(a => a.id === split.accountId);
+  const rewardUnitLabelOf = (split: SplitDraft) => sourceAccountOf(split)?.rewardUnit || 'Points';
+  // A rupee wallet has nothing to toggle, so it stays pinned to rupees whatever the card last held.
+  const unitOf = (split: SplitDraft): 'points' | 'rupee' =>
+    isUnitDenominated(sourceAccountOf(split)) ? split.unit : 'rupee';
+  /* The balance the picker shows for this account, in the account's own unit. Reused by the shortfall
+     message, which has to name the figure itself: the collapsed trigger deliberately shows only the
+     account name. rewardUnitBalance is what knows the two kinds apart — a card's points wallet is a
+     separate ledger already counted in points, a rewards wallet's is rupees converted at its rate. */
+  const rewardBalanceOf = (split: SplitDraft) =>
+    rewardUnitBalance(sourceAccountOf(split), data.transactions, getCurrentMonthStr(), data.cashbackStatements);
+  const formatRewardBalanceOf = (split: SplitDraft, v: number) =>
+    formatRewardBalance(sourceAccountOf(split), v);
   // Typed value -> canonical rupees. Points divide by the rate; rupees pass straight through.
-  const rewardInputToRupees = (n: number) =>
-    activeRewardUnit === 'points' ? rewardPointsToRupees(n, rewardSourceAcc) : n;
+  const inputToRupeesFor = (split: SplitDraft, n: number) =>
+    unitOf(split) === 'points' ? rewardPointsToRupees(n, sourceAccountOf(split)) : n;
+
+  /* Sources still on offer for one card: everything eligible, minus what the OTHER cards already
+     spend from — including "Other", which is a single one-off by definition and would be
+     indistinguishable twice over. That is also the natural ceiling on how many cards there can be,
+     so nothing here caps the count at two: split across as many wallets as exist. */
+  const availableSourcesFor = (index: number) => splitSourceAccounts.filter(a =>
+    a.id === splits[index]?.accountId || !splits.some((o, j) => j !== index && o.accountId === a.id));
+  const externalTakenElsewhere = (index: number) =>
+    splits.some((o, j) => j !== index && isExternalRewardSource(o.accountId));
+  /* Offered on the LAST card, and only while that is the card on screen: the button adds a card
+     AFTER this one, so anywhere else it points off screen — and a `+` sitting on every card reads as
+     "add one here", which is not what it does. */
+  const canAddSplitSource = splits.length > 0
+    && activeSplit === splits.length - 1
+    && !!splits[splits.length - 1].accountId
+    && (splits[splits.length - 1].amount || 0) > 0
+    && (availableSourcesFor(splits.length).length > 0 || !externalTakenElsewhere(splits.length));
+
+  const patchSplit = (index: number, patch: Partial<SplitDraft>) => {
+    setSplits(prev => prev.map((sp, j) => (j === index ? { ...sp, ...patch } : sp)));
+    if (errors[`rewardUsed_${index}`] || errors[`rewardSource_${index}`]) {
+      setErrors(prev => ({ ...prev, [`rewardUsed_${index}`]: '', [`rewardSource_${index}`]: '' }));
+    }
+  };
+  /** Every card's errors, dropped at once. Adding or removing a source renumbers the cards, and the
+   *  error keys are positions — left alone, the second card's shortfall would be reported against
+   *  whichever source slid into its place. */
+  const clearSplitErrors = () => setErrors(prev => {
+    const next = { ...prev };
+    Object.keys(next).forEach(k => {
+      if (k.startsWith('rewardUsed_') || k.startsWith('rewardSource_')) delete next[k];
+    });
+    return next;
+  });
+  const addSplitSource = () => {
+    setSplits(prev => [...prev, blankSplit()]);
+    setActiveSplit(splits.length);
+    clearSplitErrors();
+  };
+  /** Drop one source. The last one standing closes the panel — a split with no sources is not a
+   *  split, and leaving an empty card behind reads as "there is something to fill in here". */
+  const removeSplitSource = (index: number) => {
+    const next = splits.filter((_, j) => j !== index);
+    setSplits(next);
+    setActiveSplit(Math.max(0, Math.min(index, next.length - 1)));
+    clearSplitErrors();
+    if (next.length === 0) setShowRewardSplit(false);
+  };
 
   // What this row will actually STORE — the Amount field means the full price, but a reward split
   // leaves the primary account paying only the remainder (mirrors mainAccountAmount in handleSave).
@@ -2072,6 +2266,9 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
             style={{ marginBottom: '1rem', padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}
             onClick={() => {
               setShowRewardSplit(true);
+              // The panel IS its cards, so opening it means opening one — empty, ready for a source.
+              setSplits(prev => (prev.length > 0 ? prev : [blankSplit()]));
+              setActiveSplit(0);
               setTimeout(() => {
                 rewardSplitRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
               }, 100);
@@ -2085,21 +2282,26 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         {showRewardSplit && canSplitWithRewards && (
           <div
             ref={rewardSplitRef}
-            className="grid grid-cols-2 gap-4"
             style={{ marginBottom: '1rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}
           >
-            <div className="flex justify-between align-center col-span-2">
-              <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>Split Payment</span>
+            {/* The header's controls act on the card ON SCREEN — only one is visible at a time, and
+                the unit toggle in particular belongs to that card's source (Jewels beside CRED coins
+                is two different units on one split). */}
+            <div className="flex justify-between align-center" style={{ marginBottom: '0.85rem' }}>
+              <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>
+                Split Payment
+              </span>
               <div className="flex align-center" style={{ gap: '0.6rem' }}>
                 {/* Only a points account has two units to switch between. 'PTS' rather than the
                     account's own unit name because that name is free text with no length limit
                     ("Reward Points" would not fit), and rather than a glyph because none of the
                     bundled font subsets carry one — a diamond or star would fall back to a system
                     font and sit at a different size than the ₹ beside it. */}
-                {isPointsSource && (
+                {!!splits[activeSplit] && isUnitDenominated(sourceAccountOf(splits[activeSplit])) && (
                   <div className="flex" style={{ border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden', height: SPLIT_CONTROL_HEIGHT, boxSizing: 'border-box' }}>
                     {(['rupee', 'points'] as const).map(mode => {
-                      const active = mode === activeRewardUnit;
+                      const card = splits[activeSplit];
+                      const active = mode === unitOf(card);
                       return (
                         <button
                           key={mode}
@@ -2115,14 +2317,13 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                             color: active ? '#ffffff' : 'var(--text-secondary)'
                           }}
                           onClick={() => {
-                            if (mode === activeRewardUnit) return;
+                            if (active) return;
                             // Lossless switch: the rupee value is canonical, so re-render the field
                             // from it in the new unit rather than reinterpreting the typed digits.
                             const shown = mode === 'points'
-                              ? rupeesToRewardPoints(rewardRupees, rewardSourceAcc)
-                              : rewardRupees;
-                            setInputStrings(prev => ({ ...prev, rewardUsed: shown === 0 ? '' : String(shown) }));
-                            setRewardUnitMode(mode);
+                              ? rupeesToRewardPoints(card.amount, sourceAccountOf(card))
+                              : card.amount;
+                            patchSplit(activeSplit, { unit: mode, input: shown === 0 ? '' : String(shown) });
                           }}
                         >
                           {mode === 'points' ? 'PTS' : '₹'}
@@ -2131,10 +2332,32 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                     })}
                   </div>
                 )}
+                {/* One more source, once the LAST card is actually funding something — see
+                    canAddSplitSource for why it belongs to that card alone. Sits left of the remove
+                    button, and is gone when every eligible source is already spoken for: the same
+                    account twice would produce two legs nothing could tell apart. */}
+                {canAddSplitSource && (
+                  <button
+                    className="btn btn-secondary flex-center"
+                    title="Add another reward source"
+                    aria-label="Add another reward source"
+                    style={{
+                      width: SPLIT_CONTROL_HEIGHT,
+                      height: SPLIT_CONTROL_HEIGHT,
+                      padding: 0,
+                      minHeight: 'auto',
+                      boxSizing: 'border-box',
+                      boxShadow: '2px 2px 0 #000'
+                    }}
+                    onClick={addSplitSource}
+                  >
+                    <Plus size={14} strokeWidth={3} />
+                  </button>
+                )}
                 <button
                   className="btn btn-danger flex-center"
-                  title="Remove split"
-                  aria-label="Remove split"
+                  title={splits.length > 1 ? 'Remove this reward source' : 'Remove split'}
+                  aria-label={splits.length > 1 ? 'Remove this reward source' : 'Remove split'}
                   style={{
                     width: SPLIT_CONTROL_HEIGHT,
                     height: SPLIT_CONTROL_HEIGHT,
@@ -2144,93 +2367,165 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                     boxShadow: '2px 2px 0 #000'
                   }}
                   onClick={() => {
+                    if (splits.length > 1) {
+                      removeSplitSource(activeSplit);
+                      return;
+                    }
                     setShowRewardSplit(false);
-                    setInputStrings(prev => ({ ...prev, rewardUsed: '' }));
-                    setNewTx({ ...newTx, rewardUsed: 0, rewardUsedAccountId: '' });
-                    if (errors.rewardUsedAccountId) setErrors(prev => ({ ...prev, rewardUsedAccountId: '' }));
-                    if (errors.rewardUsed) setErrors(prev => ({ ...prev, rewardUsed: '' }));
+                    setSplits([]);
+                    setActiveSplit(0);
+                    clearSplitErrors();
                   }}
                 >
                   <X size={14} strokeWidth={3} />
                 </button>
               </div>
             </div>
-            <div className="input-group">
-              <label>
-                Rewards Used{activeRewardUnit === 'points' ? ` (${rewardUnitLabel})` : ''}{' '}
-                <span className="text-muted" style={{ fontWeight: 400 }}>(Optional)</span>
-              </label>
-              <input
-                type="text"
-                inputMode="decimal"
-                className={`input-field ${errors.rewardUsed ? 'border-danger' : ''}`}
-                value={inputStrings.rewardUsed}
-                onChange={e => {
-                  const val = e.target.value;
-                  if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                    setInputStrings(prev => ({ ...prev, rewardUsed: val }));
-                    const numVal = parseFloat(val);
-                    // Store rupees, always — utils' balance math and FinanceContext's leg rebalance
-                    // both treat rewardUsed as money. The points figure is derived on save.
-                    setNewTx({ ...newTx, rewardUsed: isNaN(numVal) ? 0 : rewardInputToRupees(numVal) });
-                    if (errors.rewardUsed && !isNaN(numVal) && numVal > 0) {
-                      setErrors(prev => ({ ...prev, rewardUsed: '' }));
-                    }
-                    if (errors.rewardUsedAccountId && (isNaN(numVal) || numVal <= 0)) {
-                      setErrors(prev => ({ ...prev, rewardUsedAccountId: '' }));
-                    }
-                  }
-                }}
-                placeholder={activeRewardUnit === 'points' ? '0' : '0.00'}
-              />
-              {/* The counterpart value, same treatment as the instant-cashback percent hint. */}
-              {isPointsSource && rewardRupees > 0 && (
-                <span className="text-xs text-muted text-mono" style={{ marginTop: '0.25rem', opacity: 0.8 }}>
-                  {activeRewardUnit === 'points'
-                    ? `= ${formatCurrency(rewardRupees)}`
-                    : `= ${rewardPoints} ${rewardUnitLabel}`}
-                </span>
-              )}
-              {errors.rewardUsed && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.rewardUsed}</span>}
-            </div>
-            <CustomPicker
-              label="From Rewards"
-              value={newTx.rewardUsedAccountId || ''}
-              placeholder="Select Reward Account"
-              options={[
-                { id: '', name: 'None (Select Account)' },
-                ...[...splitSourceAccounts].sort(sortByAccountType).map(acc => ({
-                  id: acc.id,
-                  name: acc.archived ? `${acc.name} (deleted)` : acc.name,
-                  subtext: acc.rewardType === 'points'
-                    ? `${calculateBalance(acc, data.transactions, getCurrentMonthStr(), false, true, data.cashbackStatements)} ${acc.rewardUnit || ''}`
-                    : formatCurrency(calculateBalance(acc, data.transactions, getCurrentMonthStr(), false, false, data.cashbackStatements))
-                })),
-                // Last, as the catch-all it is: a coupon or voucher with no account to draw from. No
-                // balance line — there is nothing to run out of, which is the whole point of it.
-                { id: EXTERNAL_REWARD_SOURCE_ID, name: 'Other', subtext: 'One-time reward, not tracked' }
-              ]}
-              onChange={val => {
-                // Accounts can differ in unit and rate, so the typed digits would change meaning on
-                // a switch. Hold the rupee value steady and re-render the field for the new account:
-                // 430 Jewels (₹86) picked over to a rupee wallet shows 86, still ₹86.
-                const nextAcc = data.accounts.find(a => a.id === val);
-                const nextUnit = isPointsDenominated(nextAcc) ? rewardUnitMode : 'rupee';
-                const shown = nextUnit === 'points' ? rupeesToRewardPoints(rewardRupees, nextAcc) : rewardRupees;
-                setInputStrings(prev => ({ ...prev, rewardUsed: shown === 0 ? '' : String(shown) }));
-                setNewTx({
-                  ...newTx,
-                  rewardUsedAccountId: val,
-                  ...(!val && (Number(newTx.rewardUsed) || 0) <= 0 ? { rewardUsed: 0 } : {})
-                });
-                if (errors.rewardUsedAccountId) setErrors(prev => ({ ...prev, rewardUsedAccountId: '' }));
-                if (errors.rewardUsed) setErrors(prev => ({ ...prev, rewardUsed: '' }));
+
+            {/* One card per source, side by side on a snapping scroller: swipe, or tap a dot. Each
+                card is exactly the panel's width, so the geometry is what pages it — no transform
+                bookkeeping, and the drag keeps the platform's own feel. */}
+            <div
+              ref={splitScrollRef}
+              className="split-carousel no-scrollbar"
+              onScroll={e => {
+                const el = e.currentTarget;
+                // Mid-flight frames of a scroll WE started say nothing about which card the user
+                // wants — reading them turns the effect above into a tug of war.
+                const target = splitScrollTargetRef.current;
+                if (target !== null) {
+                  if (Math.abs(el.scrollLeft - target) < 4) splitScrollTargetRef.current = null;
+                  return;
+                }
+                const page = Math.round(el.scrollLeft / Math.max(1, el.clientWidth));
+                if (page !== activeSplit && page >= 0 && page < splits.length) setActiveSplit(page);
               }}
-              iconGetter={id => getAccountIcon(id)}
-              error={errors.rewardUsedAccountId}
-            />
-            <div className="col-span-2 text-xs text-muted" style={{ opacity: 0.7 }}>
-              Primary Account Debit: <strong>{formatCurrency(Math.max(0, Number(newTx.amount || 0) - Number(newTx.rewardUsed || 0)))}</strong>
+            >
+              {splits.map((split, i) => {
+                const points = isUnitDenominated(sourceAccountOf(split));
+                const unit = unitOf(split);
+                const amountError = errors[`rewardUsed_${i}`];
+                return (
+                  <div
+                    key={i}
+                    className="split-card grid grid-cols-2 gap-4"
+                  >
+                    <div className="input-group">
+                      <label>
+                        Rewards Used{unit === 'points' ? ` (${rewardUnitLabelOf(split)})` : ''}{' '}
+                        <span className="text-muted" style={{ fontWeight: 400 }}>(Optional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className={`input-field ${amountError ? 'border-danger' : ''}`}
+                        value={split.input}
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                            const numVal = parseFloat(val);
+                            // Store rupees, always — utils' balance math and FinanceContext's leg
+                            // rebalance both treat a split's amount as money. The points figure is
+                            // derived, for display and on save.
+                            patchSplit(i, { input: val, amount: isNaN(numVal) ? 0 : inputToRupeesFor(split, numVal) });
+                          }
+                        }}
+                        placeholder={unit === 'points' ? '0' : '0.00'}
+                      />
+                      {/* The counterpart value, same treatment as the instant-cashback percent hint. */}
+                      {points && split.amount > 0 && (
+                        <span className="text-xs text-muted text-mono" style={{ marginTop: '0.25rem', opacity: 0.8 }}>
+                          {unit === 'points'
+                            ? `= ${formatCurrency(split.amount)}`
+                            : `= ${rupeesToRewardPoints(split.amount, sourceAccountOf(split))} ${rewardUnitLabelOf(split)}`}
+                        </span>
+                      )}
+                      {amountError && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{amountError}</span>}
+                    </div>
+                    <CustomPicker
+                      label={splits.length > 1 ? `From Rewards ${i + 1}` : 'From Rewards'}
+                      value={split.accountId}
+                      placeholder="Select Reward Account"
+                      options={[
+                        { id: '', name: 'None (Select Account)' },
+                        ...[...availableSourcesFor(i)].sort(sortByAccountType).map(acc => ({
+                          id: acc.id,
+                          name: acc.archived ? `${acc.name} (deleted)` : acc.name,
+                          // In whatever the account counts in. This used to ask `rewardType ===
+                          // 'points'` directly, which is only ever set on a CARD — so a wallet
+                          // holding 500 Chips was announced as ₹500 while the Accounts screen called
+                          // the same figure 500 CHIPS.
+                          subtext: formatRewardBalance(
+                            acc,
+                            rewardUnitBalance(acc, data.transactions, getCurrentMonthStr(), data.cashbackStatements),
+                          ),
+                        })),
+                        // Last, as the catch-all it is: a coupon or voucher with no account to draw
+                        // from. No balance line — there is nothing to run out of, which is the whole
+                        // point of it. Offered once per split: a second untracked reward is
+                        // indistinguishable from the first, so it would only be the same entry twice.
+                        ...(externalTakenElsewhere(i)
+                          ? []
+                          : [{ id: EXTERNAL_REWARD_SOURCE_ID, name: 'Other', subtext: 'One-time reward, not tracked' }])
+                      ]}
+                      onChange={val => {
+                        // Accounts can differ in unit and rate, so the typed digits would change
+                        // meaning on a switch. Hold the rupee value steady and re-render the field for
+                        // the new account: 430 Jewels (₹86) picked over to a rupee wallet shows 86,
+                        // still ₹86.
+                        const nextAcc = data.accounts.find(a => a.id === val);
+                        const nextUnit = isUnitDenominated(nextAcc) ? split.unit : 'rupee';
+                        const shown = nextUnit === 'points' ? rupeesToRewardPoints(split.amount, nextAcc) : split.amount;
+                        patchSplit(i, {
+                          accountId: val,
+                          input: shown === 0 ? '' : String(shown),
+                          ...(!val && split.amount <= 0 ? { amount: 0 } : {})
+                        });
+                      }}
+                      // "None" stands in for a reward source, so it wears one's mark rather than the
+                      // no-such-account fallback wallet — every other row here is a Gift.
+                      iconGetter={id => (id === '' ? getAccountTypeIcon('rewards', 18) : getAccountIcon(id))}
+                      error={errors[`rewardSource_${i}`]}
+                    />
+                    {/* Said where the choice is made: this share DOES get its own ledger entry, like
+                        every other source, but it is the one entry that draws on nothing. */}
+                    {isExternalRewardSource(split.accountId) && (
+                      <div className="col-span-2 text-xs text-muted" style={{ opacity: 0.75 }}>
+                        Logged as its own entry under this row, drawing on no account — nothing is
+                        deducted anywhere, so a coupon needs no wallet set up for it.
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Which card of how many, and a way back to any of them. Only earns its space once
+                there is more than one source to page between. */}
+            {splits.length > 1 && (
+              <div className="split-dots">
+                {splits.map((split, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    aria-label={`Reward source ${i + 1}${split.accountId ? `: ${sourceAccountOf(split)?.name || 'One-time reward'}` : ''}`}
+                    aria-current={i === activeSplit}
+                    className={`split-dot${i === activeSplit ? ' split-dot--active' : ''}${(errors[`rewardUsed_${i}`] || errors[`rewardSource_${i}`]) ? ' split-dot--error' : ''}`}
+                    onClick={() => setActiveSplit(i)}
+                  />
+                ))}
+              </div>
+            )}
+
+            <div className="text-xs text-muted" style={{ opacity: 0.7, marginTop: '0.5rem' }}>
+              Primary Account Debit: <strong>{formatCurrency(Math.max(0, (Number(newTx.amount) || 0) - rewardTotal))}</strong>
+              {splits.filter(sp => !!sp.accountId).length > 1 && (
+                <>
+                  {' · '}
+                  <strong>{formatCurrency(rewardTotal)}</strong>
+                  {` from ${splits.filter(sp => !!sp.accountId).length} reward sources`}
+                </>
+              )}
             </div>
           </div>
         )}

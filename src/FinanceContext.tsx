@@ -3,8 +3,12 @@ import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitE
 import { BUILT_IN_ACCOUNT_TYPES, isOffsetTypeAlias } from './types';
 import { classifySmsIsTransaction } from './services/GeminiService';
 import { clearChatHistory } from './services/ChatHistoryService';
-import { INVESTMENT_CATEGORY, isInvestmentCategory, inferInvestmentKind, getInvestmentKind } from './utils';
-import { resolveRewardLegTransition } from './services/RewardLegService';
+import {
+  INVESTMENT_CATEGORY, isInvestmentCategory, inferInvestmentKind, getInvestmentKind,
+  getRewardSplits, isRewardSourceOf, redistributeRewardSplits, rewardLegIdsOf,
+  rewardSplitIndexOfLeg, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits,
+} from './utils';
+import { resolveRewardLegPlan } from './services/RewardLegService';
 
 export interface PendingTransfer {
   fromAccountId: string;
@@ -404,6 +408,37 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           // account changes; its transactions already reference it by id.
           if (isOffsetTypeAlias(acc.type)) {
             return { ...acc, type: 'offset' };
+          }
+          /* Migration: a rewards wallet that names a unit AND a rate is counted in that unit, so the
+             balance figures entered against it were the user's own unit — they typed 500 under a
+             field the Accounts card captions "CHIPS" — while everything that did arithmetic with
+             them read rupees. The wallet is now unit-denominated for real (see isUnitDenominated):
+             its stored figures are rupees, and the unit is applied on the way in and out. So the
+             figures that were entered as units are divided by the rate once — 500 Chips at 10/₹1
+             becomes the ₹50 it was always worth — and `rewardType: 'points'` records that this
+             wallet is counted in points, which is what the display now keys off.
+
+             Self-limiting: the flag it sets is part of the condition, and the account form has
+             written it alongside the unit ever since, so the only shape this can fire on is the one
+             no build produces any more. Transactions are untouched — those were always rupees. */
+          if (acc.type === 'rewards' && acc.rewardUnit && (acc.pointsConversionRate || 0) > 0
+            && acc.rewardType !== 'points') {
+            const rate = acc.pointsConversionRate as number;
+            const toRupees = (v: any) => Math.round(((Number(v) || 0) / rate) * 100) / 100;
+            const mapValues = (m: any) => Object.fromEntries(
+              Object.entries(m || {}).map(([month, v]) => [month, toRupees(v)])
+            );
+            return {
+              ...acc,
+              rewardType: 'points',
+              openingBalances: mapValues(acc.openingBalances),
+              balanceAdjustments: acc.balanceAdjustments ? mapValues(acc.balanceAdjustments) : acc.balanceAdjustments,
+              balanceEditHistory: (acc.balanceEditHistory || []).map((h: any) => ({
+                ...h,
+                previousBalance: toRupees(h.previousBalance),
+                newBalance: toRupees(h.newBalance),
+              })),
+            };
           }
           return acc;
         });
@@ -1321,20 +1356,25 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       // Reward-split (3-leg CC Payment) edit detection — Option B keeps the card credit as the
       // fixed anchor; the non-edited funding leg absorbs the change. See docs/LINKED_TRANSACTIONS.md.
-      // (a) editing the REWARD leg: a linked parent uses this tx's account as rewardUsedAccountId.
+      // (a) editing a REWARD leg: a linked parent counts this tx among its split's legs. Asked via
+      //     rewardSplitOfLeg rather than "the account the anchor points at", which could only ever
+      //     name ONE source and so misread the second leg of a two-wallet split as a plain
+      //     counterpart — handing it the anchor's own amount.
       const rewardSplitParent = prev.transactions.find(p =>
         p.id !== transaction.id &&
         (p.linkedTransactionIds || []).includes(transaction.id) &&
-        !!p.rewardUsedAccountId &&
-        p.rewardUsedAccountId === transaction.accountId
+        !!rewardSplitOfLeg(p, transaction)
       );
+      const editedSplit = rewardSplitParent ? rewardSplitOfLeg(rewardSplitParent, transaction) : undefined;
       const isRewardSplitChildEdit = !!rewardSplitParent;
-      // (b) editing the BANK leg of a parent that has an active reward split.
+      // (b) editing the BANK leg of a parent that has an active reward split: linked to it, but not
+      //     one of its redemptions (by leg id, and — for a legacy row with no ids — by account).
       const bankLegParent = !rewardSplitParent ? prev.transactions.find(p =>
         p.id !== transaction.id &&
         (p.linkedTransactionIds || []).includes(transaction.id) &&
-        !!p.rewardUsedAccountId && (p.rewardUsed || 0) > 0 &&
-        p.rewardUsedAccountId !== transaction.accountId
+        rewardSplitTotal(p) > 0 &&
+        !rewardSplitOfLeg(p, transaction) &&
+        !isRewardSourceOf(p, transaction.accountId)
       ) : undefined;
       const isRewardSplitBankEdit = !!bankLegParent;
 
@@ -1343,8 +1383,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       // card as its payment source) so the modal reads correctly — but those must NOT persist onto the
       // child, or two legs would claim the anchor. Strip them; the branches below rebalance the card.
       if (isRewardSplitBankEdit) {
-        updatedTransaction.rewardUsed = 0;
-        updatedTransaction.rewardUsedAccountId = '';
+        updatedTransaction = withRewardSplits(updatedTransaction, []);
       }
       if (isRewardSplitChildEdit) {
         updatedTransaction.paymentSourceAccountId = '';
@@ -1370,20 +1409,21 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       /* What becomes of the split's reward leg — see services/RewardLegService. Skipped for a child
          leg's own edit: its form carries reconstructed anchor fields that the block above has just
          stripped, and reading those as a source change would delete its sibling. */
-      const rewardLegMove = (!isRewardSplitChildEdit && !isRewardSplitBankEdit)
-        ? resolveRewardLegTransition({
+      const rewardLegPlan = (!isRewardSplitChildEdit && !isRewardSplitBankEdit)
+        ? resolveRewardLegPlan({
           anchor: updatedTransaction,
           storedAnchor: oldTx,
           transactions: prev.transactions,
           accounts: prev.accounts,
         })
-        : { kind: 'none' as const };
+        : { syncs: [], deletes: [] };
+      const rewardLegSyncs = new Map(rewardLegPlan.syncs.map(s => [s.legId, s.patch]));
 
-      if (rewardLegMove.kind === 'delete') {
+      if (rewardLegPlan.deletes.length > 0) {
         const linkedIdsNow = updatedTransaction.linkedTransactionIds
           || (updatedTransaction.linkedTransactionId ? [updatedTransaction.linkedTransactionId] : []);
-        txsToDelete = [...txsToDelete, rewardLegMove.legId];
-        updatedTransaction.linkedTransactionIds = linkedIdsNow.filter(id => id !== rewardLegMove.legId);
+        txsToDelete = [...txsToDelete, ...rewardLegPlan.deletes];
+        updatedTransaction.linkedTransactionIds = linkedIdsNow.filter(id => !rewardLegPlan.deletes.includes(id));
       }
 
       let updatedTxs = prev.transactions.map(t => t.id === transaction.id ? updatedTransaction : t);
@@ -1413,8 +1453,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
             // Check if this linked transaction is a Reward Split counterpart. The patch carries the
             // account too, so a leg whose source was switched moves with it instead of being left
             // behind to be mistaken for a transfer counterpart.
-            else if (rewardLegMove.kind === 'sync' && t.id === rewardLegMove.legId) {
-              Object.assign(updated, rewardLegMove.patch);
+            else if (rewardLegSyncs.has(t.id)) {
+              Object.assign(updated, rewardLegSyncs.get(t.id));
             }
             // Otherwise it's a Transfer counterpart, Mutual Funds, or CC payment bank portion
             else {
@@ -1427,9 +1467,9 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
               const isStocks = invKind === 'stocks';
               const isCommodity = invKind === 'commodity';
               if (isCCPayment) {
-                if (updatedTransaction.rewardUsed && updatedTransaction.rewardUsedAccountId) {
-                  // It's the bank portion
-                  updated.amount = updatedTransaction.amount - updatedTransaction.rewardUsed;
+                if (rewardSplitTotal(updatedTransaction) > 0) {
+                  // It's the bank portion — what the card was paid, less every reward source.
+                  updated.amount = updatedTransaction.amount - rewardSplitTotal(updatedTransaction);
                 } else {
                   // Standard 1:1
                   updated.amount = updatedTransaction.amount;
@@ -1523,19 +1563,30 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           return t;
         });
       } else if (isRewardSplitChildEdit && rewardSplitParent) {
-        // Option B — edited the REWARD leg. Card credit (parent.amount) is the fixed anchor;
-        // the bank leg absorbs: bank = total − reward. Parent.rewardUsed follows the reward leg.
+        // Option B — edited ONE reward leg. Card credit (parent.amount) is the fixed anchor; the bank
+        // leg absorbs: bank = total − every reward source. Only the edited source changes; a sibling
+        // wallet on the same split is left exactly as it was, which is what makes a multi-source
+        // split editable leg by leg.
         const total = rewardSplitParent.amount;
-        const newReward = updatedTransaction.amount;
-        const bankAmount = Math.max(0, total - newReward);
-        const rewardAcct = updatedTransaction.accountId;
+        const nextSplits = getRewardSplits(rewardSplitParent).map(s => (
+          (editedSplit && (s.legId ? s.legId === editedSplit.legId : s.accountId === editedSplit.accountId))
+            // The leg's own id is recorded while we have it: a legacy split that has just been
+            // rebalanced becomes identifiable, so the next edit no longer relies on the account.
+            ? { ...s, accountId: updatedTransaction.accountId, amount: updatedTransaction.amount, legId: s.legId || updatedTransaction.id }
+            : s
+        ));
+        const rewardTotal = nextSplits.reduce((sum, s) => sum + (s.amount || 0), 0);
+        const bankAmount = Math.max(0, total - rewardTotal);
         const bankLegId = (rewardSplitParent.linkedTransactionIds || []).find(id => {
           const lt = prev.transactions.find(t => t.id === id);
-          return !!lt && lt.id !== updatedTransaction.id && lt.accountId !== rewardAcct && lt.accountId !== rewardSplitParent.accountId;
+          // Not this leg, not a SIBLING redemption, and not the card itself.
+          return !!lt && lt.id !== updatedTransaction.id
+            && !rewardSplitOfLeg(rewardSplitParent, lt)
+            && lt.accountId !== rewardSplitParent.accountId;
         });
         updatedTxs = updatedTxs.map(t => {
           if (t.id === rewardSplitParent.id) {
-            return { ...t, rewardUsed: newReward, rewardUsedAccountId: rewardAcct, date: updatedTransaction.date };
+            return { ...withRewardSplits(t, nextSplits), date: updatedTransaction.date };
           }
           if (bankLegId && t.id === bankLegId) {
             return { ...t, amount: bankAmount, date: updatedTransaction.date };
@@ -1543,26 +1594,46 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           return t;
         });
       } else if (isRewardSplitBankEdit && bankLegParent) {
-        // Option B (symmetric) — edited the BANK leg. Card credit stays fixed; the reward leg
-        // absorbs: reward = total − bank. Parent.rewardUsed follows the new reward amount.
+        // Option B (symmetric) — edited the BANK leg. Card credit stays fixed; the rewards absorb:
+        // reward total = total − bank. Which source takes the difference is redistributeRewardSplits'
+        // decision (the last one, cascading back); a source flexed to ₹0 has stopped funding anything,
+        // so its leg goes with it rather than lingering as a ₹0 row in the ledger.
         const total = bankLegParent.amount;
         const newBank = updatedTransaction.amount;
-        const newReward = Math.max(0, total - newBank);
-        const rewardAcct = bankLegParent.rewardUsedAccountId;
-        const rewardLegId = (bankLegParent.linkedTransactionIds || []).find(id => {
+        const storedSplits = getRewardSplits(bankLegParent);
+        const nextSplits = redistributeRewardSplits(storedSplits, Math.max(0, total - newBank));
+        const liveSplits = nextSplits.filter(s => s.amount > 0);
+
+        /* Which leg belongs to which source — by id, or by account for a legacy row. Same rule as
+           rewardSplitIndexOfLeg, applied against the STORED list so the redistributed amounts can be
+           matched back positionally. */
+        const legAmounts = new Map<string, number>();
+        const legsToDrop: string[] = [];
+        (bankLegParent.linkedTransactionIds || []).forEach(id => {
           const lt = prev.transactions.find(t => t.id === id);
-          return !!lt && lt.accountId === rewardAcct;
+          if (!lt || lt.id === bankLegParent.id) return;
+          const i = rewardSplitIndexOfLeg(bankLegParent, lt);
+          if (i < 0) return;
+          const amount = nextSplits[i]?.amount || 0;
+          if (amount > 0) legAmounts.set(lt.id, amount);
+          else legsToDrop.push(lt.id);
         });
 
-        updatedTxs = updatedTxs.map(t => {
-          if (t.id === bankLegParent.id) {
-            return { ...t, rewardUsed: newReward, date: updatedTransaction.date };
-          }
-          if (rewardLegId && t.id === rewardLegId) {
-            return { ...t, amount: newReward, date: updatedTransaction.date };
-          }
-          return t;
-        });
+        updatedTxs = updatedTxs
+          .filter(t => !legsToDrop.includes(t.id))
+          .map(t => {
+            if (t.id === bankLegParent.id) {
+              return {
+                ...withRewardSplits(t, liveSplits),
+                date: updatedTransaction.date,
+                linkedTransactionIds: (t.linkedTransactionIds || []).filter(l => !legsToDrop.includes(l)),
+              };
+            }
+            if (legAmounts.has(t.id)) {
+              return { ...t, amount: legAmounts.get(t.id) as number, date: updatedTransaction.date };
+            }
+            return t;
+          });
       }
 
       const syncResult = syncDebtsForTransaction(prev.debts || [], oldTx, updatedTransaction);
@@ -1659,37 +1730,42 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       const tx = prev.transactions.find(t => t.id === id);
       if (!tx) return prev;
 
-      // Special case: deleting ONLY the reward leg of a 3-leg reward-split payment does NOT remove
-      // the payment. It un-splits it — the card credit stays, the bank leg absorbs the reward amount
-      // (bank = card total), and the parent's reward split is cleared. See docs/LINKED_TRANSACTIONS.md.
+      // Special case: deleting ONLY a reward leg of a reward-split payment does NOT remove the
+      // payment. It un-splits it by that much — the card credit stays, the bank leg absorbs what this
+      // source was paying, and that source drops off the anchor. With several sources the others stay
+      // exactly as they are: deleting the ₹36 super.money leg of a ₹448 bill leaves the ₹50 CRED leg
+      // alone and hands the bank ₹36 more to carry. See docs/LINKED_TRANSACTIONS.md.
       const rewardSplitParentOnDelete = prev.transactions.find(p =>
         p.id !== tx.id &&
         (p.linkedTransactionIds || []).includes(tx.id) &&
-        !!p.rewardUsedAccountId && (p.rewardUsed || 0) > 0 &&
-        p.rewardUsedAccountId === tx.accountId
+        rewardSplitTotal(p) > 0 &&
+        !!rewardSplitOfLeg(p, tx)
       );
       if (rewardSplitParentOnDelete) {
         const total = rewardSplitParentOnDelete.amount; // card credit = fixed total
-        const rewardAcct = tx.accountId;
+        const goneIndex = rewardSplitIndexOfLeg(rewardSplitParentOnDelete, tx);
+        const remainingSplits = getRewardSplits(rewardSplitParentOnDelete).filter((_, i) => i !== goneIndex);
+        const remainingReward = remainingSplits.reduce((sum, sp) => sum + (sp.amount || 0), 0);
         const bankLegId = (rewardSplitParentOnDelete.linkedTransactionIds || []).find(lid => {
           const lt = prev.transactions.find(t => t.id === lid);
-          return !!lt && lt.id !== tx.id && lt.accountId !== rewardAcct && lt.accountId !== rewardSplitParentOnDelete.accountId;
+          // Not the leg going away, not a surviving redemption, and not the card itself.
+          return !!lt && lt.id !== tx.id
+            && !rewardSplitOfLeg(rewardSplitParentOnDelete, lt)
+            && lt.accountId !== rewardSplitParentOnDelete.accountId;
         });
         const remaining = prev.transactions
           .filter(t => t.id !== tx.id)
           .map(t => {
             if (t.id === rewardSplitParentOnDelete.id) {
               return {
-                ...t,
-                rewardUsed: 0,
-                rewardUsedAccountId: '',
+                ...withRewardSplits(t, remainingSplits),
                 linkedTransactionIds: (t.linkedTransactionIds || []).filter(l => l !== tx.id),
               };
             }
             if (bankLegId && t.id === bankLegId) {
               return {
                 ...t,
-                amount: total,
+                amount: Math.max(0, total - remainingReward),
                 linkedTransactionIds: (t.linkedTransactionIds || []).filter(l => l !== tx.id),
               };
             }
@@ -1750,8 +1826,11 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         // 2. If parent is deleted, delete linked instant cashback
         if (t.category === 'Cashback' && tx.type === 'debit') return true;
 
-        // 3. If parent is deleted, delete linked reward split counterpart
-        if (tx.rewardUsedAccountId && t.accountId === tx.rewardUsedAccountId && tx.type === 'debit') return true;
+        // 3. If parent is deleted, delete every linked reward-split counterpart. Leg ids are
+        //    unconditional — those rows exist only to fund this one — while the account fallback
+        //    (legacy rows, which recorded no ids) keeps its original debit-only guard.
+        if (rewardLegIdsOf(tx).includes(t.id)) return true;
+        if (isRewardSourceOf(tx, t.accountId) && tx.type === 'debit') return true;
 
         return false;
       }).map(t => t.id);
@@ -1776,11 +1855,16 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           updated.rewardEarnedAccountId = '';
         }
 
-        // If any of the deleted transactions was a reward split counterpart
-        const wasRewardSplitDeleted = prev.transactions.some(del => intersection.includes(del.id) && t.rewardUsedAccountId && del.accountId === t.rewardUsedAccountId);
-        if (wasRewardSplitDeleted) {
-          updated.rewardUsed = 0;
-          updated.rewardUsedAccountId = '';
+        // If any of the deleted transactions was a reward-split counterpart, that SOURCE goes with
+        // it — and only that one. A two-wallet split whose second leg was swept up in a cascade keeps
+        // funding the row from the first.
+        const survivingSplits = getRewardSplits(t).filter((_, i) => !intersection.some(delId => {
+          const del = prev.transactions.find(x => x.id === delId);
+          return !!del && rewardSplitIndexOfLeg(t, del) === i;
+        }));
+        if (survivingSplits.length !== getRewardSplits(t).length) {
+          Object.assign(updated, withRewardSplits(t, survivingSplits));
+          updated.linkedTransactionIds = newLinkedIds;
         }
 
         return updated;

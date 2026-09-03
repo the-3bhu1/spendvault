@@ -1047,6 +1047,16 @@ export default function Settings() {
       if (min.i) min.i = getTinyId(min.i);
       if (min.x) min.x = getTinyId(min.x);
       if (min.w) min.w = getTinyId(min.w);
+      // Each source of a multi-wallet split carries its own account id and leg id ('x'/'rlg' inside
+      // 'rs'). Shortened here so they compress like every other id — and, more to the point, so the
+      // import's expansion pass has the same shape to undo on both sides.
+      if (Array.isArray(min.rs)) {
+        min.rs = min.rs.map((sp: any) => ({
+          ...sp,
+          ...(sp.x ? { x: getTinyId(sp.x) } : {}),
+          ...(sp.rlg ? { rlg: getTinyId(sp.rlg) } : {}),
+        }));
+      }
       if (min.rea) min.rea = getTinyId(min.rea);
       if (min.ri) min.ri = getTinyId(min.ri);
       if (min.lts) min.lts = min.lts.map(getTinyId);
@@ -1169,6 +1179,16 @@ export default function Settings() {
               if (t.id) t.id = expandId(t.id);
               if (t.accountId) t.accountId = expandId(t.accountId);
               if (t.rewardUsedAccountId) t.rewardUsedAccountId = expandId(t.rewardUsedAccountId);
+              // Each source of a multi-wallet split carries an account id and a leg id of its own,
+              // and both were shortened on export. Missing either one leaves the split pointing at
+              // accounts and legs that no longer exist under those ids.
+              if (Array.isArray(t.rewardSplits)) {
+                t.rewardSplits = t.rewardSplits.map((sp: any) => ({
+                  ...sp,
+                  accountId: sp.accountId ? expandId(sp.accountId) : sp.accountId,
+                  legId: sp.legId ? expandId(sp.legId) : sp.legId,
+                }));
+              }
               if (t.rewardEarnedAccountId) t.rewardEarnedAccountId = expandId(t.rewardEarnedAccountId);
               if (t.linkedTransactionIds) t.linkedTransactionIds = t.linkedTransactionIds.map(expandId);
               if (t.linkedTransactionId) t.linkedTransactionId = expandId(t.linkedTransactionId);

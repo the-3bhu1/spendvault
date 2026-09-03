@@ -211,6 +211,30 @@ export interface Account {
   epfBalanceAdjustments?: EPFBalanceAdjustment[];
 }
 
+/** One reward source funding part of a transaction, and the leg it debited.
+ *
+ *  A split used to be a single pair of fields on the anchor (`rewardUsed` + `rewardUsedAccountId`),
+ *  which could only ever name ONE source — so a bill part-paid from two wallets had to be logged as
+ *  two transactions. This is that pair, made plural: the anchor holds a list, one entry per source,
+ *  and `rewardUsed` became the TOTAL across them (so every consumer that does arithmetic with it —
+ *  `amount = total - rewardUsed`, the Option-B rebalance, the stats — kept working untouched).
+ *
+ *  `legId` is what makes a multi-source split identifiable. With one source, "which leg is the
+ *  redemption?" could be answered by the account the anchor pointed at; with several, the answer has
+ *  to be recorded, or moving one source's picker makes its leg indistinguishable from a sibling's.
+ *  It is absent on rows written before this existed (and on an external source, which has no leg),
+ *  and those fall back to matching on the account — see `rewardSplitOfLeg` in utils. */
+export interface RewardSplitLeg {
+  /** A reward account's id, or EXTERNAL_REWARD_SOURCE_ID for an untracked one-time reward. */
+  accountId: string;
+  /** Rupees this source paid. Always rupees, like every other amount in the ledger; the points
+   *  conversion happens when the source's points balance is read (see docs/LINKED_TRANSACTIONS.md). */
+  amount: number;
+  /** The debit leg this source generated. Absent for an external one-time reward — there is no
+   *  account to debit — and for legacy single-source rows. */
+  legId?: string;
+}
+
 export type TransactionType = 'credit' | 'debit';
 export type RewardEarnedType = 'delayed' | 'instant' | 'none';
 // Sub-kinds of the single 'Investments' category. Values deliberately match the corresponding
@@ -249,8 +273,17 @@ export interface Transaction {
   rewardEarnedType?: RewardEarnedType;
   rewardEarnedAccountId?: string;
 
+  /** TOTAL rupees redeemed across every reward source on this row. With one source it is that
+   *  source's amount, which is what it has always meant; with several it is their sum. */
   rewardUsed?: number;
+  /** The FIRST reward source. Retained beside `rewardSplits` because `!!rewardUsedAccountId` is the
+   *  app's "this row anchors a split" test, and because a single-source split written by any older
+   *  build (or read by one) is exactly this field. */
   rewardUsedAccountId?: string;
+  /** Every source funding this row, in the order they were added. Authoritative when present;
+   *  absent on rows written before multi-source splits, which `getRewardSplits` reconstructs from
+   *  the two fields above. Never empty — a cleared split drops the field. */
+  rewardSplits?: RewardSplitLeg[];
 
   isTravelTransaction?: boolean;
   isRewardTransaction?: boolean;
