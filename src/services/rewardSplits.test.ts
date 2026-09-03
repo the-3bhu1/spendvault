@@ -10,7 +10,7 @@ import {
   getRewardSplits, rewardSplitTotal, isRewardSourceOf, rewardSplitOfLeg, accountNameOf,
   rewardSplitIndexOfLeg, rewardLegIdsOf, withRewardSplits, redistributeRewardSplits,
   isPointsDenominated, isUnitDenominated, rewardUnitBalance, formatRewardBalance,
-  rupeesToRewardPoints, EXTERNAL_REWARD_SOURCE_ID,
+  rupeesToRewardPoints, formatAmount, formatCurrency, EXTERNAL_REWARD_SOURCE_ID,
 } from '../utils';
 import type { Account, Transaction } from '../types';
 
@@ -219,6 +219,20 @@ describe('a rewards wallet counted in its own unit', () => {
     // (the pre-migration shape: no rewardType, so its stored figures are still plain rupees).
     expect(isUnitDenominated(cred())).toBe(false);
     expect(isUnitDenominated(cred({ rewardUnit: 'Coins', pointsConversionRate: 10 }))).toBe(false);
+  });
+
+  it('states ONE row\'s amount in its unit too, not just the balance', () => {
+    // The ledger row for a redemption is a rupee amount like every other row, so the rate has to be
+    // applied when it is rendered. It wasn't: the unit was appended to the rupee figure, and a ₹50
+    // redemption from this wallet read "50 Chips" in the expanded linked-entry list while the log
+    // form's own hint and the Accounts card both said 500. The rate is the whole difference between
+    // the two, so a 1:1 wallet never showed it.
+    expect(formatAmount(50, chips())).toBe('500 Chips');
+    expect(formatAmount(21, cred())).toBe(formatCurrency(21));
+    // Whatever the balance reads for a given rupee figure, one row of that size reads the same.
+    expect(formatAmount(50, chips())).toBe(formatRewardBalance(chips(), rupeesToRewardPoints(50, chips())));
+    // A wallet that names a unit but carries no rate is 1:1, and says so rather than dividing by 0.
+    expect(formatAmount(50, chips({ pointsConversionRate: undefined }))).toBe('50 Chips');
   });
 
   it('converts its rupee balance into its unit, net of what has been redeemed', () => {

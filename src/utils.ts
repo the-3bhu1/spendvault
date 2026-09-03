@@ -257,8 +257,17 @@ export const formatCurrency = (amount: number) => {
 
 export const formatAmount = (amount: number, account?: Account) => {
   if (account && account.type === 'rewards' && account.rewardUnit) {
-    let cleanAmount = amount;
-    if (Math.round(amount * 100) / 100 === 0) {
+    /* `amount` is RUPEES here, as it is on every row in the ledger — a wallet counted in Chips still
+       keeps one rupee ledger, and the unit figure is its rate applied at render. Without this the
+       label was pinned to the rupee number: ₹50 off a 10-Chips-to-₹1 wallet read "50 Chips" when 500
+       Chips is what was spent, and the same redemption showed 500 in the log form's "= 500 Chips"
+       hint and on the Accounts screen (both of which go through rewardUnitBalance, which does
+       convert). A wallet at the default 1:1 rate is unaffected, which is why this stayed hidden.
+       Not `rewardUnitBalance`: that reads an account's whole balance out of the ledger, while this
+       renders ONE row's amount — but they agree, because both apply this same rate. */
+    const inUnits = rupeesToRewardPoints(amount, account);
+    let cleanAmount = inUnits;
+    if (Math.round(inUnits * 100) / 100 === 0) {
       cleanAmount = 0;
     }
     const formatted = new Intl.NumberFormat('en-IN', {
