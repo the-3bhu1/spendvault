@@ -368,12 +368,26 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
       // Debit cards, rewards wallets, offset ledgers, and anything the user defined themselves.
       // Grouped rather than dropped so the Assets total matches the money the user actually holds.
       // 'offset' is named explicitly because it used to be a custom type and was counted here via
-      // isCustomType — going native would otherwise have silently dropped it out of Assets. A fully
-      // paired offset ledger nets to zero, so it contributes nothing; an unpaired entry is a real
-      // ₹ position (money fronted, or spent and not yet funded) and belongs in the total.
-      other: live.filter((a: Account) =>
-        a.type === 'debit_card' || a.type === 'rewards' || a.type === 'offset' || isCustomType(a.type)
-      ),
+      // isCustomType — going native would otherwise have silently dropped it out of Assets.
+      //
+      // It is LISTED but no longer counted (see getLiquidBalanceAt). The reasoning here used to be
+      // that an unpaired entry is a real ₹ position and belongs in the total; it isn't. An offset
+      // ledger exists precisely because no account of the user's was touched — a friend paid, and
+      // this records the spend without a fake entry on a real account. So a half-entered pair is
+      // unfinished data entry, not money gained or lost, and counting it moved net worth by an
+      // amount nobody's balance ever changed by: one ₹500 spend awaiting its funding credit read
+      // ₹1,000 of bank as ₹500 of assets. The row stays because a non-zero balance is the only
+      // visible sign of a pair still missing its other half.
+      //
+      // Sorted last, and stably, so the ledger sits at the very bottom of the last section on the
+      // screen — under the accounts that do count, where a line that is always ₹0 belongs.
+      other: live
+        .filter((a: Account) =>
+          a.type === 'debit_card' || a.type === 'rewards' || a.type === 'offset' || isCustomType(a.type)
+        )
+        .sort((a: Account, b: Account) =>
+          (a.type === 'offset' ? 1 : 0) - (b.type === 'offset' ? 1 : 0)
+        ),
     };
   }, [activeAccounts]);
 
@@ -394,8 +408,21 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
   const inAccountUnit = (account: Account, rupees: number) =>
     isPointsDenominated(account) ? rupeesToRewardPoints(rupees, account) : rupees;
 
+  /** Listed on this screen but contributing nothing to its ₹ total — an offset ledger, whose
+   *  balance is a bookkeeping residue rather than money (see the note in liquidGroups). It is the
+   *  only such row: a wallet counted in Chips or Miles DOES hold money, and now counts.
+   *
+   *  A unit-denominated wallet used to sit here too, which made the total inconsistent with itself:
+   *  a rewards wallet naming no unit (CRED coins) counted its ₹50 while one naming Chips did not,
+   *  though both hold the same money and either can fund a reward split. Naming a unit is a display
+   *  preference, not an economic one. And the rupee figure is not an estimate at a rate — it is the
+   *  STORED value: a rewards wallet's ledger is rupees, and the Chips figure is what the rate
+   *  produces at render (see rewardUnitBalance), so counting it skips a conversion rather than
+   *  performing one. The row shows both, so the column still reconciles. */
+  const isExcludedFromTotal = (a: Account) => a.type === 'offset';
+
   const getLiquidBalanceAt = (account: Account, month: string) => {
-    if (isPointsDenominated(account)) return 0;
+    if (isExcludedFromTotal(account)) return 0;
     let bal = calculateBalance(account, data.transactions, month);
     // An NCMC-enabled debit card carries a second, separate travel-wallet balance. It's real
     // money on the card, so it counts toward the account's contribution.
@@ -899,7 +926,16 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
               + {formatCurrency(travelBal)} travel
             </div>
           )}
+          {/* What this row puts INTO the total, on the one kind of row whose headline figure is not
+              rupees. Without it the column cannot be added up by eye — 500 Chips sitting in a ₹
+              column reads either as ₹500 or as nothing. Same pairing, and the same '=', as the log
+              form's "= 500 Chips" hint, read the other way round. */}
           {points && (
+            <div className="text-mono" style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.15rem', opacity: 0.85 }}>
+              = {formatCurrency(getLiquidBalanceAt(account, currentMonth))}
+            </div>
+          )}
+          {isExcludedFromTotal(account) && (
             <div className="text-mono uppercase" style={{ fontSize: '0.58rem', color: 'var(--text-muted)', marginTop: '0.2rem', letterSpacing: '0.5px' }}>
               Not in total
             </div>
@@ -1263,8 +1299,25 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
     // not to count — counting any of them inflates both figures without saying anything about the
     // month. Same rule as the Income / Spends pair on the Transactions screen, so filtering that
     // screen to this account and this month now agrees with this strip.
+    /* A REWARDS WALLET COUNTS EVERY MOVEMENT. The rule above is about Income/Spends: what the month
+       cost and earned, exclusions applied. A rewards wallet's two cells ask a different question —
+       what came INTO the wallet and what LEFT it — and both answers are real events on the wallet
+       even when the row carrying them is stats-excluded. The commonest way to spend a reward is
+       against a card bill, category 'CC Payment', so under the stats rule "Redeemed" read 0 while
+       the redemption that emptied the wallet sat in Recent Activity directly beneath it,
+       contradicting it on the same screen. Cashback IN is the same argument the other way round.
+
+       Keyed on the account BEING a rewards wallet, not on it naming a unit. Both kinds redeem the
+       same way, so scoping this to unit-denominated wallets would have fixed Cheq Chips and left
+       CRED coins reading 0 for the identical redemption. `points` still governs what really is
+       about the unit: which ranges the chart offers, and the "= ₹x" line under the headline.
+
+       Left alone for every other account: there "Spends" really does mean the stats figure, and a
+       card payment out of a bank account is not spending. */
+    const isRewardsWallet = account.type === 'rewards';
     const monthTxs = ledger.filter(t =>
-      t.date.slice(0, 7) === currentMonth && !isStatsExcludedCategory(t.category));
+      t.date.slice(0, 7) === currentMonth
+      && (isRewardsWallet || !isStatsExcludedCategory(t.category)));
     const flow = (type: Transaction['type']) =>
       monthTxs.filter(t => t.type === type).reduce((s, t) => s + statsAmount(t), 0);
     const inflow = flow('credit');
@@ -1332,7 +1385,17 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
               + {formatCurrency(travelBal)} travel wallet
             </div>
           )}
+          {/* What this wallet puts INTO the Assets total, in the unit that total is kept in. It used
+              to say "Not counted in the Assets total", which stopped being true when a wallet counted
+              in Chips started contributing its rupee value — and a screen that disowns a balance the
+              Assets screen is adding up is worse than one that says nothing. Same line, same '=', as
+              the wallet's row on the Assets list, so the two agree at a glance. */}
           {points && (
+            <div className="text-mono" style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '0.6rem', letterSpacing: '0.5px' }}>
+              = {formatCurrency(getLiquidBalanceAt(account, currentMonth))}
+            </div>
+          )}
+          {isExcludedFromTotal(account) && (
             <div className="text-mono uppercase" style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: '0.6rem', letterSpacing: '0.5px' }}>
               Not counted in the Assets total
             </div>
@@ -1447,12 +1510,15 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
           Named Income/Spends, not In/Out: those two read as raw cash movement, which is what they
           used to be and why they once reconciled with the hero. Borrowing the Transactions screen's
           own words is what tells the user these are the stats figures, exclusions already applied.
-          A points wallet earns and redeems rather than earning and spending, so it says so. */}
+          A rewards wallet earns and redeems rather than earning and spending, so it says so — and the
+          words follow the arithmetic above, which counts every movement for such a wallet. Calling
+          that figure "Spends" would be the wrong word twice over: a redemption is not a spend, and
+          Spends elsewhere in the app means the stats figure, which this deliberately is not. */}
         <div style={{ marginTop: series.length > 1 ? '0.5rem' : '1rem' }}>
           {metricStrip(<>
-            {metricCell(points ? 'Earned' : 'Income', fmt(val(inflow)), inflow > 0 ? 'var(--success)' : undefined)}
+            {metricCell(isRewardsWallet ? 'Earned' : 'Income', fmt(val(inflow)), inflow > 0 ? 'var(--success)' : undefined)}
             {metricDivider}
-            {metricCell(points ? 'Redeemed' : 'Spends', fmt(val(outflow)), outflow > 0 ? '#ef4444' : undefined)}
+            {metricCell(isRewardsWallet ? 'Redeemed' : 'Spends', fmt(val(outflow)), outflow > 0 ? '#ef4444' : undefined)}
           </>, { gutter: DETAIL_GUTTER, heading: monthLabel })}
         </div>
 
@@ -1817,7 +1883,27 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
         const activeFilter: AssetsFilter =
           tabs.length === 0 || tabs.some(t => t.v === assetsFilter) ? assetsFilter : 'all';
         const single = activeFilter !== 'all';
-        const pointsOnly = liquidAccounts.filter(isPointsDenominated).length;
+        /* The footnote under the list. Named for what the reader can check — the rows wearing
+           "Not in total" — and it names the kind rather than saying "1 account is excluded", which
+           would leave the reader hunting for which row. Offset ledgers are the only kind now that a
+           unit-denominated wallet counts (see isExcludedFromTotal), so the phrase no longer has to
+           compose two clauses.
+
+           Counted over the sections THIS filter renders, not over every liquid account. Both
+           excluded kinds live in "Other", so filtering to Bank used to print "1 offset ledger is
+           listed but excluded" under a list containing no such row — a note about something the
+           reader cannot see, which reads as a figure that doesn't add up rather than one that does.
+           Collapsing a section deliberately does NOT suppress it: a folded section still carries its
+           name and count, so its rows are listed, just not unfolded. */
+        const visibleLiquid = [
+          ...(activeFilter === 'all' || activeFilter === 'bank' ? liquidGroups.bank : []),
+          ...(activeFilter === 'all' || activeFilter === 'cash' ? liquidGroups.cash : []),
+          ...(activeFilter === 'all' || activeFilter === 'ewallet' ? liquidGroups.ewallet : []),
+          ...(activeFilter === 'all' || activeFilter === 'other' ? liquidGroups.other : []),
+        ];
+        const excludedRows = visibleLiquid.filter(isExcludedFromTotal);
+        const excludedPhrase =
+          `${excludedRows.length} offset ${excludedRows.length === 1 ? 'ledger' : 'ledgers'}`;
         return (
           <div className="fade-in">
             {renderSubviewHeader('Assets', () => setCategory(null), 'tour-wealth-back', true)}
@@ -1864,9 +1950,9 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
             {liquidGroups.other.length > 0 && (activeFilter === 'all' || activeFilter === 'other') &&
               renderHoldingSection('other', 'Other Accounts', liquidGroups.other, single, renderLiquidRow)}
 
-            {pointsOnly > 0 && (
+            {excludedRows.length > 0 && (
               <div className="text-mono uppercase" style={{ fontSize: '0.6rem', color: 'var(--text-muted)', letterSpacing: '0.5px', textAlign: 'center', padding: '1.5rem', lineHeight: 1.6 }}>
-                {pointsOnly} points-based {pointsOnly === 1 ? 'wallet is' : 'wallets are'} listed but excluded from the total
+                {excludedPhrase} {excludedRows.length === 1 ? 'is' : 'are'} listed but excluded from the total
               </div>
             )}
           </div>
