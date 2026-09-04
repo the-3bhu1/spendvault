@@ -107,7 +107,10 @@ Actions (Transactions tab):
 - Delete: swipe the row to the RIGHT until the red DELETE appears, then release. Deleting also
   removes any linked counterpart legs.
 - Reorder: long-press a row and drag up/down. Reordering works only WITHIN the same date and moves a
-  linked transaction together with its counterpart legs as a block.
+  linked transaction together with its counterpart legs as a block. Dragging while a filter or search
+  is active reorders only the rows you can see, among the positions those rows already occupy —
+  anything the filter is hiding keeps its place in the day, so clearing the filter never reveals a
+  day that has been shuffled behind your back.
 - Filter/search: use the Filters panel in the Transactions tab to search and filter by type, account,
   category, tag, or month (with removable filter chips and income/spend summaries).
   - Selecting the "Investments" category reveals an extra "Investment Type" filter (Mutual Funds /
@@ -146,16 +149,27 @@ deleting one keeps the legs in sync / removes them together. By category:
   - With a reward split: if reward points are used toward the payment, a THIRD leg debits the rewards
     account for the points used and the bank leg covers the rest — and a fourth leg, and so on, if the
     payment draws on more than one reward source.
-  - Which reward accounts can be used: a card's OWN points wallet (e.g. Jupiter's Jewels) only offsets
-    THAT card's bill — issuer points aren't fungible between cards, so another card's points wallet
-    won't appear in the "From Rewards" picker. Standalone "rewards" wallets are universal and can be
-    used against any payment or purchase, whether they are counted in rupees (CRED coins) or in their
-    own unit (Cheq Chips at 10 = ₹1 — the picker shows "500 Chips" and the ₹ | PTS toggle appears). Switching category (or investment type) clears an
-    in-progress split.
+  - Which accounts can be used: the "Paid from" picker is grouped under account-type headings and
+    offers three kinds, all of them unconditionally.
+    (1) Standalone "rewards" wallets, whether counted in rupees (CRED coins) or in their own unit
+    (Cheq Chips at 10 = ₹1 — the picker shows "500 Chips" and the ₹ | PTS toggle appears).
+    (2) E-WALLETS — a Flipkart, Amazon Pay, AJIO or Uber balance and the like. A purchase part-paid
+    from stored value is therefore ONE entry with two legs, not two unrelated entries: the wallet's
+    leg is an ordinary rupee debit, so that wallet's balance drops by exactly what it paid, and the
+    spend is still counted once (loading the wallet was a Transfer, which is excluded from stats).
+    (3) Any card carrying its own points ledger (Jupiter's Jewels) — offered whatever account the
+    payment itself is charged to, so a card's points can be put toward a purchase made on a different
+    card or straight from a bank. The points always come out of that card's OWN points ledger and its
+    rupee/credit balance is untouched. Most issuers only let their points offset their own bill; the
+    app records what you tell it and does not enforce that rule.
+    Physical cash is deliberately NOT a source — a cash purchase has no second leg to reconcile.
+    There is no "None" entry in the picker: the panel's "×" is how you abandon a split, and it clears
+    the amount and the source together. Switching category (or investment type) clears an in-progress
+    split.
   - The split panel and "Apply Payment To" cycle picker appear as soon as the category is CC Payment —
     you don't have to pick the paying account first.
 
-"Split with Rewards?" is NOT limited to CC Payments — it appears on ANY ordinary debit (a purchase,
+"Split Payment" is NOT limited to CC Payments — it appears on ANY ordinary debit (a purchase,
 a bill, a recharge). Investments are the only exclusion. It does not require owning a reward account:
 the "Other" source below covers one-off rewards.
 - On an ordinary purchase the split is a PAIR of entries, not three: the chosen account is debited for
@@ -164,7 +178,7 @@ the "Other" source below covers one-off rewards.
   reopening the entry shows the full price again, not the reduced figure.
 - SEVERAL reward sources on one payment: once a source is picked and given an amount, a "+" appears
   beside the panel's "×" and adds another card. The cards slide sideways (swipe, or tap a pagination
-  dot underneath) and each carries its own "Rewards Used" field, its own source picker and its own
+  dot underneath) and each carries its own "Amount" field, its own "Paid from" picker and its own
   unit — so a ₹448 bill can be part-paid with ₹50 of CRED coins AND ₹36 of super.money at once. How
   many is not fixed at two: every eligible reward account can be a card, and a source already used by
   another card drops out of the other pickers, so one account is only ever spent from once per
@@ -172,7 +186,7 @@ the "Other" source below covers one-off rewards.
   the full price minus every source together, and the save is refused if the sources together exceed
   the price. Each source produces its OWN debit leg, so a two-wallet split lists two redemptions under
   the spend in the ledger, and the "×" removes only the card on screen (the last one closes the panel).
-- Unit toggle (₹ | PTS): when the reward source is a card's own points wallet, the "Rewards Used" field
+- Unit toggle (₹ | PTS): when the source is a card's own points wallet, the "Amount" field
   can be typed in either unit and a "= ..." line underneath shows the converted value. It always
   STARTS in ₹, including after picking a points wallet — picking a source never re-reads digits
   already typed as points. PTS is only ever reached by tapping the toggle, and that choice then
@@ -184,7 +198,8 @@ the "Other" source below covers one-off rewards.
 - Redeeming more than the wallet holds is refused on save, and the message names what IS available in
   that account's own unit (e.g. "Only 432 Jewels available"). Editing an existing split can always be
   re-saved or lowered — its own already-recorded redemption counts as available.
-- "Other" (last option in the "From Rewards" picker) is for a ONE-TIME reward that isn't worth its own
+- "Other" (last option in the "Paid from" picker, under its own "No Account" heading) is for a
+  ONE-TIME reward that isn't worth its own
   account — a coupon, a voucher, a scratch-card credit, a referral discount. It behaves like any other
   source: the Amount field is the full price, the primary account is debited for the rest, and the
   reward gets its OWN entry in the ledger, collapsed under the spend like any redemption ("One-time
@@ -195,10 +210,12 @@ the "Other" source below covers one-off rewards.
   tracking (CRED coins, super.money, a card's own points).
   Splits logged before one-time rewards got their own entry show a small "₹40 REWARD" pill beside the
   category instead; re-saving such an entry replaces the pill with the ledger entry.
-- In the ledger the SPEND is the row you see, with the reward redemption collapsed under it as a
-  linked entry ("Part-paid with rewards", or "Funding + rewards" on a CC Payment). Two sources are
-  listed as two separate entries in there, and the toggle counts them ("Part-paid with 2 rewards",
-  "Funding + 2 rewards"). Inside an expanded group the legs are ordered: the primary account's own
+- In the ledger the SPEND is the row you see, with the source's leg collapsed under it as a linked
+  entry ("Part-paid with rewards", or "Funding + rewards" on a CC Payment). That toggle says
+  "rewards" whatever the source was, so it reads that way for an e-wallet leg too. Each leg is named
+  "Paid toward: <the spend's description>" (on a CC Payment, "Paid toward: <the card>"). Two sources
+  are listed as two separate entries in there, and the toggle counts them ("Part-paid with 2
+  rewards", "Funding + 2 rewards"). Inside an expanded group the legs are ordered: the primary account's own
   leg first, then the reward redemptions largest-first by rupee value (so a 500-Chip redemption worth
   ₹50 outranks a ₹10 coupon), and any instant-cashback credit last — the legs above it add up to the
   row's total, which cashback is not part of.
@@ -425,7 +442,7 @@ Mutual Funds bill behaves like any other bill; its LOG button opens the normal i
 the user chooses the funding account and the fund account themselves. Holdings and returns are
 tracked in Wealth, not here.
 A bill's LOG button opens the SAME form as "Log Transaction" on the Ledger, so everything available
-there is available here — tags, instant cashback, Split with Rewards, investment fields, NCMC travel,
+there is available here — tags, instant cashback, Split Payment, investment fields, NCMC travel,
 the passive-log toggle. The only differences are deliberate: logging from a bill also advances that
 bill's next due date and marks the entry recurring, and SMS auto-fill is a Ledger-only entry point.
 

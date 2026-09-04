@@ -623,10 +623,10 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       splits.forEach((sp, i) => {
         const amount = Number(sp.amount) || 0;
         if (amount > 0 && !sp.accountId) {
-          newErrors[`rewardSource_${i}`] = 'Reward source is required';
+          newErrors[`rewardSource_${i}`] = 'Payment source is required';
         }
         if (sp.accountId && amount <= 0) {
-          newErrors[`rewardUsed_${i}`] = 'Reward amount is required when a reward source is selected';
+          newErrors[`rewardUsed_${i}`] = 'Amount is required when a source is selected';
         }
         // One source, once. Two cards on the same account would produce two legs on it that nothing
         // could tell apart — not the ledger, not the next edit — and their balance checks would each
@@ -984,7 +984,11 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       addTransaction({
         id: legId as string,
         date: newTx.date as string,
-        description: isCCPayment ? `Rewards used for ${paidCardName || account?.name || 'CC'}` : `Rewards applied to: ${newTx.description}`,
+        // "Paid toward", not "Rewards applied to": the source may now be an e-wallet holding real
+        // money, and calling a ₹81 Flipkart Wallet payment a reward would be a plain lie on the row.
+        // Reads correctly for a redemption too — points paid toward it just the same. Kept in step
+        // with RewardLegService, which rewrites this on every anchor edit.
+        description: `Paid toward: ${isCCPayment ? (paidCardName || account?.name || 'CC') : newTx.description}`,
         // A one-time reward's leg carries the external sentinel here. It matches no account, which is
         // exactly what makes the row safe: no balance moves, nothing had to be set up first, and the
         // redemption is still a row you can see, expand and tap through to the split it belongs to.
@@ -1231,19 +1235,29 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   const hasCashbackDepositAccount = data.accounts.some(a =>
     (!a.archived || a.id === newTx.rewardEarnedAccountId) && (a.type === 'rewards' || a.type === 'e_wallet')
   );
-  // Which accounts can fund a reward split. A card's own points balance (e.g. Jupiter's Jewels)
-  // only offsets THAT card's own bill — issuer points aren't fungible across cards — so the
-  // points option is tied to the CARD leg of this log: on a CC Payment that's whichever side
-  // holds the card (Account when logged as a Credit, the counterpart when logged as a Debit);
-  // on a plain purchase it's the account being charged. Standalone 'rewards' wallets stay universal
-  // whatever they are counted in — CRED coins in rupees, Cheq Chips in Chips — because a wallet's
-  // balance is its own money either way, not an issuer's points tied to one card.
-  const cardLegAccountId = isCCPayment
-    ? (newTx.type === 'credit' ? newTx.accountId : paymentSourceAccountId)
-    : newTx.accountId;
+  /* Which accounts can fund a split.
+     Three kinds, and all three are offered unconditionally:
+       - 'rewards' wallets, whatever they count in (CRED coins in rupees, Cheq Chips in Chips);
+       - e-wallets, because the leg this panel writes is the same row either way: a plain rupee
+         debit on the source, linked to the anchor, with the anchor holding `total − split`. A
+         Flipkart order paid ₹81 from the Flipkart Wallet and ₹106 on a card is the same shape as
+         one part-paid with CRED coins, and every reward-specific behaviour downstream is gated on
+         `isPointsDenominated`, which an e-wallet does not satisfy — so its leg moves the wallet's
+         rupee balance, exactly as it should. Loading the wallet was a Transfer, which is
+         stats-excluded, so the spend is still counted once;
+       - any card carrying its own points ledger (Jupiter's Jewels).
+
+     That last one used to be tied to the card being charged, on the reasoning that issuer points
+     only offset that issuer's own bill. True of most programmes, but it is a rule about the ISSUER,
+     not about this ledger, and enforcing it here just hid a balance the user can see on the
+     Accounts screen — there was no way to record a redemption the app had decided was impossible.
+     The arithmetic never depended on it: a points leg carries `isRewardTransaction`, so it is read
+     into its OWN card's points ledger by calculateBalance whichever account the anchor sits on.
+     Cash is deliberately absent: a cash purchase has no second leg to reconcile. */
   const splitSourceAccounts = data.accounts.filter(a =>
     (!a.archived || splits.some(sp => sp.accountId === a.id))
-    && (a.type === 'rewards' || (a.isCashbackEnabled && a.rewardType === 'points' && !!cardLegAccountId && a.id === cardLegAccountId))
+    && (a.type === 'rewards' || a.type === 'e_wallet'
+      || (a.isCashbackEnabled && a.rewardType === 'points'))
   );
   // Investments are excluded: paying part of a fund/stock/metal buy out of reward points isn't a
   // thing the holdings math models. Everything else that spends money can be split — a CC Payment
@@ -1365,6 +1379,18 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         <h3>{editId ? 'Edit Transaction' : 'Log Transaction'}</h3>
         <button onClick={onClose}><X /></button>
       </div>
+      {/* Spacing convention for this form: every direct child of the body owns its
+          BOTTOM margin (1rem — the `.input-group` default) and sets no top margin.
+          Nothing here collapses, since these are all flex containers, so a stray
+          marginTop simply adds to the margin above it.
+
+          Most of this form is optional panels, and the two failure modes both came
+          from spacing being shared between neighbours rather than owned by one. The
+          Cashback panel carried a marginTop that the Tags block above it leaned on by
+          zeroing its own marginBottom — so on a travel spend, where the panel is
+          hidden, "Split Payment" ended up flush against the tag input. And the
+          Passive panel's marginTop stacked on top of the margin the button above
+          already had, for a 32px gap in a form where every other gap is 16. */}
       <div className="modal-body" ref={modalBodyRef}>
         <div className="input-group" onClick={() => setIsDatePickerOpen(true)}>
           <label>Date</label>
@@ -1973,7 +1999,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         )}
 
         {data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled && (
-          <div className="input-group" style={{ marginBottom: 0 }}>
+          <div className="input-group">
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
               <Hash size={13} style={{ opacity: 0.6 }} />Tags <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: 400 }}>(optional)</span>
             </label>
@@ -2080,7 +2106,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
           if (showInstantUI && !hasCashbackDepositAccount) return null;
 
           return (
-            <div className="flex-col gap-3" style={{ marginTop: '0.5rem', marginBottom: '1rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}>
+            <div className="flex-col gap-3" style={{ marginBottom: '1rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}>
               <div className="flex justify-between align-center">
                 <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>Cashback Earned</span>
                 {showInstantUI && (
@@ -2274,8 +2300,15 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
             card/bank ends up on the other leg. */}
         {!showRewardSplit && canSplitWithRewards && (
           <button
-            className="btn btn-secondary w-100 flex align-center justify-center gap-2"
-            style={{ marginBottom: '1rem', padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}
+            className="btn btn-secondary w-100 flex align-center justify-center"
+            /* The gap is INLINE, and has to be. `.btn` sets `gap: 0.5rem` of its own and is declared
+               after every `.gap-*` utility in the sheet, so at equal specificity it wins — the
+               `gap-2` that used to sit in this className was doing nothing at all, and swapping it
+               for gap-3 changed nothing either (measured: 8px both ways).
+               0.75rem because the label is uppercase mono with 1px of letter-spacing, so its glyphs
+               carry their own air and the icon needs a little more than the default to sit apart
+               from them. */
+            style={{ marginBottom: '1rem', padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)', gap: '0.75rem' }}
             onClick={() => {
               setShowRewardSplit(true);
               // The panel IS its cards, so opening it means opening one — empty, ready for a source.
@@ -2287,7 +2320,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
             }}
           >
             <Sparkles size={14} className="text-primary" />
-            <span>Split with Rewards?</span>
+            <span>Split Payment</span>
           </button>
         )}
 
@@ -2351,8 +2384,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                 {canAddSplitSource && (
                   <button
                     className="btn btn-secondary flex-center"
-                    title="Add another reward source"
-                    aria-label="Add another reward source"
+                    title="Add another payment source"
+                    aria-label="Add another payment source"
                     style={{
                       width: SPLIT_CONTROL_HEIGHT,
                       height: SPLIT_CONTROL_HEIGHT,
@@ -2368,8 +2401,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                 )}
                 <button
                   className="btn btn-danger flex-center"
-                  title={splits.length > 1 ? 'Remove this reward source' : 'Remove split'}
-                  aria-label={splits.length > 1 ? 'Remove this reward source' : 'Remove split'}
+                  title={splits.length > 1 ? 'Remove this source' : 'Remove split'}
+                  aria-label={splits.length > 1 ? 'Remove this source' : 'Remove split'}
                   style={{
                     width: SPLIT_CONTROL_HEIGHT,
                     height: SPLIT_CONTROL_HEIGHT,
@@ -2422,10 +2455,15 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                     className="split-card grid grid-cols-2 gap-4"
                   >
                     <div className="input-group">
-                      <label>
-                        Rewards Used{unit === 'points' ? ` (${rewardUnitLabelOf(split)})` : ''}{' '}
-                        <span className="text-muted" style={{ fontWeight: 400 }}>(Optional)</span>
-                      </label>
+                      {/* "Amount", not "Rewards Used": the panel is reached from a button that says
+                          Split Payment and pairs this field with "Paid from", so naming the
+                          money after one particular KIND of source contradicted both — and does so
+                          on every split funded from an e-wallet.
+                          No "(Optional)" either. It described the panel, not the field: the split as
+                          a whole is optional, but you get here by asking for one, and the card has an
+                          X to close if you change your mind. Inside an open card the amount is
+                          required the moment a source is picked (see validate). */}
+                      <label>Amount{unit === 'points' ? ` (${rewardUnitLabelOf(split)})` : ''}</label>
                       <input
                         type="text"
                         inputMode="decimal"
@@ -2458,14 +2496,24 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                       {amountError && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{amountError}</span>}
                     </div>
                     <CustomPicker
-                      label={splits.length > 1 ? `From Rewards ${i + 1}` : 'From Rewards'}
+                      label={splits.length > 1 ? `Paid from ${i + 1}` : 'Paid from'}
                       value={split.accountId}
-                      placeholder="Select Reward Account"
+                      placeholder="Select Account"
+                      /* No "None" entry, unlike Deposit To above. That card has no dismiss control,
+                         so its picker has to carry the way out; this one opens from a button and
+                         closes on its own X, which drops the card and everything typed into it. A
+                         "None" here would be a second, weaker way to undo — it clears the source but
+                         leaves the amount and the open card behind. Nothing selected shows the
+                         placeholder, which is the same empty state without the dead end. */
                       options={[
-                        { id: '', name: 'None (Select Account)' },
                         ...[...availableSourcesFor(i)].sort(sortByAccountType).map(acc => ({
                           id: acc.id,
                           name: acc.archived ? `${acc.name} (deleted)` : acc.name,
+                          // Headed by account type, the way Deposit To already does it. The list is
+                          // a mix of kinds now that e-wallets are eligible — a wallet, a rewards
+                          // wallet and the charged card's own points ledger read as one undivided
+                          // run without this, and they are not the same kind of money.
+                          group: getAccountGroupLabel(acc.type, acc.archived),
                           // In whatever the account counts in. This used to ask `rewardType ===
                           // 'points'` directly, which is only ever set on a CARD — so a wallet
                           // holding 500 Chips was announced as ₹500 while the Accounts screen called
@@ -2481,7 +2529,11 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                         // indistinguishable from the first, so it would only be the same entry twice.
                         ...(externalTakenElsewhere(i)
                           ? []
-                          : [{ id: EXTERNAL_REWARD_SOURCE_ID, name: 'Other', subtext: 'One-time reward, not tracked' }])
+                          // Headed separately, and not by an account type, because it ISN'T one: the
+                          // sentinel matches no account, so nothing moves. Left ungrouped it would
+                          // tuck itself under whichever real group happened to be last and read as
+                          // one of them.
+                          : [{ id: EXTERNAL_REWARD_SOURCE_ID, name: 'Other', subtext: 'One-time reward, not tracked', group: 'No Account' }])
                       ]}
                       onChange={val => {
                         // Accounts can differ in unit and rate, so the typed digits would change
@@ -2558,7 +2610,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         {/* Tags kept last so it stays at the end of the form across all scenarios (e.g. after
             the CC-payment "Apply Payment To" picker). */}
         {!data.accounts.find(a => a.id === newTx.accountId)?.isNcmcEnabled && (
-          <div className="input-group" style={{ marginBottom: 0 }}>
+          <div className="input-group">
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
               <Hash size={13} style={{ opacity: 0.6 }} />Tags <span className="text-muted" style={{ fontSize: '0.75rem', fontWeight: 400 }}>(optional)</span>
             </label>
@@ -2633,7 +2685,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
 
 
         {data.user?.enablePassiveTransactions && newTx.category?.toLowerCase() !== 'transfer' && newTx.category?.toLowerCase() !== 'cc payment' && newTx.category?.toLowerCase() !== 'ncmc travel recharge' && newTx.category?.toLowerCase() !== 'lending & borrowing' && (
-          <div ref={passiveLogRef} className="flex-col gap-3" style={{ marginTop: '1rem', padding: '1rem', background: 'var(--bg-hover)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+          <div ref={passiveLogRef} className="flex-col gap-3" style={{ marginBottom: '1rem', padding: '1rem', background: 'var(--bg-hover)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
             <div className="flex justify-between align-center">
               <div className="flex-col">
                 <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>Passive Transaction</span>

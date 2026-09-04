@@ -418,6 +418,21 @@ select {
   flex-wrap: wrap;
 }
 
+/* Claim the free space on the main axis, so a sibling that must not stretch — a chevron, an amount,
+   an icon tile — is pushed to the far end of the row instead of trailing whatever text precedes it.
+   Tailwind's `flex-1`, and named after it because that is what every call site already assumed.
+   This rule did not exist for a long time while seventeen elements across seven files carried the
+   class, so all of them were silently sizing to their content: the Hub's four rows put their
+   chevrons at four different x positions, and Insights' category legend sat in a 300px box with a
+   dead gutter beside it. Everything else was already correct, because a flex item shrinks to fit by
+   default and only GROWING needed asking for.
+   Deliberately no `min-width: 0` here. It is the right companion often enough to be tempting, but it
+   changes how an item ellipsises rather than how it is sized, and the call sites that need it
+   already say so themselves. */
+.flex-1 {
+  flex: 1 1 0%;
+}
+
 .flex-center {
   display: flex;
   align-items: center;

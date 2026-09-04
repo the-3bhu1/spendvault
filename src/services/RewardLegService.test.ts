@@ -39,7 +39,7 @@ const anchorWith = (source: string, over: Partial<Transaction> = {}) => tx({
   linkedTransactionIds: ['leg'], ...over,
 });
 const legOn = (accountId: string, over: Partial<Transaction> = {}) => tx({
-  id: 'leg', accountId, amount: 86, description: 'Rewards applied to: Swiggy Order',
+  id: 'leg', accountId, amount: 86, description: 'Paid toward: Swiggy Order',
   linkedTransactionIds: ['anchor'], ...over,
 });
 
@@ -142,13 +142,13 @@ describe('a split whose source does not change', () => {
     const stored = anchorWith('cred');
     const renamed = anchorWith('cred', { description: 'Zomato Order' });
     const purchase = plan(renamed, stored, [stored, legOn('cred')]);
-    expect(purchase.syncs[0].patch.description).toBe('Rewards applied to: Zomato Order');
+    expect(purchase.syncs[0].patch.description).toBe('Paid toward: Zomato Order');
 
     // A CC leg's description names the card it paid, and is set once at creation.
     const ccStored = anchorWith('cred', { category: 'CC Payment' });
-    const ccLeg = legOn('cred', { category: 'CC Payment', description: 'Rewards used for Jupiter x CSB' });
+    const ccLeg = legOn('cred', { category: 'CC Payment', description: 'Paid toward: Jupiter x CSB' });
     const cc = plan(anchorWith('cred', { category: 'CC Payment' }), ccStored, [ccStored, ccLeg]);
-    expect(cc.syncs[0].patch.description).toBe('Rewards used for Jupiter x CSB');
+    expect(cc.syncs[0].patch.description).toBe('Paid toward: Jupiter x CSB');
   });
 
   it('never mistakes a cashback leg or the anchor itself for the redemption', () => {

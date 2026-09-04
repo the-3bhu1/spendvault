@@ -56,10 +56,14 @@ const DatePickerPanel: React.FC<Omit<CustomDatePickerProps, 'isOpen'>> = ({
   const weekDays = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   
-  // Show 8 years with active year at 4th position (center-ish)
-  const VISIBLE_YEARS = 8;
+  /* Five years, the selected one dead centre with two either side. Eight of them shared the same
+     column height as the month grid beside it, which left each row about 38px tall — under any
+     reasonable touch target, and dense enough to read as a list rather than something to tap. Five
+     rows in that same space are half again as tall, and an odd count is what lets the selection sit
+     in the middle rather than "center-ish". */
+  const VISIBLE_YEARS = 5;
   const activeYear = getYear(viewDate);
-  const yearStart = activeYear - 3 + yearPageOffset;
+  const yearStart = activeYear - Math.floor(VISIBLE_YEARS / 2) + yearPageOffset;
   const visibleYears = Array.from({ length: VISIBLE_YEARS }, (_, i) => yearStart + i);
 
   const handlePrevMonth = () => setViewDate(subMonths(viewDate, 1));
@@ -218,9 +222,9 @@ const DatePickerPanel: React.FC<Omit<CustomDatePickerProps, 'isOpen'>> = ({
                     }}
                   >
                     <button 
-                      onClick={() => setYearPageOffset(prev => prev - 4)}
+                      onClick={() => setYearPageOffset(prev => prev - VISIBLE_YEARS)}
                       className="flex-center text-muted"
-                      style={{ padding: '0.2rem 0', flexShrink: 0 }}
+                      style={{ padding: '0.4rem 0', minHeight: '32px', flexShrink: 0 }}
                     >
                       <ChevronLeft size={14} style={{ transform: 'rotate(90deg)' }} />
                     </button>
@@ -230,10 +234,11 @@ const DatePickerPanel: React.FC<Omit<CustomDatePickerProps, 'isOpen'>> = ({
                         return (
                           <button
                             key={y}
-                            onClick={() => setViewDate(setYear(viewDate, y))}
+                            onClick={() => { setViewDate(setYear(viewDate, y)); setYearPageOffset(0); }}
                             className="text-mono"
                             style={{
                               padding: '0.35rem 0',
+                              minHeight: '44px',
                               borderRadius: '8px',
                               fontSize: '0.8rem',
                               fontWeight: isCurrent ? 800 : 400,
@@ -248,9 +253,9 @@ const DatePickerPanel: React.FC<Omit<CustomDatePickerProps, 'isOpen'>> = ({
                       })}
                     </div>
                     <button 
-                      onClick={() => setYearPageOffset(prev => prev + 4)}
+                      onClick={() => setYearPageOffset(prev => prev + VISIBLE_YEARS)}
                       className="flex-center text-muted"
-                      style={{ padding: '0.2rem 0', flexShrink: 0 }}
+                      style={{ padding: '0.4rem 0', minHeight: '32px', flexShrink: 0 }}
                     >
                       <ChevronLeft size={14} style={{ transform: 'rotate(-90deg)' }} />
                     </button>

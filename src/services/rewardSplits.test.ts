@@ -239,7 +239,7 @@ describe('a rewards wallet counted in its own unit', () => {
     // A ₹20 redemption leg — an ordinary rupee debit, since the wallet has no points ledger.
     const redemption = tx({
       id: 'leg', accountId: 'chips', date: '2026-09-05', amount: 20,
-      description: 'Rewards applied to: Swiggy Order',
+      description: 'Paid toward: Swiggy Order',
     });
     expect(rewardUnitBalance(chips(), [redemption], '2026-09')).toBe(300);
     expect(formatRewardBalance(chips(), 300)).toBe('300 Chips');

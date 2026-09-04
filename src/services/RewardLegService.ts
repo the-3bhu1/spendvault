@@ -77,7 +77,7 @@ const patchFor = (split: RewardSplitLeg, anchor: Transaction, leg: Transaction, 
     amount: Number(split.amount) || 0,
     // A CC leg's description names the card it paid and is set at creation; only a plain purchase's
     // tracks the anchor's description.
-    description: isCCPayment ? leg.description : `Rewards applied to: ${anchor.description}`,
+    description: isCCPayment ? leg.description : `Paid toward: ${anchor.description}`,
     isRewardTransaction: isPointsDenominated(source),
   };
 };

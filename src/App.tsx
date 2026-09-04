@@ -349,6 +349,11 @@ function App() {
               </button>
             </div>
 
+            {/* Each row's text column grows and its chevron does not, so every chevron lands on the
+                card's trailing edge instead of trailing the label — four different title lengths
+                otherwise put four chevrons at four different x positions. `minWidth: 0` is separate
+                from the growth and stays inline: it lets a long title ellipsise rather than shoulder
+                the chevron off the card. */}
             <div className="flex-col gap-3 no-scrollbar" style={{ padding: '0.5rem 1.5rem 2rem', overflowY: 'auto' }}>
               <div
                 className="card flex align-center gap-4 clickable"
@@ -358,11 +363,11 @@ function App() {
                 <div className="flex-center" style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'linear-gradient(135deg, #6366f1, #a855f7)', color: 'white', flexShrink: 0 }}>
                   <Users size={22} />
                 </div>
-                <div className="flex-col flex-1">
+                <div className="flex-col flex-1" style={{ minWidth: 0 }}>
                   <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Group Splits</span>
                   <span className="text-xs text-muted">Shared Expenses & Trips</span>
                 </div>
-                <ChevronRight size={18} className="text-muted" />
+                <ChevronRight size={18} className="text-muted" style={{ flexShrink: 0 }} />
               </div>
 
               <div
@@ -373,11 +378,11 @@ function App() {
                 <div className="flex-center" style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'linear-gradient(135deg, #f59e0b, #10b981)', color: 'white', flexShrink: 0 }}>
                   <HandCoins size={22} />
                 </div>
-                <div className="flex-col flex-1">
+                <div className="flex-col flex-1" style={{ minWidth: 0 }}>
                   <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Lending & Borrowing</span>
                   <span className="text-xs text-muted">Track Owe & Owed</span>
                 </div>
-                <ChevronRight size={18} className="text-muted" />
+                <ChevronRight size={18} className="text-muted" style={{ flexShrink: 0 }} />
               </div>
 
               <div
@@ -388,11 +393,11 @@ function App() {
                 <div className="flex-center" style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'linear-gradient(135deg, #8b5cf6, #3b82f6)', color: 'white', flexShrink: 0 }}>
                   <Calendar size={22} />
                 </div>
-                <div className="flex-col flex-1">
+                <div className="flex-col flex-1" style={{ minWidth: 0 }}>
                   <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Bills</span>
                   <span className="text-xs text-muted">Upcoming Obligations</span>
                 </div>
-                <ChevronRight size={18} className="text-muted" />
+                <ChevronRight size={18} className="text-muted" style={{ flexShrink: 0 }} />
               </div>
 
               {/* Rewards and Wealth used to sit here. Both now have a door of their own on the
@@ -407,11 +412,11 @@ function App() {
                 <div className="flex-center" style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'linear-gradient(135deg, #f59e0b, #ef4444)', color: 'white', flexShrink: 0 }}>
                   <Sparkles size={22} />
                 </div>
-                <div className="flex-col flex-1">
+                <div className="flex-col flex-1" style={{ minWidth: 0 }}>
                   <span className="font-bold uppercase text-mono" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>Smart Insights</span>
                   <span className="text-xs text-muted">Spend Analysis & Trends</span>
                 </div>
-                <ChevronRight size={18} className="text-muted" />
+                <ChevronRight size={18} className="text-muted" style={{ flexShrink: 0 }} />
               </div>
             </div>
           </div>

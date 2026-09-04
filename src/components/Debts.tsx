@@ -709,38 +709,47 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
                       style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       onClick={() => {
                         if (tx.markedDone) { showHint('Untick to delete'); return; }
-                        const ledgerTx = data.transactions.find(t => t.linkedTransactionIds?.includes(tx.id));
-                        const isLendingCategory = ledgerTx?.category === 'Lending & Borrowing';
+                        // EVERY ledger row referencing this entry, not the first one
+                        // found. A single bank row can legitimately carry two debt
+                        // refs — one ₹1,800 credit split across two people's ledgers —
+                        // and a `find` here scrubbed one while stranding the other.
+                        const ledgerTxs = data.transactions.filter(t => (t.linkedTransactionIds || []).includes(tx.id));
+                        const hasLedger = ledgerTxs.length > 0;
+
+                        const removeEntry = () => {
+                          const updatedTransactions = debt.transactions.filter(t => t.id !== tx.id);
+                          if (updatedTransactions.length === 0) {
+                            onDelete();
+                          } else {
+                            onUpdateDebt({ ...debt, transactions: updatedTransactions, status: calcDebtBalance(updatedTransactions) === 0 ? 'settled' : 'active', updatedAt: Date.now() });
+                          }
+                          setConfirmConfig(null);
+                        };
+
                         setConfirmConfig({
-                          title: (ledgerTx && !isLendingCategory) ? "Delete Linked Transaction?" : "Delete Transaction?",
-                          message: (ledgerTx && !isLendingCategory)
+                          title: hasLedger ? "Delete Linked Transaction?" : "Delete Transaction?",
+                          message: hasLedger
                             ? "This record is linked to your Ledger. What would you like to do?"
                             : "Are you sure you want to delete this record?",
-                          confirmLabel: (ledgerTx && !isLendingCategory) ? "Delete from Both" : "Delete",
-                          thirdLabel: (ledgerTx && !isLendingCategory) ? "Remove from History Only" : undefined,
+                          confirmLabel: hasLedger ? "Delete from Both" : "Delete",
+                          // Offered for every linked row now, Lending & Borrowing
+                          // included. Withholding it from exactly those left "delete
+                          // the bank row outright" as the only way out of this dialog,
+                          // so an entry removed by any other route left its reference
+                          // behind — and nothing downstream can clear a reference whose
+                          // entry has already gone.
+                          thirdLabel: hasLedger ? "Remove from History Only" : undefined,
                           isDanger: true,
                           onConfirm: () => {
-                            if (ledgerTx) deleteTransaction(ledgerTx.id);
-                            const updatedTransactions = debt.transactions.filter(t => t.id !== tx.id);
-                            if (updatedTransactions.length === 0) {
-                              onDelete();
-                            } else {
-                              onUpdateDebt({ ...debt, transactions: updatedTransactions, status: calcDebtBalance(updatedTransactions) === 0 ? 'settled' : 'active', updatedAt: Date.now() });
-                            }
-                            setConfirmConfig(null);
+                            ledgerTxs.forEach(ledgerTx => deleteTransaction(ledgerTx.id));
+                            removeEntry();
                           },
-                          onThirdAction: (ledgerTx && !isLendingCategory) ? () => {
-                            updateTransaction({
+                          onThirdAction: hasLedger ? () => {
+                            ledgerTxs.forEach(ledgerTx => updateTransaction({
                               ...ledgerTx,
-                              linkedTransactionIds: ledgerTx.linkedTransactionIds?.filter(id => id !== tx.id)
-                            });
-                            const updatedTransactions = debt.transactions.filter(t => t.id !== tx.id);
-                            if (updatedTransactions.length === 0) {
-                              onDelete();
-                            } else {
-                              onUpdateDebt({ ...debt, transactions: updatedTransactions, status: calcDebtBalance(updatedTransactions) === 0 ? 'settled' : 'active', updatedAt: Date.now() });
-                            }
-                            setConfirmConfig(null);
+                              linkedTransactionIds: (ledgerTx.linkedTransactionIds || []).filter(id => id !== tx.id)
+                            }));
+                            removeEntry();
                           } : undefined,
                           onCancel: () => setConfirmConfig(null)
                         });

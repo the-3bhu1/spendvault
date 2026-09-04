@@ -1157,3 +1157,166 @@ export function getInvestmentAccountStats(
     currentPrice
   };
 }
+
+// ---------------------------------------------------------------------------
+// Day ordering
+//
+// A transaction's `order` only means anything against the other rows sharing its
+// `date`: each day is a gap-free, duplicate-free 0..N-1 run. Two invariants ride
+// on that run, and the drag-reorder maths breaks the moment either slips:
+//
+//   1. the run is contiguous — no gaps, no duplicates
+//   2. the members of a linked group sit on ADJACENT indices
+//
+// (2) is the subtle one, and it is what these helpers exist to keep true. A
+// linked group is dragged as a unit, so the drag has to know how many slots it
+// occupies; with its legs scattered the only answer available was "the span from
+// the first leg to the last", which is how one drag used to pick up — and
+// relocate — every unrelated row caught in between. Nothing renumbers a day into
+// that state on purpose: a leg created by an EDIT used to be appended at
+// `maxOrder + 1` while its parent kept the order it had always had, and the
+// load-time heal deliberately preserves visible order, so it could never see the
+// gap, let alone close it.
+// ---------------------------------------------------------------------------
+
+/** The ids `tx` links to, tolerating the legacy single-id field. */
+export const linkedIdsOf = (tx: Transaction): string[] =>
+  tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []);
+
+/**
+ * Every member of `tx`'s linked group that is present in `pool`, in pool order.
+ *
+ * Legs use a STAR topology — children link to the parent, not to each other — so
+ * a 1-hop walk from a child misses its siblings. The last clause closes that by
+ * also pulling in rows that link to the same parent(s) `tx` links to. Kept here
+ * rather than inline at each call site because the render, the drag and the
+ * invariant check all have to agree on what "one group" means: when they drifted,
+ * the drag moved a block the render had never drawn.
+ *
+ * Ids that resolve to nothing in `pool` are simply absent from the result — a ref
+ * to a debt ledger entry (a legitimate cross-reference) or to a since-deleted row
+ * contributes no member rather than corrupting the group.
+ */
+export function linkedGroupOf(tx: Transaction, pool: Transaction[]): Transaction[] {
+  const linkedIds = linkedIdsOf(tx);
+  if (!linkedIds.length) return pool.filter(o => o.id === tx.id);
+  return pool.filter(o =>
+    o.id === tx.id ||
+    linkedIds.includes(o.id) ||
+    linkedIdsOf(o).includes(tx.id) ||
+    linkedIds.some(pid => linkedIdsOf(o).includes(pid))
+  );
+}
+
+/**
+ * `day` re-sequenced so every linked group occupies adjacent slots, each group
+ * anchored at its FIRST member's position and everything else keeping its
+ * relative order. Returns the input array itself when nothing had to move, so
+ * callers can cheaply tell a no-op from a change.
+ *
+ * This is the invariant's enforcement point. It runs on every write that can
+ * disturb a day, which is the only way to stop the scatter coming back: the fix
+ * for how gaps were *created* stops new ones, but a day can still be nudged into
+ * a split group by a reorder made while a filter is hiding part of it.
+ */
+export function compactLinkedGroups(day: Transaction[]): Transaction[] {
+  const out: Transaction[] = [];
+  const placed = new Set<string>();
+  day.forEach(tx => {
+    if (placed.has(tx.id)) return;
+    linkedGroupOf(tx, day).forEach(member => {
+      if (placed.has(member.id)) return;
+      placed.add(member.id);
+      out.push(member);
+    });
+  });
+  return out.every((t, i) => t === day[i]) ? day : out;
+}
+
+/** `day`'s rows sorted into their stored order, falling back to array position. */
+export const sortDayByOrder = (day: Transaction[]): Transaction[] =>
+  [...day].sort((a, b) => {
+    const oa = a.order !== undefined ? a.order : day.indexOf(a);
+    const ob = b.order !== undefined ? b.order : day.indexOf(b);
+    return oa - ob;
+  });
+
+/**
+ * The day's rows after a reorder that only the VISIBLE rows took part in.
+ *
+ * `newVisible` is the visible rows in their new sequence; every other row in
+ * `day` is hidden behind a filter or a search and must not be dragged along. Each
+ * visible slot in `day` is refilled from `newVisible` in sequence, which makes
+ * the whole operation a permutation of the slots the visible rows already
+ * occupied: hidden rows keep their exact positions, and because no new order
+ * values are invented the 0..N-1 run cannot gain a gap or a duplicate.
+ *
+ * With three visible rows sitting on orders 3, 5 and 7 of a ten-row day, dragging
+ * the second above the first swaps 3 and 5 and leaves 7 — and every hidden row —
+ * exactly where it was. The renumber this replaced wrote 0, 1, 2 onto those three
+ * rows instead, colliding head-on with the hidden rows already holding 0, 1 and 2
+ * and scrambling the day the moment the filter came off.
+ *
+ * A redeal can still drop an unrelated row between two legs (the visible slots a
+ * group lands on need not be adjacent), so groups are compacted afterwards.
+ */
+export function applyVisibleReorder(day: Transaction[], newVisible: Transaction[]): Transaction[] {
+  const visibleIds = new Set(newVisible.map(t => t.id));
+  let next = 0;
+  const redealt = day.map(t => (visibleIds.has(t.id) ? newVisible[next++] : t));
+  return compactLinkedGroups(redealt);
+}
+
+/** The rows of `day` whose stored `order` no longer matches their position. */
+export function dayOrderUpdates(day: Transaction[]): Transaction[] {
+  const updates: Transaction[] = [];
+  day.forEach((t, i) => {
+    if (t.order !== i) updates.push({ ...t, order: i });
+  });
+  return updates;
+}
+
+/**
+ * `transactions` with `tx` added, placed inside its own day rather than dumped at
+ * the end of it.
+ *
+ * A leg lands directly after the last member of the group it links to. The log
+ * form creates legs BEFORE saving the row they belong to, so on a brand-new log
+ * the parent does not exist yet, the leg appends, the parent appends right behind
+ * it and the two are adjacent anyway. On an EDIT the parent is already there on
+ * whatever order it has always had, and appending stranded the new leg at the far
+ * end of the day — the gap that armed the drag bug. An explicit `tx.order` is
+ * honoured as an insertion index.
+ *
+ * Array position is left alone: rows are patched in place and `tx` is appended,
+ * because `order` is what the day sorts by and other call sites lean on the array
+ * order they already have.
+ */
+export function insertIntoDay(transactions: Transaction[], tx: Transaction): Transaction[] {
+  const sorted = sortDayByOrder(transactions.filter(t => t.date === tx.date));
+
+  let at = sorted.length;
+  if (tx.order !== undefined) {
+    at = Math.max(0, Math.min(sorted.length, tx.order));
+  } else {
+    const linkedIds = linkedIdsOf(tx);
+    if (linkedIds.length) {
+      // Every slot the linked group already occupies, so a second leg lands after
+      // the first rather than between the parent and the leg it just gained.
+      const anchors = sorted.filter(t => linkedIds.includes(t.id));
+      const occupied = anchors
+        .flatMap(a => linkedGroupOf(a, sorted))
+        .map(m => sorted.indexOf(m))
+        .filter(i => i > -1);
+      if (occupied.length) at = Math.max(...occupied) + 1;
+    }
+  }
+
+  const placed = compactLinkedGroups([...sorted.slice(0, at), tx, ...sorted.slice(at)]);
+  const orderById = new Map(placed.map((t, i) => [t.id, i]));
+  const patched = transactions.map(t => {
+    const o = orderById.get(t.id);
+    return o !== undefined && t.order !== o ? { ...t, order: o } : t;
+  });
+  return [...patched, { ...tx, order: orderById.get(tx.id) ?? 0 }];
+}

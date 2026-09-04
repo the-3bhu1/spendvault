@@ -296,7 +296,10 @@ export function FilterPills<T extends string>({
   const [thumbBox, setThumbBox] = useState<{ left: number; width: number } | null>(null);
   useLayoutEffect(() => {
     const el = trackRef.current;
-    if (!el || !scrollable || scrolls) {
+    // Every row that shows a thumb at all, since all of them are label-sized now — the same
+    // condition the pill styles branch on, and it has to stay that way: a thumb still doing the
+    // equal-cell arithmetic over label-sized pills lands the wrong width in the wrong place.
+    if (!el || scrolls) {
       setThumbBox(null);
       return;
     }
@@ -308,7 +311,7 @@ export function FilterPills<T extends string>({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [scrollable, scrolls, active, N]);
+  }, [scrolls, active, N]);
 
   // ENDLESS ROW. The pills are laid out THREE times over and the view is parked in the middle copy;
   // whenever scrolling carries it into the first or last copy, scrollLeft jumps by exactly one set.
@@ -554,21 +557,33 @@ export function FilterPills<T extends string>({
                 // same: 2 × padding, whatever those labels happen to be. Capped, because one
                 // absurdly long card name should truncate rather than push the row off the ring.
                 ? { flex: 'none', padding: '0.5rem 0.95rem', maxWidth: '170px' }
-                : scrollable
-                  /* The same row when its pills DO fit. `flex: 1` here meant equal cells, which put
-                     the label-sizing argument above into reverse the moment the row stopped
-                     scrolling: ALL floated in the middle of a wide cell while JUPITER nearly filled
-                     its own, so the track's left edge sat 74px from the first label and its right
-                     edge 31px from the last. Same row, same pills, visibly lopsided — and only in
-                     this mode, which is why it read as the row behaving differently when it stopped
-                     scrolling.
-                     `1 1 auto` keeps the label-sized base and lets every pill grow from it by an
-                     EQUAL share of the slack (equal grow factors, so free space divides N ways).
-                     The track still fills edge to edge, and the space around every label — the first
-                     and the last included — is identical by construction, exactly as it is when the
-                     row scrolls. */
-                  ? { flex: '1 1 auto', minWidth: 0, padding: '0.5rem 0.95rem' }
-                  : { flex: 1, minWidth: 0, padding: '0.5rem 0' }),
+                /* EVERY row that isn't scrolling, whichever width mode it is in. `flex: 1` here
+                   meant equal cells, which put the label-sizing argument above into reverse: a
+                   short label floated in the middle of a wide cell while a long one nearly filled
+                   its own, so the whitespace around a label was set by the length of that label
+                   instead of being constant. Wealth's Assets row ran 21.8px from the track's left
+                   edge to ALL against 13.8px from OTHER to its right edge, with the gaps between
+                   stepping 37.7 / 33.6 / 21.5 / 17.4 — every one different.
+                   `1 1 auto` keeps the label-sized base and lets every pill grow from it by an
+                   EQUAL share of the slack (equal grow factors divide free space N ways). Each
+                   label then carries `padding + share/2` on both sides, so the two track edges
+                   match and every label-to-label gap matches, exactly as they do when the row
+                   scrolls.
+                   This was gated on `scrollable` when the Statements row was fixed, which left
+                   both of Wealth's rows behind — Assets on the `flexible` branch and Portfolio on
+                   the plain fixed one. There is no mode in which equal cells were the right answer,
+                   so the three branches are now one.
+
+                   The padding is the one thing that still has to know which mode it is in, because
+                   it is a MINIMUM and the two modes have very different room for it. A scrollable
+                   row's track is the full width, so 0.95rem is free. A width-budgeted row's is
+                   `N × pillWidth`, and 0.95rem a side leaves a 68px budget only 37.6px of label —
+                   enough to ellipsise WALLETS, and enough to push the row's own base past the
+                   track, at which point the pills SHRINK proportionally rather than grow equally
+                   and the whole point is lost. (Measured: it clipped four of the five Assets pills
+                   and left Portfolio's edges 16.2 against 8.8.) Half that keeps every current
+                   label whole with slack to spare. */
+                : { flex: '1 1 auto', minWidth: 0, padding: scrollable ? '0.5rem 0.95rem' : '0.5rem 0.5rem' }),
               position: 'relative',
               zIndex: 1,
               border: 'none',

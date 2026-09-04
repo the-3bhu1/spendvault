@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account, InvestmentKind } from '../types';
-import { formatCurrency, formatAmount, formatDateString, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, getInvestmentKind, isCountableTransaction, isExternalRewardSource, getRewardSplits, rewardSplitIndexOfLeg, rewardSplitOfLeg, accountNameOf } from '../utils';
+import { formatCurrency, formatAmount, formatDateString, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, getInvestmentKind, isCountableTransaction, isExternalRewardSource, getRewardSplits, rewardSplitIndexOfLeg, rewardSplitOfLeg, accountNameOf, linkedGroupOf, applyVisibleReorder, dayOrderUpdates, sortDayByOrder } from '../utils';
 import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, ChevronRight, ChevronDown, Hash, Shapes, Layers, Sparkles, Loader2, Filter, ArrowUp } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
@@ -1204,12 +1204,10 @@ export default function Transactions() {
                   {isExpanded && (
                     <div className="fade-in">
                       {Object.entries(groupedByDate).sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime()).map(([date, txs]) => {
-                        const allTxsOnDate = data.transactions.filter(t => t.date === date);
-                        const sortedAllTxsOnDate = [...allTxsOnDate].sort((a, b) => {
-                          const orderA = a.order !== undefined ? a.order : allTxsOnDate.indexOf(a);
-                          const orderB = b.order !== undefined ? b.order : allTxsOnDate.indexOf(b);
-                          return orderA - orderB;
-                        });
+                        // The WHOLE day, filters ignored. `txs` below is the filtered
+                        // view; a reorder has to be written back against this, or it
+                        // renumbers over the top of rows the filter is hiding.
+                        const sortedAllTxsOnDate = sortDayByOrder(data.transactions.filter(t => t.date === date));
                         const sortedTxs = [...txs].sort((a, b) => {
                           return sortedAllTxsOnDate.indexOf(a) - sortedAllTxsOnDate.indexOf(b);
                         });
@@ -1248,18 +1246,12 @@ export default function Transactions() {
 
                                   const linkedIds = t.linkedTransactionIds || (t.linkedTransactionId ? [t.linkedTransactionId] : []);
                                   if (linkedIds.length > 0) {
-                                    // Linked legs use a STAR topology (children link only to the parent,
-                                    // not to each other). A 1-hop filter from a child misses its siblings,
-                                    // so also pull in txs that link to the same parent(s) `t` links to.
-                                    // Without this, a 3-leg group (e.g. reward split: card + bank + reward)
-                                    // whose parent is iterated AFTER its children maps only the last child
-                                    // and silently hides the other leg. See docs/LINKED_TRANSACTIONS.md.
-                                    const group = sortedTxs.filter(other =>
-                                      other.id === t.id ||
-                                      linkedIds.includes(other.id) ||
-                                      (other.linkedTransactionIds && other.linkedTransactionIds.includes(t.id)) ||
-                                      linkedIds.some(pid => other.linkedTransactionIds?.includes(pid))
-                                    );
+                                    // Shared with the drag and the invariant check — see linkedGroupOf.
+                                    // All three have to agree on what "one group" is: while the drag
+                                    // kept its own copy of this rule it moved blocks the render had
+                                    // never drawn. (Star topology: children link to the parent, not to
+                                    // each other. See docs/LINKED_TRANSACTIONS.md.)
+                                    const group = linkedGroupOf(t, sortedTxs);
 
                                     const uncollapsedInGroup = group.filter(other => !collapsedTxIds.has(other.id));
                                     if (uncollapsedInGroup.length > 1) {
@@ -1353,18 +1345,18 @@ export default function Transactions() {
                                 return sortedTxs.map((tx) => {
                                   if (collapsedTxIds.has(tx.id)) return null;
 
-                                  const linkedIds = tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []);
-                                  const group = sortedTxs.filter(t =>
-                                    t.id === tx.id ||
-                                    linkedIds.includes(t.id) ||
-                                    (t.linkedTransactionIds && t.linkedTransactionIds.includes(tx.id)) ||
-                                    linkedIds.some(pid => t.linkedTransactionIds?.includes(pid))
-                                  );
-                                  const firstGroupIdx = sortedTxs.indexOf(group[0]);
-                                  const lastGroupIdx = sortedTxs.indexOf(group[group.length - 1]);
+                                  const group = linkedGroupOf(tx, sortedTxs);
+                                  const groupIds = new Set(group.map(g => g.id));
+                                  const firstGroupIdx = sortedTxs.findIndex(t => groupIds.has(t.id));
+                                  const lastGroupIdx = sortedTxs.map(t => groupIds.has(t.id)).lastIndexOf(true);
                                   const isFirstInGroupAndList = firstGroupIdx === 0;
                                   const isLastInGroupAndList = lastGroupIdx === sortedTxs.length - 1;
-                                  const groupBlockLen = lastGroupIdx - firstGroupIdx + 1;
+                                  // How many slots this row really consumes — its MEMBER COUNT, not
+                                  // the distance from its first leg to its last. Those are the same
+                                  // number for a group whose legs are adjacent, which they are meant
+                                  // to be; the span was what turned a scattered group into a drag
+                                  // that swallowed every unrelated row lying between two legs.
+                                  const groupBlockLen = group.length;
 
                                   return (
                                     <TransactionRow
@@ -1377,27 +1369,41 @@ export default function Transactions() {
                                       onDelete={handleDelete}
                                       blockLen={groupBlockLen}
                                       onMoveBy={(steps) => {
-                                        // Reposition the whole (possibly linked) group by `steps`
-                                        // slots within this date in one shot, then renumber the
-                                        // date's order field 0..N-1. Single pass keeps the dragged
-                                        // row locked to the finger even on fast multi-row drags.
+                                        // Reposition this (possibly linked) group by `steps` slots in
+                                        // one pass, which is what keeps the dragged row locked to the
+                                        // finger even on a fast multi-row drag.
                                         //
                                         // Bail if a prior reorder from this same drag hasn't committed
                                         // yet: our `sortedTxs`/`firstGroupIdx` closure would be stale and
                                         // the renumber would fight the in-flight one. Returning false tells
                                         // the row not to consume this crossing so it retries post-commit.
                                         if (reorderPendingRef.current) return false;
-                                        const blockLen = lastGroupIdx - firstGroupIdx + 1;
-                                        const list = [...sortedTxs];
-                                        const block = list.splice(firstGroupIdx, blockLen);
+
+                                        // Move the group's ACTUAL members. Splicing out
+                                        // `first..last` instead swept up everything sitting between
+                                        // two legs and relocated it — rows the drag never touched.
+                                        const block = sortedTxs.filter(t => groupIds.has(t.id));
+                                        const rest = sortedTxs.filter(t => !groupIds.has(t.id));
+                                        // `firstGroupIdx` is the group's lowest slot, so no member
+                                        // precedes it and the index needs no correction for removal.
                                         let insertAt = firstGroupIdx + steps;
                                         if (insertAt < 0) insertAt = 0;
-                                        if (insertAt > list.length) insertAt = list.length;
-                                        list.splice(insertAt, 0, ...block);
-                                        const updates: Transaction[] = [];
-                                        list.forEach((t, i) => {
-                                          if (t.order !== i) updates.push({ ...t, order: i });
-                                        });
+                                        if (insertAt > rest.length) insertAt = rest.length;
+                                        const newVisible = [
+                                          ...rest.slice(0, insertAt), ...block, ...rest.slice(insertAt)
+                                        ];
+
+                                        // Write the move back against the WHOLE day. `sortedTxs` is
+                                        // the filtered view, so renumbering it 0..N-1 — as this used
+                                        // to — stamped orders straight onto rows a filter was hiding:
+                                        // three visible rows became 0, 1, 2 and collided with the
+                                        // three hidden rows already holding 0, 1 and 2. Redealing
+                                        // instead permutes only the slots the visible rows already
+                                        // occupied, so hidden rows keep their positions and the day
+                                        // cannot gain a gap or a duplicate.
+                                        const updates = dayOrderUpdates(
+                                          applyVisibleReorder(sortedAllTxsOnDate, newVisible)
+                                        );
                                         if (updates.length) {
                                           reorderPendingRef.current = true;
                                           reorderTransactions(...updates);

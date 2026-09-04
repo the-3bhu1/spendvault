@@ -7,6 +7,7 @@ import {
   INVESTMENT_CATEGORY, isInvestmentCategory, inferInvestmentKind, getInvestmentKind,
   getRewardSplits, isRewardSourceOf, redistributeRewardSplits, rewardLegIdsOf,
   rewardSplitIndexOfLeg, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits,
+  insertIntoDay, linkedGroupOf, linkedIdsOf, sortDayByOrder,
 } from './utils';
 import { resolveRewardLegPlan } from './services/RewardLegService';
 
@@ -1055,30 +1056,51 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     localStorage.setItem(SMS_QUEUE_STORAGE_KEY, JSON.stringify(smsQueue));
   }, [smsQueue]);
 
-  // Dev-only diagnostic: the drag-reorder logic requires each day's `order` to be a gap-free,
-  // duplicate-free 0..N-1 run with linked-group legs sitting on adjacent indices. If either
-  // invariant ever breaks at runtime, log the offending day so we can trace what produced it
-  // (this is the state that let a single drag scramble untouched rows). Warn-only, no mutation.
+  // The drag-reorder maths requires each day's `order` to be a gap-free,
+  // duplicate-free 0..N-1 run with every linked group's legs on adjacent indices.
+  // If either invariant breaks at runtime, report the offending day so we can
+  // trace what produced it — this is the state that let a single drag scramble
+  // untouched rows. Warn-only, never mutates: healing here would hide the write
+  // that did the damage, which is exactly how this went unnoticed for so long.
+  //
+  // Runs in production too, and deliberately. Gated to DEV it could only ever
+  // fire on a dataset a developer happened to be holding, and every real instance
+  // of this bug lived on a phone. Deduped by signature so a genuinely broken day
+  // reports once rather than on every keystroke that touches the ledger.
+  const reportedInvariants = useRef(new Set<string>());
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
     const byDate = new Map<string, Transaction[]>();
     data.transactions.forEach(t => {
       const arr = byDate.get(t.date);
       if (arr) arr.push(t); else byDate.set(t.date, [t]);
     });
+    const report = (signature: string, ...args: unknown[]) => {
+      if (reportedInvariants.current.has(signature)) return;
+      reportedInvariants.current.add(signature);
+      console.warn(...args);
+    };
     byDate.forEach((dayTxs, date) => {
-      const sorted = [...dayTxs].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      const sorted = sortDayByOrder(dayTxs);
       if (!sorted.every((t, i) => t.order === i)) {
-        console.warn(`[order-invariant] ${date}: order is not a clean 0..N-1 run`, sorted.map(t => t.order));
+        const orders = sorted.map(t => t.order);
+        report(`run:${date}:${orders.join(',')}`,
+          `[order-invariant] ${date}: order is not a clean 0..N-1 run`, orders);
       }
+      // Checked through the same grouping rule the render and the drag use, so a
+      // change to what counts as "one group" can never leave this check behind
+      // asserting the old shape.
       const idxById = new Map(sorted.map((t, i) => [t.id, i]));
+      const seen = new Set<string>();
       sorted.forEach(t => {
-        const links = (t.linkedTransactionIds || (t.linkedTransactionId ? [t.linkedTransactionId] : []))
-          .filter(id => idxById.has(id));
-        if (!links.length) return;
-        const idxs = [idxById.get(t.id)!, ...links.map(id => idxById.get(id)!)].sort((a, b) => a - b);
+        if (seen.has(t.id)) return;
+        const group = linkedGroupOf(t, sorted);
+        group.forEach(m => seen.add(m.id));
+        if (group.length < 2) return;
+        const idxs = group.map(m => idxById.get(m.id)!).sort((a, b) => a - b);
         if (!idxs.every((v, i) => i === 0 || v === idxs[i - 1] + 1)) {
-          console.warn(`[order-invariant] ${date}: linked group not adjacent`, t.id, idxs);
+          report(`group:${date}:${group.map(m => m.id).sort().join(',')}`,
+            `[order-invariant] ${date}: linked group not adjacent`,
+            { ids: group.map(m => m.id), indices: idxs });
         }
       });
     });
@@ -1312,24 +1334,18 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const addTransaction = (transaction: Transaction) => {
     setData(prev => {
-      const txsOnDate = prev.transactions.filter(t => t.date === transaction.date);
-      const maxOrder = txsOnDate.reduce((max, t, idx) => {
-        const ord = t.order !== undefined ? t.order : idx;
-        return ord > max ? ord : max;
-      }, -1);
-      
       const newTxId = transaction.id || crypto.randomUUID();
-      const initialTx = {
-        ...transaction,
-        id: newTxId,
-        order: transaction.order !== undefined ? transaction.order : (maxOrder + 1)
-      };
+      const initialTx = { ...transaction, id: newTxId };
 
       const { updatedDebts, updatedTx } = syncDebtsForTransaction(prev.debts || [], undefined, initialTx);
 
       return {
         ...prev,
-        transactions: [...prev.transactions, updatedTx],
+        // Placed INSIDE its day rather than stamped with `maxOrder + 1`: a leg has
+        // to land beside the parent it links to, or it strands itself at the far
+        // end of the day and the gap it leaves behind makes the next drag on that
+        // day haul every row in between along with it. See insertIntoDay.
+        transactions: insertIntoDay(prev.transactions, updatedTx),
         debts: updatedDebts
       };
     });
@@ -1968,10 +1984,25 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const deleteDebt = (id: string) => {
-    setData(prev => ({
-      ...prev,
-      debts: (prev.debts || []).filter(d => d.id !== id)
-    }));
+    setData(prev => {
+      // Transactions that referenced this debt's ledger entries keep their own
+      // money record — removing a person is not a reason to delete bank rows —
+      // but they have to let go of the reference, because nothing else ever will.
+      // The one other cleanup (syncDebtsForTransaction's Scenario B) can only
+      // strip ids it can still SEE in the debts, so an id whose entry is already
+      // gone is unreachable from the moment it is stranded.
+      const doomed = (prev.debts || []).find(d => d.id === id);
+      const deadIds = new Set((doomed?.transactions || []).map(dt => dt.id));
+      return {
+        ...prev,
+        debts: (prev.debts || []).filter(d => d.id !== id),
+        transactions: deadIds.size === 0 ? prev.transactions : prev.transactions.map(t => {
+          const links = linkedIdsOf(t);
+          if (!links.some(l => deadIds.has(l))) return t;
+          return { ...t, linkedTransactionIds: links.filter(l => !deadIds.has(l)) };
+        })
+      };
+    });
   };
 
   const loadDemoData = () => {
