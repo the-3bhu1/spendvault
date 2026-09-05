@@ -308,12 +308,20 @@ export default function OnboardingScreen() {
     }}>
       {/* Top Header / Progress indicator */}
       <div className="flex-col align-center w-100 gap-4" style={{ maxWidth: '400px' }}>
+        {/* ONE DOT PER STEP, generated from the step count rather than hand-written.
+            There were three dots against four steps: the recovery key is step 4, so the bar filled
+            completely at step 3 and the last screen of setup sat under a progress indicator that
+            already read as finished.
+            Four is the length of the LONGER branch. Step 2 forks — "Use without a lock" finishes
+            there, so that path ends at two of four. That is the right way round to be wrong: a bar
+            sized to the short branch would have to grow when someone chooses to set a PIN, and a
+            progress indicator that gets longer as you go is worse than one that ends early on a
+            screen you leave immediately. */}
         <div className="flex align-center justify-center gap-4" style={{ width: '100%' }}>
-          <div className={`step-dot ${step >= 1 ? 'active' : ''}`} />
-          <div className="step-line" />
-          <div className={`step-dot ${step >= 2 ? 'active' : ''}`} />
-          <div className="step-line" />
-          <div className={`step-dot ${step >= 3 ? 'active' : ''}`} />
+          {[1, 2, 3, 4].flatMap((n, i) => [
+            ...(i > 0 ? [<div key={`line-${n}`} className="step-line" />] : []),
+            <div key={`dot-${n}`} className={`step-dot ${step >= n ? 'active' : ''}`} />,
+          ])}
         </div>
         <div className="text-center w-100" style={{ marginTop: '0.5rem' }}>
           <h1 className="navbar-title text-accent uppercase font-bold" style={{ fontSize: '1.25rem', letterSpacing: '2px', margin: 0 }}>
@@ -481,7 +489,7 @@ export default function OnboardingScreen() {
                 type="checkbox"
                 checked={hasSavedKey}
                 onChange={e => setHasSavedKey(e.target.checked)}
-                style={{ width: '20px', height: '20px', accentColor: 'var(--accent)', cursor: 'pointer' }}
+
               />
               <span className="text-xs text-muted" style={{ userSelect: 'none' }}>
                 I have securely saved my Master Recovery Key.
