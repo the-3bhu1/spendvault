@@ -75,12 +75,7 @@ export function CustomPicker({
 
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    if (!isOpen) {
-      setCollapsedGroups({});
-      setSearchQuery('');
-    }
-  }, [isOpen]);
+
 
   const flatListThreshold = 7;
   const groupCollapseThreshold = 4;
@@ -333,7 +328,17 @@ export function CustomPicker({
       {!hideLabel && <label>{label}</label>}
       <div
         className={`custom-select-trigger ${isOpen ? 'active' : ''} ${error ? 'border-danger' : ''}`}
-        onClick={() => setIsOpen(true)}
+        /* The sheet's transient state is cleared on the way IN, not on the way out. An effect
+           watching isOpen did the same job from the other side, but it also ran on mount — where
+           there is nothing to clear — and setCollapsedGroups({}) hands React a fresh object every
+           time, so it could not bail out and every closed picker on a form paid a wasted render to
+           reset state it had never set. There are four ways to close this sheet and exactly one to
+           open it, and "clean when it opens" is the requirement either way. */
+        onClick={() => {
+          setCollapsedGroups({});
+          setSearchQuery('');
+          setIsOpen(true);
+        }}
       >
         <div className="flex align-center gap-3" style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
           {triggerIconOption && iconGetter && (
