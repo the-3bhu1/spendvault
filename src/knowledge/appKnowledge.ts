@@ -227,6 +227,12 @@ the "Other" source below covers one-off rewards.
   This applies ONLY to a part-paid purchase. A plain purchase shows its single amount as always, and
   a linked pair that is NOT a split (a transfer, a CC payment, an investment) never gets a combined
   figure — its two legs are the same money counted twice and adding them would double it.
+  THE HEADLINE FOLLOWS WHAT THE CURRENT VIEW CAN ACCOUNT FOR. Filtering the ledger to one account
+  takes the other source's leg out of the list, and out of the day and month totals with it — so on
+  a filtered view the same row leads with the −₹106 this account lent and the line below reads
+  "of ₹187". The bold figure and the totals beside it therefore always agree. A one-time reward
+  logged before redemption legs existed has no leg at all, so it reads that way unfiltered too
+  (−₹120 over "of ₹150", with the "₹30 REWARD" pill naming the difference).
   The source's leg is collapsed under the row as a linked
   entry ("Part-paid with rewards", or "Funding + rewards" on a CC Payment). That toggle says
   "rewards" whatever the source was, so it reads that way for an e-wallet leg too. Each leg is named

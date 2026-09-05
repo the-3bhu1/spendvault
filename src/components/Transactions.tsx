@@ -57,6 +57,20 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
   // a split — see rewardSplitGross, which is where the reasoning lives.
   const splitPaidElsewhere = rewardSplitTotal(tx);
   const splitGross = rewardSplitGross(tx);
+  // How much of that "elsewhere" money is ACTUALLY IN THIS VIEW, as legs rendered under this row.
+  // Counterparts are built from the filtered day list, so filtering the ledger to the card takes the
+  // wallet leg out of both the counterparts and the day and month totals — and the headline was the
+  // one figure that carried on quoting the full price regardless. A ₹187 row over a ₹106 day total,
+  // with the ₹81 that explains the gap filtered out of reach.
+  //
+  // Read off the SPLIT rather than the leg's own amount: the split's figure is the one
+  // rewardSplitTotal added up, so a row with every leg present lands back on splitGross exactly,
+  // with no float drift deciding which branch below is taken.
+  const splitShownHere = (counterparts || []).reduce(
+    (sum, c) => sum + (rewardSplitOfLeg(tx, c.tx)?.amount || 0), 0);
+  // What the screen can account for, which is what the totals beside it counted. Equals splitGross
+  // unfiltered, and tx.amount once the legs are filtered away.
+  const headline = tx.amount + splitShownHere;
   const [swipeX, setSwipeX] = useState(0);
   const [swipeY, setSwipeY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -314,7 +328,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
               Both figures go through formatAmount with the same account, so a wallet counted in
               Chips renders both lines in Chips rather than switching units halfway down. */}
           <span className="text-mono" style={{ fontWeight: 800, fontSize: '1rem', color: tx.type === 'credit' ? '#10b981' : '#ef4444' }}>
-            {tx.type === 'credit' ? '+' : '-'}{formatAmount(splitGross > 0 ? splitGross : tx.amount, acc)}
+            {tx.type === 'credit' ? '+' : '-'}{formatAmount(headline, acc)}
           </span>
           {/* The account's own share, in the metadata row's exact type — same classes, same weight —
               so it lands on the line the account NAME is already on, and the two read across as
@@ -327,7 +341,12 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
               title={`${formatAmount(splitGross, acc)} total · ${formatAmount(tx.amount, acc)} from ${accountNameOf(tx.accountId, data.accounts)} · ${formatAmount(splitPaidElsewhere, acc)} from another source`}
               style={{ fontWeight: 600, marginTop: '2px' }}
             >
-              {formatAmount(tx.amount, acc)}
+              {/* Whichever of the two figures the headline is NOT, so the pair always spans the
+                  whole purchase. Unfiltered the headline is the price and this is the card's share,
+                  reading across to the account name beside it. Filtered, the headline has dropped to
+                  the card's share and this becomes the price — which needs the "of", because a
+                  LARGER number sitting under the total would otherwise read as anything but. */}
+              {headline >= splitGross ? formatAmount(tx.amount, acc) : `of ${formatAmount(splitGross, acc)}`}
             </span>
           )}
           {acc?.isNcmcEnabled && tx.isTravelTransaction && <span className="metric-pill" style={{ marginTop: '6px', backgroundColor: 'var(--accent)', color: 'var(--bg-color)', borderColor: 'var(--accent)' }}>TRAVEL</span>}
