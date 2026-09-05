@@ -460,6 +460,16 @@ entries yourself settles it too. It only works one way — to re-open a settled 
 A debt whose net balance reaches zero settles on its own, with all its entries marked done. Entries logged to the main ledger use the
 "Lending & Borrowing" category, so they never count toward Spends or Income (see Categories & Budgets) —
 only the account balance moves.
+Sharing a person's history: the share icon in that person's header (left of the tick) sends the
+whole history as PNG image(s) — image only, no accompanying message, since every figure a message
+would repeat is already on the picture. Each image carries the person's name, the net balance and
+which way it points in words ("Balaji owes you" / "You owe Balaji"), then the entries newest-first,
+twelve to a page; a long history simply becomes several images rather than one very tall one, and
+each one repeats the header so it stands alone. It is always the WHOLE history — there is no "open
+entries only" or date-range option, and that is deliberate: a tick is a checkoff that does not
+change the balance, and this ledger is cumulative, so either filter would list rows that do not add
+up to the figure printed above them. On a phone this opens the share sheet; on a desktop browser
+that cannot share files, the PNGs download instead.
 The add/edit entry form previews the balance AS OF THAT ENTRY'S OWN DATE — the running balance just
 before it, then after it — not the debt's final net. So editing the 2nd of 10 entries shows what the
 balance was back then, and changing the date re-slots the entry and updates the figures. When that

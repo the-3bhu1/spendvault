@@ -18,12 +18,18 @@ import {
   Wallet,
   Edit2,
   Calendar,
+  Share2,
   X
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { Share } from '@capacitor/share';
+import { Filesystem, Directory } from '@capacitor/filesystem';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
 import { getAccountTypeIcon, getAccountGroupLabel, sortByAccountType } from './transactionIcons';
-import { generateId, formatCurrency, calculateBalance, getCurrentMonthStr } from '../utils';
+import { generateId, formatCurrency, calculateBalance, getCurrentMonthStr, errorMessage } from '../utils';
+import { buildDebtShareImages } from '../services/debtImage';
+import { blobToBase64 } from '../services/shareCanvas';
 import type { Debt, DebtTransaction, Account, Transaction } from '../types';
 
 /** Props for the shared confirmation dialog, held in state while it is open. */
@@ -436,6 +442,79 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
     return sum;
   }, 0);
 
+  /* THE SAME ORDER THE LOG IS RENDERED IN, hoisted so the share image cannot drift from the screen
+     it is a picture of: newest first, and ties broken by original insertion order reversed. */
+  const orderedTransactions = [...debt.transactions].sort((a, b) => {
+    const timeDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+    if (timeDiff !== 0) return timeDiff;
+    return debt.transactions.indexOf(b) - debt.transactions.indexOf(a);
+  });
+
+  const sharingRef = useRef(false);
+  const [isSharing, setIsSharing] = useState(false);
+
+  /* Shares the history as PNG(s) — image only, no accompanying message. The text a share sheet
+     carries is dropped by half the apps it lands in and duplicated by the other half, and every
+     figure it would have restated is already on the image. One page per dozen entries, however many
+     that comes to; see debtImage for why the whole history goes and not a filtered slice of it. */
+  const handleShare = async () => {
+    if (sharingRef.current) return;   // ignore a second tap while a share is already in flight
+    sharingRef.current = true;
+    setIsSharing(true);
+    try {
+      const blobs = await buildDebtShareImages({
+        personName: debt.personName,
+        netBalance,
+        settled: debt.status === 'settled',
+        entries: orderedTransactions.map(t => ({
+          date: format(parseISO(t.date), 'dd/MM/yyyy'),
+          description: t.description,
+          amount: t.amount,
+          type: t.type,
+          markedDone: t.markedDone,
+        })),
+      });
+
+      const safeName = (debt.personName || 'history').replace(/[^a-z0-9]+/gi, '-');
+      const fileName = (i: number) => blobs.length > 1
+        ? `SpendVault-Debt-${safeName}-${i + 1}.png`
+        : `SpendVault-Debt-${safeName}.png`;
+
+      if (Capacitor.isNativePlatform()) {
+        const uris: string[] = [];
+        for (let i = 0; i < blobs.length; i++) {
+          const base64 = await blobToBase64(blobs[i]);
+          const res = await Filesystem.writeFile({ path: fileName(i), data: base64, directory: Directory.Cache });
+          uris.push(res.uri);
+        }
+        await Share.share({ files: uris });
+      } else {
+        const files = blobs.map((b, i) => new File([b], fileName(i), { type: 'image/png' }));
+        const nav = navigator as Navigator & { canShare?: (d?: ShareData) => boolean };
+        if (nav.canShare && nav.canShare({ files })) {
+          await nav.share({ files });
+        } else {
+          // Desktop browsers cannot share files — download the PNG(s) so they can be attached by hand.
+          files.forEach(file => {
+            const url = URL.createObjectURL(file);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = file.name;
+            a.click();
+            URL.revokeObjectURL(url);
+          });
+        }
+      }
+    } catch (err) {
+      // A dismissed share sheet rejects, and being told about it is worse than silence.
+      if (String(errorMessage(err) ?? err).toLowerCase().includes('cancel')) return;
+      console.error('Share debt history failed', err);
+    } finally {
+      sharingRef.current = false;
+      setIsSharing(false);
+    }
+  };
+
   const allTicked = debt.transactions.length > 0 && debt.transactions.every(t => t.markedDone);
   const isHeaderTicked = debt.status === 'settled' || allTicked;
 
@@ -536,6 +615,15 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
             <div className="flex gap-3">
               <button
                 className="btn btn-secondary"
+                style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                onClick={handleShare}
+                disabled={isSharing || debt.transactions.length === 0}
+                title={debt.transactions.length === 0 ? 'Nothing to share yet' : 'Share history'}
+              >
+                <Share2 size={18} />
+              </button>
+              <button
+                className="btn btn-secondary"
                 style={{
                   width: '36px', height: '36px', padding: 0,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -634,11 +722,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
         <div className="flex-col gap-4 tour-debt-tx-log">
           <span className="text-xs text-muted font-bold uppercase" style={{ letterSpacing: '1px' }}>Transaction Log</span>
           <div className="flex-col gap-3">
-            {[...debt.transactions].sort((a, b) => {
-              const timeDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
-              if (timeDiff !== 0) return timeDiff;
-              return debt.transactions.indexOf(b) - debt.transactions.indexOf(a);
-            }).map(tx => (
+            {orderedTransactions.map(tx => (
               <div key={tx.id} className="card flex align-center justify-between" style={{
                 padding: '0.75rem 1rem',
                 background: 'var(--bg-color)',
