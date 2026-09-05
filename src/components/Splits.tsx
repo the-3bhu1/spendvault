@@ -89,6 +89,10 @@ export default function Splits() {
 
   const buildSummaryMessage = (event: SplitEvent) => {
     const { shareItems, settlements } = getShareData(event);
+    /* The user's own name, for the copy that leaves the device — see splitDisplayName. Read here
+       rather than threaded through, so the message and the image cannot disagree about it. */
+    const selfName = data.user?.name;
+
     let message = `💰 *Split Summary: ${event.name}*\n\n`;
 
     // 1. Deep Itemized Breakdown
@@ -98,13 +102,13 @@ export default function Splits() {
         const splitCount = item.involvedPeople.length + (item.includeMe ? 1 : 0);
         if (splitCount === 0) return;
         const isUnequal = item.splitType === 'unequal';
-        const payerName = splitDisplayName(item.paidBy || 'me');
+        const payerName = splitDisplayName(item.paidBy || 'me', selfName);
 
         message += `\n🔹 *${item.description}* (₹${item.amount.toFixed(2)}) - Paid by: *${payerName}*\n`;
 
         if (item.includeMe) {
           const myShare = isUnequal ? (item.shares?.['me'] ?? 0) : (item.amount / splitCount);
-          message += `  • Me: ₹${myShare.toFixed(2)}\n`;
+          message += `  • ${splitDisplayName('me', selfName)}: ₹${myShare.toFixed(2)}\n`;
         }
         item.involvedPeople.forEach(p => {
           const friendShare = isUnequal ? (item.shares?.[p] ?? 0) : (item.amount / splitCount);
@@ -121,7 +125,7 @@ export default function Splits() {
       message += `✅ All settled up! No active debts.\n`;
     } else {
       settlements.forEach(s => {
-        message += `➡️ *${splitDisplayName(s.from)}* pays *${splitDisplayName(s.to)}*: ₹${s.amount.toFixed(2)}\n`;
+        message += `➡️ *${splitDisplayName(s.from, selfName)}* pays *${splitDisplayName(s.to, selfName)}*: ₹${s.amount.toFixed(2)}\n`;
       });
     }
 
@@ -137,18 +141,20 @@ export default function Splits() {
     try {
       const { shareItems, settlements, totalSpent, subtitle } = getShareData(event);
       const message = buildSummaryMessage(event);
+      const selfName = data.user?.name;
       const blobs = await buildSplitShareImages({
         title: event.name,
         subtitle,
         totalSpent,
-        settlements: settlements.map(s => ({ from: splitDisplayName(s.from), to: splitDisplayName(s.to), amount: s.amount })),
+        settlements: settlements.map(s => ({ from: splitDisplayName(s.from, selfName), to: splitDisplayName(s.to, selfName), amount: s.amount })),
         items: shareItems.map(it => {
           const parts = it.includeMe ? [...it.involvedPeople, 'me'] : [...it.involvedPeople];
           return {
             description: it.description,
             amount: it.amount,
-            paidBy: splitDisplayName(it.paidBy || 'me'),
-            participantNames: parts.map(splitDisplayName),
+            paidBy: splitDisplayName(it.paidBy || 'me', selfName),
+            // Point-free `.map(splitDisplayName)` would hand map's index through as selfName.
+            participantNames: parts.map(n => splitDisplayName(n, selfName)),
           };
         }),
       });

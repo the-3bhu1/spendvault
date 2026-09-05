@@ -165,7 +165,14 @@ export const isCountableTransaction = (tx: Transaction) => {
 
 // ---- Split settlement math ----------------------------------------------------------------
 // 'me' is the self key used across split items (paidBy/shares); everything else is a friend name.
-export const splitDisplayName = (key: string) => (key === 'me' ? 'Me' : key);
+//
+// `selfName` is for anything LEAVING the app. On screen "Me" is exactly right — the reader is the
+// person it refers to. In a summary pasted into a group chat it is the one name nobody can resolve:
+// "Me pays Balaji ₹397.66" tells five people that somebody owes Balaji, and every one of them has
+// to guess who sent the screenshot. So the share paths pass the user's own name and the screen
+// keeps saying Me. Falls back to 'Me' when no name is set, which is better than a blank.
+export const splitDisplayName = (key: string, selfName?: string) =>
+  key === 'me' ? (selfName?.trim() || 'Me') : key;
 
 export interface SplitSettlement { from: string; to: string; amount: number; }
 

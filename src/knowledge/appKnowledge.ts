@@ -444,6 +444,10 @@ the fewest payments across ALL participants (including friend-to-friend debts, n
 a per-person balance list. Share the summary as text or as an image: the image shows settle-up and
 the itemized expenses (each expense lists who it was split among); a large split is split into a
 Settle-Up image plus paginated Expenses images.
+IN ANYTHING SHARED, YOU ARE NAMED. The app calls you "Me" on screen, where the reader is you, but
+the shared text and image both use the name from Settings → User Details instead — "Tribhuvan pays
+Balaji", not "Me pays Balaji", which in a group chat tells everyone somebody owes Balaji and leaves
+them guessing who sent it. It falls back to "Me" only if no name is set.
 
 # Lending & Borrowing (Debts)
 A per-person ledger of money lent or borrowed, plus repayments. Add a person/debt, log repayments
