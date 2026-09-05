@@ -2705,6 +2705,11 @@ export default function Settings() {
         title={confirmConfig?.title}
         message={confirmConfig?.message || ''}
         confirmLabel={confirmConfig?.confirmLabel}
+        /* Forwarded, finally. The state below has always declared cancelLabel and the notification
+           dialog has always set it to "Skip", but this line was missing, so it fell back to the
+           default "Cancel" — mid-flow, one dialog after granting SMS permission, where "Cancel"
+           reads as "abandon this" rather than "keep SMS logging, just no alerts". */
+        cancelLabel={confirmConfig?.cancelLabel}
         isDanger={confirmConfig?.isDanger}
         isAlert={confirmConfig?.isAlert}
         onConfirm={() => confirmConfig?.onConfirm()}
