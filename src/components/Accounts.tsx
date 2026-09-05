@@ -18,7 +18,6 @@ import { scrollToFirstError } from '../utils/formErrors';
 import { CardNetworkLogo, NETWORK_LABELS } from './CardNetworkLogo';
 import { ViewCardOverlay } from './ViewCardOverlay';
 
-import { EPFDetailsView } from './EPFDetailsModal';
 
 /**
  * How a card charges, as the one choice that decides which fee fields exist.
@@ -75,7 +74,6 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [viewingCard, setViewingCard] = useState<Account | null>(null);
-  const [viewingEPFAccount, setViewingEPFAccount] = useState<Account | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [datePickerTarget, setDatePickerTarget] = useState<{ type: 'joining' | 'revision' | 'cardOpened'; index?: number } | null>(null);
   // How the open card charges. Held beside newAccount rather than derived from it on every render:
@@ -764,19 +762,6 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     return '';
   };
 
-  if (viewingEPFAccount) {
-    return (
-      <EPFDetailsView
-        account={viewingEPFAccount}
-        onClose={() => setViewingEPFAccount(null)}
-        onUpdateAccount={(updatedAcc) => {
-          updateAccount(updatedAcc);
-          setViewingEPFAccount(updatedAcc);
-        }}
-      />
-    );
-  }
-
   return (
     <div className="flex-col gap-6" style={{ maxWidth: '600px', margin: '0 auto', width: '100%' }}>
       <div className="flex justify-between align-center" style={{ marginBottom: '1rem' }}>
@@ -1194,8 +1179,6 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                             </div>
                           </div>
                         )}
-
-                        {/* EPF Account has clean card layout with Opening & Total Balance */}
 
                         {acc.type === 'debit_card' && !acc.isNcmcEnabled && acc.cardDetails?.cardNumber && (
                           <div className="flex justify-end align-center gap-4" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)' }}>

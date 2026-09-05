@@ -565,7 +565,7 @@ and Accounts tabs.
 Total EPF running balance and interest earned this financial year, plus the monthly credit breakdown
 (12% employee + 3.67% employer EPF + 8.33% EPS pension), the 1-year projected balance and projected
 annual growth. Interest accrues monthly and is credited March 31st. Tapping an EPF account row opens
-its full passbook detail.
+Wealth's read-only breakdown of it; to change anything, edit the account on the Accounts tab.
 
 # Commodity (gold / silver) prices
 Gold/silver per-gram prices are approximate AI estimates fetched from a vendor (price reference) using
