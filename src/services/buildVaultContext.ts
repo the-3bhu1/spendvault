@@ -225,11 +225,17 @@ function buildSummary(data: FinanceData): string {
       const arrears = d.overdue > 0
         ? `, OVERDUE from earlier statements ${formatCurrency(d.overdue)} (${d.overdueCycles.join(', ')})`
         : '';
+      // Stated so the four figures on this line add up. Left out, a card carrying a rounding
+      // remainder would hand the assistant a total a rupee above its own parts, and the assistant
+      // would either recompute the total wrongly or be asked to explain a gap it cannot see.
+      const remainder = d.residue > 0
+        ? `, rounding remainder ${formatCurrency(d.residue)} on an older statement (too small to call overdue; correct that cycle's statement figure to clear it)`
+        : '';
       const countdown = d.daysToDue === undefined ? ''
         : d.daysToDue < 0 ? ` (statement ${Math.abs(d.daysToDue)} day${d.daysToDue === -1 ? '' : 's'} OVERDUE)`
         : d.daysToDue === 0 ? ' (due today)'
         : ` (due in ${d.daysToDue} day${d.daysToDue === 1 ? '' : 's'})`;
-      out.push(`  - ${cc.name}: billed ${formatCurrency(d.billed)}, unbilled ${formatCurrency(d.unbilled)}${arrears}, total ${formatCurrency(d.outstanding)}` +
+      out.push(`  - ${cc.name}: billed ${formatCurrency(d.billed)}, unbilled ${formatCurrency(d.unbilled)}${arrears}${remainder}, total ${formatCurrency(d.outstanding)}` +
         (cc.dueDay ? `, due day ${cc.dueDay}${countdown}` : '') +
         (cc.creditLimit ? `, limit ${formatCurrency(cc.creditLimit)}` : '') +
         `, fees: ${feeParts.join(', ')}` +

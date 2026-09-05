@@ -257,7 +257,7 @@ describe('an unpaid statement, once the next one is cut', () => {
     expect(getCardDues(card(), [AUG], NOW).overdue).toBe(0);
   });
 
-  it('ignores a rounding residue rather than crying arrears over one rupee', () => {
+  it('keeps a rounding residue in the total without crying arrears over one rupee', () => {
     // round() turns a ₹1,538.92 statement into ₹1,539, and ₹1,538 clears it. The residue is a
     // property of the rounding, not of the data: correcting the cycle with a statement adjustment
     // is the real fix, and this floor only covers the cycles nobody has corrected.
@@ -269,8 +269,32 @@ describe('an unpaid statement, once the next one is cut', () => {
     ];
     const d = getCardDues(acc, txs, NOW);
     expect(getCardCycleFigures(acc, txs, '2026-07').due).toBe(1);
+    // Nothing SAYS overdue…
     expect(d.overdue).toBe(0);
+    expect(d.overdueCycles).toEqual([]);
     expect(isCycleOverdue(d, '2026-07', 1)).toBe(false);
+    // …but the rupee is still money, and the card's balance says so. Dropping it left `outstanding`
+    // disagreeing with the Statements screen showing that very cycle still owing it.
+    expect(d.residue).toBe(1);
+    expect(d.outstanding).toBe(d.overdue + d.residue + d.billed + d.unbilled);
+    expect(d.outstanding).toBe(7241);
+  });
+
+  it('adds a residue up across the wallet and leaves it out of the overdue total', () => {
+    const rounding = { statementRounding: 'round' as const };
+    const a = card({ id: 'a', ...rounding });
+    const b = card({ id: 'b', name: 'Jupiter x CSB', ...rounding });
+    const txs = [
+      tx({ accountId: 'a', date: '2026-07-01', amount: 1538.92 }),
+      tx({ accountId: 'a', date: '2026-07-08', amount: 1538, type: 'credit', category: 'CC Payment' }),
+      tx({ accountId: 'b', date: '2026-07-01', amount: 999.6 }),
+      tx({ accountId: 'b', date: '2026-07-08', amount: 999, type: 'credit', category: 'CC Payment' }),
+      tx({ accountId: 'a', date: '2026-08-01', amount: 7240 }),
+    ];
+    const totals = sumCardDues(getActiveCardDues([a, b], txs, NOW));
+    expect(totals.overdue).toBe(0);
+    expect(totals.residue).toBe(2);
+    expect(totals.outstanding).toBe(7242);
   });
 
   it('totals across the wallet', () => {

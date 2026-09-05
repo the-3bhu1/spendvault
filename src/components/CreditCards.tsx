@@ -758,10 +758,16 @@ export default function CreditCards({ onExit, onViewStatement }: {
    *  these cells is overdue + billed + unbilled, so omitting the first of the three left a total that
    *  visibly did not add up — ₹12,240 over "Billed ₹7,240 · Unbilled ₹0" reads as a arithmetic fault
    *  in the screen rather than as a statement that went unpaid. Leading, because it is the oldest
-   *  money and the only part of the total that is late. */
-  const renderSplit = (billed: number, unbilled: number, overdue = 0) => renderFigures(
+   *  money and the only part of the total that is late.
+   *
+   *  RESIDUE RIDES WITH BILLED, for that same additivity. It is arrears the app has decided not to
+   *  call overdue (a rounding remainder — see ARREARS_MIN), so giving it a red cell of its own would
+   *  be the alarm the floor exists to suppress; leaving it out of all three cells would put the gap
+   *  back. Billed is the least wrong of the buckets: it is money on a statement that was cut. At
+   *  most a rupee per uncorrected cycle, and correcting the cycle removes it. */
+  const renderSplit = (billed: number, unbilled: number, overdue = 0, residue = 0) => renderFigures(
     ...(overdue > 0 ? [{ label: 'Overdue', value: formatWhole(overdue), tone: 'var(--danger)' }] : []),
-    { label: 'Billed', value: formatWhole(billed), tone: billed > 0 ? 'var(--text-primary)' : 'var(--text-secondary)' },
+    { label: 'Billed', value: formatWhole(billed + residue), tone: billed + residue > 0 ? 'var(--text-primary)' : 'var(--text-secondary)' },
     { label: 'Unbilled', value: formatWhole(unbilled) },
   );
 
@@ -902,7 +908,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
 
               {!hasCards ? null : (
                 <>
-                  {renderSplit(totals.billed, totals.unbilled, totals.overdue)}
+                  {renderSplit(totals.billed, totals.unbilled, totals.overdue, totals.residue)}
                   {totals.utilization !== undefined && renderUtilization(totals.utilization, totals.creditLimit)}
                   {nextDue && (
                     <div className="text-mono uppercase" style={{ fontSize: '0.62rem', letterSpacing: '0.5px', color: dueColor(nextDue), marginTop: '1rem' }}>
@@ -1357,7 +1363,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
               <div className="text-serif" style={{ fontSize: '2.6rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '1.25rem', lineHeight: 1 }}>
                 {formatCurrency(cardDues.outstanding)}
               </div>
-              {renderSplit(cardDues.billed, cardDues.unbilled, cardDues.overdue)}
+              {renderSplit(cardDues.billed, cardDues.unbilled, cardDues.overdue, cardDues.residue)}
               {cardDues.utilization !== undefined && renderUtilization(cardDues.utilization, cardDues.creditLimit ?? 0)}
               {dueSentence(cardDues) && (
                 <div className="text-mono uppercase" style={{ fontSize: '0.62rem', letterSpacing: '0.5px', color: dueColor(cardDues), marginTop: '1rem' }}>

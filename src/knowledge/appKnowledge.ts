@@ -304,9 +304,12 @@ A card has a statement day and a due day.
   you were charged (cashback paid in rupees, refunds, reversals) — and payments are then subtracted
   from that rounded figure. That is the order a bank uses: it prints ₹1,538 and you clear it by
   paying ₹1,538, so the paise the rounding dropped must not come back as a balance.
-- A residue of ₹1 or less left behind by that rounding is NOT treated as arrears — a statement is
-  rounded and the payment against it is not, so a rupee is noise rather than a debt. The proper fix
-  for a cycle whose figure disagrees with the bank is to correct it outright (see below).
+- A residue of ₹1 or less left behind by that rounding is NOT called arrears — a statement is
+  rounded and the payment against it is not, so a rupee is noise rather than a debt. It is still
+  COUNTED: it stays in the card's outstanding balance (shown under Billed, since it is money on a
+  statement that was cut) and simply never triggers an overdue badge, band or status. The proper fix
+  for a cycle whose figure disagrees with the bank is to correct it outright (see below), which
+  drives the residue to zero.
 - Correcting a statement by hand: on the statement screen, LONG-PRESS the big Statement Amount
   figure. A "Statement Amount" sheet opens showing the month, its date range and the app's
   "Calculated:" figure; type what your bank actually printed and press "Save statement amount".
@@ -483,8 +486,9 @@ statement and its countdown beneath it ("This statement · In 2 days ₹7,240"),
 statement alone. A card whose own statement has simply gone past its date shows the countdown as
 "3 days overdue" instead, with no band, because nothing older is owed.
 An unpaid statement therefore stays in the card's outstanding balance and in its credit utilisation
-after the next statement is cut, instead of dropping out of both. Anything at or under ₹1 is ignored
-as rounding residue, since a statement is rounded and the payment against it is not.
+after the next statement is cut, instead of dropping out of both. Anything at or under ₹1 is still
+counted in that balance but is not called overdue — it is rounding residue, since a statement is
+rounded and the payment against it is not.
 Any category can be picked for a bill, INCLUDING Mutual Funds — so a fund instalment can still be
 tracked here purely as a due-date reminder. What no longer exists is the dedicated SIP wiring: a bill
 can NOT be linked to a mutual fund account, and logging it does NOT auto-credit that account. A

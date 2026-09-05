@@ -119,6 +119,12 @@ const SETTLE_EPS = 0.005;
  *
  *  Strictly greater, because rounding can manufacture a residue of exactly ₹1.00.
  *
+ *  IT GATES THE WORD, NOT THE ARITHMETIC. The floor used to drop the rupee out of the sum as well,
+ *  which meant `outstanding` — the figure Accounts calls the card's balance — disagreed with the
+ *  Statements screen showing the very same cycle still owing it, and a genuine ₹1 shortfall left
+ *  the card's balance quietly light. Below the floor the money now lands in `residue`: counted in
+ *  the total, never called overdue.
+ *
  *  This is a SECOND line of defence, not the first. A cycle whose printed figure disagrees with the
  *  ledger is meant to be corrected outright by long-pressing the statement and entering what the
  *  bank actually charged (statementAdjustments), which drives the residue to zero rather than
@@ -151,7 +157,11 @@ export interface CardDues {
   /** Which cycles those are, oldest first, so a surface can name them rather than just total them.
    *  Empty whenever `overdue` is 0. */
   overdueCycles: string[];
-  /** overdue + billed + unbilled — the figure Accounts calls the card's balance. */
+  /** Arrears too small to call overdue — see ARREARS_MIN. Real money, and counted in `outstanding`,
+   *  but deliberately kept out of `overdue` so no badge, banner or status pill fires over a rounding
+   *  remainder. 0 on every card that has no uncorrected cycle, which is nearly all of them. */
+  residue: number;
+  /** overdue + residue + billed + unbilled — the figure Accounts calls the card's balance. */
   outstanding: number;
   dueDay?: number;
   /** '5th', for prose. */
@@ -170,6 +180,8 @@ export interface DuesTotals {
   unbilled: number;
   /** Summed across cards. Non-zero means at least one statement went a whole cycle unpaid. */
   overdue: number;
+  /** Summed across cards. Sub-floor arrears — in `outstanding`, never called overdue. */
+  residue: number;
   outstanding: number;
   /** Summed across cards that declare a limit. 0 when none do. */
   creditLimit: number;
@@ -394,15 +406,19 @@ export const getCardDues = (
   // Oldest first, so a caller can name the months instead of only totalling them.
   const overdueCycles: string[] = [];
   let overdue = 0;
+  let residue = 0;
   for (const cycle of [...figures.keys()].sort()) {
     if (cycle >= billedCycle) continue;
     const due = figures.get(cycle)!.due;
-    if (due <= ARREARS_MIN) continue;
+    if (due <= 0) continue;
+    // Two questions, and the floor only answers the second: is this money, and is it worth
+    // alarming about. `continue` here answered both at once and so lost the rupee from the total.
+    if (due <= ARREARS_MIN) { residue += due; continue; }
     overdueCycles.push(cycle);
     overdue += due;
   }
 
-  const outstanding = overdue + billed + unbilled;
+  const outstanding = overdue + residue + billed + unbilled;
 
   const dues: CardDues = {
     account,
@@ -412,6 +428,7 @@ export const getCardDues = (
     unbilled,
     overdue,
     overdueCycles,
+    residue,
     outstanding,
   };
 
@@ -475,10 +492,11 @@ export const sumCardDues = (dues: CardDues[]): DuesTotals => {
       billed: acc.billed + d.billed,
       unbilled: acc.unbilled + d.unbilled,
       overdue: acc.overdue + d.overdue,
+      residue: acc.residue + d.residue,
       outstanding: acc.outstanding + d.outstanding,
       creditLimit: acc.creditLimit + (d.creditLimit || 0),
     }),
-    { billed: 0, unbilled: 0, overdue: 0, outstanding: 0, creditLimit: 0 }
+    { billed: 0, unbilled: 0, overdue: 0, residue: 0, outstanding: 0, creditLimit: 0 }
   );
   // Utilization only over cards that declare a limit — dividing the whole outstanding by a partial
   // limit would report a fraction of a denominator that doesn't cover it.
