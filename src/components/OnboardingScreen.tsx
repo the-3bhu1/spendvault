@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { useFinance } from '../FinanceContext';
 import { Shield, Key, User as UserIcon, Check, Copy, AlertTriangle, ArrowRight, ArrowLeft, Upload, Database } from 'lucide-react';
 import type { User } from '../types';
@@ -34,21 +34,22 @@ export default function OnboardingScreen() {
   const [isConfirming, setIsConfirming] = useState(false);
   const [pinError, setPinError] = useState('');
 
-  // Step 3: Master Recovery Key
-  const [recoveryKey, setRecoveryKey] = useState('');
-  const [hasSavedKey, setHasSavedKey] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  // Generate recovery key once on mount
-  useEffect(() => {
+  /* Step 3: Master Recovery Key — generated in the initialiser, so it exists from the first render.
+     It used to be born empty and filled by a mount effect, which is a state that must never be seen:
+     the whole point of this step is that the string on screen is the only copy. Nothing off-screen
+     makes that safe, it just makes the window small. A lazy initialiser runs exactly once, the same
+     as the [] effect did, and leaves no moment where the key is ''. */
+  const [recoveryKey] = useState(() => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let result = '';
     for (let i = 0; i < 16; i++) {
       if (i > 0 && i % 4 === 0) result += '-';
       result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    setRecoveryKey(result);
-  }, []);
+    return result;
+  });
+  const [hasSavedKey, setHasSavedKey] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const hashString = async (str: string) => {
     const encoder = new TextEncoder();
