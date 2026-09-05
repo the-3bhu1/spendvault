@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Cuboid, Scale, ShieldUser, WalletMinimal } from 'lucide-react';
 import { getCachedLogo, cacheLogoImage, getLogoShape, ensureLogoShape } from '../services/LogoService';
 
@@ -55,8 +55,24 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf, isWallet, accoun
     return { remoteSources: remote, sources: remote.map(s => getCachedLogo(s) || s) };
   }, [logoUrl]);
   const [srcIdx, setSrcIdx] = useState(0);
-  // Reset to the first source if the URL changes (e.g. user adds a logo.dev token).
-  useEffect(() => { setSrcIdx(0); }, [logoUrl]);
+  /* Reset to the first source if the URL changes (e.g. the user adds a logo.dev token) — DURING
+     RENDER, not in an effect.
+  
+     An effect resets it one commit too late, and this component is built around not painting the
+     wrong pixels for even one frame. With srcIdx sitting at 1 because the old brand had fallen
+     through to its favicon, the first render after a new logoUrl arrives pairs the NEW sources with
+     the OLD index: it paints the new brand's FAVICON, fetches it, and measures its shape for the
+     plate colour — then the effect fires and it all changes again. The flash this file's caching is
+     designed to avoid, reintroduced by the reset meant to prevent it.
+  
+     Storing the URL this index belongs to and comparing is React's documented way to adjust state on
+     a prop change. React re-runs the component immediately with the new state and commits only the
+     second result, so nothing reaches the DOM holding a mismatched pair. */
+  const [srcIdxUrl, setSrcIdxUrl] = useState(logoUrl);
+  if (srcIdxUrl !== logoUrl) {
+    setSrcIdxUrl(logoUrl);
+    setSrcIdx(0);
+  }
 
   // How the chosen source's own pixels sit in their canvas, which decides the plate colour behind it
   // and whether it needs zooming to fill the circle — see the shape-analysis block in LogoService.
