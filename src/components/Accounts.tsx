@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown, CalendarDays } from 'lucide-react';
@@ -119,20 +119,61 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     return () => window.removeEventListener('appBackButton', handleGlobalBack);
   }, [viewingCard, isModalOpen, deleteConfirmId]);
 
+  /* EVERY SYMBOL THAT STILL WANTS A PRICE, tagged with where to get it, deduped and sorted into one
+     string. This is the effect's dependency, and it is a string rather than `data.accounts` on
+     purpose: the accounts array changes identity whenever ANY account is touched — a bank renamed, a
+     balance moved — and depending on it would re-run the fetch and re-raise the skeletons over rows
+     that already have their prices. This changes only when the WORK changes.
+  
+     It also carries everything the effect needs, so the effect can read the key and nothing else. */
+  const priceWork = useMemo(() => {
+    const parts: string[] = [];
+    for (const a of data.accounts) {
+      if (a.archived || !a.marketSymbol) continue;
+      if (a.type === 'stocks') parts.push(`stock:${a.marketSymbol}`);
+      else if (a.type === 'mutual_funds') parts.push(`mf:${a.marketSymbol}`);
+      // A manual price override needs no lookup — and skipping it is what keeps a Gemini call
+      // from being spent on a figure the user has already supplied.
+      else if (a.type === 'commodity' && a.manualPricePerGram === undefined) parts.push(`commodity:${a.marketSymbol}`);
+    }
+    return [...new Set(parts)].sort().join('|');
+  }, [data.accounts]);
+
+  /* Symbols a fetch has already been started for, so a re-run only picks up what is new. A ref, not
+     state: reading it must not itself be a reason to re-run. */
+  const requestedSymbols = useRef(new Set<string>());
+
+  /* WHY THIS RE-RUNS AT ALL. It used to be a mount-only [] effect, and the comment below explains
+     why that looked safe — the tab never unmounts, so it fired once and the shared cache kept it
+     current. What it missed is an account that did not exist at mount: add a stock or a commodity
+     (or restore a backup containing one) and its row sat without a price until the app was
+     restarted, because nothing else on this screen ever asks for one.
+  
+     Re-running is close to free. MarketDataService TTL-caches every source — 5 min for stocks, 8 h
+     for MF NAVs, 1 h for commodities — and the commodity path refuses a force flag outright so that
+     repeated refreshes cannot burn the Gemini quota. A re-run for symbols already held is a few map
+     lookups, and the filter below means it does not even reach them. */
   useEffect(() => {
-    const stockMfItems = data.accounts
-      .filter(a => !a.archived && (a.type === 'stocks' || a.type === 'mutual_funds') && a.marketSymbol)
-      .map(a => ({ symbol: a.marketSymbol!, kind: (a.type === 'stocks' ? 'stock' : 'mf') as 'stock' | 'mf' }));
-    // Skip accounts with a manual price override — no need to spend a Gemini call for them.
-    const commodityAccs = data.accounts.filter(a => !a.archived && a.type === 'commodity' && a.marketSymbol && a.manualPricePerGram === undefined);
-    if (stockMfItems.length === 0 && commodityAccs.length === 0) return;
-    const allSyms = [...stockMfItems.map(i => i.symbol), ...commodityAccs.map(a => a.marketSymbol!)];
-    /* One extra render at mount, raising the skeletons over the rows whose prices are being fetched
-       on the line below. It cannot be hoisted into the initialiser without computing the same two
-       filtered lists twice — once for the state, once for the fetches that consume them — and then
-       keeping those two copies in agreement. */
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRefreshingSymbols(new Set(allSyms));
+    if (!priceWork) return;
+    const wanted = priceWork.split('|').map(part => {
+      const i = part.indexOf(':');
+      return { kind: part.slice(0, i), symbol: part.slice(i + 1) };
+    }).filter(w => !requestedSymbols.current.has(w.symbol));
+    if (!wanted.length) return;
+    wanted.forEach(w => requestedSymbols.current.add(w.symbol));
+
+    const stockMfItems = wanted
+      .filter(w => w.kind !== 'commodity')
+      .map(w => ({ symbol: w.symbol, kind: w.kind as 'stock' | 'mf' }));
+    const commoditySyms = wanted.filter(w => w.kind === 'commodity').map(w => w.symbol);
+
+    // Skeletons over the rows being fetched below, and only those rows — `wanted` is already
+    // filtered to what has not been asked for, so a re-run cannot re-flash a row that has a price.
+    setRefreshingSymbols(prev => new Set([...prev, ...wanted.map(w => w.symbol)]));
+
+    // Guards the writes, not the requests: the fetches are cached by the service and worth
+    // finishing, but a component that has moved on must not have state pushed into it.
+    let cancelled = false;
     const clearRefreshing = (syms: string[]) =>
       setRefreshingSymbols(prev => { const s = new Set(prev); syms.forEach(sym => s.delete(sym)); return s; });
 
@@ -140,28 +181,32 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     // of the slower Gemini commodity call, so quick price sources don't wait on the estimate.
     if (stockMfItems.length) {
       fetchPricesForSymbols(stockMfItems).then(stockMfPrices => {
+        if (cancelled) return;
         setPrices(prev => ({ ...prev, ...stockMfPrices }));
         clearRefreshing(stockMfItems.map(i => i.symbol));
       });
     }
 
     // Commodities (Gemini grounding) resolve on their own timeline.
-    if (commodityAccs.length) {
-      Promise.all(commodityAccs.map(a =>
-        fetchCommodityPriceINR(a.marketSymbol!).then(p => [a.marketSymbol!, p] as [string, number | null])
+    if (commoditySyms.length) {
+      Promise.all(commoditySyms.map(sym =>
+        fetchCommodityPriceINR(sym).then(p => [sym, p] as [string, number | null])
       )).then(commodityPrices => {
+        if (cancelled) return;
         const result: Record<string, number> = {};
         commodityPrices.forEach(([sym, p]) => { if (p !== null) result[sym] = p; });
         setPrices(prev => ({ ...prev, ...result }));
-        clearRefreshing(commodityAccs.map(a => a.marketSymbol!));
+        clearRefreshing(commoditySyms);
       });
     }
-  }, []);
 
-  // This tab stays mounted for the whole session (App renders it with display:none), so its
-  // mount-time fetch above runs only once. Re-sync from the shared price cache whenever any
-  // screen refreshes prices (e.g. Wealth → Portfolio's "Refresh prices" button) so we don't show a
-  // stale estimate relative to other views.
+    return () => { cancelled = true; };
+  }, [priceWork]);
+
+  // Re-sync from the shared price cache whenever any screen refreshes prices (e.g. Wealth →
+  // Portfolio's "Refresh prices" button) so we don't show a stale estimate relative to other views.
+  // This tab stays mounted for the whole session (App renders it with display:none), so it is the
+  // only thing that would otherwise notice a price moving elsewhere.
   useEffect(() => {
     const resync = () => {
       setPrices(prev => {
