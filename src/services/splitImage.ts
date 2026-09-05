@@ -1,9 +1,11 @@
 import { formatCurrency } from '../utils';
+import { C, W, PADX, roundRect, ellipsize, newCanvas, canvasToBlob, drawFooter } from './shareCanvas';
 
 // Renders shareable "split summary" PNGs entirely on a <canvas>, so it works offline in the
 // Android/iOS WebView with no extra dependency. Small splits fit in one combined image; large
 // splits are broken into a Settle-Up image + one or more (paginated) Expenses images so no single
-// image gets impractically tall. Returns an array of PNG Blobs.
+// image gets impractically tall. Returns an array of PNG Blobs. Palette, geometry and the drawing
+// primitives are shared with every other share image — see shareCanvas.
 
 export interface SplitImageRow { from: string; to: string; amount: number; }
 export interface SplitImageItem {
@@ -25,39 +27,8 @@ const SINGLE_MAX_ITEMS = 8;      // more expenses than this → split into separ
 const SINGLE_MAX_SETTLEMENTS = 6; // more settlements than this → split too
 const ITEMS_PER_PAGE = 10;        // expenses per Expenses image once split
 
-// Palette (mirrors the app's dark theme).
-const C = {
-  bg: '#0f1115',
-  panel: '#1a1d24',
-  panelBorder: 'rgba(255,255,255,0.06)',
-  text: '#f5f6f8',
-  muted: '#8b8f9a',
-  accent: '#6366f1',
-  success: '#34d399',
-  danger: '#f87171',
-};
-
-const W = 720;
-const PADX = 44;
 const SETTLE_ROW = 62; // settle row card height + gap
 const ITEM_ROW = 96;   // three-line expense row card height + gap
-
-const roundRect = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) => {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-};
-
-const ellipsize = (ctx: CanvasRenderingContext2D, text: string, maxW: number) => {
-  if (ctx.measureText(text).width <= maxW) return text;
-  let t = text;
-  while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
-  return t + '…';
-};
 
 interface RenderInput {
   title: string;
@@ -83,16 +54,7 @@ async function renderSplitImage(input: RenderInput): Promise<Blob> {
   }
   H += 72; // footer
 
-  const scale = Math.min(3, Math.max(2, Math.floor(window.devicePixelRatio || 2)));
-  const canvas = document.createElement('canvas');
-  canvas.width = W * scale;
-  canvas.height = H * scale;
-  const ctx = canvas.getContext('2d')!;
-  ctx.scale(scale, scale);
-  ctx.textBaseline = 'alphabetic';
-
-  ctx.fillStyle = C.bg;
-  ctx.fillRect(0, 0, W, H);
+  const { canvas, ctx } = newCanvas(H);
 
   let y = 44;
 
@@ -213,15 +175,9 @@ async function renderSplitImage(input: RenderInput): Promise<Blob> {
 
   // ---- Footer ----
   y += 18;
-  ctx.textAlign = 'center';
-  ctx.fillStyle = C.muted;
-  ctx.font = '600 13px monospace';
-  ctx.fillText('Generated via SpendVault', W / 2, y + 12);
-  ctx.textAlign = 'left';
+  drawFooter(ctx, y);
 
-  return await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(b => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png');
-  });
+  return await canvasToBlob(canvas);
 }
 
 // Decides single vs. multiple images and returns the rendered PNGs in share order.
@@ -246,15 +202,3 @@ export async function buildSplitShareImages(opts: SplitImageOpts): Promise<Blob[
   }
   return blobs;
 }
-
-export const blobToBase64 = (blob: Blob): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const res = reader.result as string;
-      // strip the "data:image/png;base64," prefix — Filesystem wants raw base64
-      resolve(res.split(',')[1] ?? '');
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });

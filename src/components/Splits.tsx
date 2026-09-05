@@ -9,7 +9,8 @@ import { useFinance } from '../FinanceContext';
 import type { SplitEvent, SplitItem } from '../types';
 import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, formatDateString, errorMessage } from '../utils';
 import { scrollToFirstError } from '../utils/formErrors';
-import { buildSplitShareImages, blobToBase64 } from '../services/splitImage';
+import { buildSplitShareImages } from '../services/splitImage';
+import { blobToBase64 } from '../services/shareCanvas';
 import { SubviewWrapper } from './SubviewWrapper.tsx';
 
 export default function Splits() {
