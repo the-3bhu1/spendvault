@@ -462,6 +462,17 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
     sharingRef.current = true;
     setIsSharing(true);
     try {
+      /* The running balance after each entry, keyed by id. Built by walking the entries FORWARDS —
+         chronological() and txEffect() are the same pair the add/edit form's "as of this date"
+         preview runs on, so a row's figure in the image is the figure the form shows for that row
+         rather than a second opinion about it. The log renders newest-first, hence the lookup. */
+      const balanceAfter = new Map<string, number>();
+      chronological(debt.transactions).reduce((running, e) => {
+        const next = running + txEffect(e.t);
+        balanceAfter.set(e.t.id, next);
+        return next;
+      }, 0);
+
       const blobs = await buildDebtShareImages({
         personName: debt.personName,
         netBalance,
@@ -472,6 +483,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
           amount: t.amount,
           type: t.type,
           markedDone: t.markedDone,
+          balanceAfter: balanceAfter.get(t.id) ?? 0,
         })),
       });
 

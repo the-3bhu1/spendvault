@@ -25,6 +25,9 @@ export interface DebtImageEntry {
   type: 'lent' | 'borrowed' | 'repayment_received' | 'repayment_sent';
   /** Ticked off on the screen. Carried through so the image looks like what the sender is looking at. */
   markedDone?: boolean;
+  /** What the debt stood at once this entry had happened — the same "as of this date" figure the
+   *  add/edit form previews. Computed by the caller, which owns the chronology. */
+  balanceAfter: number;
 }
 
 export interface DebtImageOpts {
@@ -153,7 +156,23 @@ async function renderDebtPage(
         ? '' : `  ·  ${TYPE_LABEL[e.type]}`;
       ctx.fillStyle = C.muted;
       ctx.font = '500 13px sans-serif';
-      ctx.fillText(`${e.date}${kind}${e.markedDone ? '  ·  Done' : ''}`, cx, y + 48);
+      const meta = `${e.date}${kind}${e.markedDone ? '  ·  Done' : ''}`;
+
+      /* THE RUNNING BALANCE, right-aligned under the amount so the two form a column you can read
+         straight down. Without it every row is a movement with no position: you can see ₹5,000 was
+         lent, but not what that left owing, and the only figure that answers it is the net at the
+         very top — which is the answer for TODAY, not for the row you are looking at. It is the same
+         "as of this date" number the add/edit form previews, so the image agrees with the form.
+    
+         Read downwards it counts backwards, because the log is newest-first; the top row's balance
+         is therefore the headline net, which is the reconciliation the recipient will do first. */
+      const balT = `Balance ${formatCurrency(e.balanceAfter)}`;
+      ctx.font = '600 12px sans-serif';
+      const balW = ctx.measureText(balT).width;
+      ctx.fillText(balT, W - PADX - 20 - balW, y + 48);
+
+      ctx.font = '500 13px sans-serif';
+      ctx.fillText(ellipsize(ctx, meta, W - PADX * 2 - balW - 60), cx, y + 48);
 
       /* A ticked entry is struck through on screen; canvas has no text-decoration, so the line is
          drawn. Both the description and the amount, matching the row it is a picture of. */

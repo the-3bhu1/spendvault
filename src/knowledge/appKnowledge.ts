@@ -464,7 +464,10 @@ Sharing a person's history: the share icon in that person's header (left of the 
 whole history as PNG image(s) — image only, no accompanying message, since every figure a message
 would repeat is already on the picture. Each image carries the person's name, the net balance and
 which way it points in words ("Balaji owes you" / "You owe Balaji"), then the entries newest-first,
-twelve to a page; a long history simply becomes several images rather than one very tall one, and
+twelve to a page. Each entry shows its amount and, beneath it, the RUNNING BALANCE as of that entry
+— the same "as of this date" figure the add/edit form previews — so a row says both what moved and
+what it left owing. Read down the column it counts backwards, the log being newest-first, so the top
+entry's balance is the net at the top of the image; a long history simply becomes several images rather than one very tall one, and
 each one repeats the header so it stands alone. It is always the WHOLE history — there is no "open
 entries only" or date-range option, and that is deliberate: a tick is a checkoff that does not
 change the balance, and this ledger is cumulative, so either filter would list rows that do not add
