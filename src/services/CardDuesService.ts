@@ -39,7 +39,7 @@
 //   whenever `dueDate < new Date()`, which is true from 00:00 onward on the due date itself — so a
 //   bill due today silently advertised itself as due next month, and an overdue-today bill never
 //   read as overdue.
-import { format, addMonths, setDate, startOfDay, differenceInCalendarDays } from 'date-fns';
+import { format, addMonths, setDate, startOfDay, differenceInCalendarDays, parseISO } from 'date-fns';
 import type { Account, Transaction, RoundingRule } from '../types';
 import {
   affectsRupeeBalance,
@@ -109,6 +109,22 @@ const OVERPAY_MIN = 1;
  *  paisa must not fail by a billionth. Far too small to forgive a real shortfall. */
 const SETTLE_EPS = 0.005;
 
+/** How much has to be left on a statement before the app calls it OVERDUE.
+ *
+ *  A whole rupee, mirroring OVERPAY_MIN, and for the same reason viewed from the other side:
+ *  `charged` is rounded and what is paid against it is not. A bill the bank printed at ₹1,538.92
+ *  rounds to ₹1,539, is cleared in full by ₹1,538, and leaves ₹1 of residue that nobody owes — and
+ *  without a floor the new overdue band would announce it in red for as long as the card exists.
+ *  Arrears are a statement you skipped, not a rounding remainder.
+ *
+ *  Strictly greater, because rounding can manufacture a residue of exactly ₹1.00.
+ *
+ *  This is a SECOND line of defence, not the first. A cycle whose printed figure disagrees with the
+ *  ledger is meant to be corrected outright by long-pressing the statement and entering what the
+ *  bank actually charged (statementAdjustments), which drives the residue to zero rather than
+ *  hiding it. The floor is here for the cycles nobody has got round to correcting. */
+const ARREARS_MIN = 1;
+
 /** Money sent to clear the bill, rather than anything that was bought or credited. These are the
  *  app's own "pure ledger movement" categories (see STATS_EXCLUDED_CATEGORIES); anything else on the
  *  card is either a purchase or an adjustment to one.
@@ -129,7 +145,13 @@ export interface CardDues {
   unbilledCycle: string;
   billed: number;
   unbilled: number;
-  /** billed + unbilled — the figure Accounts calls the card's balance. */
+  /** Still owed on statements OLDER than billedCycle — see the long note in getCardDues. 0 for a
+   *  card that has never missed one, which is why nothing had noticed it was missing. */
+  overdue: number;
+  /** Which cycles those are, oldest first, so a surface can name them rather than just total them.
+   *  Empty whenever `overdue` is 0. */
+  overdueCycles: string[];
+  /** overdue + billed + unbilled — the figure Accounts calls the card's balance. */
   outstanding: number;
   dueDay?: number;
   /** '5th', for prose. */
@@ -146,6 +168,8 @@ export interface CardDues {
 export interface DuesTotals {
   billed: number;
   unbilled: number;
+  /** Summed across cards. Non-zero means at least one statement went a whole cycle unpaid. */
+  overdue: number;
   outstanding: number;
   /** Summed across cards that declare a limit. 0 when none do. */
   creditLimit: number;
@@ -201,34 +225,32 @@ export const cycleStatus = (
   return f.due < f.charged ? 'partial' : 'unpaid';
 };
 
-/** Whether a cycle's own due date has gone by, without a due-date calculator for arbitrary past
- *  cycles. Only the latest closed statement can have a date still ahead — the card knows that one.
- *  Every OLDER cycle that still owes something is past due by construction: a newer statement has
- *  since been cut, so that one's date went by a month or more ago. */
+/** Whether a cycle's own due date has gone by. Only the latest closed statement can have a date
+ *  still ahead — the card knows that one, and since getCardDues stopped rolling it forward past its
+ *  own cycle, `daysToDue < 0` is a live test rather than the dead branch it used to be. Every OLDER
+ *  cycle that still owes something is past due by construction: a newer statement has since been
+ *  cut, so that one's date went by a month or more ago. */
 export const isCycleOverdue = (dues: Pick<CardDues, 'billedCycle' | 'daysToDue'>, cycle: string, due: number) =>
-  due > 0
+  due > ARREARS_MIN
   && (cycle < dues.billedCycle || (cycle === dues.billedCycle && dues.daysToDue !== undefined && dues.daysToDue < 0));
 
-/** The two sides of one cycle for one card. */
-export const getCardCycleFigures = (
-  account: Account,
-  transactions: Transaction[],
-  cycle: string
-): CardCycleFigures => {
-  const statementDay = account.statementDay || 1;
-  let spend = 0;
-  let settlement = 0;
-  let credits = 0;
+/** The three running sums a cycle is built from, before any clamping or rounding. */
+interface CycleTally { spend: number; settlement: number; credits: number; }
 
-  for (const t of transactions) {
-    if (t.accountId !== account.id) continue;
-    if (!affectsRupeeBalance(t)) continue;
-    if (getAppliedBillingCycle(t, statementDay) !== cycle) continue;
-    if (SETTLEMENT_CATEGORIES.has((t.category || '').toLowerCase())) settlement += t.type === 'debit' ? -t.amount : t.amount;
-    else if (t.type === 'debit') spend += t.amount;
-    else credits += t.amount;
-  }
+/** Fold one transaction into a tally.
+ *
+ *  Split out for the same reason the rest of this file exists: there are now TWO readers — one
+ *  cycle, and every cycle at once — and a returned payment classified as spend on one path and as a
+ *  negative settlement on the other would let a card's overdue total disagree with the statement
+ *  screen showing the very same month. One classifier, so they cannot. */
+const tally = (into: CycleTally, t: Transaction) => {
+  if (SETTLEMENT_CATEGORIES.has((t.category || '').toLowerCase())) into.settlement += t.type === 'debit' ? -t.amount : t.amount;
+  else if (t.type === 'debit') into.spend += t.amount;
+  else into.credits += t.amount;
+};
 
+/** Tally → statement. Everything below this line is the arithmetic that was always here. */
+const finalise = (account: Account, cycle: string, { spend, settlement, credits }: CycleTally): CardCycleFigures => {
   const payment = settlement + credits;
   // Unchanged by the signing above: moving a returned payment out of `spend` and into a negative
   // `settlement` shifts it across the minus sign, so `net` — and therefore the card's balance,
@@ -263,6 +285,74 @@ export const getCardCycleFigures = (
   };
 };
 
+/** The two sides of one cycle for one card. */
+export const getCardCycleFigures = (
+  account: Account,
+  transactions: Transaction[],
+  cycle: string
+): CardCycleFigures => {
+  const statementDay = account.statementDay || 1;
+  const sums: CycleTally = { spend: 0, settlement: 0, credits: 0 };
+  for (const t of transactions) {
+    if (t.accountId !== account.id) continue;
+    if (!affectsRupeeBalance(t)) continue;
+    if (getAppliedBillingCycle(t, statementDay) !== cycle) continue;
+    tally(sums, t);
+  }
+  return finalise(account, cycle, sums);
+};
+
+/**
+ * EVERY cycle the card has, in one pass over the ledger.
+ *
+ * getCardDues needs an unbounded number of cycles now that it looks for unpaid older statements,
+ * and calling getCardCycleFigures per cycle walks the whole transaction list once per month of the
+ * card's history. The bill-alert banner calls getActiveCardDues on every render with no memo, so
+ * that is cards × months × transactions on each paint.
+ *
+ * A cycle carrying only a hand-entered figure is included even with no transactions under it. That
+ * is precisely the case where the user HAS recorded what the bank carried forward, and a map keyed
+ * off the ledger alone would drop the one number they typed in themselves.
+ */
+export const getCardCycleFiguresByCycle = (
+  account: Account,
+  transactions: Transaction[]
+): Map<string, CardCycleFigures> => {
+  const statementDay = account.statementDay || 1;
+  const sums = new Map<string, CycleTally>();
+  const bucket = (cycle: string) => {
+    let t = sums.get(cycle);
+    if (!t) { t = { spend: 0, settlement: 0, credits: 0 }; sums.set(cycle, t); }
+    return t;
+  };
+  for (const t of transactions) {
+    if (t.accountId !== account.id) continue;
+    if (!affectsRupeeBalance(t)) continue;
+    tally(bucket(getAppliedBillingCycle(t, statementDay)), t);
+  }
+  for (const cycle of Object.keys(account.statementAdjustments ?? {})) bucket(cycle);
+  const out = new Map<string, CardCycleFigures>();
+  for (const [cycle, t] of sums) out.set(cycle, finalise(account, cycle, t));
+  return out;
+};
+
+/**
+ * The date the statement for `cycle` falls due.
+ *
+ * A cycle is named for the month its statement is CUT in: 2026-08 on a 20th statement day covers
+ * 20 Jul – 19 Aug and prints on 20 Aug (getBillingCycleDates). The due day that follows is the next
+ * dueDay STRICTLY after the cut — a card cut on the 20th and due on the 7th is due the 7th of the
+ * next month; one cut on the 1st and due on the 20th is due that same month.
+ *
+ * Derived from the cycle rather than from today, which is the whole point: this can return a date
+ * in the past, and a due date that is allowed to be behind us is what makes "overdue" expressible.
+ */
+export const getCycleDueDate = (cycle: string, statementDay: number, dueDay: number): Date => {
+  const cut = setDate(parseISO(`${cycle}-01`), statementDay);
+  const due = setDate(cut, dueDay);
+  return due <= cut ? addMonths(due, 1) : due;
+};
+
 /**
  * Everything one card owes right now. `now` is injectable so a caller can ask about a fixed
  * moment — and so this is testable without freezing the clock.
@@ -280,10 +370,39 @@ export const getCardDues = (
   // derived from today rather than by adding a month so the two can't drift if that helper changes.
   const unbilledCycle = getBillingCycleForDate(todayStr, statementDay);
 
+  // One pass for every cycle rather than one pass per cycle — see getCardCycleFiguresByCycle. A
+  // cycle with no transactions and no adjustment is absent from the map and owes nothing, which is
+  // what the missing figures object used to compute the long way round.
+  const figures = getCardCycleFiguresByCycle(account, transactions);
+
   // Rounded on the closed side, raw on the open one — see the note on rounding above.
-  const billed = getCardCycleFigures(account, transactions, billedCycle).statementAmount;
-  const unbilled = getCardCycleFigures(account, transactions, unbilledCycle).payable;
-  const outstanding = billed + unbilled;
+  const billed = figures.get(billedCycle)?.statementAmount ?? 0;
+  const unbilled = figures.get(unbilledCycle)?.payable ?? 0;
+
+  // WHAT AN UNPAID STATEMENT DOES ONCE THE NEXT ONE IS CUT — and why this is a third component of
+  // the balance rather than a display flag.
+  //
+  // This service used to hold that a card owes exactly `billed + unbilled` and nothing older,
+  // on the grounds that "an unpaid older statement rolls into the next one as a real posting, so it
+  // is already counted". A BANK does that. This app does not: `charged` is derived from the
+  // transactions the user entered inside the cycle, and nobody enters the previous balance the bank
+  // carried forward. So on the morning a new statement was cut, an unpaid one stopped being billed,
+  // stopped being unbilled, and left the card's outstanding, its utilisation and the Bills screen
+  // without so much as changing colour on the way out. The only place it survived was the
+  // Statements list, which is the screen you go to when you already know something is wrong.
+  //
+  // Oldest first, so a caller can name the months instead of only totalling them.
+  const overdueCycles: string[] = [];
+  let overdue = 0;
+  for (const cycle of [...figures.keys()].sort()) {
+    if (cycle >= billedCycle) continue;
+    const due = figures.get(cycle)!.due;
+    if (due <= ARREARS_MIN) continue;
+    overdueCycles.push(cycle);
+    overdue += due;
+  }
+
+  const outstanding = overdue + billed + unbilled;
 
   const dues: CardDues = {
     account,
@@ -291,15 +410,31 @@ export const getCardDues = (
     unbilledCycle,
     billed,
     unbilled,
+    overdue,
+    overdueCycles,
     outstanding,
   };
 
   if (account.dueDay) {
     const today = startOfDay(now);
-    // This month's due date, rolled forward only once it has actually PASSED — a due date of today
-    // stays today, at 0 days left.
-    let dueDate = setDate(today, account.dueDay);
-    if (dueDate < today) dueDate = addMonths(dueDate, 1);
+    // THE DATE THE LATEST STATEMENT FALLS DUE — not the next dueDay on the calendar.
+    //
+    // Those two agree right up until you miss a payment, and then they part company in the worst
+    // available direction. This was `setDate(today, dueDay)` rolled forward once it had passed,
+    // which floors `daysToDue` at zero and makes a due date behind us unrepresentable: the morning
+    // after you missed a bill the row went from "Due today" to "In 30 days" while still showing the
+    // money you had not paid. Every `daysToDue < 0` branch downstream — the Bills card's overdue
+    // styling, duePhrase, dueSentence, the alert banner's overdue count — was unreachable.
+    //
+    // Taken from the CYCLE instead, so it sits where the bank put it and is allowed to be in the
+    // past. The calendar answer is kept for a SETTLED card: nothing is owed, so there is no date to
+    // be late for, and the honest reading of "next due" is the next time this card's day comes
+    // round. That is also the behaviour every surface has always shown for a paid card.
+    let dueDate = getCycleDueDate(billedCycle, statementDay, account.dueDay);
+    if (billed <= 0) {
+      dueDate = setDate(today, account.dueDay);
+      if (dueDate < today) dueDate = addMonths(dueDate, 1);
+    }
     dues.dueDay = account.dueDay;
     dues.dueDayStr = getOrdinalSuffix(account.dueDay);
     dues.dueDate = format(dueDate, 'yyyy-MM-dd');
@@ -339,10 +474,11 @@ export const sumCardDues = (dues: CardDues[]): DuesTotals => {
     (acc, d) => ({
       billed: acc.billed + d.billed,
       unbilled: acc.unbilled + d.unbilled,
+      overdue: acc.overdue + d.overdue,
       outstanding: acc.outstanding + d.outstanding,
       creditLimit: acc.creditLimit + (d.creditLimit || 0),
     }),
-    { billed: 0, unbilled: 0, outstanding: 0, creditLimit: 0 }
+    { billed: 0, unbilled: 0, overdue: 0, outstanding: 0, creditLimit: 0 }
   );
   // Utilization only over cards that declare a limit — dividing the whole outstanding by a partial
   // limit would report a fraction of a denominator that doesn't cover it.

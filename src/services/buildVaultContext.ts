@@ -13,8 +13,6 @@ import {
   calculateBalance,
   formatCurrency,
   getCurrentMonthStr,
-  getAppliedBillingCycle,
-  getLatestBilledCycle,
   isStatsExcludedCategory,
   isCountableTransaction,
   isExternalRewardSource,
@@ -26,11 +24,11 @@ import {
   rewardSplitTotal,
   getInvestmentAccountStats,
   isPointsDenominated,
-  affectsRupeeBalance,
 } from '../utils';
-import { format, parseISO, addMonths, subMonths } from 'date-fns';
+import { format, parseISO, subMonths } from 'date-fns';
 import { calculateEPFProjection } from '../utils/epfEngine';
 import { getCachedPrice, getCachedPrevPrice, getCachedCommodityPriceINR } from './MarketDataService';
+import { getActiveCardDues } from './CardDuesService';
 
 const SLICE_CAP = 60;
 const RECENT_FALLBACK = 40;
@@ -184,25 +182,24 @@ function buildSummary(data: FinanceData): string {
     out.push(line);
   });
 
-  // Credit-card dues (billed / unbilled) — mirrors the Dashboard calculation.
-  const cards = data.accounts.filter(a => a.type === 'credit_card' && !a.archived);
-  if (cards.length) {
+  /* Credit-card dues, from CardDuesService — the one place that derives them.
+   *
+   * This block used to hand-roll the arithmetic itself, under a comment saying it "mirrors the
+   * Dashboard calculation" — which had by then been extracted into that service precisely because
+   * four screens were each answering "what's billed?" differently. This was the fifth, and the
+   * extraction missed it. So the assistant could quote figures no screen was showing: it applied no
+   * statement rounding, ignored a hand-entered statement figure outright, could not tell a payment
+   * from a cashback (which is what fixes the order rounding is done in), and had no notion of a
+   * statement left unpaid once the next one was cut.
+   *
+   * Ordered by urgency rather than by wallet position, which getActiveCardDues already does: the
+   * question put to an assistant is "what do I owe and when", so the soonest bill leading is the
+   * useful order for it. */
+  const cardDues = getActiveCardDues(data.accounts, data.transactions);
+  if (cardDues.length) {
     out.push('\n## Credit card dues');
-    cards.forEach(cc => {
-      const statementDay = cc.statementDay || 1;
-      const billedCycle = getLatestBilledCycle(statementDay);
-      const unbilledCycle = format(addMonths(parseISO(`${billedCycle}-01`), 1), 'yyyy-MM');
-      let billed = 0, unbilled = 0;
-      data.transactions.forEach(t => {
-        if (t.accountId !== cc.id) return;
-        // Mirrors the Dashboard: a points redemption isn't a charge on the credit line, so quoting it
-        // as part of the dues would overstate them (and disagree with the card balance).
-        if (!affectsRupeeBalance(t)) return;
-        const cyc = getAppliedBillingCycle(t, statementDay);
-        if (cyc === unbilledCycle) unbilled += t.type === 'debit' ? t.amount : -t.amount;
-        else if (cyc === billedCycle) billed += t.type === 'debit' ? t.amount : -t.amount;
-      });
-      billed = Math.max(0, billed); unbilled = Math.max(0, unbilled);
+    cardDues.forEach(d => {
+      const cc = d.account;
       // WHAT THE CARD COSTS travels with what it owes, on the same line. The My Cards screen answers
       // "what do I pay to hold this?" and the assistant could not: nothing here emitted a limit or a
       // fee, so every fee question fell through to "I can't see that in your data". An absent
@@ -217,8 +214,23 @@ function buildSummary(data: FinanceData): string {
         if (fees.joiningFee) feeParts.push(`joining fee ${formatCurrency(fees.joiningFee)}`);
         if (fees.waiverSpend) feeParts.push(`waived on ${formatCurrency(fees.waiverSpend)} of spend in a membership year`);
       }
-      out.push(`  - ${cc.name}: billed ${formatCurrency(billed)}, unbilled ${formatCurrency(unbilled)}, total ${formatCurrency(billed + unbilled)}` +
-        (cc.dueDay ? `, due day ${cc.dueDay}` : '') +
+      /* ARREARS ARE NAMED, not folded into the total and left to be inferred. "Total ₹12,240" on a
+         card whose statement says ₹7,240 is the kind of gap a user asks the assistant about, and the
+         answer — a statement from an earlier month that was never paid — is not recoverable from the
+         numbers alone. The cycles are listed because which month went unpaid is the actionable half.
+
+         The countdown is stated too, and can now be negative: getCardDues stopped rolling a due date
+         forward past its own cycle, so "3 days overdue" is a state the assistant can finally see and
+         report rather than reading it as comfortably in-future. */
+      const arrears = d.overdue > 0
+        ? `, OVERDUE from earlier statements ${formatCurrency(d.overdue)} (${d.overdueCycles.join(', ')})`
+        : '';
+      const countdown = d.daysToDue === undefined ? ''
+        : d.daysToDue < 0 ? ` (statement ${Math.abs(d.daysToDue)} day${d.daysToDue === -1 ? '' : 's'} OVERDUE)`
+        : d.daysToDue === 0 ? ' (due today)'
+        : ` (due in ${d.daysToDue} day${d.daysToDue === 1 ? '' : 's'})`;
+      out.push(`  - ${cc.name}: billed ${formatCurrency(d.billed)}, unbilled ${formatCurrency(d.unbilled)}${arrears}, total ${formatCurrency(d.outstanding)}` +
+        (cc.dueDay ? `, due day ${cc.dueDay}${countdown}` : '') +
         (cc.creditLimit ? `, limit ${formatCurrency(cc.creditLimit)}` : '') +
         `, fees: ${feeParts.join(', ')}` +
         (cc.cardOpenedOn ? `, opened ${cc.cardOpenedOn}` : ', opening date not set'));

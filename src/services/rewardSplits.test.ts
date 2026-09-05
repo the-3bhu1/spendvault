@@ -7,7 +7,7 @@
 // interesting cases are the OLD shapes, and they are what most of this file is about.
 import { describe, it, expect } from 'vitest';
 import {
-  getRewardSplits, rewardSplitTotal, isRewardSourceOf, rewardSplitOfLeg, accountNameOf,
+  getRewardSplits, rewardSplitTotal, rewardSplitGross, cardRewardOn, isRewardSourceOf, rewardSplitOfLeg, accountNameOf,
   rewardSplitIndexOfLeg, rewardLegIdsOf, withRewardSplits, redistributeRewardSplits,
   isPointsDenominated, isUnitDenominated, rewardUnitBalance, formatRewardBalance,
   rupeesToRewardPoints, formatAmount, formatCurrency, EXTERNAL_REWARD_SOURCE_ID,
@@ -263,5 +263,86 @@ describe('a rewards wallet counted in its own unit', () => {
     // check compares 200 against the 500 the wallet holds.
     expect(rupeesToRewardPoints(20, chips())).toBe(200);
     expect(rewardUnitBalance(chips(), [], '2026-09')).toBe(500);
+  });
+});
+
+// ── the price the ledger row strikes through ──────────────────────────────────────────────────────
+describe('the gross price of a part-paid purchase', () => {
+  it('adds what was split off back onto what this account lent', () => {
+    // The Flipkart case: ₹187 order, ₹106 on the card, ₹81 from a wallet.
+    expect(rewardSplitGross(tx({ amount: 106, rewardSplits: [{ accountId: 'fw', amount: 81, legId: 'leg' }] })))
+      .toBe(187);
+  });
+
+  it('reads a legacy row the same way', () => {
+    expect(rewardSplitGross(legacy)).toBe(448);   // 362 lent + 86 redeemed
+    expect(rewardSplitGross(modern)).toBe(448);   // …and the same purchase split two ways
+  });
+
+  it('is 0 on a purchase that was not split, so the row shows nothing', () => {
+    expect(rewardSplitGross(tx({ amount: 642 }))).toBe(0);
+  });
+
+  it('is 0 on the LEG of a split — only the anchor carries the sources', () => {
+    // The ₹81 wallet leg. Were this to report 187 the ledger would strike the same price twice,
+    // once against each half of the same purchase.
+    expect(rewardSplitGross(tx({ id: 'leg', accountId: 'fw', amount: 81, linkedTransactionIds: ['anchor'] })))
+      .toBe(0);
+  });
+
+  it('is 0 on a linked pair that is not a split', () => {
+    // A transfer, a CC payment and an investment are all linked rows whose legs must never be added
+    // together: a bank debit plus the card credit it funds is double the money that moved.
+    const transferOut = tx({ id: 'tr1', amount: 2000, category: 'Transfer', linkedTransactionIds: ['tr2'] });
+    const transferIn = tx({ id: 'tr2', amount: 2000, category: 'Transfer', type: 'credit', linkedTransactionIds: ['tr1'] });
+    expect(rewardSplitGross(transferOut)).toBe(0);
+    expect(rewardSplitGross(transferIn)).toBe(0);
+  });
+
+  it('does not let binary floating point leak a third decimal into the price', () => {
+    expect(rewardSplitGross(tx({ amount: 106.4, rewardSplits: [{ accountId: 'fw', amount: 80.6 }] })))
+      .toBe(187);
+  });
+});
+
+// ── what a card's own reward rate is applied to ───────────────────────────────────────────────────
+//
+// The bug this pins: the log form's Amount field holds the FULL price a split is taken out of, and
+// the rate was being applied to it. A ₹187 Flipkart order part-paid with ₹81 of wallet money is a
+// ₹106 authorisation as far as the issuer is concerned, so 50% of it earned 93 jewels on screen
+// against the 53 that actually arrive.
+describe('a card reward is paid on what the card lent', () => {
+  const jupiter = {
+    cashbackRates: [{ id: 'online', name: 'Online Shopping', rate: 50, roundOffCashback: true }],
+    defaultCashbackRate: 2,
+    roundOffCashback: false,
+  };
+
+  it('pays on the charge, not on the price', () => {
+    const order = tx({ amount: 106, rewardSplits: [{ accountId: 'fw', amount: 81, legId: 'leg' }] });
+    expect(rewardSplitGross(order)).toBe(187);                       // what it cost
+    expect(cardRewardOn(jupiter, 'online', order.amount)).toBe(53);  // what the card pays
+    expect(cardRewardOn(jupiter, 'online', rewardSplitGross(order))).toBe(93); // …the old figure
+  });
+
+  it('is unchanged on a purchase with no split', () => {
+    expect(cardRewardOn(jupiter, 'online', 642)).toBe(321);
+  });
+
+  it('takes rounding from the LEVEL, and from the account only as a fallback', () => {
+    // 50% of 187 is 93.5; the level rounds off, so 93 — not the account's roundOffCashback: false.
+    expect(cardRewardOn(jupiter, 'online', 187)).toBe(93);
+    // The default rate falls back to the account's flag, which here does NOT round.
+    expect(cardRewardOn(jupiter, 'default', 106)).toBeCloseTo(2.12);
+    expect(cardRewardOn({ ...jupiter, roundOffCashback: true }, 'default', 106)).toBe(2);
+  });
+
+  it('pays nothing when no level is selected and there is no default in play', () => {
+    expect(cardRewardOn(jupiter, '', 106)).toBe(0);
+    expect(cardRewardOn(jupiter, 'a-level-that-was-deleted', 106)).toBe(0);
+  });
+
+  it('never pays on a negative charge', () => {
+    expect(cardRewardOn(jupiter, 'online', -50)).toBe(0);
   });
 });

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, InvestmentKind, RewardSplitLeg } from '../types';
-import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, cardEarnsCashback, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance } from '../utils';
+import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, cardEarnsCashback, cardRewardOn, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance } from '../utils';
 import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X, Plus, Ticket } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
@@ -1096,20 +1096,15 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     let finalRewardEarned = Number(newTx.rewardEarned) || 0;
     if (newTx.rewardEarnedType === 'delayed' && !finalRewardEarned) {
       if ((account?.type === 'credit_card' || account?.type === 'debit_card') && newTx.type === 'debit' && !newTx.isTravelTransaction && finalCategory !== 'Transfer' && finalCategory !== 'CC Payment' && finalCategory !== 'NCMC Travel Recharge') {
-        const selectedCbObj = account.cashbackRates?.find(r => r.id === selectedCashbackLevelId);
-
-        let rateToUse = 0;
-        let shouldRoundOff = account.roundOffCashback;
-
-        if (selectedCbObj) {
-          rateToUse = selectedCbObj.rate;
-          shouldRoundOff = selectedCbObj.roundOffCashback;
-        } else if (selectedCashbackLevelId === 'default') {
-          rateToUse = account.defaultCashbackRate || 0;
-        }
-
-        finalRewardEarned = (newTx.amount! * (rateToUse || 0)) / 100;
-        if (shouldRoundOff) finalRewardEarned = Math.floor(finalRewardEarned);
+        /* WHAT THE CARD ACTUALLY LENT, not what the purchase cost — see cardRewardOn, which is
+         * where the reasoning lives. `newTx.amount` is the form's Amount field and means the FULL
+         * price a split is taken out of; mainAccountAmount is the reduced figure this row is saved
+         * with a few lines down, so passing it keeps the rate and the charge it is applied to from
+         * drifting apart. Investments keep newTx.amount: their charged figure is assembled
+         * differently (allotted + charges) and nothing here is asking to change what a card-funded
+         * investment earns. */
+        const chargedToCard = isInvestment ? Number(newTx.amount) : mainAccountAmount;
+        finalRewardEarned = cardRewardOn(account, selectedCashbackLevelId, chargedToCard);
       }
     }
 

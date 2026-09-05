@@ -35,18 +35,27 @@ export default function BillAlertBanner({ onNavigateToBills }: BillAlertBannerPr
   const manualAlerts = (data.recurringBills || [])
     .filter(bill => bill.isActive)
     .map(bill => ({ name: bill.name, daysLeft: getDaysLeft(bill.nextDueDate) }))
-    .filter(b => b.daysLeft <= URGENCY_DAYS);
+    .filter(b => b.daysLeft <= URGENCY_DAYS)
+    .map(b => ({ ...b, overdue: b.daysLeft < 0 }));
 
   // CC bills. The statement figure and the due date both come from CardDuesService, so this banner
   // can't warn about an amount the Dashboard and Accounts disagree with — which it used to, on any
   // card that had redeemed its own points.
+  //
+  // A card in arrears alerts whatever its CURRENT statement's date says. Money left on a statement
+  // older than this one is past due on its own terms — that date went by a cycle ago — so gating on
+  // `daysToDue <= 3` would keep the banner silent for the twenty-odd days a rolled bill spends
+  // waiting for the next due date to come round.
   const ccAlerts = getActiveCardDues(data.accounts, data.transactions)
-    .filter(d => d.daysToDue !== undefined && d.billed > 0 && d.daysToDue <= URGENCY_DAYS)
-    .map(d => ({ name: `${d.account.name} Payment`, daysLeft: d.daysToDue! }));
+    .filter(d => d.daysToDue !== undefined && (d.overdue > 0 || (d.billed > 0 && d.daysToDue <= URGENCY_DAYS)))
+    .map(d => ({ name: `${d.account.name} Payment`, daysLeft: d.daysToDue!, overdue: d.overdue > 0 || d.daysToDue! < 0 }));
 
+  // Counted off an explicit flag rather than off the sign of daysLeft. A card with an unpaid older
+  // statement AND a current one due next week has a positive daysLeft and is still overdue, and the
+  // sign test would have filed it under "due within 3 days" — the softer of the two words.
   const allAlerts = [...manualAlerts, ...ccAlerts];
-  const overdueCount = allAlerts.filter(a => a.daysLeft < 0).length;
-  const urgentCount = allAlerts.filter(a => a.daysLeft >= 0).length;
+  const overdueCount = allAlerts.filter(a => a.overdue).length;
+  const urgentCount = allAlerts.filter(a => !a.overdue).length;
 
   if (!visible || allAlerts.length === 0) return null;
 

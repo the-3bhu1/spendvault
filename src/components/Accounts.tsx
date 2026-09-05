@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { format, addMonths, parseISO } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown, CalendarDays } from 'lucide-react';
 import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols, isCacheFresh, searchMFByName, searchStockByName, fetchCommodityPriceINR, getCachedCommodityPriceINR, isCommodityCacheFresh, getCommodityVendorFound } from '../services/MarketDataService';
@@ -12,7 +12,8 @@ import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardFees, CardNetwork, BrandKey, RoundingRule } from '../types';
 import { CardBrandLogo, brandLabel, BRAND_INK } from './CardBrandLogo';
 import { resolveCardIssuer } from '../utils';
-import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, calculateCycleBalanceForCycle, getBillingCycleForDate, getOrdinalSuffix, affectsRupeeBalance, cardEarnsCashback, isUnitDenominated, rewardUnitBalance, rewardPointsToRupees, rupeesToRewardPoints } from '../utils';
+import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, getLatestBilledCycle, getOrdinalSuffix, affectsRupeeBalance, cardEarnsCashback, isUnitDenominated, rewardUnitBalance, rewardPointsToRupees, rupeesToRewardPoints } from '../utils';
+import { getCardCycleFigures } from '../services/CardDuesService';
 import { scrollToFirstError } from '../utils/formErrors';
 import { CardNetworkLogo, NETWORK_LABELS } from './CardNetworkLogo';
 import { ViewCardOverlay } from './ViewCardOverlay';
@@ -881,17 +882,23 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       openingBal = calculateBalance(acc, data.transactions, prevMonthStr);
                     }
 
-                    const prevCycleDue = (() => {
-                      if (acc.type !== 'credit_card') return null;
-                      const statementDay = acc.statementDay || 1;
-                      const currentCycle = getBillingCycleForDate(todayStr, statementDay);
-                      const prevCycle = format(addMonths(parseISO(`${currentCycle}-01`), -1), 'yyyy-MM');
-                      const due = calculateCycleBalanceForCycle(acc, data.transactions, prevCycle);
-                      const rounding = acc.statementRounding || 'none';
-                      if (rounding === 'round') return Math.round(due);
-                      if (rounding === 'floor') return Math.floor(due);
-                      if (rounding === 'ceil') return Math.ceil(due);
-                      return due;
+                    // PREV DUE — the latest CLOSED statement, from the one service that derives it.
+                    //
+                    // This tile was the last card surface still doing its own arithmetic, and it
+                    // differed from every other one in ways that had nothing to do with intent: it
+                    // ignored a hand-entered statement figure outright, it rounded `spend − every
+                    // credit` rather than rounding the BILL and then subtracting what was paid
+                    // against it, and it could not tell a payment from a cashback. The CYCLE it
+                    // picked was always right — getLatestBilledCycle is the same month, derived the
+                    // same way. It was the sum over that month nobody had moved.
+                    //
+                    // Kept SIGNED rather than reading `f.due`, because the tile below paints a
+                    // negative figure green: an overpaid statement is money sitting on the card, and
+                    // `due` is this same subtraction with a clamp at zero that would hide it.
+                    const prevCycleDue = acc.type !== 'credit_card' ? null : (() => {
+                      const cycle = getLatestBilledCycle(acc.statementDay || 1, parseISO(todayStr));
+                      const f = getCardCycleFigures(acc, data.transactions, cycle);
+                      return f.charged - f.settlement;
                     })();
 
                     const isFirstAccount = index === 0 && acc.id === grouped[type][0].id;

@@ -549,6 +549,54 @@ export const rewardSplitTotal = (tx?: Partial<Transaction>): number => {
   return Math.round(splits.reduce((sum, s) => sum + (s.amount || 0), 0) * 100) / 100;
 };
 
+/**
+ * What a card's own reward programme pays on a charge of `chargedAmount`.
+ *
+ * CHARGED, and the parameter is named that because the wrong figure is the easy one to reach for.
+ * The form's Amount field holds the FULL price a split is taken out of, and applying a rate to it
+ * invents rewards the bank will never credit: a ₹187 order part-paid with ₹81 of wallet money is a
+ * ₹106 authorisation as far as the issuer is concerned, and 50% of it was reporting 93 jewels
+ * against the 53 that actually arrive. The issuer never sees the other ₹81 — which is the same
+ * reason it stays off the statement, out of the card's outstanding and out of the card's dues (see
+ * affectsRupeeBalance). A rate paid on money the credit line did not lend contradicts every other
+ * figure the card reports about the same purchase.
+ *
+ * Rounding comes from the LEVEL when a level was picked and from the account only as a fallback,
+ * which is the precedence the form has always used: a card can round its UPI rate and not its swipe
+ * rate.
+ */
+export const cardRewardOn = (
+  account: Pick<Account, 'cashbackRates' | 'defaultCashbackRate' | 'roundOffCashback'>,
+  levelId: string | undefined,
+  chargedAmount: number,
+): number => {
+  const level = account.cashbackRates?.find(r => r.id === levelId);
+  const rate = level ? level.rate : (levelId === 'default' ? (account.defaultCashbackRate || 0) : 0);
+  const earned = (Math.max(0, chargedAmount) * (rate || 0)) / 100;
+  return (level ? level.roundOffCashback : account.roundOffCashback) ? Math.floor(earned) : earned;
+};
+
+/** WHAT THE PURCHASE COST, across every source that paid for it — this row's own leg plus
+ *  everything split off it. 0 when nothing was split, which is the signal to show nothing.
+ *
+ *  A ₹187 order settled with ₹106 of credit and ₹81 of wallet money is stored as a ₹106 row with an
+ *  ₹81 split hanging off it, because `amount` is what THIS account lent. The ₹187 was therefore
+ *  written down nowhere: the ₹81 lives in a linked entry the ledger collapses by default, so the
+ *  order read as if it cost ₹106.
+ *
+ *  Derived from the ANCHOR alone, never by summing a linked group, and the difference is the safety
+ *  of it. A CC-payment pair, a transfer pair and an investment pair are linked rows too, and adding
+ *  their legs gives a number that means nothing — a bank debit plus the card credit it funds is
+ *  double the money that moved. Only a split has legs that sum to a price, and only an anchor
+ *  carries splits, so a leg correctly reports 0.
+ *
+ *  Rounded to paise: 106.4 + 80.6 is not 187 in binary floating point. */
+export const rewardSplitGross = (tx?: Partial<Transaction>): number => {
+  const paidElsewhere = rewardSplitTotal(tx);
+  if (paidElsewhere <= 0) return 0;
+  return Math.round(((tx?.amount || 0) + paidElsewhere) * 100) / 100;
+};
+
 /** Whether `accountId` is one of this row's reward sources — the multi-source form of the
  *  `p.rewardUsedAccountId === child.accountId` discriminator described in
  *  docs/LINKED_TRANSACTIONS.md. */

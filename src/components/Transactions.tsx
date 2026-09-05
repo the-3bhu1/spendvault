@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account, InvestmentKind } from '../types';
-import { formatCurrency, formatAmount, formatDateString, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, getInvestmentKind, isCountableTransaction, isExternalRewardSource, getRewardSplits, rewardSplitIndexOfLeg, rewardSplitOfLeg, accountNameOf, linkedGroupOf, applyVisibleReorder, dayOrderUpdates, sortDayByOrder } from '../utils';
+import { formatCurrency, formatAmount, formatDateString, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, getInvestmentKind, isCountableTransaction, isExternalRewardSource, getRewardSplits, rewardSplitIndexOfLeg, rewardSplitOfLeg, rewardSplitTotal, rewardSplitGross, accountNameOf, linkedGroupOf, applyVisibleReorder, dayOrderUpdates, sortDayByOrder } from '../utils';
 import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, ChevronRight, ChevronDown, Hash, Shapes, Layers, Sparkles, Loader2, Filter, ArrowUp } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
@@ -53,6 +53,10 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
   // Hoisted out of the icon lookup below so the kind label pill (next to the category pill) can
   // use it too, without a second, possibly inconsistent lookup.
   const invKind = getInvestmentKind(tx, data.accounts);
+  // The full price of a part-paid purchase, and what came from elsewhere. 0 on anything that is not
+  // a split — see rewardSplitGross, which is where the reasoning lives.
+  const splitPaidElsewhere = rewardSplitTotal(tx);
+  const splitGross = rewardSplitGross(tx);
   const [swipeX, setSwipeX] = useState(0);
   const [swipeY, setSwipeY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -295,9 +299,37 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
         </div>
 
         <div className="flex-col align-end" style={{ flexShrink: 0, marginLeft: '1rem', position: 'relative', zIndex: 2 }}>
+          {/* WHAT THE PURCHASE COST leads, and the account's share is subordinate to it.
+              
+              The row's big figure is normally the movement on this account, and on a split row that
+              is the one number nobody wants: "Flipkart Order −₹106" answers "what did the card
+              lend", when the question a ledger is scanned with is "what did this cost". So on a
+              split — and only on a split — the headline becomes the price, and what this account
+              actually put in drops to the line below it.
+              
+              Deliberately in the AMOUNT column rather than as another pill beside the category:
+              that row already carries the account, the category, an investment kind and up to three
+              tags, and it wraps, so a pill there costs a whole line on a narrow phone.
+              
+              Both figures go through formatAmount with the same account, so a wallet counted in
+              Chips renders both lines in Chips rather than switching units halfway down. */}
           <span className="text-mono" style={{ fontWeight: 800, fontSize: '1rem', color: tx.type === 'credit' ? '#10b981' : '#ef4444' }}>
-            {tx.type === 'credit' ? '+' : '-'}{formatAmount(tx.amount, acc)}
+            {tx.type === 'credit' ? '+' : '-'}{formatAmount(splitGross > 0 ? splitGross : tx.amount, acc)}
           </span>
+          {/* The account's own share, in the metadata row's exact type — same classes, same weight —
+              so it lands on the line the account NAME is already on, and the two read across as
+              "Jupiter x CSB … ₹106". That pairing is what lets the figure go unlabelled; there is no
+              room in this column for a caption, and a bare number under a bold total would otherwise
+              be as likely to read as a discount. */}
+          {splitGross > 0 && (
+            <span
+              className="text-mono text-muted text-xs"
+              title={`${formatAmount(splitGross, acc)} total · ${formatAmount(tx.amount, acc)} from ${accountNameOf(tx.accountId, data.accounts)} · ${formatAmount(splitPaidElsewhere, acc)} from another source`}
+              style={{ fontWeight: 600, marginTop: '2px' }}
+            >
+              {formatAmount(tx.amount, acc)}
+            </span>
+          )}
           {acc?.isNcmcEnabled && tx.isTravelTransaction && <span className="metric-pill" style={{ marginTop: '6px', backgroundColor: 'var(--accent)', color: 'var(--bg-color)', borderColor: 'var(--accent)' }}>TRAVEL</span>}
         </div>
 

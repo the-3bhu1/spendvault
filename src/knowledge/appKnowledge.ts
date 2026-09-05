@@ -132,6 +132,8 @@ Actions (Transactions tab):
     stored in the same \`tags\` field on the transaction.
   Manage both types in Settings → Tags (two separate sections: "Active Tags" and "Event / One-off Tags");
   you can move a tag between types there (arrow icon), rename, or delete it.
+  Renaming a tag to a name that already exists MERGES the two — every transaction carrying the old
+  tag is rewritten to the existing one — so a rename is also how you fold a duplicate tag away.
   Deleting a tag removes it from all its transactions.
 
 # Auto-generated (linked) transactions — what creates a child log
@@ -210,7 +212,16 @@ the "Other" source below covers one-off rewards.
   tracking (CRED coins, super.money, a card's own points).
   Splits logged before one-time rewards got their own entry show a small "₹40 REWARD" pill beside the
   category instead; re-saving such an entry replaces the pill with the ledger entry.
-- In the ledger the SPEND is the row you see, with the source's leg collapsed under it as a linked
+- In the ledger a part-paid purchase leads with WHAT IT COST, not with what this account lent. A
+  ₹187 order paid with ₹106 of credit and ₹81 of wallet money shows a bold −₹187 as the row's
+  headline, with a small grey ₹106 on the line below it — level with the account name, so the two
+  read across as "Jupiter x CSB … ₹106". The remaining ₹81 is the collapsed leg. So all three
+  figures are reachable: the price at a glance, the card's share beside the card, and the wallet's
+  share on expanding.
+  This applies ONLY to a part-paid purchase. A plain purchase shows its single amount as always, and
+  a linked pair that is NOT a split (a transfer, a CC payment, an investment) never gets a combined
+  figure — its two legs are the same money counted twice and adding them would double it.
+  The source's leg is collapsed under the row as a linked
   entry ("Part-paid with rewards", or "Funding + rewards" on a CC Payment). That toggle says
   "rewards" whatever the source was, so it reads that way for an e-wallet leg too. Each leg is named
   "Paid toward: <the spend's description>" (on a CC Payment, "Paid toward: <the card>"). Two sources
@@ -279,10 +290,28 @@ A card has a statement day and a due day.
 - Statement day: the day the cycle closes. A transaction dated ON or AFTER the statement day rolls
   into NEXT month's statement; before it, it stays in the CURRENT one.
 - Billed = the most recently generated statement (what's due). Unbilled = the cycle in progress.
+- A statement left unpaid when the NEXT one is cut does not disappear: it stays in the card's
+  outstanding balance and in its credit utilisation as arrears, named by the month it came from, and
+  the Bills row for that card shows it in a red band above the current statement.
 - Due day: shown for reference (when payment is due); it does not lock anything.
-- Rounding rule (round/floor/ceil/none) is applied to what is LEFT after payments and credits, not to
-  the billed total. So a cycle paid to the rupee can still show ₹1 outstanding when the raw figure had
-  paise on it — e.g. 92 paise left over rounds up to ₹1.
+- Rounding rule (round/floor/ceil/none) is applied to the BILL — spend less credits that adjust what
+  you were charged (cashback paid in rupees, refunds, reversals) — and payments are then subtracted
+  from that rounded figure. That is the order a bank uses: it prints ₹1,538 and you clear it by
+  paying ₹1,538, so the paise the rounding dropped must not come back as a balance.
+- A residue of ₹1 or less left behind by that rounding is NOT treated as arrears — a statement is
+  rounded and the payment against it is not, so a rupee is noise rather than a debt. The proper fix
+  for a cycle whose figure disagrees with the bank is to correct it outright (see below).
+- Correcting a statement by hand: on the statement screen, LONG-PRESS the big Statement Amount
+  figure. A "Statement Amount" sheet opens showing the month, its date range and the app's
+  "Calculated:" figure; type what your bank actually printed and press "Save statement amount".
+  Banks do not always round the way they say they do, and the printed bill wins. It changes THAT
+  cycle only — every other cycle keeps following the card's rounding rule — and once set the sheet
+  offers "Reset to <calculated figure>" to drop the override again.
+- Where a statement stands is said in one word, the same word on the Statements list and on the
+  statement screen: "Nothing billed" (an unused month), "Overdue", "Overpaid" (more was paid against
+  it than it billed — the money sits as credit on the card), "Settled", "Partially paid", "Unpaid",
+  and "Open" for the cycle still running. Overdue outranks partially paid, and overpaid outranks
+  settled, so the row always shows the stronger of two true statements.
 - Which statement a credit lands on: only a CC PAYMENT gets to choose. Logging one shows "Apply
   Payment To" — Previous Statement (reduce already-billed dues) or Current Open Cycle (an early
   payment against the cycle in progress). Every OTHER credit on a card — a merchant refund, a
@@ -366,8 +395,12 @@ the app falls back to the financial year and says so on screen rather than quoti
 A card with no fees recorded is treated as lifetime free.
 
 # Cashback / Rewards
-Cards can earn cashback at a default rate or per-mode rates (e.g. UPI, swipe). The app tracks expected
-vs. realized cashback per card per billing cycle. Cashback can be instant or delayed, credited in the
+Cards can earn cashback at a default rate or per-mode rates (e.g. UPI, swipe). A rate is applied to
+what the CARD WAS CHARGED, not to what the purchase cost: on a ₹187 order part-paid with ₹81 of
+wallet money the card was charged ₹106, so a 50% mode expects 53 jewels, not 93. The issuer never
+sees the other ₹81 — the same reason it stays off the statement and out of the card's dues. (An
+existing entry keeps whatever figure was stored with it; re-picking its Cashback Mode recomputes.)
+The app tracks expected vs. realized cashback per card per billing cycle. Cashback can be instant or delayed, credited in the
 same cycle or the next, as rupees or as reward points, and deposited into a chosen account. In
 Cards → Rewards the user confirms realized cashback, which posts a consolidated "Cashback"
 credit into that account. The screen leads with what is still pending, and rupees are kept SEPARATE
@@ -435,6 +468,17 @@ PAID dates it today.
 Credit card statement dues appear here automatically from each card's due day. Those DO settle —
 a statement genuinely closes — so a card with nothing outstanding shows "No Dues". Only credit
 cards ever show that; a manual bill never does.
+There is exactly ONE row per credit card, never two. A card is not one row per statement, so an
+unpaid statement and a newly generated one do not appear side by side — they are added together on
+the card's single row, and the row breaks the total down. A card carrying money from an older
+statement shows a red band naming the months it is from ("Jul statement unpaid ₹5,000"), the current
+statement and its countdown beneath it ("This statement · In 2 days ₹7,240"), and then the sum as
+"To clear ₹12,240" with an OVERDUE badge. The figure LOG prefills is that total, not the current
+statement alone. A card whose own statement has simply gone past its date shows the countdown as
+"3 days overdue" instead, with no band, because nothing older is owed.
+An unpaid statement therefore stays in the card's outstanding balance and in its credit utilisation
+after the next statement is cut, instead of dropping out of both. Anything at or under ₹1 is ignored
+as rounding residue, since a statement is rounded and the payment against it is not.
 Any category can be picked for a bill, INCLUDING Mutual Funds — so a fund instalment can still be
 tracked here purely as a due-date reminder. What no longer exists is the dedicated SIP wiring: a bill
 can NOT be linked to a mutual fund account, and logging it does NOT auto-credit that account. A

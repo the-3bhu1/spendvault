@@ -230,9 +230,12 @@ const leadFigure = (s: PendingRewards) =>
 const trailingUnits = (s: PendingRewards) => s.byUnit.slice(s.rupees > 0 ? 0 : 1);
 
 const dueColor = (d: CardDues) =>
-  d.billed <= 0 ? 'var(--text-secondary)'
-    : d.daysToDue !== undefined && d.daysToDue <= URGENCY_DAYS ? 'var(--danger)'
-      : 'var(--warning)';
+  // Arrears first: a card carrying an unpaid older statement is urgent no matter how comfortable
+  // the current statement's date looks, and `billed <= 0` would otherwise paint it grey.
+  d.overdue > 0 ? 'var(--danger)'
+    : d.billed <= 0 ? 'var(--text-secondary)'
+      : d.daysToDue !== undefined && d.daysToDue <= URGENCY_DAYS ? 'var(--danger)'
+        : 'var(--warning)';
 
 /** One figure in a bordered cell — the unit the card summary's stat rows are built from. */
 const StatCell: React.FC<{ label: string; value: string; tone: string }> = ({ label, value, tone }) => (
@@ -295,6 +298,12 @@ const sameRewards = (a: PendingRewards, b: PendingRewards) => {
  * "Due 2nd" and inherits its subject from it; here it had none, so it says what is due and when.
  */
 const dueSentence = (d: CardDues) => {
+  // Outranks everything below. "Bill due in 12 days" over a card that skipped a statement is the
+  // reassuring half of the truth, and it is the half that reads as the whole one.
+  if (d.overdue > 0) {
+    const n = d.overdueCycles.length;
+    return `${n} earlier statement${n === 1 ? '' : 's'} unpaid`;
+  }
   if (d.billed <= 0) return d.dueDayStr ? `Nothing billed \u00b7 due ${d.dueDayStr}` : 'Nothing billed';
   if (d.daysToDue === undefined) return d.dueDayStr ? `Bill due ${d.dueDayStr}` : null;
   if (d.daysToDue < 0) {
@@ -561,7 +570,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
      copy that names a specific card. Now that the list is in wallet order it would have named
      whichever card was added first, and the same silent break was one re-sort away regardless. */
   const nextDue = dues.reduce<CardDues | null>((soonest, d) => {
-    if (d.billed <= 0 || d.daysToDue === undefined) return soonest;
+    if ((d.billed <= 0 && d.overdue <= 0) || d.daysToDue === undefined) return soonest;
     return !soonest || d.daysToDue < (soonest.daysToDue as number) ? d : soonest;
   }, null);
 
@@ -723,12 +732,14 @@ export default function CreditCards({ onExit, onViewStatement }: {
    *  built once — the hero above it changes, the split does not. */
   /** Two mono-labelled figures under a hero. The shape appears under three of them, so it is built
    *  once and the labels are the caller's business. */
+  /** Variadic since arrears became a third component of what a card owes — see renderSplit. The two
+   *  fixed parameters it had would otherwise have forced the new cell to be rendered somewhere else,
+   *  in type that did not match the two it belongs beside. */
   const renderFigures = (
-    a: { label: string; value: string; tone?: string },
-    b: { label: string; value: string; tone?: string },
+    ...cells: { label: string; value: string; tone?: string }[]
   ) => (
     <div className="flex justify-center" style={{ gap: '2rem', marginTop: '1rem' }}>
-      {[a, b].map(cell => (
+      {cells.map(cell => (
         <div key={cell.label} style={{ textAlign: 'center' }}>
           <div className="text-mono uppercase" style={{ fontSize: '0.55rem', fontWeight: 800, letterSpacing: '1px', color: 'var(--text-muted)' }}>{cell.label}</div>
           <div className="text-serif" style={{ fontSize: '1.05rem', fontWeight: 700, color: cell.tone ?? 'var(--text-primary)', marginTop: '0.15rem' }}>
@@ -739,10 +750,17 @@ export default function CreditCards({ onExit, onViewStatement }: {
     </div>
   );
 
-  /** Billed and unbilled as two mono-labelled figures. Still its own function because the tone rule
-   *  is particular to it: a zero BILLED is "nothing billed yet" and reads muted, where a zero
-   *  unbilled is simply a month with no spend on it and reads normally. */
-  const renderSplit = (billed: number, unbilled: number) => renderFigures(
+  /** The components of what is owed, as mono-labelled figures under the total. Its own function
+   *  because the tone rule is particular to it: a zero BILLED is "nothing billed yet" and reads
+   *  muted, where a zero unbilled is simply a month with no spend on it and reads normally.
+   *
+   *  OVERDUE IS SHOWN ONLY WHEN THERE IS SOME, and it has to be shown when there is: the figure above
+   *  these cells is overdue + billed + unbilled, so omitting the first of the three left a total that
+   *  visibly did not add up — ₹12,240 over "Billed ₹7,240 · Unbilled ₹0" reads as a arithmetic fault
+   *  in the screen rather than as a statement that went unpaid. Leading, because it is the oldest
+   *  money and the only part of the total that is late. */
+  const renderSplit = (billed: number, unbilled: number, overdue = 0) => renderFigures(
+    ...(overdue > 0 ? [{ label: 'Overdue', value: formatWhole(overdue), tone: 'var(--danger)' }] : []),
     { label: 'Billed', value: formatWhole(billed), tone: billed > 0 ? 'var(--text-primary)' : 'var(--text-secondary)' },
     { label: 'Unbilled', value: formatWhole(unbilled) },
   );
@@ -884,7 +902,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
 
               {!hasCards ? null : (
                 <>
-                  {renderSplit(totals.billed, totals.unbilled)}
+                  {renderSplit(totals.billed, totals.unbilled, totals.overdue)}
                   {totals.utilization !== undefined && renderUtilization(totals.utilization, totals.creditLimit)}
                   {nextDue && (
                     <div className="text-mono uppercase" style={{ fontSize: '0.62rem', letterSpacing: '0.5px', color: dueColor(nextDue), marginTop: '1rem' }}>
@@ -1339,7 +1357,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
               <div className="text-serif" style={{ fontSize: '2.6rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '1.25rem', lineHeight: 1 }}>
                 {formatCurrency(cardDues.outstanding)}
               </div>
-              {renderSplit(cardDues.billed, cardDues.unbilled)}
+              {renderSplit(cardDues.billed, cardDues.unbilled, cardDues.overdue)}
               {cardDues.utilization !== undefined && renderUtilization(cardDues.utilization, cardDues.creditLimit ?? 0)}
               {dueSentence(cardDues) && (
                 <div className="text-mono uppercase" style={{ fontSize: '0.62rem', letterSpacing: '0.5px', color: dueColor(cardDues), marginTop: '1rem' }}>

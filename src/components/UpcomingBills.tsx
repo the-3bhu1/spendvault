@@ -26,6 +26,17 @@ import { advanceBillCycle } from '../utils';
 import { getActiveCardDues } from '../services/CardDuesService';
 import { scrollToFirstError } from '../utils/formErrors';
 
+/** "Aug statement" / "Jul + Aug statements" / "3 statements" — what the overdue money is FROM.
+ *  A bare "₹5,000 overdue" leaves you counting backwards to work out which month went unpaid, and
+ *  the answer is the difference between a forgotten bill and a payment logged into the wrong cycle.
+ *  Cycles are 'yyyy-MM' and named for the month the statement was cut in. */
+const namedStatements = (cycles: string[]) => {
+  if (cycles.length === 0) return '';
+  if (cycles.length > 2) return `${cycles.length} statements`;
+  const months = cycles.map(c => format(parseISO(`${c}-01`), 'MMM'));
+  return `${months.join(' + ')} statement${months.length > 1 ? 's' : ''}`;
+};
+
 const FREQUENCY_LABELS: Record<RecurringFrequency, string> = {
   daily: 'Daily',
   weekly: 'Weekly',
@@ -176,12 +187,22 @@ export default function UpcomingBills() {
       .map(d => ({
         id: `cc-${d.account.id}`,
         name: `${d.account.name} Payment`,
-        amount: d.billed,
+        // WHAT IT WOULD TAKE TO CLEAR THE CARD — the latest statement plus anything older still
+        // unpaid, not the latest statement alone. Identical to `billed` on a card that has never
+        // missed one, which is every card most of the time; the two only part company after a
+        // statement has been allowed to roll, and then this is the number you actually have to pay.
+        // It is also what LOG prefills, and prefilling a figure that leaves the card in arrears is
+        // how the old bill quietly stayed unpaid for a second month.
+        amount: d.billed + d.overdue,
+        billed: d.billed,
+        overdue: d.overdue,
+        overdueCycles: d.overdueCycles,
         category: 'CC Payment',
         nextDueDate: d.dueDate!,
         isCC: true,
-        // Nothing billed means the statement is settled — there is no bill to pay this cycle.
-        isPaid: d.billed <= 0,
+        // Settled means BOTH: nothing on this statement and nothing left on an older one. Reading
+        // `billed <= 0` alone put "No Dues · PAID" on a card carrying a statement it had skipped.
+        isPaid: d.billed <= 0 && d.overdue <= 0,
         accountId: d.account.id,
         statementDay: d.account.statementDay || 1
       }));
@@ -223,7 +244,10 @@ export default function UpcomingBills() {
             <div className="flex-col gap-4">
               {allUpcoming.map(bill => {
                 const daysLeft = getDaysRemaining(bill.nextDueDate);
-                const isOverdue = daysLeft < 0;
+                // Money left on a statement older than the current one. Overdue on its own terms
+                // whatever the current statement's date says — its own went by a cycle ago.
+                const ccOverdue = 'isCC' in bill ? bill.overdue : 0;
+                const isOverdue = daysLeft < 0 || ccOverdue > 0;
                 const isUrgent = daysLeft <= 3;
                 // Credit cards only — a statement genuinely settles. Manual bills never reach here.
                 const isPaidCC = ('isCC' in bill && bill.isPaid);
@@ -244,7 +268,7 @@ export default function UpcomingBills() {
                           flexShrink: 0,
                           borderRadius: '12px',
                           background: isPaidCC ? 'rgba(16, 185, 129, 0.1)' : isOverdue ? 'rgba(255, 59, 48, 0.1)' : 'var(--bg-hover)',
-                          color: isPaidCC ? 'var(--success-color, #10b981)' : isOverdue ? 'var(--negative-color)' : 'var(--text-color)',
+                          color: isPaidCC ? 'var(--success-color, #10b981)' : isOverdue ? 'var(--danger)' : 'var(--text-color)',
                           border: '1px solid var(--border-color)'
                         }}>
                           {isPaidCC ? <CheckCircle2 size={22} /> : (('isCC' in bill) ? <CreditCard size={22} /> : getCategoryIcon(bill.category as string, 22))}
@@ -281,20 +305,67 @@ export default function UpcomingBills() {
                       )}
                     </div>
 
-                    {/* Row 2: amount + due badge */}
+                    {/* Row 1b: what the figure below is made of, and ONLY when a statement has
+                        actually been allowed to roll. Every card that is up to date keeps the
+                        two-row layout it has always had — this is not a slot sitting empty.
+
+                        The breakdown exists because the total alone is unactionable: "₹12,240" on a
+                        card whose statement says ₹7,240 reads as a bug in the app rather than as a
+                        month you skipped, and the fix for the two is not the same. */}
+                    {ccOverdue > 0 && (
+                      <div className="flex-col gap-2" style={{
+                        border: '2px solid var(--danger)',
+                        borderRadius: '10px',
+                        padding: '0.6rem 0.75rem',
+                        background: 'rgba(255, 59, 48, 0.08)'
+                      }}>
+                        <div className="flex align-center justify-between gap-2">
+                          <span className="flex align-center gap-2 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--danger)', minWidth: 0 }}>
+                            <AlertCircle size={13} strokeWidth={3} style={{ flexShrink: 0 }} />
+                            {namedStatements('isCC' in bill ? bill.overdueCycles : [])} unpaid
+                          </span>
+                          <span className="text-sm font-bold" style={{ fontFamily: 'var(--font-mono)', color: 'var(--danger)', flexShrink: 0 }}>
+                            ₹{ccOverdue.toLocaleString()}
+                          </span>
+                        </div>
+                        {'isCC' in bill && bill.billed > 0 && (
+                          <div className="flex align-center justify-between gap-2">
+                            <span className="text-muted text-xs font-bold uppercase tracking-wider" style={{ minWidth: 0 }}>
+                              This statement · {formatDays(daysLeft)}
+                            </span>
+                            <span className="text-sm font-bold" style={{ fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+                              ₹{bill.billed.toLocaleString()}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Row 2: amount + due badge.
+
+                        PAINTED WITH var(--danger), which is a token that exists. Every red on this
+                        card used to be var(--negative-color) and the amount wore a `text-negative`
+                        class, and neither is defined anywhere in the stylesheet — so the badge lost
+                        its fill and the figure stayed the same colour as a bill due next month. It
+                        went unnoticed because the only way to reach it was an overdue MANUAL bill;
+                        a credit card could not get here at all until getCardDues stopped flooring
+                        daysToDue at zero. */}
                     <div className="flex justify-end align-center gap-3">
-                      <span className={`text-xl font-bold ${isOverdue && !isPaidCC ? 'text-negative' : ''}`} style={{ fontFamily: 'var(--font-mono)' }}>
+                      {ccOverdue > 0 && (
+                        <span className="text-muted text-xs font-bold uppercase tracking-wider" style={{ marginRight: 'auto' }}>To clear</span>
+                      )}
+                      <span className="text-xl font-bold" style={{ fontFamily: 'var(--font-mono)', color: isOverdue && !isPaidCC ? 'var(--danger)' : undefined }}>
                         {bill.amount > 0 ? `₹${bill.amount.toLocaleString()}` : isPaidCC ? 'PAID' : '--'}
                       </span>
                       <div className="flex align-center gap-1 text-xs font-bold px-2 py-1" style={{
                         borderRadius: '6px',
-                        background: isPaidCC ? 'rgba(16, 185, 129, 0.1)' : isOverdue ? 'var(--negative-color)' : isUrgent ? 'rgba(255, 159, 10, 0.1)' : 'var(--bg-hover)',
+                        background: isPaidCC ? 'rgba(16, 185, 129, 0.1)' : isOverdue ? 'var(--danger)' : isUrgent ? 'rgba(255, 159, 10, 0.1)' : 'var(--bg-hover)',
                         color: isPaidCC ? 'var(--success-color, #10b981)' : isOverdue ? 'white' : isUrgent ? 'var(--warning-color, #ff9f0a)' : 'var(--text-muted)',
                         textTransform: 'uppercase',
                         whiteSpace: 'nowrap'
                       }}>
                         {isPaidCC ? <Check size={12} /> : isOverdue ? <AlertCircle size={12} /> : <Clock size={12} />}
-                        {isPaidCC ? 'No Dues' : formatDays(daysLeft)}
+                        {isPaidCC ? 'No Dues' : daysLeft < 0 ? formatDays(daysLeft) : ccOverdue > 0 ? 'Overdue' : formatDays(daysLeft)}
                       </div>
                     </div>
 

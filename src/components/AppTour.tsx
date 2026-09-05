@@ -240,7 +240,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       },
       {
         title: "What You Owe",
-        description: "Your total outstanding across every card, split into what has been billed and what is still accruing on the open cycle. The bar below is how much of your combined credit limit is in use, and the line under it names the card whose bill lands first.",
+        description: "Your total outstanding across every card, split into what has been billed and what is still accruing on the open cycle — plus anything overdue, if a statement went unpaid when the next one was cut. The bar below is how much of your combined credit limit is in use, and the line under it names the card whose bill lands first.",
         selector: ".tour-cards-summary",
         icon: Sparkles
       },
