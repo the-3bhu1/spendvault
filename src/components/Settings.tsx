@@ -317,7 +317,18 @@ export default function Settings() {
     setShowPin(false);
     setShowConfirmPin(false);
 
+    /* HOLD THE SESSION OPEN LONG ENOUGH TO SAY WHY.
+     *
+     * A PIN-less session never authenticated — there was no lock to pass — so `isAuthenticated` has
+     * been false the entire time the user has been using the app. The moment a pinHash is written,
+     * App's `pinHash && !isAuthenticated` becomes true and AuthScreen replaces this screen on the
+     * very next render, taking the alert below with it. Setting the first PIN therefore threw the
+     * user at the lock screen mid-sentence, with nothing said about what had happened.
+     *
+     * Claiming authentication here grants nothing: they are already inside the app with full access,
+     * and the alert's own OK hands it straight back. */
     if (hadPinChange) {
+      setAuthenticated(true);
       setConfirmConfig({
         title: "Success",
         message: "Profile and Security settings updated. Please unlock with your new PIN.",
@@ -398,6 +409,17 @@ export default function Settings() {
     setGeneratedKey('');
     setProfileForm(prev => ({ ...prev, oldPin: '', pin: '', confirmPin: '' }));
 
+    /* HOLD THE SESSION OPEN LONG ENOUGH TO SAY WHY.
+     *
+     * A PIN-less session never authenticated — there was no lock to pass — so `isAuthenticated` has
+     * been false the entire time the user has been using the app. The moment a pinHash is written,
+     * App's `pinHash && !isAuthenticated` becomes true and AuthScreen replaces this screen on the
+     * very next render, taking the alert below with it. Setting the first PIN therefore threw the
+     * user at the lock screen mid-sentence, with nothing said about what had happened.
+     *
+     * Claiming authentication here grants nothing: they are already inside the app with full access,
+     * and the alert's own OK hands it straight back. */
+    setAuthenticated(true);
     setConfirmConfig({
       title: "Success",
       message: "Security setup complete! Please unlock with your new PIN.",
@@ -1280,18 +1302,36 @@ export default function Settings() {
 
   const [clipboardText, setClipboardText] = useState('');
 
+  /* Whether this device HAS a lock right now. Read from the saved user rather than the form, since
+   * it decides what the form is even allowed to ask for. */
+  const pinAlreadySet = !!(data.user?.pinHash || data.user?.pin);
+  /** A new PIN typed and confirmed — the pending lock, before it is saved. */
+  const pinPairEntered = profileForm.pin.length === 4 && profileForm.confirmPin.length === 4;
+
   const isEditingPin = profileForm.oldPin !== '' || profileForm.pin !== '' || profileForm.confirmPin !== '' || isOldPinVerified;
+  /* THE CURRENT PIN IS ONLY DEMANDED WHEN THERE IS ONE.
+   *
+   * This used to require `isOldPinVerified || oldPin.length === 4` unconditionally, which no
+   * PIN-less user could ever satisfy: the CURRENT PIN field is not rendered at all without a
+   * `pinHash`, and isOldPinVerified is set only by biometric verification, which itself requires a
+   * PIN. So `oldPin` stayed '' forever, isPinFormComplete stayed false, hasProfileChanges stayed
+   * false, and the Save button never rendered — a first PIN could not be set from Settings at all.
+   * You could type both fields and watch nothing happen.
+   *
+   * handleUpdateProfile was always right about this; it only compares an old PIN when pinHash or the
+   * legacy pin exists. It was the button's visibility, not the save, that was wrong.
+   *
+   * This also reopens the one-way door on the recovery screen's "Use without a lock", which drops
+   * the user to exactly this state on the promise that a PIN can be set again later. */
   const isPinFormComplete =
     (!isEditingPin) ||
-    ((isOldPinVerified || profileForm.oldPin.length === 4) &&
-      profileForm.pin.length === 4 &&
-      profileForm.confirmPin.length === 4);
+    ((!pinAlreadySet || isOldPinVerified || profileForm.oldPin.length === 4) && pinPairEntered);
 
   const hasProfileChanges =
     isPinFormComplete && (
       profileForm.name !== (data.user?.name || '') ||
       profileForm.biometricsEnabled !== (data.user?.biometricsEnabled || false) ||
-      (profileForm.pin !== '' && profileForm.pin.length === 4 && profileForm.confirmPin.length === 4)
+      (profileForm.pin !== '' && pinPairEntered)
     );
 
   let viewContent;
@@ -2081,7 +2121,13 @@ export default function Settings() {
 
                 {/* Biometric unlock requires a PIN as fallback — gated on a PIN existing. */}
                 {(() => {
-                  const pinExists = !!(data.user?.pinHash || data.user?.pin);
+                  /* Live against the PIN BEING TYPED as well as the saved one, so a first PIN and
+                     biometrics can be turned on in the same Save. Reading only the saved user left
+                     the toggle greyed out through the whole of first-time setup, and the flow ends
+                     by bouncing to the lock screen — so enabling it meant unlocking and walking back
+                     into Settings a second time. finalizeSetupWithKey already persists the flag; the
+                     only thing missing was permission to flip it. */
+                  const pinExists = pinAlreadySet || pinPairEntered;
                   return (
                     <div className="flex justify-between align-center" style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg-color)', borderRadius: '8px', border: '1px solid var(--border-color)', opacity: pinExists ? 1 : 0.55 }}>
                       <div className="flex align-center gap-3">

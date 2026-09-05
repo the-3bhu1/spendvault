@@ -628,11 +628,24 @@ can tap "Restore from backup" on the first step to import an existing backup fil
   see a lock screen.
 - PIN: an optional 4-digit PIN, stored only as a hash. When you set a PIN a 16-character recovery key is
   shown once — save it.
-- Biometrics: can be enabled (Settings → User Details) once a PIN is set.
+- Setting a PIN later: Settings → User Details → type it under SET PIN and again under CONFIRM PIN.
+  Nothing else is asked for when the app has no lock yet — the CURRENT PIN field only appears once one
+  exists. "Save Changes" appears as soon as the two match, then a recovery key is generated for you to
+  save, and you are taken to the lock screen to unlock with the PIN you just chose.
+- Biometrics: can be enabled (Settings → User Details) once a PIN is set — including in the same pass
+  as a first PIN, since the toggle comes alive as soon as the two PIN fields match.
 - Remove the PIN: Settings → User Details → "Remove PIN (use without a lock)" (authorized by your
   current PIN or biometrics); this clears the PIN, recovery key, and biometrics.
-- Forgot PIN: on the lock screen tap "Forgot PIN?" and enter your recovery key to get in, or
+- Forgot PIN: on the lock screen tap "Forgot PIN?" — either enter your recovery key, or
   "Wipe & Reset" to erase everything if the key is lost.
+- What the recovery key does: it proves who you are, it does NOT unlock the app on its own. A correct
+  key opens a "set a new pin" screen — enter a new 4-digit PIN, confirm it, and you go straight in
+  with that PIN in force from then on. Your recovery key stays the same; there is no new one to save.
+  The screen has no close button on purpose, because the old PIN is the one you have just told us you
+  forgot. The other way off it is "Use without a lock", which removes the PIN, the recovery key and
+  biometrics together — the same set Settings' "Remove PIN" clears — and you can set a fresh PIN any
+  time from Settings → User Details. Closing the app mid-way changes nothing: the old PIN and the same
+  recovery key still work.
 
 # Backup, restore & data
 - Export: Settings → Export Data, with two different outcomes:
