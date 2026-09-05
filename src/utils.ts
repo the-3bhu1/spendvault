@@ -1,5 +1,5 @@
 import { format, parseISO, addMonths, subMonths, addDays, setDate, differenceInCalendarDays } from 'date-fns';
-import type { Account, Transaction, CardNetwork, CashbackStatement, SplitItem, InvestmentKind, RecurringBill, RewardSplitLeg, BrandKey } from './types';
+import type { Account, Transaction, CardNetwork, CashbackStatement, SplitItem, InvestmentKind, RecurringBill, RewardSplitLeg, BrandKey, DebtTransaction } from './types';
 
 /**
  * The message carried by a thrown value, if it has one.
@@ -161,6 +161,47 @@ export const isCountableTransaction = (tx: Transaction) => {
     }
   }
   return true;
+};
+
+// ---- Debt ledger math -----------------------------------------------------------------------
+// One copy, because there are now THREE readers: the Debts screen, the share image it builds, and
+// the Ask Vault context. The context had its own hand-rolled sign table — correct, but the same
+// shape of duplication that let a card's overdue total disagree with the statement screen showing
+// the very same month (see CardDuesService). A second opinion about which way a repayment points is
+// not something this app should be able to hold.
+
+/** Which way an entry moves the balance. Positive = they owe you more. */
+export const debtEntryEffect = (t: Pick<DebtTransaction, 'type' | 'amount'>) => {
+  if (t.type === 'lent' || t.type === 'repayment_sent') return t.amount;
+  if (t.type === 'borrowed' || t.type === 'repayment_received') return -t.amount;
+  return 0;
+};
+
+/** Oldest first, ties broken by the order entries were added — the order the transaction log
+ *  renders reversed, and the order a running balance has to be accumulated in. */
+export const debtEntriesChronological = (transactions: DebtTransaction[]) =>
+  transactions
+    .map((t, idx) => ({ t, idx }))
+    .sort((a, b) => {
+      const timeDiff = new Date(a.t.date).getTime() - new Date(b.t.date).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return a.idx - b.idx;
+    });
+
+/** Positive = they owe you; negative = you owe them. */
+export const debtNetBalance = (transactions: DebtTransaction[]) =>
+  transactions.reduce((sum, t) => sum + debtEntryEffect(t), 0);
+
+/** The balance after each entry, keyed by entry id — the "as of this date" figure the add/edit
+ *  form previews and the share image prints beside every row. */
+export const debtRunningBalances = (transactions: DebtTransaction[]) => {
+  const after = new Map<string, number>();
+  debtEntriesChronological(transactions).reduce((running, e) => {
+    const next = running + debtEntryEffect(e.t);
+    after.set(e.t.id, next);
+    return next;
+  }, 0);
+  return after;
 };
 
 // ---- Split settlement math ----------------------------------------------------------------

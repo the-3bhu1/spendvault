@@ -24,6 +24,8 @@ import {
   rewardSplitTotal,
   getInvestmentAccountStats,
   isPointsDenominated,
+  debtNetBalance,
+  debtRunningBalances,
 } from '../utils';
 import { format, parseISO, subMonths } from 'date-fns';
 import { calculateEPFProjection } from '../utils/epfEngine';
@@ -289,19 +291,24 @@ function buildSummary(data: FinanceData): string {
     };
     out.push('\n## Lending & borrowing (active)');
     debts.forEach(d => {
-      const net = d.transactions.reduce((sum, tx) => {
-        // Positive = they owe you; negative = you owe them.
-        if (tx.type === 'lent') return sum + tx.amount;
-        if (tx.type === 'borrowed') return sum - tx.amount;
-        if (tx.type === 'repayment_received') return sum - tx.amount;
-        if (tx.type === 'repayment_sent') return sum + tx.amount;
-        return sum;
-      }, 0);
+      // debtNetBalance, not a sign table written out again here. This block used to carry its own
+      // copy — correct, but the same shape of duplication that once let a card's overdue total
+      // disagree with the statement screen showing the very same month.
+      const net = debtNetBalance(d.transactions);
       const who = net > 0 ? `${d.personName} owes you` : net < 0 ? `you owe ${d.personName}` : `settled with ${d.personName}`;
       out.push(`  - ${who} ${formatCurrency(Math.abs(net))}`);
+      /* THE BALANCE AFTER EACH ENTRY, not just the amount that moved. The app shows this in two
+         places — the add/edit form previews it as "as of this date", and the share image prints it
+         beside every row — so without it here the assistant is behind its own UI: it can say a
+         ₹5,000 repayment happened on 20 July and cannot say what was owed once it had. Running the
+         balance backwards from today's net is exactly the arithmetic a user asks the assistant to
+         do for them, and exactly the arithmetic it should not be left to improvise. */
+      const balanceAfter = debtRunningBalances(d.transactions);
       const recent = [...d.transactions].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
       recent.forEach(tx => {
+        const after = balanceAfter.get(tx.id);
         out.push(`      ${tx.date} | ${ENTRY_LABELS[tx.type] || tx.type} | ${formatCurrency(tx.amount)}` +
+          (after === undefined ? '' : ` | balance after: ${formatCurrency(after)}`) +
           (tx.description ? ` | ${tx.description}` : ''));
       });
     });

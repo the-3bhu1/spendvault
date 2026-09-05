@@ -27,7 +27,8 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import CustomDatePicker from './CustomDatePicker';
 import ConfirmDialog from './ConfirmDialog';
 import { getAccountTypeIcon, getAccountGroupLabel, sortByAccountType } from './transactionIcons';
-import { generateId, formatCurrency, calculateBalance, getCurrentMonthStr, errorMessage } from '../utils';
+import { generateId, formatCurrency, calculateBalance, getCurrentMonthStr, errorMessage,
+  debtEntryEffect, debtEntriesChronological, debtNetBalance, debtRunningBalances } from '../utils';
 import { buildDebtShareImages } from '../services/debtImage';
 import { blobToBase64 } from '../services/shareCanvas';
 import type { Debt, DebtTransaction, Account, Transaction } from '../types';
@@ -51,26 +52,6 @@ import { TransactionSelector } from './TransactionSelector';
 import { SubviewWrapper } from './SubviewWrapper';
 
 // Signed effect of one entry on the net balance: positive means they owe you.
-const txEffect = (t: Pick<DebtTransaction, 'type' | 'amount'>) => {
-  if (t.type === 'lent' || t.type === 'repayment_sent') return t.amount;
-  if (t.type === 'borrowed' || t.type === 'repayment_received') return -t.amount;
-  return 0;
-};
-
-// Chronological order matching the transaction log (which renders this reversed):
-// by date, ties broken by the order entries were added.
-const chronological = (transactions: DebtTransaction[]) =>
-  transactions
-    .map((t, idx) => ({ t, idx }))
-    .sort((a, b) => {
-      const timeDiff = new Date(a.t.date).getTime() - new Date(b.t.date).getTime();
-      if (timeDiff !== 0) return timeDiff;
-      return a.idx - b.idx;
-    });
-
-const calcDebtBalance = (transactions: DebtTransaction[]) =>
-  transactions.reduce((sum, t) => sum + txEffect(t), 0);
-
 export default function Debts() {
   const { data, addDebt, updateDebt, deleteDebt, addTransaction, updateTransaction } = useFinance();
   const [activeDebtId, setActiveDebtId] = useState<string | null>(null);
@@ -255,7 +236,7 @@ export default function Debts() {
     }
 
     const updatedTransactions = [...debt.transactions, newTx];
-    const balanced = calcDebtBalance(updatedTransactions) === 0;
+    const balanced = debtNetBalance(updatedTransactions) === 0;
     const finalTransactions = balanced
       ? updatedTransactions.map(t => ({ ...t, markedDone: true }))
       : updatedTransactions;
@@ -462,16 +443,10 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
     sharingRef.current = true;
     setIsSharing(true);
     try {
-      /* The running balance after each entry, keyed by id. Built by walking the entries FORWARDS —
-         chronological() and txEffect() are the same pair the add/edit form's "as of this date"
-         preview runs on, so a row's figure in the image is the figure the form shows for that row
-         rather than a second opinion about it. The log renders newest-first, hence the lookup. */
-      const balanceAfter = new Map<string, number>();
-      chronological(debt.transactions).reduce((running, e) => {
-        const next = running + txEffect(e.t);
-        balanceAfter.set(e.t.id, next);
-        return next;
-      }, 0);
+      /* The running balance after each entry, keyed by id — the same figures the add/edit form
+         previews as "as of this date", from the same helper rather than a second opinion about
+         them. The log renders newest-first, hence the lookup. */
+      const balanceAfter = debtRunningBalances(debt.transactions);
 
       const blobs = await buildDebtShareImages({
         personName: debt.personName,
@@ -817,7 +792,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
                           if (updatedTransactions.length === 0) {
                             onDelete();
                           } else {
-                            onUpdateDebt({ ...debt, transactions: updatedTransactions, status: calcDebtBalance(updatedTransactions) === 0 ? 'settled' : 'active', updatedAt: Date.now() });
+                            onUpdateDebt({ ...debt, transactions: updatedTransactions, status: debtNetBalance(updatedTransactions) === 0 ? 'settled' : 'active', updatedAt: Date.now() });
                           }
                           setConfirmConfig(null);
                         };
@@ -914,7 +889,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
             const updatedTxs = debt.transactions.map(t =>
               t.id === editingTx.id ? { ...t, amount: amt, type, description: (desc || '').trim(), date, linkedTxId } : t
             );
-            const balanced = calcDebtBalance(updatedTxs) === 0;
+            const balanced = debtNetBalance(updatedTxs) === 0;
             const finalTxs = balanced ? updatedTxs.map(t => ({ ...t, markedDone: true })) : updatedTxs;
             onUpdateDebt({
               ...debt,
@@ -1354,7 +1329,7 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, tra
       date
     };
     // Filter after sorting so each entry keeps its original insertion index for tie-breaks.
-    const ordered = chronological(transactions).filter(e => e.t.id !== initialTx?.id);
+    const ordered = debtEntriesChronological(transactions).filter(e => e.t.id !== initialTx?.id);
     // Ties fall to the entry's own insertion slot, matching how the log stacks them.
     const draftIdx = initialTx
       ? transactions.findIndex(t => t.id === initialTx.id)
@@ -1364,12 +1339,12 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, tra
       (new Date(e.t.date).getTime() === new Date(draft.date).getTime() && e.idx > draftIdx)
     );
     const before = at === -1 ? ordered : ordered.slice(0, at);
-    const prior = before.reduce((sum, e) => sum + txEffect(e.t), 0);
-    const rest = (at === -1 ? [] : ordered.slice(at)).reduce((sum, e) => sum + txEffect(e.t), 0);
+    const prior = before.reduce((sum, e) => sum + debtEntryEffect(e.t), 0);
+    const rest = (at === -1 ? [] : ordered.slice(at)).reduce((sum, e) => sum + debtEntryEffect(e.t), 0);
     return {
       priorBalance: prior,
-      newBalance: prior + txEffect(draft),
-      finalBalance: prior + txEffect(draft) + rest
+      newBalance: prior + debtEntryEffect(draft),
+      finalBalance: prior + debtEntryEffect(draft) + rest
     };
   }, [transactions, initialTx, amount, date, pendingType]);
 

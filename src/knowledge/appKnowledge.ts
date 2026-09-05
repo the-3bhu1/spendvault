@@ -276,6 +276,12 @@ the "Other" source below covers one-off rewards.
   rebates the payer, whatever the money was for. It needs a rewards/e-wallet account to deposit into.
   Card cashback is the other kind: paid by the issuer for spending on the card, so it is NOT offered
   on transfers, CC payments, NCMC recharges or fund purchases.
+  ITS PERCENTAGE IS OF WHAT THE ACCOUNT ACTUALLY PAID, not of the full price. On a ₹100 purchase
+  with ₹20 coming from a wallet, the account is debited ₹80, so ₹2 of cashback is 2.5% — the rate
+  the payment app really applied — and typing 2.5% gives ₹2. The "Primary Account Debit" line in the
+  split panel is that base. Adding or changing a split recomputes the cashback, rather than leaving
+  a percentage standing over a figure that has moved beneath it. Card rewards work the same way
+  against the amount the card was charged (see Rewards).
 - Cashback (delayed): see Rewards — confirming realized cashback posts a "Cashback" credit
   into the chosen account.
 - NCMC Travel Recharge: on an NCMC-enabled debit card, moves money from the card's payments balance
