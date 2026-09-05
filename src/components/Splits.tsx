@@ -146,6 +146,10 @@ export default function Splits() {
         title: event.name,
         subtitle,
         totalSpent,
+        /* The event's DECLARED roster, not the union of who happens to appear in its expenses. If
+           someone is on the trip but sat out one meal, that meal is not "Everyone" — and a reader
+           who knows all four went would be the first to spot it if we said otherwise. */
+        everyone: [...event.people, 'me'].map(n => splitDisplayName(n, selfName)),
         settlements: settlements.map(s => ({ from: splitDisplayName(s.from, selfName), to: splitDisplayName(s.to, selfName), amount: s.amount })),
         items: shareItems.map(it => {
           const parts = it.includeMe ? [...it.involvedPeople, 'me'] : [...it.involvedPeople];

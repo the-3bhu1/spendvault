@@ -442,8 +442,11 @@ can carry forward the previous cycle's items; unequal splits have an "Auto-Split
 The detail screen has a "Settle Up · Who Pays Whom" section that simplifies everyone's balances into
 the fewest payments across ALL participants (including friend-to-friend debts, not just yours), plus
 a per-person balance list. Share the summary as text or as an image: the image shows settle-up and
-the itemized expenses (each expense lists who it was split among); a large split is split into a
-Settle-Up image plus paginated Expenses images.
+the itemized expenses; a large split is split into a Settle-Up image plus paginated Expenses images.
+Each expense says who it was split among, and an expense covering the WHOLE event reads
+"Split (3): Everyone" rather than repeating the roster — so on a trip where most things are shared
+by all, the expenses that were not are the only rows carrying names, which is the difference worth
+seeing. The count stays either way. It has to be the same people, not merely the same number.
 IN ANYTHING SHARED, YOU ARE NAMED. The app calls you "Me" on screen, where the reader is you, but
 the shared text and image both use your FIRST name from Settings → User Details instead —
 "Tribhuvan pays Balaji", not "Me pays Balaji", which in a group chat tells everyone somebody owes

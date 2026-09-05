@@ -20,6 +20,9 @@ export interface SplitImageOpts {
   totalSpent: number;
   settlements: SplitImageRow[];
   items: SplitImageItem[];
+  /** Everyone the EVENT has, as display names — not everyone a given expense has. An expense
+   *  covering all of them is labelled "Everyone" instead of repeating the roster; see splitLabel. */
+  everyone: string[];
 }
 
 // Layout thresholds — the "single vs. multiple" decision.
@@ -36,11 +39,40 @@ interface RenderInput {
   totalSpent: number;
   settlements?: SplitImageRow[];  // present → draw the Settle-Up section
   items?: SplitImageItem[];       // present → draw the Expenses section
+  everyone?: string[];            // the event's full roster, for the "Everyone" shorthand
   expensesLabel?: string;         // header text for the Expenses section (e.g. "Expenses (1/3)")
 }
 
+/* Who an expense was split among — by name, unless that is the whole event, in which case saying so
+   is shorter AND clearer than proving it.
+ 
+   On a trip most expenses cover everybody, so the roster is printed on line after line and the eye
+   stops reading it; the ONE line that matters is the odd expense covering a subset, and it looks
+   exactly like the five above it until you compare the lists name by name. "Everyone" collapses the
+   repetition into a word, and the subsets are then the only rows carrying names — which is the
+   difference you were meant to notice.
+ 
+   Compared as a SET, not by count: an expense with as many people as the event but not the same
+   people is not everyone, and it is the case most worth not mislabelling. The count stays in the
+   "Split (3)" prefix, because that is what a reader dividing the total by heads is looking for.
+ 
+   BOTH DIRECTIONS. "Every name is on the roster" is not enough on its own — with a name repeated,
+   three entries can be two people and still pass it, and the third member goes unmentioned on an
+   expense the image then calls Everyone. So the distinct names have to cover the roster and match
+   it in size.
+ 
+   Two-person events still get "Everyone" — the rule is worth more as one rule than as one with an
+   exception — but a roster of one does not, since there is nobody for "everyone" to include. */
+export const namesOrEveryone = (names: string[], everyone?: string[]) => {
+  const roster = new Set(everyone || []);
+  if (roster.size < 2) return names.join(', ');
+  const involved = new Set(names);
+  const isEveryone = involved.size === roster.size && [...roster].every(p => involved.has(p));
+  return isEveryone ? 'Everyone' : names.join(', ');
+};
+
 async function renderSplitImage(input: RenderInput): Promise<Blob> {
-  const { title, subtitle, totalSpent, settlements, items, expensesLabel } = input;
+  const { title, subtitle, totalSpent, settlements, items, expensesLabel, everyone } = input;
 
   // ---- Measure total height up front ----
   let H = 44 + 22 + 46 + 30; // top pad + kicker + title + total line
@@ -161,7 +193,7 @@ async function renderSplitImage(input: RenderInput): Promise<Blob> {
         // split among — names only, so it's clear WHO each expense covers without bloating the row
         ctx.fillStyle = C.accent;
         ctx.font = '600 12px sans-serif';
-        const splitLabel = `Split (${it.participantNames.length}): ` + it.participantNames.join(', ');
+        const splitLabel = `Split (${it.participantNames.length}): ${namesOrEveryone(it.participantNames, everyone)}`;
         ctx.fillText(ellipsize(ctx, splitLabel, W - PADX * 2 - 40), cx, y + 66);
         ctx.fillStyle = C.text;
         ctx.font = '800 18px sans-serif';
@@ -182,8 +214,8 @@ async function renderSplitImage(input: RenderInput): Promise<Blob> {
 
 // Decides single vs. multiple images and returns the rendered PNGs in share order.
 export async function buildSplitShareImages(opts: SplitImageOpts): Promise<Blob[]> {
-  const { title, subtitle, totalSpent, settlements, items } = opts;
-  const head = { title, subtitle, totalSpent };
+  const { title, subtitle, totalSpent, settlements, items, everyone } = opts;
+  const head = { title, subtitle, totalSpent, everyone };
 
   const fitsSingle = items.length <= SINGLE_MAX_ITEMS && settlements.length <= SINGLE_MAX_SETTLEMENTS;
   if (fitsSingle) {
