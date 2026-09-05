@@ -827,6 +827,85 @@ h3 {
   box-shadow: 0px 0px 0 #000 !important;
 }
 
+/* A DISABLED BUTTON HAS TO LOOK DISABLED.
+   `.btn` carried no :disabled rule, so a button that correctly refused to do anything still rendered
+   at full contrast, kept its hard shadow, and still animated on press. The recovery-key screen is
+   where that bit: "Complete Setup" sat bright and inviting above an unticked checkbox and silently
+   swallowed every tap, so the button read as broken rather than as waiting. Same treatment the
+   AskVault composer buttons already use.
+   Declared AFTER .btn:active deliberately — that rule marks its transform !important, and between
+   two !important declarations of equal specificity the later one wins. */
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* ── Checkboxes ───────────────────────────────────────────────────────────────────────────────────
+   The native control ignores everything else in this file: the platform draws its own rounded blue
+   box, which on the recovery-key screen sat between a dashed accent panel and a mono uppercase
+   button and looked like a fragment of a different app. Styled globally rather than per screen
+   because every one of them is the same control — two on the recovery screens, six in the account
+   editor — and they should not drift.
+   Sized in RELATIVE units throughout, because the account editor's six set 16px inline while these
+   default to 20px: a tick pinned at fixed offsets would be centred at one size and off at the
+   other. */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  margin: 0;
+  display: inline-block;
+  position: relative;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-color);
+  box-shadow: 2px 2px 0 #000;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The tick is a clipped block rather than a glyph or a rotated border: it scales with the box, needs
+   no font, and stays centred at any size.
+   POSITIONED, not sized. A percentage width on a centred grid item resolves against a track that is
+   itself sized by the item's content — and the content here is empty, so 68% of nothing rendered an
+   invisible tick on a correctly-filled box. An inset resolves against the padding box instead, which
+   is a real number at both 16px and 20px. */
+input[type="checkbox"]::after {
+  content: '';
+  position: absolute;
+  inset: 17%;
+  background: #fff;
+  clip-path: polygon(14% 44%, 0 65%, 40% 100%, 100% 16%, 82% 0%, 38% 62%);
+  transform: scale(0);
+  transition: transform 0.12s cubic-bezier(0.2, 0, 0, 1);
+}
+
+input[type="checkbox"]:checked::after {
+  transform: scale(1);
+}
+
+/* Pressed like the buttons above — the shadow collapses and the box moves onto it. */
+input[type="checkbox"]:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 #000;
+}
+
+input[type="checkbox"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 .btn-primary {
   background-color: var(--text-primary);
   color: var(--bg-color);
