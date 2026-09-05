@@ -142,6 +142,20 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
      balance is something you do in that card's units ("I spent 430 Jewels") while a rupee wallet has
      nothing to convert, and two sources on one split can disagree. */
   const [splits, setSplits] = useState<SplitDraft[]>([]);
+
+  /* Hoisted to sit above the instant-cashback effect below, which needs it in its dependency list —
+   * it used to be declared beside the split panel's other helpers, several hundred lines down, where
+   * naming it here would land in the temporal dead zone. */
+  const rewardTotal = Math.round(splits.reduce((sum, sp) => sum + (Number(sp.amount) || 0), 0) * 100) / 100;
+
+  /* WHAT THIS ACCOUNT ACTUALLY PAYS — the Amount field less everything split off it, and the figure
+   * the panel already prints as "Primary Account Debit".
+   *
+   * Instant cashback is a percentage of THIS, not of the order total. On an ₹80/₹20 split of a ₹100
+   * purchase, ₹2 of cashback is 2.5% of the ₹80 that left the account, and reporting it as 2% of
+   * ₹100 describes a rate nobody was paid at. The same reasoning already governs the card's own
+   * delayed reward (see cardRewardOn): a rate applies to money the account actually put in. */
+  const primaryDebit = Math.max(0, (Number(newTx.amount) || 0) - rewardTotal);
   const [activeSplit, setActiveSplit] = useState(0);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
@@ -168,14 +182,14 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   const syncInputStrings = (tx: Partial<Transaction>) => setInputStrings(buildInputStrings(tx));
 
   // When entering instant cashback as a percentage, keep rewardEarned in sync with
-  // (percent × amount), recomputing whenever the percent or the debited amount changes.
+  // (percent × the debited amount) — see primaryDebit. Adding a split therefore re-computes it,
+  // which is the whole point: the base moved, so the rupee figure has to move with it.
   useEffect(() => {
     if (!cashbackPercentMode) return;
     const pct = parseFloat(cashbackPercentStr);
-    const amt = Number(newTx.amount) || 0;
-    const computed = (!isNaN(pct) && amt > 0) ? Math.round((amt * pct) / 100 * 100) / 100 : 0;
+    const computed = (!isNaN(pct) && primaryDebit > 0) ? Math.round((primaryDebit * pct) / 100 * 100) / 100 : 0;
     setNewTx(prev => prev.rewardEarned === computed ? prev : { ...prev, rewardEarned: computed, rewardEarnedType: 'instant' });
-  }, [cashbackPercentMode, cashbackPercentStr, newTx.amount]);
+  }, [cashbackPercentMode, cashbackPercentStr, primaryDebit]);
 
   const seedFromExisting = (tx: Transaction) => {
     setErrors({});
@@ -1270,7 +1284,6 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
      unit, a plain rupee wallet (CRED coins, super.money) is already money, and a one-time reward has
      no balance at all. So everything the panel needs is a function OF a card rather than one set of
      values for "the" reward account — that shape is what made a second source impossible. */
-  const rewardTotal = Math.round(splits.reduce((sum, sp) => sum + (Number(sp.amount) || 0), 0) * 100) / 100;
   const sourceAccountOf = (split: SplitDraft) => data.accounts.find(a => a.id === split.accountId);
   const rewardUnitLabelOf = (split: SplitDraft) => sourceAccountOf(split)?.rewardUnit || 'Points';
   // A rupee wallet has nothing to toggle, so it stays pinned to rupees whatever the card last held.
@@ -2125,11 +2138,12 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                             onClick={() => {
                               const toPercent = mode === 'percent';
                               if (toPercent === cashbackPercentMode) return;
-                              const amt = Number(newTx.amount) || 0;
                               const earned = Number(newTx.rewardEarned) || 0;
                               if (toPercent) {
-                                // Back-compute the percent from the current ₹ value so the switch is lossless.
-                                setCashbackPercentStr(amt > 0 && earned > 0 ? String(Math.round((earned / amt) * 100 * 100) / 100) : '');
+                                // Back-compute the percent from the current ₹ value so the switch is
+                                // lossless. Against primaryDebit, so flipping modes cannot change the
+                                // rate the row is describing.
+                                setCashbackPercentStr(primaryDebit > 0 && earned > 0 ? String(Math.round((earned / primaryDebit) * 100 * 100) / 100) : '');
                               } else {
                                 // Reflect the computed ₹ value into the amount input.
                                 setInputStrings(prev => ({ ...prev, rewardEarned: earned === 0 ? '' : String(earned) }));
@@ -2244,8 +2258,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                         amount yet there is nothing to take a percentage of, hence the 0 fallback
                         instead of a division by zero. */}
                     <span className="text-xs text-muted text-mono" style={{ opacity: 0.8 }}>
-                      = {(Number(newTx.amount) || 0) > 0
-                        ? Math.round(((Number(newTx.rewardEarned) || 0) / Number(newTx.amount)) * 100 * 100) / 100
+                      = {primaryDebit > 0
+                        ? Math.round(((Number(newTx.rewardEarned) || 0) / primaryDebit) * 100 * 100) / 100
                         : 0}%
                     </span>
                     {errors.rewardEarned && <span className="text-xs text-danger" style={{ marginTop: '0.1rem' }}>{errors.rewardEarned}</span>}
