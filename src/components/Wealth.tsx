@@ -285,7 +285,17 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
   // Scroll position per navigation level, so backing out of a sub-view (or a holding detail)
   // lands where the user was instead of at the top. Keyed by level, not a single scalar, because
   // the stack is now two deep: tree → sub-view → holding detail.
-  const scrollRef = useRef<{ tree: number; category: number }>({ tree: 0, category: 0 });
+  /* Only the CATEGORY level is remembered — Portfolio, Assets, My Cards, Statements. Those are long
+     lists you go down into and come back from, and landing anywhere but where you left costs you
+     your place in a list you were reading.
+  
+     THE TREE IS NOT, deliberately. It is a hero and three or four cards; on a tall phone it does not
+     scroll at all, and on a short one it has a couple of hundred pixels of room — never enough to
+     get lost in, always enough to return you below the hero that names what you are looking at. It
+     also disagreed with the way the tab itself behaves: `resettingTabs` in App.tsx already sends you
+     to the top of Cards and Wealth when you arrive from the bottom nav, so backing out of a category
+     was the one path that did something different. */
+  const scrollRef = useRef<{ category: number }>({ category: 0 });
   const [historyData, setHistoryData] = useState<HistoryDataPoint[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [stockRange, setStockRange] = useState<StockHistoryRange>(STOCK_RANGES[0]);
@@ -958,8 +968,6 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
   }) => <CategoryCard key={props.label} {...props} />;
 
   const openCategory = (next: WealthCategory) => {
-    const appRoot = document.querySelector('.app-root');
-    scrollRef.current.tree = appRoot?.scrollTop ?? 0;
     // Drop the sub-view's remembered scroll, so entering from the tree always starts at the top.
     // That position belongs to one visit: it exists so backing out of a holding detail lands where
     // you left the list. Left standing, it also applied on the NEXT entry from the tree, dropping
@@ -995,8 +1003,8 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
   useEffect(() => {
     const appRoot = document.querySelector('.app-root');
     if (!appRoot) return;
-    // Descending starts at the top; coming back restores that level's saved position.
-    const top = selectedAsset ? 0 : category ? scrollRef.current.category : scrollRef.current.tree;
+    // Descending starts at the top, and so does the tree; only a category is restored.
+    const top = category && !selectedAsset ? scrollRef.current.category : 0;
     appRoot.scrollTo({ top, behavior: 'auto' });
   }, [selectedAsset, category]);
 

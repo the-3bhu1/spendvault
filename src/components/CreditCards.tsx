@@ -466,7 +466,17 @@ export default function CreditCards({ onExit, onViewStatement }: {
   // Where each level was scrolled to, so backing out of one lands where it was left rather than at
   // the top. Same two-slot memory as Wealth's — the detail screen always opens at the top, so it
   // needs no slot of its own.
-  const scrollRef = useRef<{ tree: number; category: number }>({ tree: 0, category: 0 });
+  /* Only the CATEGORY level is remembered — Portfolio, Assets, My Cards, Statements. Those are long
+     lists you go down into and come back from, and landing anywhere but where you left costs you
+     your place in a list you were reading.
+  
+     THE TREE IS NOT, deliberately. It is a hero and three or four cards; on a tall phone it does not
+     scroll at all, and on a short one it has a couple of hundred pixels of room — never enough to
+     get lost in, always enough to return you below the hero that names what you are looking at. It
+     also disagreed with the way the tab itself behaves: `resettingTabs` in App.tsx already sends you
+     to the top of Cards and Wealth when you arrive from the bottom nav, so backing out of a category
+     was the one path that did something different. */
+  const scrollRef = useRef<{ category: number }>({ category: 0 });
 
   /* Ordered to match the Accounts screen, which lists a type's accounts in the order they were
      added and never sorts within the group. A card sat in a different position on every screen that
@@ -603,8 +613,6 @@ export default function CreditCards({ onExit, onViewStatement }: {
   const ltfCount = dues.filter(d => !d.account.cardFees?.annualFee).length;
 
   const openCategory = (next: CardsCategory) => {
-    const appRoot = document.querySelector('.app-root');
-    scrollRef.current.tree = appRoot?.scrollTop ?? 0;
     // Dropped on the way IN, kept on the way back from a detail screen: the remembered position
     // belongs to one visit down and back, not to the next entry from the tree.
     scrollRef.current.category = 0;
@@ -654,8 +662,8 @@ export default function CreditCards({ onExit, onViewStatement }: {
   useEffect(() => {
     const appRoot = document.querySelector('.app-root');
     if (!appRoot) return;
-    // Descending starts at the top; coming back restores that level's saved position.
-    const top = activeCard ? 0 : activeCategory ? scrollRef.current.category : scrollRef.current.tree;
+    // Descending starts at the top, and so does the tree; only a category is restored.
+    const top = activeCategory && !activeCard ? scrollRef.current.category : 0;
     appRoot.scrollTo({ top, behavior: 'auto' });
   }, [activeCategory, activeCard]);
 
