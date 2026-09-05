@@ -752,7 +752,14 @@ export default function Settings() {
   const [exportStatus, setExportStatus] = useState<{ fileName: string; sizeKb: string; mode: 'saved' | 'shared'; fellBackToShare?: boolean } | null>(null);
   const [importPreview, setImportPreview] = useState<{ txCount: number; accountCount: number; sizeKb: string; raw: string } | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  /* One collapse flag PER SCREEN. Export's "Advanced (Clipboard)" and Import's "Advanced (Paste
+   * Code)" are different panels on different sub-views, and they shared a single flag: opening the
+   * clipboard fallback on Export left Import's paste box hanging open the next time you went there,
+   * and collapsing either one closed the other behind your back. Both are legacy escape hatches most
+   * people never open, so the shared state read as the panel remembering a decision made somewhere
+   * else entirely. */
+  const [showExportAdvanced, setShowExportAdvanced] = useState(false);
+  const [showImportAdvanced, setShowImportAdvanced] = useState(false);
   const advancedSectionRef = useRef<HTMLDivElement>(null);
 
   // Shared Gemini key (BYOK) — one key powers all AI features (commodity prices, asset logos,
@@ -1662,8 +1669,8 @@ export default function Settings() {
               className="flex justify-between align-center w-100"
               style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}
               onClick={() => {
-                const willShow = !showAdvanced;
-                setShowAdvanced(willShow);
+                const willShow = !showExportAdvanced;
+                setShowExportAdvanced(willShow);
                 if (willShow) {
                   setTimeout(() => {
                     advancedSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1672,9 +1679,9 @@ export default function Settings() {
               }}
             >
               <span className="text-xs font-bold uppercase" style={{ letterSpacing: '1px' }}>Advanced (Clipboard)</span>
-              <ChevronDown size={16} style={{ transform: showAdvanced ? 'rotate(180deg)' : 'none', transition: '0.2s' }} />
+              <ChevronDown size={16} style={{ transform: showExportAdvanced ? 'rotate(180deg)' : 'none', transition: '0.2s' }} />
             </button>
-            {showAdvanced && (
+            {showExportAdvanced && (
               <div className="flex-col gap-2">
                 <p className="text-xs text-muted">Legacy option: copies a Base64 backup code to clipboard. Use only if file export is unavailable.</p>
                 <button className="btn btn-secondary w-100 flex align-center justify-center" style={{ padding: '0.9rem 1.5rem', minHeight: '48px' }} onClick={handleCopyBackup}>
@@ -1751,12 +1758,12 @@ export default function Settings() {
             <button
               className="flex justify-between align-center w-100"
               style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}
-              onClick={() => setShowAdvanced(v => !v)}
+              onClick={() => setShowImportAdvanced(v => !v)}
             >
               <span className="text-xs font-bold uppercase" style={{ letterSpacing: '1px' }}>Advanced (Paste Code)</span>
-              <ChevronDown size={16} style={{ transform: showAdvanced ? 'rotate(180deg)' : 'none', transition: '0.2s' }} />
+              <ChevronDown size={16} style={{ transform: showImportAdvanced ? 'rotate(180deg)' : 'none', transition: '0.2s' }} />
             </button>
-            {showAdvanced && (
+            {showImportAdvanced && (
               <div className="flex-col gap-2">
                 <p className="text-xs text-muted">Paste a Base64 or JSON backup code if you don't have a file.</p>
                 <textarea
