@@ -174,6 +174,23 @@ export const isCountableTransaction = (tx: Transaction) => {
 export const splitDisplayName = (key: string, selfName?: string) =>
   key === 'me' ? (selfName?.trim() || 'Me') : key;
 
+/* WHAT TO CALL THE USER IN SOMETHING THEY ARE SENDING SOMEONE ELSE: their first name.
+ *
+ * Settings holds a full name, because that is what a profile row wants. A settle-up line does not —
+ * everybody else in the split is down as the one name their friends call them ("Balaji",
+ * "Supreeth"), and a full legal name among them reads like a different kind of entry, as though the
+ * app knows something about that person it does not know about the rest.
+ *
+ * A LEADING INITIAL KEEPS THE WHOLE NAME. "K S Tribhuvan" is a shape a lot of names come in, and
+ * taking the first token there yields "K", which is no better than the "Me" this exists to replace.
+ * A bare letter — with or without its full stop — is not a name anyone is called, so in that case
+ * the full string is the informative answer. */
+export const shareSelfName = (fullName?: string) => {
+  const full = (fullName || '').trim();
+  const first = full.split(/\s+/)[0] || '';
+  return /^\p{L}\.?$/u.test(first) ? full : first;
+};
+
 export interface SplitSettlement { from: string; to: string; amount: number; }
 
 // Net balance per participant (including the self key 'me') across a set of split items.

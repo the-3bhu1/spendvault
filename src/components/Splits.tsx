@@ -7,7 +7,7 @@ import { Share } from '@capacitor/share';
 import ConfirmDialog from './ConfirmDialog';
 import { useFinance } from '../FinanceContext';
 import type { SplitEvent, SplitItem } from '../types';
-import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, formatDateString, errorMessage } from '../utils';
+import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, shareSelfName, formatDateString, errorMessage } from '../utils';
 import { scrollToFirstError } from '../utils/formErrors';
 import { buildSplitShareImages } from '../services/splitImage';
 import { blobToBase64 } from '../services/shareCanvas';
@@ -91,7 +91,7 @@ export default function Splits() {
     const { shareItems, settlements } = getShareData(event);
     /* The user's own name, for the copy that leaves the device — see splitDisplayName. Read here
        rather than threaded through, so the message and the image cannot disagree about it. */
-    const selfName = data.user?.name;
+    const selfName = shareSelfName(data.user?.name);
 
     let message = `💰 *Split Summary: ${event.name}*\n\n`;
 
@@ -141,7 +141,7 @@ export default function Splits() {
     try {
       const { shareItems, settlements, totalSpent, subtitle } = getShareData(event);
       const message = buildSummaryMessage(event);
-      const selfName = data.user?.name;
+      const selfName = shareSelfName(data.user?.name);
       const blobs = await buildSplitShareImages({
         title: event.name,
         subtitle,
