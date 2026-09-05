@@ -252,11 +252,18 @@ export default function AuthScreen() {
     }
   };
 
+  /* Offer the fingerprint as soon as the lock screen appears, so the common case needs no taps.
+     Deliberately not in a handler: there is no event to hang it on — arriving at this screen IS the
+     trigger, whether from a cold start, a resume, or backing out of "forgot pin?". */
   useEffect(() => {
-
     if (data.user?.biometricsEnabled && view === 'unlock') {
+      /* The state this sets is the prompt's own visibility, on a screen whose entire job is to show
+         that prompt. A render caused by asking for a fingerprint is not a cascade to design away. */
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       triggerBiometrics();
     }
+    // triggerBiometrics is re-created every render and biometricsEnabled cannot change while the
+    // user is locked out of the app that would change it, so `view` is the only real trigger.
   }, [view]);
 
   if (view === 'forgot') {

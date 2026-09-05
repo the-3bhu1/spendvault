@@ -300,6 +300,11 @@ export function FilterPills<T extends string>({
     // condition the pill styles branch on, and it has to stay that way: a thumb still doing the
     // equal-cell arithmetic over label-sized pills lands the wrong width in the wrong place.
     if (!el || scrolls) {
+      /* Measuring the DOM and storing the result is the one thing a layout effect is for, and there
+         is no earlier moment to do it: the pill's width is decided by the browser laying out its
+         label, which has not happened until this runs. The cascade the rule warns about is the point
+         here — it is flushed before paint, so the thumb is never seen at the wrong width. */
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setThumbBox(null);
       return;
     }

@@ -127,6 +127,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     const commodityAccs = data.accounts.filter(a => !a.archived && a.type === 'commodity' && a.marketSymbol && a.manualPricePerGram === undefined);
     if (stockMfItems.length === 0 && commodityAccs.length === 0) return;
     const allSyms = [...stockMfItems.map(i => i.symbol), ...commodityAccs.map(a => a.marketSymbol!)];
+    /* One extra render at mount, raising the skeletons over the rows whose prices are being fetched
+       on the line below. It cannot be hoisted into the initialiser without computing the same two
+       filtered lists twice — once for the state, once for the fetches that consume them — and then
+       keeping those two copies in agreement. */
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRefreshingSymbols(new Set(allSyms));
     const clearRefreshing = (syms: string[]) =>
       setRefreshingSymbols(prev => { const s = new Set(prev); syms.forEach(sym => s.delete(sym)); return s; });
