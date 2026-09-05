@@ -44,11 +44,23 @@ function App() {
   const shouldLockOnReturnRef = useRef(false);
   const lastBackgroundTimeRef = useRef<number>(0);
   const scrollPositions = useRef<Record<string, number>>({});
+  /* LATEST-VALUE REFS, so the SMS listeners below can read today's callback and today's setting
+     without being torn down and re-registered every time either one changes. Re-registering is not
+     free here: the native listener is the only path a live SMS has into an open app, and a gap
+     between removing one and adding the next is a message that arrives nowhere.
+  
+     Written in a layout effect rather than during render. A render can be started and thrown away —
+     StrictMode does it deliberately, and concurrent React does it whenever a render is interrupted —
+     and a ref mutated on the way past keeps the value of a render that never happened. Layout, not
+     passive: the mount effect below reads autoLogSmsRef.current synchronously to decide whether to
+     drain the queue, and layout effects are all flushed before any passive effect runs, so the read
+     cannot land ahead of the write however the two are ordered in the file. */
   const addToSmsQueueRef = useRef(addToSmsQueue);
-  addToSmsQueueRef.current = addToSmsQueue;
-
   const autoLogSmsRef = useRef(data.user?.autoLogSms);
-  autoLogSmsRef.current = data.user?.autoLogSms;
+  useLayoutEffect(() => {
+    addToSmsQueueRef.current = addToSmsQueue;
+    autoLogSmsRef.current = data.user?.autoLogSms;
+  });
 
   // Define which tabs should reset to top vs resume.
   // 'cards' replaces the retired 'cashback' here, and it belongs in this list for the same reason
