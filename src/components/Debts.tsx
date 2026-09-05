@@ -19,6 +19,7 @@ import {
   Edit2,
   Calendar,
   Share2,
+  Loader2,
   X
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
@@ -590,8 +591,8 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
         {/* Balance card + action buttons — scroll away normally */}
         <div className="flex-col gap-6 tour-debt-detail-summary">
           <div className="flex justify-between align-center debt-detail-header-row">
-            <div className="flex align-center gap-4">
-              <button className="btn btn-secondary" style={{ padding: '0.5rem' }} onClick={onBack}>
+            <div className="flex align-center gap-4 debt-detail-identity">
+              <button className="btn btn-secondary" style={{ padding: '0.5rem', flexShrink: 0 }} onClick={onBack}>
                 <ChevronLeft size={20} />
               </button>
               <div className="flex-col">
@@ -599,15 +600,21 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
                 <span className="text-xs text-muted uppercase font-bold text-mono">History</span>
               </div>
             </div>
-            <div className="flex gap-3">
+            <div className="flex gap-3 debt-detail-actions">
               <button
-                className="btn btn-secondary"
+                className={`btn btn-secondary${isSharing ? ' is-busy' : ''}`}
                 style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 onClick={handleShare}
                 disabled={isSharing || debt.transactions.length === 0}
-                title={debt.transactions.length === 0 ? 'Nothing to share yet' : 'Share history'}
+                title={isSharing ? 'Preparing image…'
+                  : debt.transactions.length === 0 ? 'Nothing to share yet' : 'Share history'}
               >
-                <Share2 size={18} />
+                {/* Drawing the pages takes a second or two before the OS share sheet appears, and
+                    with a static icon that gap reads as a tap that did not register — so the button
+                    says it is working. Loader2 rather than the Share2 icon spun in place: a spinner
+                    is the shape people already read as "wait", where a rotating share glyph is a
+                    puzzle. */}
+                {isSharing ? <Loader2 size={18} className="icon-spin" /> : <Share2 size={18} />}
               </button>
               <button
                 className="btn btn-secondary"

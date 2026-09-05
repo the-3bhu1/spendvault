@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { format } from 'date-fns';
-import { Plus, Users, ChevronRight, Trash2, Check, Search, ChevronDown, Calendar, Edit2, ChevronLeft, ArrowRight, ImageDown, ReceiptIndianRupee, X } from 'lucide-react';
+import { Plus, Users, ChevronRight, Trash2, Check, Search, ChevronDown, Calendar, Edit2, ChevronLeft, ArrowRight, ImageDown, ReceiptIndianRupee, Loader2, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -19,6 +19,9 @@ export default function Splits() {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   // Guards against a double-tap / synthetic touch+click firing the image share twice.
   const sharingImageRef = useRef(false);
+  /* Beside the ref, not instead of it. The ref is what actually blocks a second tap — it is set
+     synchronously, where a state update is not — and this is only what the button renders from. */
+  const [isSharingImage, setIsSharingImage] = useState(false);
 
   const [newEvent, setNewEvent] = useState({ name: '', people: [] as string[] });
   const [newPerson, setNewPerson] = useState('');
@@ -138,6 +141,7 @@ export default function Splits() {
   const handleShareImage = async (event: SplitEvent) => {
     if (sharingImageRef.current) return; // ignore a second tap while a share is already in flight
     sharingImageRef.current = true;
+    setIsSharingImage(true);
     try {
       const { shareItems, settlements, totalSpent, subtitle } = getShareData(event);
       const message = buildSummaryMessage(event);
@@ -198,6 +202,7 @@ export default function Splits() {
       console.error('Share image failed', err);
     } finally {
       sharingImageRef.current = false;
+      setIsSharingImage(false);
     }
   };
 
@@ -347,6 +352,7 @@ export default function Splits() {
           onUpdate={updateSplitEvent}
           onDelete={() => setIsDeleteConfirmOpen(true)}
           onShareImage={() => handleShareImage(selectedEvent)}
+          isSharingImage={isSharingImage}
         />
       )}
       {/* Custom Confirmation Dialog */}
@@ -370,12 +376,13 @@ export default function Splits() {
   );
 }
 
-function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
+function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharingImage }: {
   event: SplitEvent,
   onBack: () => void,
   onUpdate: (e: SplitEvent) => void,
   onDelete: () => void,
-  onShareImage: () => void
+  onShareImage: () => void,
+  isSharingImage: boolean
 }) {
   const { data } = useFinance();
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
@@ -592,12 +599,15 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage }: {
               <Check size={18} strokeWidth={3} />
             </button>
             <button
-              className="btn btn-secondary tour-split-share-btn"
+              className={`btn btn-secondary tour-split-share-btn${isSharingImage ? ' is-busy' : ''}`}
               style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
               onClick={onShareImage}
-              title="Share Split Summary"
+              disabled={isSharingImage}
+              title={isSharingImage ? 'Preparing image…' : 'Share Split Summary'}
             >
-              <ImageDown size={18} />
+              {/* Same dead gap as the debt share, and longer here: a big split renders a settle-up
+                  page plus a page per ten expenses before the share sheet can open. */}
+              {isSharingImage ? <Loader2 size={18} className="icon-spin" /> : <ImageDown size={18} />}
             </button>
             <button
               className="btn btn-secondary"

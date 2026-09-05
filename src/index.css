@@ -2085,6 +2085,60 @@ tr:hover td {
   border-radius: 4px;
 }
 
+/* BUSY IS NOT THE SAME AS UNAVAILABLE. A disabled button is dimmed to 0.4 so it reads as out of
+   reach, which is right for a button you cannot use and wrong for one that is working: it dims the
+   spinner too, and the spinner is the entire point of the state. Still genuinely disabled — the
+   guard against a second tap while an export is mid-flight matters — just not greyed out.
+   Specificity carries it: class + pseudo-class + class beats the `.btn:disabled` rule above. */
+.btn:disabled.is-busy {
+  opacity: 1;
+  cursor: progress;
+  /* The hard shadow comes back too. Without it the button loses its box while the other three keep
+     theirs, so the control reads as having vanished and left a spinner floating where it was — the
+     opposite of "this is working". !important to answer the !important above, which is there to
+     stop a disabled button looking pressable. */
+  box-shadow: 4px 4px 0 #000 !important;
+}
+
+/* ─── Debt detail header: one line, always ─────────────────────────────────
+   The mobile block above sets `.flex.justify-between.align-center { flex-wrap: wrap }` for every
+   row of that shape, which is right nearly everywhere and wrong here: this row is a back button, a
+   name, and four icon buttons, so wrapping drops the whole action group onto a second line and
+   pushes the balance card down. A long name — "Vishruth(loan)" is enough on a 6" phone — was all it
+   took.
+
+   Specificity, not order: the rule it has to beat is three classes and lives in a media query, so
+   this one names the same three plus the row's own class and wins at every width. Nowrap alone
+   would only move the problem, the name shoving the buttons off the edge instead, so the name is
+   the part that gives — it truncates, and min-width:0 is what lets a flex child shrink below its
+   content at all. The buttons never shrink; they are 36px hit targets and this is the screen where
+   "delete the entire history" lives. */
+.flex.justify-between.align-center.debt-detail-header-row {
+  flex-wrap: nowrap;
+}
+
+.debt-detail-header-row .debt-detail-identity,
+.debt-detail-header-row .debt-detail-identity > .flex-col {
+  min-width: 0;
+}
+
+.debt-detail-header-row .debt-detail-identity h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debt-detail-header-row .debt-detail-actions {
+  flex-shrink: 0;
+}
+
+/* Buys the name ~12px back on the narrowest phones, where it is worth more than the gap. */
+@media (max-width: 400px) {
+  .debt-detail-header-row .debt-detail-actions {
+    gap: 0.5rem;
+  }
+}
+
 @keyframes spin-cw {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
