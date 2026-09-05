@@ -234,11 +234,15 @@ the "Other" source below covers one-off rewards.
   logged before redemption legs existed has no leg at all, so it reads that way unfiltered too
   (−₹120 over "of ₹150", with the "₹30 REWARD" pill naming the difference).
   The source's leg is collapsed under the row as a linked
-  entry ("Part-paid with rewards", or "Funding + rewards" on a CC Payment). That toggle says
-  "rewards" whatever the source was, so it reads that way for an e-wallet leg too. Each leg is named
+  entry, and THAT TOGGLE NAMES WHAT THE SOURCE ACTUALLY IS. Winnings — a rewards wallet, a card's
+  own points ledger, or a one-time coupon — read "Part-paid with rewards" ("Funding + rewards" on a
+  CC Payment). An E-WALLET is the user's own money, not a discount, so a Flipkart or Amazon Pay leg
+  reads "Part-paid from wallet" ("Funding + wallet"). A split drawing on both at once reads
+  "Part-paid from 2 sources", since no collective noun covers a coupon and a stored balance without
+  misdescribing one of them. Each leg is named
   "Paid toward: <the spend's description>" (on a CC Payment, "Paid toward: <the card>"). Two sources
   are listed as two separate entries in there, and the toggle counts them ("Part-paid with 2
-  rewards", "Funding + 2 rewards"). Inside an expanded group the legs are ordered: the primary account's own
+  rewards", "Part-paid from 2 wallets", "Funding + 2 rewards"). Inside an expanded group the legs are ordered: the primary account's own
   leg first, then the reward redemptions largest-first by rupee value (so a 500-Chip redemption worth
   ₹50 outranks a ₹10 coupon), and any instant-cashback credit last — the legs above it add up to the
   row's total, which cashback is not part of.

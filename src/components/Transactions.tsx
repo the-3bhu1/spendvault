@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, Account, InvestmentKind } from '../types';
-import { formatCurrency, formatAmount, formatDateString, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, getInvestmentKind, isCountableTransaction, isExternalRewardSource, getRewardSplits, rewardSplitIndexOfLeg, rewardSplitOfLeg, rewardSplitTotal, rewardSplitGross, accountNameOf, linkedGroupOf, applyVisibleReorder, dayOrderUpdates, sortDayByOrder } from '../utils';
+import { formatCurrency, formatAmount, formatDateString, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, getInvestmentKind, isCountableTransaction, isExternalRewardSource, isPointsDenominated, getRewardSplits, rewardSplitIndexOfLeg, rewardSplitOfLeg, rewardSplitTotal, rewardSplitGross, accountNameOf, linkedGroupOf, applyVisibleReorder, dayOrderUpdates, sortDayByOrder } from '../utils';
 import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, ChevronRight, ChevronDown, Hash, Shapes, Layers, Sparkles, Loader2, Filter, ArrowUp } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
@@ -429,11 +429,42 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                     // actively misleading for a 3-leg split, describing only the bank leg while a
                     // rewards leg sat hidden beside it. Reward splits never coexist with the
                     // investment / transfer / NCMC groups below, so checking first costs nothing.
-                    const rewardLegCount = counterparts!.filter(c => !!rewardSplitOfLeg(tx, c.tx)).length;
+                    const rewardLegs = counterparts!.filter(c => !!rewardSplitOfLeg(tx, c.tx));
+                    const rewardLegCount = rewardLegs.length;
                     const hidesRewardLeg = rewardLegCount > 0;
+                    /* NOT EVERY SPLIT SOURCE IS A REWARD, and calling one that isn't a reward is the
+                       kind of wrong that makes a user distrust the figure beside it. The split picker
+                       offers three kinds and only two of them are winnings: a rewards wallet (CRED
+                       coins, Cheq Chips), a card's own points ledger (Jewels), and — the odd one out
+                       — an E-WALLET, which is a Flipkart or Amazon Pay balance holding money the user
+                       put there themselves. "Part-paid with rewards" over ₹81 of their own money
+                       reads as a discount they were given.
+    
+                       isPointsDenominated is the card-ledger test and `type === 'rewards'` the wallet
+                       one; the external sentinel is a coupon and the most reward-ish of the lot. An
+                       e-wallet answers no to all three, which is exactly the distinction wanted —
+                       and it is the same predicate pair that decides whether a leg lands in the
+                       points ledger or the rupee one, so the wording can't drift from the arithmetic. */
+                    const isWinnings = (leg: Transaction) => {
+                      if (isExternalRewardSource(leg.accountId)) return true;
+                      const src = data.accounts.find(a => a.id === leg.accountId);
+                      return src?.type === 'rewards' || isPointsDenominated(src);
+                    };
+                    const moneyLegCount = rewardLegs.filter(c => !isWinnings(c.tx)).length;
                     // Two wallets funding one bill are two separate entries in there, and the toggle
-                    // is the only hint of how many before it is opened.
-                    const rewardWord = rewardLegCount > 1 ? `${rewardLegCount} rewards` : 'rewards';
+                    // is the only hint of how many before it is opened. A mixed split gets the
+                    // neutral "sources": there is no honest collective noun for a coupon and a
+                    // Flipkart balance, and picking either one libels the other.
+                    // Spelt out rather than pluralised by a helper: "rewards" is a mass noun and
+                    // stays plural at one source ("Part-paid with rewards"), where "wallet" is a
+                    // count noun and does not ("Part-paid from wallet").
+                    const sourceWord = moneyLegCount === 0
+                      ? (rewardLegCount > 1 ? `${rewardLegCount} rewards` : 'rewards')
+                      : moneyLegCount === rewardLegCount
+                        ? (rewardLegCount > 1 ? `${rewardLegCount} wallets` : 'wallet')
+                        : `${rewardLegCount} sources`;
+                    // "with rewards" but "from a wallet" — the money was already the user's.
+                    const partPaid = `Part-paid ${moneyLegCount === 0 ? 'with' : 'from'} ${sourceWord}`;
                     /* Same argument one category over: an instant-cashback leg is money that
                        arrived and is hidden in here, and no category below hints at it. Reachable
                        on far more rows than it used to be, now that instant cashback is offered on
@@ -449,10 +480,10 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                        since they have the room for it. */
                     if (hidesRewardLeg) {
                       return cats.includes('cc payment')
-                        ? `Funding + ${rewardWord}${cashbackSuffix}`
+                        ? `Funding + ${sourceWord}${cashbackSuffix}`
                         : (hidesCashbackLeg
-                          ? `${rewardLegCount > 1 ? `${rewardLegCount} rewards` : 'Rewards'} + cashback`
-                          : `Part-paid with ${rewardWord}`);
+                          ? `${sourceWord.charAt(0).toUpperCase()}${sourceWord.slice(1)} + cashback`
+                          : partPaid);
                     }
                     // Investment legs all share one category, so the wording comes from the leg's kind.
                     const invKinds = counterparts!.filter(c => isInvestmentCategory(c.tx.category)).map(c => c.tx.investmentKind);
