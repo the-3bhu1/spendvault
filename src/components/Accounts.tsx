@@ -380,11 +380,28 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     /* A unit-denominated rewards wallet is entered in its own unit (500 Chips, not the ₹50 those
        Chips are worth) — that is the figure the user reads off the app that issued them, and the
        label below says which unit it is. The rupee value is what gets stored; see handleSave. */
-    const currentBalance = acc.type === 'epf'
-      ? (acc.baseBalance || 0)
-      : (isUnitDenominated(acc) && acc.type === 'rewards'
-        ? rewardUnitBalance(acc, data.transactions, month, data.cashbackStatements)
-        : calculateBalance(acc, data.transactions, month));
+    /* EPF READS THROUGH calculateBalance LIKE EVERYTHING ELSE.
+     *
+     * It used to short-circuit to `acc.baseBalance`, which is not the balance — it is the ANCHOR:
+     * half of the "the account held ₹X in month D" pair the projection walks forward from. Those two
+     * agree on the day the account is created and diverge every month after, and the field they fill
+     * is labelled "Current Balance" in edit mode.
+     *
+     * That made editing lossy, because handleSave writes `baseBalance` from this field AND re-stamps
+     * `baseBalanceDate` to the current month. Open an account anchored at ₹5,20,000 in March, change
+     * nothing but the employer name in September, and the anchor became ₹5,20,000 in SEPTEMBER: the
+     * date moved, the figure did not, and six months of contributions — ₹64,500 at ₹10,750 a month —
+     * had nowhere left to live. Changing your salary, which is the whole way an EPF account is kept
+     * up to date, hit this every time.
+     *
+     * The branch was also redundant: calculateBalance already returns calculateEPFProjection(...)
+     * .balance for an EPF account, which is what the account card beside it has always shown. So the
+     * card and the editor disagreed about the same account. `month` here is getCurrentMonthStr() —
+     * the same month handleSave stamps — so the figure seeded and the date saved now describe the
+     * same instant. */
+    const currentBalance = isUnitDenominated(acc) && acc.type === 'rewards'
+      ? rewardUnitBalance(acc, data.transactions, month, data.cashbackStatements)
+      : calculateBalance(acc, data.transactions, month);
     setOpeningBalanceInput(currentBalance.toString());
 
     const currentTravelBalance = calculateBalance(acc, data.transactions, month, true);

@@ -52,7 +52,13 @@ An account is any place money sits or is owed. Built-in types:
 - epf — Employee Provident Fund; tracks running EPF balance, monthly employer/employee credit breakdown,
   monthly accrued interest for current FY (credited on March 31st), and 1-year projections. Options
   include Statutory Wage Ceiling (₹15,000 cap) vs Actual Basic + DA. Requires a "Current Employer"
-  name field (shown in the EPF passbook header and detail view).
+  name field.
+  Changing your salary: edit the EPF account (Accounts → pencil) and change "Monthly Basic + DA
+  Salary". There is no separate salary-history screen — the projection is anchored to a balance and a
+  month rather than replayed from your joining date, so saving re-anchors it to the current month and
+  every month from then on uses the new figure. The "Current Balance" field in that editor is
+  pre-filled with the balance as projected TODAY, so re-anchoring keeps everything accrued so far;
+  overwrite it only if your EPFO passbook says something different.
 - rewards — a reward wallet (CRED coins, super.money, Cheq Chips). Give it a REWARD UNIT NAME and a
   POINTS-TO-₹1 RATE and the wallet is counted in that unit: the balance field is typed in it (500
   Chips, not ₹500), the Accounts card and the split picker show "500 Chips", and every rupee figure
