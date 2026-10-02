@@ -169,9 +169,11 @@ export default function Splits() {
 
       const message = buildSummaryMessage(event);
 
-      // Best effort clipboard copy so the user also has the full text breakdown ready
+      // A single image carries the text as its caption, so the clipboard is left alone. Several
+      // images can't take a caption (WhatsApp drops the files if text is passed), so the summary is
+      // copied instead: send the images, then paste the text as the next message.
       try {
-        if (navigator.clipboard?.writeText) {
+        if (blobs.length > 1 && navigator.clipboard?.writeText) {
           await navigator.clipboard.writeText(message);
         }
       } catch {
@@ -492,35 +494,20 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
 
     effectiveItems.forEach(item => {
       totalSpent += item.amount;
-      const splitCount = item.involvedPeople.length + (item.includeMe ? 1 : 0);
-      if (splitCount === 0) return;
-      
-      const isUnequal = item.splitType === 'unequal';
-        const equal = isUnequal ? {} as Record<string, number> : equalSplitShares(item);
-      const payer = item.paidBy || 'me';
-
-      if (payer === 'me') {
-        item.involvedPeople.forEach(p => {
-          if (balances[p]) {
-            const friendShare = isUnequal ? (item.shares?.[p] ?? 0) : (equal[p] ?? 0);
-            balances[p].owesMe += friendShare;
-          }
-        });
-        if (item.includeMe) {
-          const myShare = isUnequal ? (item.shares?.['me'] ?? 0) : (equal['me'] ?? 0);
-          myTotalShare += myShare;
-        }
-      } else {
-        if (item.includeMe) {
-          const myShare = isUnequal ? (item.shares?.['me'] ?? 0) : (equal['me'] ?? 0);
-          myTotalShare += myShare;
-          if (balances[payer]) {
-            balances[payer].iOweThem += myShare;
-          }
-        }
-      }
+      if (!item.includeMe) return;
+      myTotalShare += item.splitType === 'unequal'
+        ? (item.shares?.['me'] ?? 0)
+        : (equalSplitShares(item)['me'] ?? 0);
     });
 
+    // Per-person figures come from the SAME simplified payments as "Settle Up", not from each
+    // expense's direct me↔payer leg. The direct legs listed nearly everyone (you owe Pranay ₹18.80
+    // for his bill, Kundan owes you ₹4.01 for yours…) even though the settle-up routes all of that
+    // through other people and only two of them actually pay you. Your net total is unchanged.
+    simplifyDebts(computeSplitNetBalances(effectiveItems)).forEach(s => {
+      if (s.to === 'me' && balances[s.from]) balances[s.from].owesMe += s.amount;
+      if (s.from === 'me' && balances[s.to]) balances[s.to].iOweThem += s.amount;
+    });
     event.people.forEach(p => {
       balances[p].net = balances[p].owesMe - balances[p].iOweThem;
     });

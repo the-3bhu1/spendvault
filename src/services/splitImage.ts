@@ -26,9 +26,14 @@ export interface SplitImageOpts {
 }
 
 // Layout thresholds — the "single vs. multiple" decision.
-const SINGLE_MAX_ITEMS = 20;      // more expenses than this → split into separate images
-const SINGLE_MAX_SETTLEMENTS = 20; // more settlements than this → split too
-const ITEMS_PER_PAGE = 10;        // expenses per Expenses image once split
+//
+// Decided by HEIGHT, not by row counts. A chat app shows an image fitted to the screen, so a picture
+// much taller than a phone is shrunk until its text is unreadable — 9 payments + 12 expenses made a
+// 1:2.8 strip you had to open and zoom. One image is kept only while it is no taller than a phone
+// screen (about 1:2); past that it becomes a Settle-Up image plus pages of expenses, each of which
+// fits that same bound.
+const MAX_IMAGE_H = W * 2;        // ~ phone-screen aspect; taller than this and it gets shrunk
+const ITEMS_PER_PAGE = 10;        // expenses per Expenses image once split (10 rows ≈ 1236px)
 
 const SETTLE_ROW = 62; // settle row card height + gap
 const ITEM_ROW = 96;   // three-line expense row card height + gap
@@ -71,10 +76,8 @@ export const namesOrEveryone = (names: string[], everyone?: string[]) => {
   return isEveryone ? 'Everyone' : names.join(', ');
 };
 
-async function renderSplitImage(input: RenderInput): Promise<Blob> {
-  const { title, subtitle, totalSpent, settlements, items, expensesLabel, everyone } = input;
-
-  // ---- Measure total height up front ----
+/** The rendered height of an image, measured before drawing. Also what decides single vs. multiple. */
+function imageHeight({ settlements, items }: Pick<RenderInput, 'settlements' | 'items'>): number {
   let H = 44 + 22 + 46 + 30; // top pad + kicker + title + total line
   if (settlements) {
     H += 30 + 30; // divider gap + section header
@@ -85,6 +88,13 @@ async function renderSplitImage(input: RenderInput): Promise<Blob> {
     H += items.length ? items.length * ITEM_ROW : 56;
   }
   H += 72; // footer
+  return H;
+}
+
+async function renderSplitImage(input: RenderInput): Promise<Blob> {
+  const { title, subtitle, totalSpent, settlements, items, expensesLabel, everyone } = input;
+
+  const H = imageHeight(input);
 
   const { canvas, ctx } = newCanvas(H);
 
@@ -217,7 +227,7 @@ export async function buildSplitShareImages(opts: SplitImageOpts): Promise<Blob[
   const { title, subtitle, totalSpent, settlements, items, everyone } = opts;
   const head = { title, subtitle, totalSpent, everyone };
 
-  const fitsSingle = items.length <= SINGLE_MAX_ITEMS && settlements.length <= SINGLE_MAX_SETTLEMENTS;
+  const fitsSingle = imageHeight({ settlements, items }) <= MAX_IMAGE_H;
   if (fitsSingle) {
     return [await renderSplitImage({ ...head, settlements, items, expensesLabel: `Expenses (${items.length})` })];
   }

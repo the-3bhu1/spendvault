@@ -476,7 +476,9 @@ that means something went wrong (the confirmed amounts totalled zero, or the dat
 import), and tapping it repairs them. It is always safe to press; it never shows mid-confirmation.
 
 # Group Splits
-- "Your Balance Per Person" lists only the people you personally owe or who owe you — anyone square
+- "Your Balance Per Person" shows the Settle Up payments that involve YOU (so the two always agree:
+  if Settle Up says only two people pay you, only those two are listed). It lists only the people you
+  personally owe or who owe you — anyone square
   with you, or whose debt is with another participant, is left out, and the heading disappears when
   nobody qualifies. Tapping a name there marks that person paid; tick everyone listed and the event
   settles.
@@ -495,9 +497,12 @@ expense: ₹613.73 among 6 is five shares of ₹102.29 and one of ₹102.28 (the
 people in the list, you last). This applies to equal splits and to Auto-Split Remaining alike.
 The detail screen has a "Settle Up · Who Pays Whom" section that simplifies everyone's balances into
 the fewest payments across ALL participants (including friend-to-friend debts, not just yours), plus
-a per-person balance list. One share button in the header sends the image(s) AND the itemized text
-together — there is no image-only or text-only option: the image shows settle-up and
-the itemized expenses; a large split is split into a Settle-Up image plus paginated Expenses images.
+a per-person balance list. One share button in the header shares the summary — there is no
+image-only or text-only option: the image shows settle-up and the itemized expenses; a large split
+is split into a Settle-Up image plus paginated Expenses images. With ONE image the itemized text is
+sent along with it as the caption. With SEVERAL images only the images are shared (apps like WhatsApp
+drop the files if text is attached) and the itemized text is copied to the clipboard instead — send
+the images, then paste the text as the next message.
 Each expense says who it was split among, and an expense covering the WHOLE event reads
 "Split (3): Everyone" rather than repeating the roster — so on a trip where most things are shared
 by all, the expenses that were not are the only rows carrying names, which is the difference worth

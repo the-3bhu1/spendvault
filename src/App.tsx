@@ -323,15 +323,17 @@ function App() {
   return (
     <div ref={appRootRef} className="app-root fade-in">
       <nav className="navbar">
+        {/* Logo, wordmark and the gap between them all scale with the viewport width, so on a narrow
+            phone (a 360px-wide S25) the wordmark gives way instead of crowding the two header buttons. */}
         <div
-          className="flex align-center gap-4"
+          className="flex align-center"
           onClick={() => setActiveTab('dashboard')}
-          style={{ cursor: 'pointer', transition: 'opacity 0.2s ease' }}
+          style={{ cursor: 'pointer', transition: 'opacity 0.2s ease', gap: 'clamp(0.5rem, 3vw, 1rem)', minWidth: 0 }}
         >
-          <TransparentLogo src="/logo.png" style={{ width: 64, height: 64, objectFit: 'contain' }} />
-          <h1 className="navbar-title" style={{ fontSize: '1.75rem', marginBottom: 0, textTransform: 'lowercase' }}>spendvault</h1>
+          <TransparentLogo src="/logo.png" style={{ width: 'clamp(44px, 13vw, 64px)', height: 'clamp(44px, 13vw, 64px)', objectFit: 'contain', flexShrink: 0 }} />
+          <h1 className="navbar-title" style={{ fontSize: 'clamp(1.25rem, 5.5vw, 1.75rem)', marginBottom: 0, textTransform: 'lowercase', whiteSpace: 'nowrap' }}>spendvault</h1>
         </div>
-        <div className="flex align-center gap-4">
+        <div className="flex align-center gap-4" style={{ flexShrink: 0 }}>
           <button
             className={`nav-header-btn tour-askvault-btn ${isAskVaultOpen ? 'active' : ''}`}
             onClick={() => setIsAskVaultOpen(true)}
