@@ -232,6 +232,22 @@ export const shareSelfName = (fullName?: string) => {
   return /^\p{L}\.?$/u.test(first) ? full : first;
 };
 
+// Split `amount` across `keys` in whole paise so the shares sum EXACTLY to the amount: everyone gets
+// the floor share and the leftover paise go one each to the first keys (so list "me" last).
+export const distributePaise = (amount: number, keys: string[]): Record<string, number> => {
+  const out: Record<string, number> = {};
+  if (keys.length === 0) return out;
+  const total = Math.round(amount * 100);
+  const base = Math.floor(total / keys.length);
+  const extra = total - base * keys.length;
+  keys.forEach((k, i) => { out[k] = (base + (i < extra ? 1 : 0)) / 100; });
+  return out;
+};
+
+// Per-person shares of an equally-split item (friends in listed order, "me" last).
+export const equalSplitShares = (item: Pick<SplitItem, 'amount' | 'involvedPeople' | 'includeMe'>): Record<string, number> =>
+  distributePaise(item.amount, item.includeMe ? [...item.involvedPeople, 'me'] : [...item.involvedPeople]);
+
 export interface SplitSettlement { from: string; to: string; amount: number; }
 
 // Net balance per participant (including the self key 'me') across a set of split items.
@@ -247,8 +263,9 @@ export const computeSplitNetBalances = (items: SplitItem[]): Record<string, numb
     const isUnequal = item.splitType === 'unequal';
     const payer = item.paidBy || 'me';
     bump(payer, item.amount); // the payer fronted the whole bill
+    const equal = isUnequal ? {} : equalSplitShares(item);
     participants.forEach(p => {
-      const share = isUnequal ? (item.shares?.[p] ?? 0) : (item.amount / participants.length);
+      const share = isUnequal ? (item.shares?.[p] ?? 0) : (equal[p] ?? 0);
       bump(p, -share); // each participant consumed their share
     });
   });
@@ -1396,10 +1413,30 @@ export const sortDayByOrder = (day: Transaction[]): Transaction[] =>
  * group lands on need not be adjacent), so groups are compacted afterwards.
  */
 export function applyVisibleReorder(day: Transaction[], newVisible: Transaction[]): Transaction[] {
+  // Work in whole-day linked GROUPS, not rows. A filter can show one leg of a group (the Canara leg of
+  // a transfer) and hide the other. Swapping only the visible rows' slots and compacting afterwards
+  // let the hidden partner pull the moved leg straight back beside it whenever it sat on the far side
+  // of the neighbour, so the drag appeared to snap back. Moving the group as a unit can't be undone.
+  const units: Transaction[][] = [];
+  const unitOf = new Map<string, number>();
+  day.forEach(tx => {
+    if (unitOf.has(tx.id)) return;
+    const members = linkedGroupOf(tx, day).filter(m => !unitOf.has(m.id));
+    members.forEach(m => unitOf.set(m.id, units.length));
+    units.push(members);
+  });
+
   const visibleIds = new Set(newVisible.map(t => t.id));
+  const visibleSlots = units.map((u, i) => (u.some(m => visibleIds.has(m.id)) ? i : -1)).filter(i => i >= 0);
+  const newOrder: number[] = [];
+  newVisible.forEach(t => {
+    const u = unitOf.get(t.id);
+    if (u !== undefined && !newOrder.includes(u)) newOrder.push(u);
+  });
+
   let next = 0;
-  const redealt = day.map(t => (visibleIds.has(t.id) ? newVisible[next++] : t));
-  return compactLinkedGroups(redealt);
+  const out = units.flatMap((u, i) => (visibleSlots.includes(i) ? units[newOrder[next++]] : u));
+  return out.every((t, i) => t === day[i]) ? day : out;
 }
 
 /** The rows of `day` whose stored `order` no longer matches their position. */

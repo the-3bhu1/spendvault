@@ -1122,7 +1122,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
                             <div className="flex-col gap-1">
                               <span className="text-mono text-muted text-xs">
-                                {acc.isNcmcEnabled ? 'PAYMENTS BALANCE' : 'TOTAL BALANCE'}
+                                {acc.isNcmcEnabled ? 'PAYMENTS BALANCE' : acc.type === 'credit_card' ? 'UNBILLED' : 'TOTAL BALANCE'}
                               </span>
                               <span className="text-serif" style={{
                                 fontSize: '1.8rem',
@@ -1159,7 +1159,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               )}
                               {prevCycleDue !== null ? (
                                 <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
-                                  <span className="text-mono text-muted text-xs">PREV DUE</span>
+                                  <span className="text-mono text-muted text-xs">PREV BILL</span>
                                   <span className="text-serif" style={{ fontSize: '1.4rem', color: prevCycleDue > 0 ? 'var(--danger)' : 'var(--success)', marginTop: '0.1rem' }}>
                                     {formatCurrency(Math.abs(prevCycleDue))}
                                   </span>

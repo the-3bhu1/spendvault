@@ -131,6 +131,10 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
     }
   };
 
+  // The card is a size container and every length on its back is expressed against its 360px design
+  // width, so the contents shrink with the card instead of overflowing it on a narrow phone.
+  const u = (n: number) => `calc(100cqw * ${n} / 360)`;
+
   return (
     <div 
       className="view-card-overlay"
@@ -156,7 +160,10 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
       <div
         style={{
           width: '100%',
-          maxWidth: '360px',
+          // Also capped by the viewport height (minus helper text, buttons and padding) so a short or
+          // landscape screen still shows the whole card.
+          maxWidth: `min(360px, calc((100dvh - 260px) * ${CARD_ASPECT_RATIO}))`,
+          containerType: 'inline-size',
           // Height follows the card ratio instead of a fixed 230px, which was
           // only correct at exactly 360px wide — on a narrower phone the card
           // was stretching.
@@ -259,18 +266,18 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
             }}
           >
             {/* Magnetic Stripe */}
-            <div style={{ width: '100%', height: '45px', minHeight: '45px', flexShrink: 0, background: '#111', marginTop: '15px' }} />
+            <div style={{ width: '100%', height: u(45), minHeight: u(45), flexShrink: 0, background: '#111', marginTop: u(15) }} />
 
             {/* Back Details Container */}
-            <div style={{ padding: '16px 24px 24px 24px', display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
+            <div style={{ padding: `${u(16)} ${u(24)} ${u(24)} ${u(24)}`, display: 'flex', flexDirection: 'column', gap: u(12), flex: 1 }}>
               
               {/* Hologram & CVV Row */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 {/* Hologram Area */}
                 <div style={{ 
-                  width: '45px', 
-                  height: '35px', 
-                  borderRadius: '6px',
+                  width: u(45), 
+                  height: u(35), 
+                  borderRadius: u(6),
                   background: 'linear-gradient(135deg, #a8caba 0%, #5d4157 25%, #a8caba 50%, #5d4157 75%, #a8caba 100%)',
                   backgroundSize: '200% 200%',
                   animation: 'hologramShine 3s infinite linear',
@@ -290,23 +297,23 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
 
                 {/* CVV Box */}
                 <div 
-                  style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'copy', width: 'fit-content' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: u(8), cursor: 'copy', width: 'fit-content' }}
                   onClick={(e) => handleCopy(cardDetails?.cvv || '', e)}
                 >
-                  <span style={{ fontSize: '10px', color: 'rgba(var(--card-ink), 0.6)', textTransform: 'uppercase', fontWeight: 600 }}>CVV</span>
+                  <span style={{ fontSize: u(10), color: 'rgba(var(--card-ink), 0.6)', textTransform: 'uppercase', fontWeight: 600 }}>CVV</span>
                   <div style={{ 
                     background: 'white', 
-                    height: '30px', 
-                    padding: '0 12px', 
-                    borderRadius: '4px',
+                    height: u(30), 
+                    padding: `0 ${u(12)}`, 
+                    borderRadius: u(4),
                     display: 'flex', 
                     alignItems: 'center', 
                     justifyContent: 'center',
                     fontFamily: '"Courier New", Courier, monospace',
-                    fontSize: '14px',
+                    fontSize: u(14),
                     fontWeight: 700,
                     color: '#111',
-                    letterSpacing: '2px',
+                    letterSpacing: u(2),
                     boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)'
                   }}>
                     {cardDetails?.cvv || '•••'}
@@ -316,24 +323,24 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
 
               {/* Full Number & Expiry, with the co-brand mark filling the empty
                   block to their right — the one genuinely free region on the back. */}
-              <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '12px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: u(12) }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: u(10) }}>
                 <div 
-                  style={{ display: 'flex', flexDirection: 'column', gap: '2px', cursor: 'copy', width: 'fit-content' }}
+                  style={{ display: 'flex', flexDirection: 'column', gap: u(2), cursor: 'copy', width: 'fit-content' }}
                   onClick={(e) => handleCopy(cardDetails?.cardNumber || '', e)}
                 >
-                  <span style={{ fontSize: '9px', color: 'rgba(var(--card-ink), 0.5)', textTransform: 'uppercase', fontWeight: 600 }}>Card Number</span>
-                  <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '15px', color: 'rgb(var(--card-ink))', fontWeight: 700, letterSpacing: '2px', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+                  <span style={{ fontSize: u(9), color: 'rgba(var(--card-ink), 0.5)', textTransform: 'uppercase', fontWeight: 600 }}>Card Number</span>
+                  <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: u(15), color: 'rgb(var(--card-ink))', fontWeight: 700, letterSpacing: u(2), textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
                     {cardDetails?.cardNumber?.match(/.{1,4}/g)?.join(' ') || '•••• •••• •••• ••••'}
                   </span>
                 </div>
                 
                 <div 
-                  style={{ display: 'flex', flexDirection: 'column', gap: '2px', cursor: 'copy', width: 'fit-content' }}
+                  style={{ display: 'flex', flexDirection: 'column', gap: u(2), cursor: 'copy', width: 'fit-content' }}
                   onClick={(e) => handleCopy(expiryFormatted, e)}
                 >
-                  <span style={{ fontSize: '9px', color: 'rgba(var(--card-ink), 0.5)', textTransform: 'uppercase', fontWeight: 600 }}>Expiry Date</span>
-                  <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: '14px', color: 'rgb(var(--card-ink))', fontWeight: 700, letterSpacing: '1px', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+                  <span style={{ fontSize: u(9), color: 'rgba(var(--card-ink), 0.5)', textTransform: 'uppercase', fontWeight: 600 }}>Expiry Date</span>
+                  <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: u(14), color: 'rgb(var(--card-ink))', fontWeight: 700, letterSpacing: u(1), textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
                     {expiryFormatted}
                   </span>
                 </div>

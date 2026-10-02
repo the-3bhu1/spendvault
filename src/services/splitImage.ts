@@ -26,8 +26,8 @@ export interface SplitImageOpts {
 }
 
 // Layout thresholds — the "single vs. multiple" decision.
-const SINGLE_MAX_ITEMS = 8;      // more expenses than this → split into separate images
-const SINGLE_MAX_SETTLEMENTS = 6; // more settlements than this → split too
+const SINGLE_MAX_ITEMS = 20;      // more expenses than this → split into separate images
+const SINGLE_MAX_SETTLEMENTS = 20; // more settlements than this → split too
 const ITEMS_PER_PAGE = 10;        // expenses per Expenses image once split
 
 const SETTLE_ROW = 62; // settle row card height + gap

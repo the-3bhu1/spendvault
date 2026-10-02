@@ -2277,6 +2277,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                   <div className="col-span-2">
                     <CustomPicker
                       label="Cashback Mode"
+                      hideLabel
                       value={selectedCashbackLevelId || 'none'}
                       options={[
                         { id: 'none', name: 'None' },
@@ -2405,8 +2406,9 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                     error={errors.rewardEarnedAccountId}
                   />
                 )}
+                {/* hideLabel zeroes the picker's bottom margin, leaving the 1rem grid gap; pull the note up under it. */}
                 {isCard && (
-                  <div className="col-span-2 flex align-center text-xs text-muted" style={{ opacity: 0.7 }}>
+                  <div className="col-span-2 flex align-center text-xs text-muted" style={{ opacity: 0.7, marginTop: '-0.5rem' }}>
                     Will show in Cashback Vault for verification.
                   </div>
                 )}

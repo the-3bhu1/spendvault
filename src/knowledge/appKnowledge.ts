@@ -338,6 +338,8 @@ A card has a statement day and a due day.
 - Statement day: the day the cycle closes. A transaction dated ON or AFTER the statement day rolls
   into NEXT month's statement; before it, it stays in the CURRENT one.
 - Billed = the most recently generated statement (what's due). Unbilled = the cycle in progress.
+  On the Accounts tab a credit card's tiles are labelled UNBILLED (the cycle in progress) and PREV BILL
+  (the latest closed statement, less anything already paid against it).
 - A statement left unpaid when the NEXT one is cut does not disappear: it stays in the card's
   outstanding balance and in its credit utilisation as arrears, named by the month it came from, and
   the Bills row for that card shows it in a red band above the current statement.
@@ -488,7 +490,9 @@ equally or unequally, among any subset of people, and tracks who paid and who ha
 is a NAME plus a list of people — there are no recurring splits, cycles, frequencies or start dates;
 every event is one-off, mark people paid as they settle and close the whole thing with the tick
 (Mark as Settled) in its header, which can be re-opened. Unequal splits have an "Auto-Split
-Remaining" helper.
+Remaining" helper. Amounts are divided in whole paise so the shares always add up exactly to the
+expense: ₹613.73 among 6 is five shares of ₹102.29 and one of ₹102.28 (the extra paise go to the first
+people in the list, you last). This applies to equal splits and to Auto-Split Remaining alike.
 The detail screen has a "Settle Up · Who Pays Whom" section that simplifies everyone's balances into
 the fewest payments across ALL participants (including friend-to-friend debts, not just yours), plus
 a per-person balance list. One share button in the header sends the image(s) AND the itemized text

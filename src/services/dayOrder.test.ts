@@ -133,13 +133,12 @@ describe('applyVisibleReorder', () => {
   });
 
   it('does not let a redeal drop an unrelated row between two legs', () => {
-    // Slots the group lands on need not be adjacent: here a hidden row sits
-    // between them afterwards, so the compaction pass has to close it back up.
+    // The group moves as one unit into B's old slot, so a hidden row can never end up between its legs.
     const day = [row('h0', 0), row('A1', 1, ['A2']), row('A2', 2, ['A1']), row('h3', 3), row('B', 4)];
     const next = applyVisibleReorder(day, [day[4], day[1], day[2]]);
     const at = (id: string) => ids(next).indexOf(id);
     expect(at('A2')).toBe(at('A1') + 1);
-    expect(ids(next)).toEqual(['h0', 'B', 'A1', 'A2', 'h3']);
+    expect(ids(next)).toEqual(['h0', 'B', 'h3', 'A1', 'A2']);
   });
 });
 
@@ -194,5 +193,15 @@ describe('insertIntoDay', () => {
     const next = insertIntoDay(day, { ...row('leg', 0, ['parent']), order: undefined });
     expect(next[0]).toBe(other);
     expect(ids(next)).toEqual(['other', 'r0', 'parent', 'leg']);
+  });
+});
+
+describe('applyVisibleReorder with a hidden linked partner', () => {
+  // A filter shows only one leg of a transfer; the other leg sits BEFORE its visible partner. The
+  // old redeal-then-compact pulled the moved leg straight back, so the drag snapped back.
+  it('moves the visible leg past a neighbour even when its hidden partner precedes it', () => {
+    const xh = row('xh', 0, ['x']), x = row('x', 1, ['xh']), yh = row('yh', 2, ['y']), y = row('y', 3, ['yh']);
+    const next = applyVisibleReorder([xh, x, yh, y], [y, x]);
+    expect(next.map(t => t.id)).toEqual(['yh', 'y', 'xh', 'x']);
   });
 });

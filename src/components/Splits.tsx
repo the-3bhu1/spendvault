@@ -7,7 +7,7 @@ import { Share } from '@capacitor/share';
 import ConfirmDialog from './ConfirmDialog';
 import { useFinance } from '../FinanceContext';
 import type { SplitEvent, SplitItem } from '../types';
-import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, shareSelfName, formatDateString, errorMessage } from '../utils';
+import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, shareSelfName, distributePaise, equalSplitShares, formatDateString, errorMessage } from '../utils';
 import { scrollToFirstError } from '../utils/formErrors';
 import { buildSplitShareImages } from '../services/splitImage';
 import { blobToBase64 } from '../services/shareCanvas';
@@ -105,16 +105,17 @@ export default function Splits() {
         const splitCount = item.involvedPeople.length + (item.includeMe ? 1 : 0);
         if (splitCount === 0) return;
         const isUnequal = item.splitType === 'unequal';
+        const equal = isUnequal ? {} as Record<string, number> : equalSplitShares(item);
         const payerName = splitDisplayName(item.paidBy || 'me', selfName);
 
         message += `\n🔹 *${item.description}* (₹${item.amount.toFixed(2)}) - Paid by: *${payerName}*\n`;
 
         if (item.includeMe) {
-          const myShare = isUnequal ? (item.shares?.['me'] ?? 0) : (item.amount / splitCount);
+          const myShare = isUnequal ? (item.shares?.['me'] ?? 0) : (equal['me'] ?? 0);
           message += `  • ${splitDisplayName('me', selfName)}: ₹${myShare.toFixed(2)}\n`;
         }
         item.involvedPeople.forEach(p => {
-          const friendShare = isUnequal ? (item.shares?.[p] ?? 0) : (item.amount / splitCount);
+          const friendShare = isUnequal ? (item.shares?.[p] ?? 0) : (equal[p] ?? 0);
           message += `  • ${p}: ₹${friendShare.toFixed(2)}\n`;
         });
       });
@@ -144,7 +145,6 @@ export default function Splits() {
     setIsSharingImage(true);
     try {
       const { shareItems, settlements, totalSpent, subtitle } = getShareData(event);
-      const message = buildSummaryMessage(event);
       const selfName = shareSelfName(data.user?.name);
       const blobs = await buildSplitShareImages({
         title: event.name,
@@ -167,6 +167,17 @@ export default function Splits() {
         }),
       });
 
+      const message = buildSummaryMessage(event);
+
+      // Best effort clipboard copy so the user also has the full text breakdown ready
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(message);
+        }
+      } catch {
+        // clipboard might not be permitted in non-focused contexts, non-fatal
+      }
+
       const safeName = (event.name || 'summary').replace(/[^a-z0-9]+/gi, '-');
       const fileName = (i: number) => blobs.length > 1
         ? `SpendVault-Split-${safeName}-${i + 1}.png`
@@ -179,12 +190,21 @@ export default function Splits() {
           const res = await Filesystem.writeFile({ path: fileName(i), data: base64, directory: Directory.Cache });
           uris.push(res.uri);
         }
-        await Share.share({ text: message, files: uris });
+        // Single image supports caption in WhatsApp/OS share; multiple images drops files if text is passed.
+        if (uris.length === 1) {
+          await Share.share({ text: message, files: uris });
+        } else {
+          await Share.share({ files: uris });
+        }
       } else {
         const files = blobs.map((b, i) => new File([b], fileName(i), { type: 'image/png' }));
         const nav = navigator as Navigator & { canShare?: (d?: ShareData) => boolean };
         if (nav.canShare && nav.canShare({ files })) {
-          await nav.share({ text: message, files });
+          if (files.length === 1) {
+            await nav.share({ text: message, files });
+          } else {
+            await nav.share({ files });
+          }
         } else {
           // Desktop browsers can't share files — download the PNG(s) so they can be attached manually.
           files.forEach(file => {
@@ -476,22 +496,23 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
       if (splitCount === 0) return;
       
       const isUnequal = item.splitType === 'unequal';
+        const equal = isUnequal ? {} as Record<string, number> : equalSplitShares(item);
       const payer = item.paidBy || 'me';
 
       if (payer === 'me') {
         item.involvedPeople.forEach(p => {
           if (balances[p]) {
-            const friendShare = isUnequal ? (item.shares?.[p] ?? 0) : (item.amount / splitCount);
+            const friendShare = isUnequal ? (item.shares?.[p] ?? 0) : (equal[p] ?? 0);
             balances[p].owesMe += friendShare;
           }
         });
         if (item.includeMe) {
-          const myShare = isUnequal ? (item.shares?.['me'] ?? 0) : (item.amount / splitCount);
+          const myShare = isUnequal ? (item.shares?.['me'] ?? 0) : (equal['me'] ?? 0);
           myTotalShare += myShare;
         }
       } else {
         if (item.includeMe) {
-          const myShare = isUnequal ? (item.shares?.['me'] ?? 0) : (item.amount / splitCount);
+          const myShare = isUnequal ? (item.shares?.['me'] ?? 0) : (equal['me'] ?? 0);
           myTotalShare += myShare;
           if (balances[payer]) {
             balances[payer].iOweThem += myShare;
@@ -1072,7 +1093,12 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                       {splitType === 'equal' && (
                         <>
                           <span className="text-2xl font-bold text-accent" style={{ marginTop: '0.5rem' }}>
-                            ₹{(totalAmount / (involvedPeople.length + (includeMe ? 1 : 0)) || 0).toFixed(2)}
+                            ₹{(() => {
+                              const vals = Object.values(distributePaise(totalAmount, [...involvedPeople, ...(includeMe ? ['me'] : [])]));
+                              if (vals.length === 0) return '0.00';
+                              const hi = Math.max(...vals), lo = Math.min(...vals);
+                              return hi === lo ? hi.toFixed(2) : `${lo.toFixed(2)} – ₹${hi.toFixed(2)}`;
+                            })()}
                           </span>
                           <span className="text-xs text-muted">per person</span>
                         </>
@@ -1302,12 +1328,12 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                                     const allCandidates = ['me', ...event.people];
                                     const emptyCandidates = allCandidates.filter(p => customShares[p] === undefined || customShares[p].trim() === '');
                                     if (emptyCandidates.length > 0) {
-                                      const count = emptyCandidates.length;
-                                      const baseShare = Math.round(remainingAmount / count);
-
+                                      // Exact paise split; leftover paise go to the first people, "me" last.
+                                      const ordered = [...emptyCandidates.filter(p => p !== 'me'), ...emptyCandidates.filter(p => p === 'me')];
+                                      const parts = distributePaise(remainingAmount, ordered);
                                       const updatedShares = { ...customShares };
-                                      emptyCandidates.forEach(p => {
-                                        updatedShares[p] = baseShare.toString();
+                                      ordered.forEach(p => {
+                                        updatedShares[p] = parts[p].toString();
                                       });
                                       setCustomShares(updatedShares);
                                       
