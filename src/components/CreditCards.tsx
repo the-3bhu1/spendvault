@@ -33,7 +33,7 @@ import { getActiveCardDues, getCardCycleFigures, sumCardDues, cycleStatus, isCyc
 import { buildRewardRows, summariseRewards, summariseCardRewards, type PendingRewards } from '../services/RewardsService';
 import { getCardYear, getCardSpendFigures, getCardFeeStanding } from '../services/CardYearService';
 import Cashback from './Cashback';
-import { CategoryCard, CategoryHero, SubviewHeader, SealedMark, FilterPills, SectionHeading } from './TreeUi';
+import { CategoryCard, CategoryHero, HERO_MIN_H, SubviewHeader, SealedMark, FilterPills, SectionHeading } from './TreeUi';
 import { DetailHeroBand, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
 import { CardsBackdrop, MyCardsBackdrop, StatementsBackdrop, RewardsBackdrop } from './CardsBackdrops';
 import { LogoAvatar } from './LogoAvatar';
@@ -891,8 +891,9 @@ export default function CreditCards({ onExit, onViewStatement }: {
       {!activeCategory && !activeCard && (
         <>
           {/* position/overflow for the backdrop, which is absolutely positioned to this box and
-              bleeds past the horizontal padding. minHeight gives the square drawing room to render
-              at full size, and the centring is what lands the hero's stack on the card plate — see
+              bleeds past the horizontal padding. The height is HERO_MIN_H, shared with every other
+              hero in both trees, which is what holds the square drawing at one scale from screen to
+              screen; the centring is what lands the hero's stack on the card plate — see
               COMPOSITION in relief.tsx. */}
               {/* Out of the tree entirely, back to the Dashboard this screen was opened from. The
                   sub-views below have had a chevron here since they existed; the ROOT had none, so
@@ -901,7 +902,11 @@ export default function CreditCards({ onExit, onViewStatement }: {
                   rather than a different kind of exit. The negative margin below is what lets the
                   hero overlap this row, exactly as CategoryHero does for the sub-views. */}
               {onExit && <SubviewHeader title="" onBack={onExit} hideTitle />}
-          <div className="tour-cards-summary" style={{ position: 'relative', overflow: 'hidden', minHeight: '400px', marginTop: onExit ? '-28px' : undefined, padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+          {/* Same box as every CategoryHero below it — height, lift and padding alike (see
+              HERO_MIN_H). It had its own 400px and its own 2rem of vertical padding, which put this
+              drawing at a different scale from the three it introduces and started the category
+              rows 40px lower here than on the screens they open. */}
+          <div className="tour-cards-summary" style={{ position: 'relative', overflow: 'hidden', minHeight: HERO_MIN_H, marginTop: onExit ? '-28px' : undefined, padding: '0 1.5rem 0.5rem', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
             <CardsBackdrop />
 
             <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
@@ -1010,7 +1015,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
         <div className="fade-in">
           <SubviewHeader title="Cards" onBack={() => setCategory(null)} hideTitle />
 
-          <CategoryHero backdrop={<MyCardsBackdrop />} label={CATEGORY_LABELS.mycards} minHeight="360px" userName={data.user?.name} possessive={false}>
+          <CategoryHero backdrop={<MyCardsBackdrop />} label={CATEGORY_LABELS.mycards} userName={data.user?.name} possessive={false}>
             <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
               {formatWhole(hasLimit ? totals.creditLimit : totals.outstanding)}
             </div>
@@ -1058,7 +1063,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
 
           <CategoryHero
             backdrop={<StatementsBackdrop />}
-            label={CATEGORY_LABELS.statements} minHeight="340px" userName={data.user?.name}
+            label={CATEGORY_LABELS.statements} userName={data.user?.name}
           >
             <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
               {formatWhole(statementsHeroTotal)}
@@ -1254,7 +1259,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
               buys the drawing room — the content is laid out in pixels, so a bigger scale shrinks its
               footprint in viewBox units. (That escape closes once height reaches width, which is the
               case the note in CardsBackdrops is about.) */}
-          <CategoryHero backdrop={<RewardsBackdrop />} label={CATEGORY_LABELS.rewards} minHeight="392px" userName={data.user?.name}>
+          <CategoryHero backdrop={<RewardsBackdrop />} label={CATEGORY_LABELS.rewards} userName={data.user?.name}>
             {/* The lead figure — pending or lifetime, whichever the list below is currently about. */}
             <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
               {leadFigure(rewardLead)}

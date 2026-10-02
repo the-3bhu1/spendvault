@@ -11,7 +11,7 @@ import WealthBackdrop from './WealthBackdrop';
 import { PortfolioBackdrop, AssetsBackdrop, RetirementBackdrop } from './WealthCategoryBackdrops';
 import { LogoAvatar } from './LogoAvatar';
 import { DetailHeroBand, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
-import { CategoryCard, CategoryHero, SubviewHeader, SealedMark, FilterPills, SectionHeading } from './TreeUi';
+import { CategoryCard, CategoryHero, HERO_MIN_H, SubviewHeader, SealedMark, FilterPills, SectionHeading } from './TreeUi';
 import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
 import { calculateEPFProjection, getEPFInterestRate, getFinancialYearForDate } from '../utils/epfEngine';
 import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance, isStatsExcludedCategory, statsAmount, errorMessage, userPossessive, rupeesToRewardPoints } from '../utils';
@@ -1021,8 +1021,8 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
 
   const renderSealedMark = (logo: ReactNode) => <SealedMark>{logo}</SealedMark>;
 
-  const renderCategoryHero = (backdrop: ReactNode, label: string, minHeight: string, children: ReactNode) => (
-    <CategoryHero backdrop={backdrop} label={label} minHeight={minHeight} userName={data.user?.name}>
+  const renderCategoryHero = (backdrop: ReactNode, label: string, children: ReactNode) => (
+    <CategoryHero backdrop={backdrop} label={label} userName={data.user?.name}>
       {children}
     </CategoryHero>
   );
@@ -1577,11 +1577,11 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
         <>
           {/* position/overflow exist for WealthBackdrop: the sketch is absolutely positioned to this box
           and bleeds past the horizontal padding, so it has to be clipped here.
-          minHeight gives the backdrop room to draw at full size — its viewBox is square, so a short
-          hero would scale it down by height and leave the arch small. justifyContent centring is what
-          lands the avatar and total on the door's hub (see COMPOSITION in WealthBackdrop): the drawing
-          is concentric about its own centre, so both must be centred in the same box. It also spends
-          the dead space that used to sit below the cards. */}
+          The height is HERO_MIN_H, shared with every other hero in both trees — the sketch's viewBox
+          is square, so the box's shorter side sets its scale, and one height is what keeps that scale
+          the same from screen to screen. justifyContent centring is what lands the avatar and total on
+          the door's hub (see COMPOSITION in WealthBackdrop): the drawing is concentric about its own
+          centre, so both must be centred in the same box. */}
               {/* Out of the tree entirely, back to the Dashboard this screen was opened from. The
                   sub-views below have had a chevron here since they existed; the ROOT had none, so
                   the one screen you always arrive at from somewhere else was the one with no way
@@ -1589,7 +1589,11 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
                   rather than a different kind of exit. The negative margin below is what lets the
                   hero overlap this row, exactly as CategoryHero does for the sub-views. */}
               {onExit && <SubviewHeader title="" onBack={onExit} hideTitle />}
-          <div className="tour-wealth-summary" style={{ position: 'relative', overflow: 'hidden', minHeight: '400px', marginTop: onExit ? '-28px' : undefined, padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+          {/* Same box as every CategoryHero below it — height, lift and padding alike (see
+              HERO_MIN_H). It had its own 400px and its own 2rem of vertical padding, which put the
+              arch at a different scale from the three drawings it introduces and started the
+              category rows 40px lower here than on the screens they open. */}
+          <div className="tour-wealth-summary" style={{ position: 'relative', overflow: 'hidden', minHeight: HERO_MIN_H, marginTop: onExit ? '-28px' : undefined, padding: '0 1.5rem 0.5rem', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
             <WealthBackdrop />
 
             {/* Every hero element is lifted above the backdrop; the sketch is the only thing at z 0. */}
@@ -1758,7 +1762,7 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
           <div className="fade-in">
             {renderSubviewHeader('Portfolio', () => setCategory(null), 'tour-wealth-back', true)}
 
-            {renderCategoryHero(<PortfolioBackdrop />, 'Portfolio', '360px', <>
+            {renderCategoryHero(<PortfolioBackdrop />, 'Portfolio', <>
               <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
                 {formatCurrency(s.current)}
               </div>
@@ -1916,7 +1920,7 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
           <div className="fade-in">
             {renderSubviewHeader('Assets', () => setCategory(null), 'tour-wealth-back', true)}
 
-            {renderCategoryHero(<AssetsBackdrop />, 'Assets', '340px', <>
+            {renderCategoryHero(<AssetsBackdrop />, 'Assets', <>
               <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
                 {formatCurrency(liquidTotals[activeFilter])}
               </div>
@@ -1972,7 +1976,7 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
         <div className="fade-in">
           {renderSubviewHeader('Retirement', () => setCategory(null), 'tour-wealth-back', true)}
 
-          {renderCategoryHero(<RetirementBackdrop />, 'Retirement', '360px', <>
+          {renderCategoryHero(<RetirementBackdrop />, 'Retirement', <>
             <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
               {formatCurrency(retirementTotals.balance)}
             </div>

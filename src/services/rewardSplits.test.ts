@@ -303,6 +303,52 @@ describe('the gross price of a part-paid purchase', () => {
     expect(rewardSplitGross(tx({ amount: 106.4, rewardSplits: [{ accountId: 'fw', amount: 80.6 }] })))
       .toBe(187);
   });
+
+  it('is 0 on a CC payment’s card leg, whose amount is already the whole payment', () => {
+    // A ₹200 bill payment on Supermoney x AXIS, ₹137 from Canara and ₹63 from CRED. The card leg is
+    // the anchor, so it carries the source — but the two legs FUND its ₹200, they do not add to it.
+    // This read as ₹263 with a subordinate "₹200", a total nothing else in the app agreed with:
+    // the card's outstanding, its dues and its balance all move by the stored ₹200.
+    const cardLeg = tx({
+      id: 'card', description: 'CC Bill Payment', accountId: 'axis', type: 'credit',
+      amount: 200, category: 'CC Payment',
+      rewardSplits: [{ accountId: 'cred', amount: 63, legId: 'legC' }],
+      linkedTransactionIds: ['bank', 'legC'],
+    });
+    expect(rewardSplitGross(cardLeg)).toBe(0);
+    // The sources are still readable on it — only the price arithmetic is off.
+    expect(rewardSplitTotal(cardLeg)).toBe(63);
+  });
+
+  it('is 0 on a paired row even from the funding side, which is where an edit can leave the split', () => {
+    // The same payment logged as a Debit: the split normally moves to the card, but an edit that
+    // adds a source can leave it on the bank leg. Either way the pair's counterpart already states
+    // the total, so there is nothing for the headline to fill in.
+    const bankLeg = tx({
+      id: 'bank', description: 'CC Payment: Supermoney x AXIS', accountId: 'canara',
+      amount: 137, category: 'CC Payment',
+      rewardSplits: [{ accountId: 'cred', amount: 63, legId: 'legC' }],
+      linkedTransactionIds: ['card'],
+    });
+    expect(rewardSplitGross(bankLeg)).toBe(0);
+  });
+
+  it('is 0 on a transfer, whose other side is the log that carries the total', () => {
+    const transferOut = tx({
+      id: 'tr1', description: 'Transfer to Jupiter', amount: 1500, category: 'Transfer',
+      rewardSplits: [{ accountId: 'cred', amount: 500, legId: 'legT' }],
+      linkedTransactionIds: ['tr2', 'legT'],
+    });
+    expect(rewardSplitGross(transferOut)).toBe(0);
+  });
+
+  it('still prices a category that writes no counterpart, like an ordinary spend', () => {
+    // An NCMC recharge is a single row: no second log states the 300, so the headline must.
+    expect(rewardSplitGross(tx({
+      amount: 250, category: 'NCMC Travel Recharge',
+      rewardSplits: [{ accountId: 'cred', amount: 50, legId: 'legN' }],
+    }))).toBe(300);
+  });
 });
 
 // ── what a card's own reward rate is applied to ───────────────────────────────────────────────────

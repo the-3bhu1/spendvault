@@ -207,7 +207,7 @@ export default function Splits() {
   };
 
   return (
-    <div className="flex-col gap-6 animate-in splits-tab-root">
+    <div className="flex-col gap-6 animate-in splits-tab-root" style={{ minHeight: '100%' }}>
       {activeView === 'main' && (
         <>
           <div className="flex justify-between align-center">
@@ -513,6 +513,16 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
   const totalYouOwe = Object.values(balances).reduce((sum, b) => sum + (b.net < 0 ? Math.abs(b.net) : 0), 0);
   const netBalance = totalYouAreOwed - totalYouOwe;
 
+  /* The people YOU actually have something to square with — which is what "Your Balance Per Person"
+     has always claimed to list. A ₹0 line is not information: Supreeth owing Balaji ₹397 is a real
+     debt, but it is not one of yours, and printing "settled" beside his name says the opposite of
+     what a blank ledger means. The row was also TAPPABLE, so ticking it struck the name through and
+     called it "paid" — a receipt for money that never moved. With no expenses logged at all, every
+     line was one of those, so the section listed nothing but false receipts.
+     Compared against half a paisa rather than 0: an equal three-way split leaves 1e-13 behind, and
+     a name is not going to be listed over a rounding artefact. */
+  const owingPeople = event.people.filter(p => Math.abs(balances[p]?.net ?? 0) >= 0.005);
+
   const handleSaveEvent = () => {
     if (!editEventName.trim() || editEventPeople.length === 0) return;
     // Trimmed once up front, then used for every comparison below — the removed/paid diffs must
@@ -543,7 +553,10 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
     const currentPaid = event.paidPeople || [];
     const isPaid = currentPaid.includes(person);
     const newPaid = isPaid ? currentPaid.filter(p => p !== person) : [...currentPaid, person];
-    const allPaid = event.people.every(p => newPaid.includes(p));
+    // Against the people who owe, not everyone in the event: the square-with-you names no longer have
+    // a row, so nobody can tick them, and asking `event.people.every` would leave the split stuck on
+    // 'active' forever the moment one participant's balance came out even.
+    const allPaid = owingPeople.length > 0 && owingPeople.every(p => newPaid.includes(p));
     onUpdate({ ...event, paidPeople: newPaid, status: allPaid ? 'settled' : 'active' });
   };
 
@@ -564,7 +577,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
       } 
       onBack={onBack}
     >
-      <div className="flex-col gap-6">
+      <div className="flex-col gap-6" style={{ flexGrow: 1 }}>
 
         <div className="flex justify-between align-center tour-split-detail-header">
           <div className="flex-col">
@@ -669,9 +682,10 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
           );
         })()}
 
+        {owingPeople.length > 0 && (
         <div className="flex-col tour-split-per-person">
           <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px', marginBottom: '0.5rem', padding: '0 0.5rem' }}>Your Balance Per Person</span>
-          {event.people.map((person, idx) => {
+          {owingPeople.map((person, idx) => {
             const isPaid = event.paidPeople?.includes(person);
             const isSettled = event.status === 'settled';
             const netVal = balances[person]?.net ?? 0;
@@ -681,7 +695,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                 onClick={() => handleTogglePaid(person)}
                 style={{
                   padding: '0.75rem 0.5rem',
-                  borderBottom: idx === event.people.length - 1 ? 'none' : '1px solid rgba(255,255,255,0.05)',
+                  borderBottom: idx === owingPeople.length - 1 ? 'none' : '1px solid rgba(255,255,255,0.05)',
                   opacity: (isPaid || isSettled) ? 0.6 : 1,
                   transition: 'all 0.2s ease'
                 }}
@@ -719,6 +733,8 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                       you owe ₹{Math.abs(netVal).toFixed(2)}
                     </span>
                   ) : (
+                    /* Unreachable while owingPeople gates the list — kept as the fallback for a
+                       balance that rounds to nothing between the filter and the render. */
                     <span className="font-bold text-sm text-muted">settled</span>
                   )}
                 </div>
@@ -726,8 +742,12 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
             );
           })}
         </div>
+        )}
 
-        <div className="flex-col gap-4">
+        {/* The last section on the page takes what is left of it, so an empty list has a space to sit
+            in the middle of instead of a heading to hang under. With expenses present the extra room
+            lands under the last card, where it was anyway. */}
+        <div className="flex-col gap-4" style={{ flexGrow: 1 }}>
           <div className="flex justify-between align-center">
             <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>Expenses ({effectiveItems.length})</span>
             {event.status !== 'settled' && (
@@ -743,9 +763,14 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
             )}
           </div>
 
-          <div className="flex-col gap-2">
+          <div className="flex-col gap-2" style={{ flexGrow: 1 }}>
             {effectiveItems.length === 0 ? (
-              <p className="text-center text-sm text-muted py-6">No expenses added to this split yet.</p>
+              /* Centred in the leftover space rather than padded off the heading. min-height keeps it
+                 honest on a screen too short for there to BE leftover space — the message still gets
+                 room of its own instead of collapsing onto the button above it. */
+              <div className="flex-center" style={{ flexGrow: 1, minHeight: '120px' }}>
+                <p className="text-center text-sm text-muted" style={{ margin: 0 }}>No expenses added to this split yet.</p>
+              </div>
             ) : (
               effectiveItems.map((item) => (
                 <div key={item.id} className="card flex-col gap-2" style={{ padding: '0.75rem' }}>

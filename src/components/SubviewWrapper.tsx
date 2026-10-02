@@ -12,7 +12,14 @@ export const SubviewWrapper = ({ title, children, onBack, footer }: SubviewWrapp
   <div className="flex-col gap-6 animate-opacity" style={{ 
     position: 'relative', 
     paddingBottom: footer ? '96px' : '40px',
-    overflowX: 'hidden'
+    overflowX: 'hidden',
+    /* Only bites where the parent is a flex column WITH a height to give away — the splits tab is
+       the one that is, and there it lets an empty list centre itself in what is left of the screen
+       instead of hugging its heading. Everywhere else the parent is auto-height or not a flex
+       container at all, and this is inert. The inner div below already carries flex:1, so where it
+       does bite, the body stretches with it. Grow only: no basis or shrink, so nothing that is
+       already taller than the screen gets squeezed. */
+    flexGrow: 1
   }}>
     <div className="flex align-center gap-4">
       <button className="btn btn-secondary" style={{ padding: '0.5rem' }} onClick={onBack}>

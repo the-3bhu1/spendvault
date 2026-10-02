@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, InvestmentKind, RewardSplitLeg } from '../types';
-import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, cardEarnsCashback, cardRewardOn, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance } from '../utils';
+import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, formatBillingCycleRange, cardEarnsCashback, cardRewardOn, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance } from '../utils';
 import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X, Plus, Ticket } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
@@ -39,6 +39,25 @@ export interface LogTransactionFormProps {
   sms?: { processing: boolean; onDiscard: () => void };
   onSuccess?: () => void;
 }
+
+/* WHAT A COUNTERPART-LESS TRANSFER IS CALLED. Every other transfer names its other side
+   ("Transfer from Canara"), which is exactly what a manual log has not got — so it falls back to
+   the bare category. Not "Transfer In"/"Transfer Out": the row already prints its own account and
+   a signed amount, so the direction is on screen twice before the description says a word.
+   It matches what the app ALREADY lands on when a transfer's counterpart cannot be resolved (see
+   the Unknown-healing pass in FinanceContext), so one vocabulary covers both. Deliberately NOT
+   "Transfer to/from Unknown" — that string means damage, and the healing pass rewrites it. */
+const MANUAL_TRANSFER_DESC = 'Transfer';
+/** A CC payment's credit side never named the counterpart anyway, so the generic already existed. */
+const MANUAL_CC_DESC = 'CC Bill Payment';
+
+/* Whether a description is one the form WROTE, and may therefore rewrite. Anything the user typed
+   is theirs and is left alone. MANUAL_TRANSFER_DESC has to be in here: without it, a transfer
+   switched to "None (Manual Log)" and back to a real account would keep reading "Transfer" instead
+   of naming the account it now has. */
+const isAutoTransferDesc = (d: string) =>
+  d === MANUAL_TRANSFER_DESC || d.startsWith('Transfer to ') || d.startsWith('Transfer from ');
+const isAutoCCDesc = (d: string) => d === MANUAL_CC_DESC || d.startsWith('CC Payment: ');
 
 // The unit toggle and the remove button sit side by side in the split panel's header, so their
 // height comes from one place — eyeballed padding on each drifted by a pixel or two.
@@ -361,11 +380,19 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     return () => window.clearTimeout(t);
   }, [activeSplit, showRewardSplit, splits.length]);
 
-  const resolveCcPaymentCycle = (date: string, statementDay?: number) => {
+  /* `target` defaults to what the picker holds, which is every save's caller. It is passed
+     explicitly only by the picker's own labels, so the month printed on an option and the month a
+     save writes come out of this one function — a second copy of the minus-one-month step is
+     exactly how a label starts telling you the wrong statement. */
+  const resolveCcPaymentCycle = (
+    date: string,
+    statementDay?: number,
+    target: 'current_cycle' | 'previous_statement' = ccPaymentCycleTarget,
+  ) => {
     const safeStatementDay = statementDay || 1;
     const currentCycle = getBillingCycleForDate(date, safeStatementDay);
 
-    if (ccPaymentCycleTarget === 'current_cycle') {
+    if (target === 'current_cycle') {
       return currentCycle;
     }
 
@@ -464,12 +491,12 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     // Transfer auto-fill / clear
     const wasTransfer = newTx.category?.toLowerCase() === 'transfer';
     const isNowTransfer = nextCategory.toLowerCase() === 'transfer';
-    const isTransferAutoFilled = currentDesc.startsWith('Transfer to ') || currentDesc.startsWith('Transfer from ');
+    const isTransferAutoFilled = isAutoTransferDesc(currentDesc);
 
     // CC Payment auto-fill / clear
     const wasCC = newTx.category?.toLowerCase() === 'cc payment';
     const isNowCC = nextCategory.toLowerCase() === 'cc payment';
-    const isCCAutoFilled = currentDesc === 'CC Bill Payment' || currentDesc.startsWith('CC Payment: ');
+    const isCCAutoFilled = isAutoCCDesc(currentDesc);
     const wasNcmc = newTx.category?.toLowerCase() === 'ncmc travel recharge';
     const isNowNcmc = nextCategory.toLowerCase() === 'ncmc travel recharge';
     const isNcmcAutoFilled = currentDesc === 'NCMC Travel Recharge';
@@ -1280,6 +1307,61 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   const canSplitWithRewards = !isInvestmentCategory(newTx.category)
     && (isCCPayment || newTx.type === 'debit');
 
+  /* "Apply Payment To", named the way the statement screen names the same two cycles.
+     "Current Open Cycle" was a claim about TODAY sitting on a value anchored to the ROW's date:
+     resolveCcPaymentCycle reads the cycle off newTx.date, so on a payment logged three months back
+     the option calling itself current and open is one the statement screen labels "Closed
+     Statement". Collapsed — which is how the field is read on an edit — the trigger was the only
+     thing on screen saying which statement the money went to, and it said the wrong one. So the
+     month rides on the TRIGGER, not just in the open sheet.
+     "Open" is gone for the same reason. "Current Cycle" reads as current relative to this payment,
+     which is what it has always meant; "open" asserts something about now that the statement screen
+     will flatly deny on any back-dated row.
+     The month, not just the range: a cycle is named for the statement it is cut into, so "August
+     2026" is 13 Jul – 12 Aug. Naming one without the other trades this confusion for a subtler one,
+     which is why the statement screen prints both and this now does too. */
+  const ccCycleCard = data.accounts.find(a =>
+    a.id === (newTx.type === 'credit' ? newTx.accountId : paymentSourceAccountId));
+  /* No card, no statement day, no cycle to name — the picker deliberately renders before either
+     account is chosen. The options fall back to the bare labels rather than to a month derived from
+     the statementDay-of-1 default: that would be a real-looking date that silently moves the moment
+     the card lands, which is worse than saying nothing yet. */
+  const ccCycleStatementDay = ccCycleCard?.type === 'credit_card' ? ccCycleCard.statementDay : undefined;
+  const ccCycleOptions = (() => {
+    const bare = [
+      { id: 'previous_statement', name: 'Previous Statement', subtext: 'Reduce already billed dues' },
+      { id: 'current_cycle', name: 'Current Cycle', subtext: 'Early payment on the cycle this date falls in' },
+    ];
+    if (!ccCycleStatementDay || !newTx.date) return bare;
+    // Through resolveCcPaymentCycle for both, so a label can never name a month a save would not write.
+    const named = (target: 'current_cycle' | 'previous_statement') => {
+      const cycle = resolveCcPaymentCycle(newTx.date as string, ccCycleStatementDay, target);
+      const d = parseISO(`${cycle}-01`);
+      return {
+        long: format(d, 'MMMM yyyy'),
+        // The Statements picker's own trigger idiom — "Aug '26" — so the two read as one label.
+        short: `${d.toLocaleString('default', { month: 'short' })} '${d.getFullYear().toString().slice(-2)}`,
+        range: formatBillingCycleRange(cycle, ccCycleStatementDay),
+      };
+    };
+    const prev = named('previous_statement');
+    const curr = named('current_cycle');
+    return [
+      {
+        id: 'previous_statement',
+        name: `Previous Statement · ${prev.long}`,
+        triggerName: `Prev Statement · ${prev.short}`,
+        subtext: `${prev.range} • reduce already billed dues`,
+      },
+      {
+        id: 'current_cycle',
+        name: `Current Cycle · ${curr.long}`,
+        triggerName: `Current Cycle · ${curr.short}`,
+        subtext: `${curr.range} • early payment`,
+      },
+    ];
+  })();
+
   /* Each source decides its own unit and its own ceiling: a card's own balance is counted in its own
      unit, a plain rupee wallet (CRED coins, super.money) is already money, and a one-time reward has
      no balance at all. So everything the panel needs is a function OF a card rather than one set of
@@ -1512,8 +1594,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
               const currentDesc = newTx.description || '';
               const isTransferCat = newTx.category?.toLowerCase() === 'transfer';
               const isCCCat = newTx.category?.toLowerCase() === 'cc payment';
-              const isTransferAutoFilled = currentDesc.startsWith('Transfer to ') || currentDesc.startsWith('Transfer from ');
-              const isCCAutoFilled = currentDesc === 'CC Bill Payment' || currentDesc.startsWith('CC Payment: ');
+              const isTransferAutoFilled = isAutoTransferDesc(currentDesc);
+              const isCCAutoFilled = isAutoCCDesc(currentDesc);
               let updatedDesc = currentDesc;
               if (isTransferCat && isTransferAutoFilled && paymentSourceAccountId) {
                 const selectedAcc = data.accounts.find(a => a.id === paymentSourceAccountId);
@@ -1631,6 +1713,17 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
               // sitting on a `rewards` account, which the CC-Payment rule below narrows away to
               // bank/e-wallet only. The account was never actually lost, just unrenderable.
               if (acc.id === newTx.accountId) return true;
+              /* NOT THE ACCOUNT ALREADY HOLDING THE OTHER LEG. The counterpart picker below has
+                 always refused the account this row is on; this is the same rule the other way
+                 round, and without it the guard only held in one direction. Log a transfer Canara
+                 ← Amazon Pay, reopen it, switch Account to Amazon Pay, and both legs land on one
+                 account: +3,001 and −3,001 cancelling each other, a pair that moves no money and
+                 that nothing downstream reads as a transfer any more.
+                 Ordered AFTER the keep-rule above on purpose — a row already in that state has
+                 accountId === paymentSourceAccountId, and reversing the two would drop it out of
+                 its own picker, which is precisely the unrenderable-value bug the note above
+                 describes. Existing rows stay openable and repairable. */
+              if (acc.id === paymentSourceAccountId) return false;
               if (isCCPayment) {
                 return newTx.type === 'debit' ? (acc.type === 'bank_account' || acc.type === 'e_wallet') : acc.type === 'credit_card';
               }
@@ -1710,9 +1803,18 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
               options={[
                 { id: '', name: 'None (Manual Log)' },
                 ...[...data.accounts].sort(sortByAccountType).filter(a => {
+                  /* WHATEVER THE COUNTERPART ACTUALLY IS STAYS SELECTABLE — archived, or the main
+                     account itself — even where the rules below would never have offered it.
+                     A picker holding a value that matches no option renders its PLACEHOLDER, and
+                     this one's placeholder reads "None (Manual Log)". So on a transfer whose two
+                     legs ended up on one account, the field announced there was no counterpart
+                     while the linked row sat open right underneath it, and the only honest reading
+                     of the screen — "a child leg with no source" — was not what had happened.
+                     Same rule the Account picker above keeps for its own value, for the same
+                     reason. It subsumes the archived exception that used to live on the next line. */
+                  if (a.id === paymentSourceAccountId) return true;
                   if (a.id === newTx.accountId) return false;
-                  // Hide archived, but keep the counterpart already selected on this transaction.
-                  if (a.archived && a.id !== paymentSourceAccountId) return false;
+                  if (a.archived) return false;
                   if (isCCPayment) {
                     // Symmetric with the main Account filter for the debit leg (bank_account/
                     // e_wallet only) — the credit leg's funding side is the same set of real
@@ -1739,20 +1841,29 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                 setPaymentSourceAccountId(val);
                 const selectedAcc = val ? data.accounts.find(a => a.id === val) : null;
                 const currentDesc = newTx.description || '';
-                const isTransferAutoFilled = currentDesc === '' || currentDesc.startsWith('Transfer to ') || currentDesc.startsWith('Transfer from ');
-                const isCCAutoFilled = currentDesc === '' || currentDesc === 'CC Bill Payment' || currentDesc.startsWith('CC Payment: ');
+                const isTransferAutoFilled = currentDesc === '' || isAutoTransferDesc(currentDesc);
+                const isCCAutoFilled = currentDesc === '' || isAutoCCDesc(currentDesc);
 
+                /* CLEARING TO "None (Manual Log)" NAMES THE ROW GENERICALLY — it does not blank it.
+                   Both branches used to write '' when no account was selected, and a transfer's
+                   description is almost always the auto-filled one, so choosing "None" emptied the
+                   field, which then failed validation ("Description is required") on the very Update
+                   that was meant to drop the counterpart. The error named the description and
+                   nothing tied it back to the picker just touched, so turning a transfer into a
+                   manual log meant working out for yourself that a description had to be retyped.
+                   The old name cannot simply stand either: "Transfer from Amazon Pay Balance" on a
+                   row with no Amazon Pay leg describes a counterpart that is no longer there. */
                 if (isTransfer && isTransferAutoFilled) {
                   // Transfer: auto-fill from account name
                   const autoDesc = selectedAcc
                     ? (newTx.type === 'debit' ? `Transfer to ${selectedAcc.name.trim()}` : `Transfer from ${selectedAcc.name.trim()}`)
-                    : '';
+                    : MANUAL_TRANSFER_DESC;
                   setNewTx(prev => ({ ...prev, description: autoDesc }));
                 } else if (isCCPayment && isCCAutoFilled) {
                   // CC Payment: debit = bank paying card → 'CC Payment: <card>'; credit = card receives → 'CC Bill Payment'
-                  const autoDesc = selectedAcc
-                    ? (newTx.type === 'debit' ? `CC Payment: ${selectedAcc.name.trim()}` : 'CC Bill Payment')
-                    : '';
+                  const autoDesc = selectedAcc && newTx.type === 'debit'
+                    ? `CC Payment: ${selectedAcc.name.trim()}`
+                    : MANUAL_CC_DESC;
                   setNewTx(prev => ({ ...prev, description: autoDesc }));
                 } else if (activeInvestmentKind) {
                   setNewTx(prev => ({
@@ -2598,18 +2709,16 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
           </div>
         )}
 
-        {/* CC Payment always ends up with a credit_card leg somewhere, and these two options
-            (previous statement / current cycle) aren't specific to which card it is — so this
-            doesn't need to wait for either account to actually be picked. */}
+        {/* CC Payment always ends up with a credit_card leg somewhere, and the CHOICE (previous
+            statement / current cycle) isn't specific to which card it is — so this doesn't need to
+            wait for either account to actually be picked. Only the month printed beside each option
+            does, and ccCycleOptions leaves it off until a card is there to date it. */}
         {isCCPayment && (
             <div style={{ marginTop: '1rem' }}>
               <CustomPicker
                 label="Apply Payment To"
                 value={ccPaymentCycleTarget}
-                options={[
-                  { id: 'previous_statement', name: 'Previous Statement', subtext: 'Reduce Already Billed Dues' },
-                  { id: 'current_cycle', name: 'Current Open Cycle', subtext: 'Count as an Early Payment for the Active Cycle' }
-                ]}
+                options={ccCycleOptions}
                 onChange={val => setCcPaymentCycleTarget(val as 'current_cycle' | 'previous_statement')}
                 iconGetter={id => id === 'current_cycle' ? '🟦' : '🧾'}
               />

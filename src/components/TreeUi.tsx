@@ -156,6 +156,26 @@ export const SealedMark: React.FC<{ children: ReactNode }> = ({ children }) => (
 );
 
 /**
+ * THE HEIGHT OF EVERY TREE HERO, roots included. One number, because the gap under the navbar is
+ * one gap: the box already starts at a fixed offset on every screen, so its HEIGHT is the only
+ * thing left that can make one hero sit differently from the next — and it used to be four
+ * different numbers (340, 360, 392, 400), which put the drawings at four different scales and the
+ * screens below them at four different starting heights.
+ *
+ * Under the box's own width, deliberately. Every backdrop is a square viewBox scaled with `meet`
+ * (see ReliefSvg), so the SHORTER axis decides: a hero taller than it is wide letterboxes at the
+ * top and bottom, and that band is dead space the plates designed to run off the frame — the
+ * Statements fanfold, the My Cards plate — cannot bleed across. A phone is ~374 units wide inside
+ * the container's padding, so 360 keeps every drawing filling its height at every phone size, and
+ * it is the value five of the eight heroes already had.
+ *
+ * Changing it rescales every drawing against content that is centred in CSS pixels. The Statements
+ * fanfold is solved against a measured map of its own hero's content, so it is the one to look at
+ * first if this moves again.
+ */
+export const HERO_MIN_H = '360px';
+
+/**
  * The illustrated hero a category screen opens with: that category's own bas-relief engraving, the
  * user's avatar and "<Name>'s <Category>" over it, then the figures the category leads with.
  *
@@ -167,7 +187,6 @@ export const SealedMark: React.FC<{ children: ReactNode }> = ({ children }) => (
 export const CategoryHero: React.FC<{
   backdrop: ReactNode;
   label: string;
-  minHeight: string;
   userName?: string;
   /**
    * Whether the label is possessed by the user. Default true — "Tribhuvan's Statements", which is
@@ -180,11 +199,11 @@ export const CategoryHero: React.FC<{
    */
   possessive?: boolean;
   children: ReactNode;
-}> = ({ backdrop, label, minHeight, userName, possessive = true, children }) => (
+}> = ({ backdrop, label, userName, possessive = true, children }) => (
   <div style={{
     position: 'relative',
     overflow: 'hidden',
-    minHeight,
+    minHeight: HERO_MIN_H,
     // Pulls the whole hero up over the back button's row. That row is otherwise dead space —
     // the chevron is a small, left-aligned button with nothing beside it (see hideTitle above) —
     // while the hero's own content is horizontally centred, so the two never collide even

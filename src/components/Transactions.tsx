@@ -66,8 +66,14 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
   // Read off the SPLIT rather than the leg's own amount: the split's figure is the one
   // rewardSplitTotal added up, so a row with every leg present lands back on splitGross exactly,
   // with no float drift deciding which branch below is taken.
-  const splitShownHere = (counterparts || []).reduce(
-    (sum, c) => sum + (rewardSplitOfLeg(tx, c.tx)?.amount || 0), 0);
+  //
+  // Gated on splitGross, because a PAIRED row carries sources and still has no price to assemble —
+  // its counterpart leg already states the total. A CC payment's card leg is the sharp case: its
+  // amount IS the whole payment, so adding the funding legs back struck ₹263 over a ₹200 bill
+  // paid ₹137 + ₹63. See rewardSplitGross.
+  const splitShownHere = splitGross > 0
+    ? (counterparts || []).reduce((sum, c) => sum + (rewardSplitOfLeg(tx, c.tx)?.amount || 0), 0)
+    : 0;
   // What the screen can account for, which is what the totals beside it counted. Equals splitGross
   // unfiltered, and tx.amount once the legs are filtered away.
   const headline = tx.amount + splitShownHere;

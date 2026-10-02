@@ -24,6 +24,8 @@ locally on the user's device (browser localStorage); nothing is on a server. Cur
 Rupees (₹). The app is also packaged for Android/iOS via Capacitor.
 
 # Navigation
+- The Dashboard's spend ring has no legend — tap a slice and the centre names that category with its
+  amount and its share of the month.
 - Bottom nav (4 icons): Home (Dashboard), Wallet (Accounts), Receipts (Transactions), Profile (Settings).
 - The Dashboard shows this month's total spend and a spend-by-category ring, plus two plaques that
   open Cards (dues, statements, rewards) and Wealth (portfolio, assets, retirement). Anything deeper
@@ -38,6 +40,17 @@ Rupees (₹). The app is also packaged for Android/iOS via Capacitor.
   which is then cleared. Tours can't currently be replayed.
 
 # Accounts
+- Tap any account-type heading to collapse or expand that group; the Archived section at the bottom
+  starts collapsed and opens the same way.
+- Cashback tracking is per card and off until you tick "Enable Cashback / Rewards?" in the account's
+  add/edit form, where you also set the Reward Type (rupee statement credit or a custom points unit),
+  the default rate, "Round off cashback?" (also per custom level), and "Apply Statement Credits To" —
+  whether the issuer credits in the same cycle or the next.
+- Tick "Enable NCMC Travel Wallet?" while adding or editing a debit card (an opening travel-wallet
+  balance is then required) to get the second travel balance, the NCMC Travel Recharge category and
+  the "PAYMENTS BALANCE" split on that card.
+- On an NCMC card the transaction form adds a "Section" toggle — 💳 Payments or 🚇 Travel — choosing
+  which of the card's two balances the entry moves; a recharge auto-posts the matching leg.
 An account is any place money sits or is owed. Built-in types:
 - bank_account, cash, debit_card, e_wallet — normal balances (a credit adds, a debit subtracts).
 - credit_card — a debit (spend) INCREASES the outstanding balance; a credit (payment) reduces it.
@@ -105,8 +118,15 @@ Actions (each account is a card on the Accounts tab):
 Opening balances are stored per month ('YYYY-MM'); editing one applies from that month forward.
 
 # Transactions
+- Tap a month's heading in the ledger to collapse or expand that month; the count beside it is the
+  month's countable transactions, not every row.
+- In any date picker, tap the month-and-year heading to open "Jump to Date" and pick a month and year
+  directly instead of stepping back one month at a time.
+- Editing the date of a linked transaction moves every counterpart leg to the same date, and the
+  whole group lands at the bottom of that day's list.
 Fields: date, description, account, type (credit/debit), amount, category. Optional: tags, a
-recurring flag, exclude-from-stats, and links to auto-generated counterpart legs.
+exclude-from-stats, and links to auto-generated counterpart legs. There is no "recurring" switch in
+the editor — a transaction is marked recurring only when logged through a Bill's LOG button.
 Actions (Transactions tab):
 - Add: tap "+", fill details, save.
 - Edit: tap a transaction row (a quick tap) to open its editor.
@@ -151,9 +171,13 @@ deleting one keeps the legs in sync / removes them together. By category:
   state its own. Use it when a platform sells balance at a discount (pay ₹180 from the bank for a
   ₹200 gift-card load — the wallet is credited ₹200) or when a rail charges a fee (send ₹200, ₹197
   lands). The difference is not income or a spend: transfers are a system category either way.
+  A counterpart is OPTIONAL: set "Debit From / Credit To Account" to "None (Manual Log)" and no second
+  row is written — the transfer is recorded on this account alone and reads just "Transfer". Switching
+  an existing transfer to "None" deletes the leg it already had.
 - CC Payment: paying a credit card from a bank/payment account. Creates a debit on the paying account
   and a credit on the card (reducing its outstanding). The card credit is applied to the chosen
-  billing cycle (current or previous statement).
+  billing cycle (current or previous statement). "None (Manual Log)" works here too and records the
+  payment on one side only, named "CC Bill Payment".
   - With a reward split: if reward points are used toward the payment, a THIRD leg debits the rewards
     account for the points used and the bank leg covers the rest — and a fourth leg, and so on, if the
     payment draws on more than one reward source.
@@ -288,6 +312,8 @@ the "Other" source below covers one-off rewards.
   into its separate travel balance (and travel purchases draw it back down).
 
 # Categories & Budgets
+- Fuel, Fund, Loans, Cashback, Lending & Borrowing and Investments are re-added automatically if
+  missing, so they can reappear after you delete them.
 Spending is grouped by category. Add, delete and reorder categories in Settings → Categories (drag a
 row by its handle to reorder; "Other/Misc" always stays last). Set or change a monthly ₹ budget per
 category in the Insights screen (not Settings), which shows actual-vs-budget progress. Deleting a
@@ -338,8 +364,11 @@ A card has a statement day and a due day.
   and "Open" for the cycle still running. Overdue outranks partially paid, and overpaid outranks
   settled, so the row always shows the stronger of two true statements.
 - Which statement a credit lands on: only a CC PAYMENT gets to choose. Logging one shows "Apply
-  Payment To" — Previous Statement (reduce already-billed dues) or Current Open Cycle (an early
-  payment against the cycle in progress). Every OTHER credit on a card — a merchant refund, a
+  Payment To" — Previous Statement (reduce already-billed dues) or Current Cycle (an early payment
+  against the cycle in progress). Both are named for the payment's OWN date, not for today, and once
+  a card is picked each option carries the cycle it resolves to ("Previous Statement · August 2026",
+  with the 13 Jul – 12 Aug range beneath it) so an old payment opened for edit says which statement
+  it actually went to. Every OTHER credit on a card — a merchant refund, a
   reversal, a cashback credit — simply falls in the cycle its own date belongs to, exactly like a
   spend does. So a refund dated the 12th appears on the statement covering the 12th.
 - Settlement lag (an entry near the cut landing on the NEXT statement): banks bill by POSTING date,
@@ -387,10 +416,10 @@ against the cards' limits, and which card's bill lands soonest — then up to th
    annual fee recorded counts as lifetime free. What one card costs, and how far its waiver has got,
    is on that card's own summary screen — the hero deliberately doesn't sum fees, because a total
    across the wallet doesn't say whether the next renewal charges you.
-2. **Statements** — every cycle that has already been CUT, newest first, with the statement amount and
-   how many entries are on it. The cycle in progress is deliberately absent: it has no printed
-   statement and its figure moves with every charge, which is what My Cards is for. The hero total
-   is the sum of what's listed, so filtering to one card narrows it too.
+2. **Statements** — opens on each card's RUNNING cycle, one row per card, with the hero reading
+   "Running across N cards". Tap a card's pill to see THAT card's closed statements, grouped under
+   collapsible year headings (the current year open, its running cycle on top) and the hero switches
+   to what the card was charged that year. The hero total is the sum of what's listed.
 3. **Rewards** — the cashback vault (see "Cashback / Rewards"). The category row shows a COUNT of
    rewards awaiting credit, not a rupee figure, because cards can pay in different units.
 Tapping a tile in My Cards opens that card's SUMMARY SCREEN — the card as a whole rather than any one
@@ -420,6 +449,11 @@ the app falls back to the financial year and says so on screen rather than quoti
 A card with no fees recorded is treated as lifetime free.
 
 # Cashback / Rewards
+- Cards → Rewards opens on pending only; the pill switches to "Showing All", which adds a year picker
+  and collapses each card to its name (tap to reveal its cycles). The ⓘ beside a row opens the
+  transaction that earned it.
+- A statement screen shows only its top transactions at first — "View all N transactions" opens the
+  full cycle ledger, "Show fewer transactions" collapses it back.
 Cards can earn cashback at a default rate or per-mode rates (e.g. UPI, swipe). A rate is applied to
 what the CARD WAS CHARGED, not to what the purchase cost: on a ₹187 order part-paid with ₹81 of
 wallet money the card was charged ₹106, so a 50% mode expects 53 jewels, not 93. The issuer never
@@ -440,14 +474,25 @@ that means something went wrong (the confirmed amounts totalled zero, or the dat
 import), and tapping it repairs them. It is always safe to press; it never shows mid-confirmation.
 
 # Group Splits
+- "Your Balance Per Person" lists only the people you personally owe or who owe you — anyone square
+  with you, or whose debt is with another participant, is left out, and the heading disappears when
+  nobody qualifies. Tapping a name there marks that person paid; tick everyone listed and the event
+  settles.
+- "+ Add Expense" opens "Select Transaction" first: search your ledger and tap a real debit to split
+  it, or tap "Add Custom / Manual Expense" for something paid directly by you or a friend.
+- Each expense records who paid (Me or any participant), whether to include yourself, and which
+  subset it is shared among; the pencil/trash on its card edit or delete it, and both disappear once
+  the event is settled.
 Split shared expenses among people. Create an event with a name and people. Each item can be split
-equally or unequally, among any subset of people, and tracks who paid and who has settled. Events can
-be one-off or recurring (with cycles, a frequency, and a start date). Mark people paid, end a cycle
-(carrying unpaid people over), or mark the whole event settled (and re-open it). Starting a new cycle
-can carry forward the previous cycle's items; unequal splits have an "Auto-Split Remaining" helper.
+equally or unequally, among any subset of people, and tracks who paid and who has settled. An event
+is a NAME plus a list of people — there are no recurring splits, cycles, frequencies or start dates;
+every event is one-off, mark people paid as they settle and close the whole thing with the tick
+(Mark as Settled) in its header, which can be re-opened. Unequal splits have an "Auto-Split
+Remaining" helper.
 The detail screen has a "Settle Up · Who Pays Whom" section that simplifies everyone's balances into
 the fewest payments across ALL participants (including friend-to-friend debts, not just yours), plus
-a per-person balance list. Share the summary as text or as an image: the image shows settle-up and
+a per-person balance list. One share button in the header sends the image(s) AND the itemized text
+together — there is no image-only or text-only option: the image shows settle-up and
 the itemized expenses; a large split is split into a Settle-Up image plus paginated Expenses images.
 Each expense says who it was split among, and an expense covering the WHOLE event reads
 "Split (3): Everyone" rather than repeating the roster — so on a trip where most things are shared
@@ -461,6 +506,18 @@ in the split does; a name that begins with an initial ("K S Tribhuvan") is kept 
 a lone "K" would be no more use than "Me". It falls back to "Me" if no name is set at all.
 
 # Lending & Borrowing (Debts)
+- New entries are logged with the Lent Money / Borrowed / Repayment buttons under the balance. In the
+  entry form, "Log in Ledger" is what creates the matching transaction and moves an account balance,
+  while "Link Ledger" attaches an EXISTING transaction instead (tap again to unlink); leave both off
+  for a ledger-only record.
+- An entry marked done is locked — the pencil and trash answer "Untick to edit"/"Untick to delete",
+  so un-tick it first. Deleting the last entry left removes that person entirely.
+- A person's header carries share, tick (mark all done), pencil (rename) and trash (delete the whole
+  history, irreversible); the main list has a search-by-name box.
+- Deleting a whole person removes only their ledger of entries — any real transactions those entries
+  created stay in the Transactions tab, just unlinked.
+- If the name in a "Name: Lent/Borrowed/Repayment" description doesn't exist yet, the ledger creates
+  that person; renaming it later moves the entry to the other person.
 A per-person ledger of money lent or borrowed, plus repayments. Add a person/debt, log repayments
 (received or sent), mark individual entries done, and settle a debt. Each person shows a
 net balance: they owe you, or you owe them. This feature supports 2-way sync: logging an entry in the
@@ -499,11 +556,15 @@ ledger, retyping flips that transaction between debit and credit to match. A tra
 manually keeps its own debit/credit.
 
 # Bills
+- Bills created under the old "SIP" category are removed automatically on upgrade because the
+  fund-linking they relied on no longer exists; logged transactions and fund accounts are untouched.
 Recurring bills — rent, utilities, subscriptions, credit card statements — with an amount, frequency
 (daily/weekly/monthly/quarterly/half-yearly/yearly/custom), and a next due date. Each bill offers LOG
 (create a new transaction), LINK (attach an existing transaction instead), or PAID (record it
 without a transaction). All three do the same thing to the bill: they roll it to its next
-occurrence.
+occurrence. That is for MANUAL bills: an auto-generated credit-card row offers only LOG — LINK is
+not shown, PAID refuses with "please log a payment to clear the balance", and it has no edit or
+delete button because the app generates it from the card itself.
 A recurring bill has no "paid" or "done" state — it is only ever due again. There is no tick to
 clear and no completed list; the countdown IS the status. Pay a 90-day recharge on its due date and
 it immediately reads "in 90 days" for the next cycle. A bill that has passed its due date reads as
@@ -626,6 +687,10 @@ the Gemini key, and may lag the live rate. Supported vendors include MMTC-PAMP, 
 There's a daily safety cap on AI price/logo lookups, and prices are cached for about an hour.
 
 # Insights
+- Also shows Savings Rate (the share of income kept, with the net rupee figure), Velocity (average
+  spend per day) and a Spend Trends bar chart of recent months whose bars you can tap to highlight.
+- Category Budgets: add with "+ Add a budget for a category", change with the pencil (or by tapping
+  its spent/budget figure), remove with the trash; the bar turns orange past 80% and red past 100%.
 Pick a month to see: total spend and income (vs. the previous month), top category, top account,
 biggest transaction, transaction count, spend by category / account / tag, weekend spend, recurring
 spend, a daily spend streak, and budget-vs-actual per category. All spend figures exclude the system
@@ -640,6 +705,8 @@ A partially excluded transaction still counts as one — only the excluded rupee
 transaction. So the count can be lower than the number of rows you see on the Ledger for that month.
 
 # SMS auto-log (Android only)
+- Turn it on at Settings → Smart Features → "Auto-Log SMS": it asks for SMS permission, then
+  optionally for notification permission so background detections can alert you.
 On Android the app can read bank SMS on-device and create transactions automatically (opt-in:
 autoLogSms). OTPs and personal messages are excluded on-device and never sent anywhere. Paired bank
 messages (e.g. a payment and its confirmation) are de-duplicated. An optional AI second filter
@@ -660,6 +727,8 @@ and is deliberately NOT included in a backup/export — confirm or discard pendi
 a backup elsewhere.
 
 # Profile & appearance
+- Tapping the avatar in Settings → User Details opens a sheet to view, change or remove the photo
+  (it opens the picker straight away when no photo is set).
 - Profile: tap your profile card in Settings → User Details to set your name and a profile photo (with
   a cropper).
 - Theme: switch light/dark in Settings → App Theme (Dark Slate / Light Mist).
@@ -672,6 +741,12 @@ PIN you confirm it and are shown a 16-character recovery key to save. Instead of
 can tap "Restore from backup" on the first step to import an existing backup file.
 
 # Security & app lock
+- With a PIN set, SpendVault re-locks when you return to it after more than 30 seconds in the
+  background; quicker app-switches skip the lock screen, and with no PIN it never locks.
+- With biometrics enabled the fingerprint/FaceID prompt appears by itself whenever the lock screen
+  opens, and the fingerprint key on the keypad re-triggers it if you dismiss it.
+- Any PIN change, not just setting the first one, ends by dropping you on the lock screen to re-enter
+  the new PIN.
 - App lock is OPTIONAL. During setup you can choose "Use without a lock" (no PIN), and such users never
   see a lock screen.
 - PIN: an optional 4-digit PIN, stored only as a hash. When you set a PIN a 16-character recovery key is
@@ -696,6 +771,10 @@ can tap "Restore from backup" on the first step to import an existing backup fil
   recovery key still work.
 
 # Backup, restore & data
+- A backup carries your finances and settings but NOT your Gemini API key or logo.dev token (those
+  live in the device keystore/local storage), so re-enter them after restoring on a new device.
+- Wipe Data also erases your saved Ask Vault conversations, after which the app restarts into
+  first-launch setup.
 - Export: Settings → Export Data, with two different outcomes:
   - "Save to Documents" writes the backup file into the device's Documents folder — a real file that
     stays there. The screen then confirms "Backup saved!" and offers "Share File".
@@ -707,10 +786,15 @@ can tap "Restore from backup" on the first step to import an existing backup fil
   Field names are minified to shrink the file.
 - Import: Settings → Import Data — restore from a backup file or by pasting a copied code. Importing
   OVERWRITES current data.
-- Demo data can be loaded to explore the app and cleared without touching real data.
+- Sample data is only ever loaded by the guided tours and cleared when they end — there is no manual
+  "load demo data" button.
 - Wipe data: Settings → Wipe Data → "delete forever" button clears all accounts, transactions, and settings after confirmation.
 
 # AI features & integrations
+- The Commodity AI tile appears under Settings → Smart Features only once you own a commodity
+  account, and Asset Logos only once you own a stock or mutual-fund account.
+- The Gemini key is written to the device keystore, so saving it fails on a phone with no screen
+  lock — set a device PIN/biometric and try again.
 - The optional Gemini API key powers commodity prices, brand logos, the SMS filter, and this assistant.
   It's stored in the device keystore (never bundled); removing it disables all those AI features.
   In Settings → AI Features you can Test a saved key, and a meter shows today's AI-fetch count against

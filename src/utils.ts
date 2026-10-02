@@ -641,6 +641,13 @@ export const cardRewardOn = (
   return (level ? level.roundOffCashback : account.roundOffCashback) ? Math.floor(earned) : earned;
 };
 
+/* Categories whose row is one half of a PAIR — the app writes a counterpart leg alongside it, and
+   that leg already states the full figure. Investments are the third such kind and are kept out by
+   isInvestmentCategory, which also knows the legacy spellings. NCMC recharges and lending are
+   deliberately absent: neither writes a counterpart TRANSACTION, so a split on one has the same
+   nowhere-else-to-look problem an ordinary spend does. */
+const PAIRED_LEG_CATEGORIES = new Set(['transfer', 'cc payment']);
+
 /** WHAT THE PURCHASE COST, across every source that paid for it — this row's own leg plus
  *  everything split off it. 0 when nothing was split, which is the signal to show nothing.
  *
@@ -655,10 +662,25 @@ export const cardRewardOn = (
  *  double the money that moved. Only a split has legs that sum to a price, and only an anchor
  *  carries splits, so a leg correctly reports 0.
  *
+ *  A PAIRED row reports 0 even though it does carry the sources, because the reason for the two-figure
+ *  treatment is absent there. An ordinary spend has nowhere else to state the price — its only other
+ *  row is the split leg itself — so the headline has to carry it. A transfer, a CC payment and an
+ *  investment all write a counterpart leg that already states the full figure, and on those rows the
+ *  price is not missing from the screen: it is the line above or below.
+ *
+ *  On a CC payment it is also plain wrong, which is what surfaced this. That one anchors on the CARD
+ *  leg (a credit, per docs/LINKED_TRANSACTIONS.md), and there the arithmetic runs the other way:
+ *  `amount` is ALREADY the whole payment, and the legs hanging off it are what FUNDS that figure
+ *  rather than money spent alongside it. A ₹200 bill payment made of ₹137 bank + ₹63 CRED read as
+ *  ₹263 — a total the card's outstanding, its dues and its balance all disagreed with. There is no
+ *  partial share to promote either: the card received the payment in full.
+ *
  *  Rounded to paise: 106.4 + 80.6 is not 187 in binary floating point. */
 export const rewardSplitGross = (tx?: Partial<Transaction>): number => {
   const paidElsewhere = rewardSplitTotal(tx);
   if (paidElsewhere <= 0) return 0;
+  const catLower = (tx?.category || '').toLowerCase();
+  if (PAIRED_LEG_CATEGORIES.has(catLower) || isInvestmentCategory(catLower)) return 0;
   return Math.round(((tx?.amount || 0) + paidElsewhere) * 100) / 100;
 };
 

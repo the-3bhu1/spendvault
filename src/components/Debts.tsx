@@ -157,21 +157,14 @@ export default function Debts() {
       linkedTxId: ledgerTxId ?? linkedTxId
     };
 
-    if (logInLedger && accountId) {
-      const ledgerTx: Transaction = {
-        id: ledgerTxId as string,
-        accountId,
-        amount,
-        type: type === 'lent' ? 'debit' : 'credit',
-        category: 'Lending & Borrowing',
-        description: `${trimmedName}: ${newTx.description}`,
-        date: newTx.date,
-        isRecurring: false,
-        linkedTransactionIds: [txId]
-      };
-      addTransaction(ledgerTx);
-    }
-
+    /* THE LEDGER ENTRY IS WRITTEN FIRST, and the money row second. The order is load-bearing, not
+       stylistic: addTransaction runs syncDebtsForTransaction, which reads a row's DESCRIPTION and
+       creates a ledger entry for anything shaped like "<Person>: Repayment". Written the other way
+       round, that sync could not see the entry this function had just minted — it is only in a local
+       — so it minted a SECOND one and appended its id to the row, and the debt write below (built
+       from a closure captured before all this) then replaced the debt wholesale and dropped it,
+       leaving the row pointing at an id that resolves to nothing. With the debt committed first the
+       sync can see the entry, and the guard in Scenario A stands down. */
     const existingDebt = debts.find(d => d.personName.toLowerCase() === trimmedName.toLowerCase());
 
     if (existingDebt) {
@@ -192,6 +185,21 @@ export default function Debts() {
       };
       addDebt(newDebt);
     }
+
+    if (logInLedger && accountId) {
+      const ledgerTx: Transaction = {
+        id: ledgerTxId as string,
+        accountId,
+        amount,
+        type: type === 'lent' ? 'debit' : 'credit',
+        category: 'Lending & Borrowing',
+        description: `${trimmedName}: ${newTx.description}`,
+        date: newTx.date,
+        isRecurring: false,
+        linkedTransactionIds: [txId]
+      };
+      addTransaction(ledgerTx);
+    }
     setShowAddModal(false);
   };
 
@@ -211,6 +219,23 @@ export default function Debts() {
       type,
       linkedTxId: ledgerTxId ?? linkedTxId
     };
+
+    // Committed BEFORE the money row for the reason spelled out in handleAddDebt: the sync inside
+    // addTransaction has to be able to SEE this entry, or it writes a second one whose id this
+    // very update then strands.
+    const updatedTransactions = [...debt.transactions, newTx];
+    const balanced = debtNetBalance(updatedTransactions) === 0;
+    const finalTransactions = balanced
+      ? updatedTransactions.map(t => ({ ...t, markedDone: true }))
+      : updatedTransactions;
+    const updatedDebt = {
+      ...debt,
+      transactions: finalTransactions,
+      status: balanced ? 'settled' : 'active',
+      updatedAt: Date.now()
+    } as Debt;
+
+    updateDebt(updatedDebt);
 
     if (logInLedger && accountId) {
       const ledgerTx: Transaction = {
@@ -235,20 +260,6 @@ export default function Debts() {
         });
       }
     }
-
-    const updatedTransactions = [...debt.transactions, newTx];
-    const balanced = debtNetBalance(updatedTransactions) === 0;
-    const finalTransactions = balanced
-      ? updatedTransactions.map(t => ({ ...t, markedDone: true }))
-      : updatedTransactions;
-    const updatedDebt = {
-      ...debt,
-      transactions: finalTransactions,
-      status: balanced ? 'settled' : 'active',
-      updatedAt: Date.now()
-    } as Debt;
-
-    updateDebt(updatedDebt);
   };
 
   return (
@@ -968,6 +979,29 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
   );
 }
 
+/* THE ACCOUNT LIST BOTH DEBT SHEETS PICK FROM, grouped by account type the way every other account
+   picker in the app is — the same `group` CustomPicker renders its headers from, so the money a
+   repayment moved is found under BANK ACCOUNTS or CREDIT CARDS rather than somewhere in one flat
+   run of every account you hold.
+   The grouping is why the sort is not optional and why it is the SHARED one: CustomPicker starts a
+   new header whenever an option's group differs from the one before it, so anything that leaves two
+   accounts of a type separated prints that type's heading twice. The two sheets used to sort with a
+   local list of five type names and everything else lumped behind them, which is exactly that.
+   `exclude` is the only thing they disagree on, so it stays a parameter rather than being settled
+   here on one sheet's behalf. */
+const debtAccountOptions = (accounts: Account[], transactions: Transaction[], exclude: string[]) => {
+  const currentMonth = getCurrentMonthStr();
+  return accounts
+    .filter(acc => !acc.archived && !exclude.includes(acc.type))
+    .sort(sortByAccountType)
+    .map(acc => ({
+      id: acc.id,
+      name: acc.name,
+      subtext: formatCurrency(calculateBalance(acc, transactions, currentMonth)),
+      group: getAccountGroupLabel(acc.type),
+    }));
+};
+
 function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
   existingNames: string[],
   accounts: Account[],
@@ -1002,18 +1036,9 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
   };
 
   const { data } = useFinance();
-  const accountOptions = useMemo(() => {
-    const currentMonth = getCurrentMonthStr();
-    return accounts
-      .filter(acc => !acc.archived && !['stocks', 'mutual_funds', 'rewards', 'commodity', 'epf'].includes(acc.type))
-      .sort(sortByAccountType)
-      .map(acc => ({
-        id: acc.id,
-        name: acc.name,
-        subtext: formatCurrency(calculateBalance(acc, data.transactions, currentMonth)),
-        group: getAccountGroupLabel(acc.type)
-      }));
-  }, [accounts, data.transactions]);
+  const accountOptions = useMemo(
+    () => debtAccountOptions(accounts, data.transactions, ['stocks', 'mutual_funds', 'rewards', 'commodity', 'epf']),
+    [accounts, data.transactions]);
 
   const handleCreateRecord = () => {
     if (!name || !amount || (logInLedger && !accountId)) return;
@@ -1296,22 +1321,11 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, tra
     return getAccountTypeIcon(acc.type, 18, acc.archived);
   };
 
-  const accountOptions = useMemo(() => {
-    const currentMonth = getCurrentMonthStr();
-    const TYPE_ORDER = ['bank_account', 'credit_card', 'debit_card', 'cash', 'e_wallet'];
-    return accounts
-      .filter(acc => !acc.archived && !['stocks', 'mutual_funds', 'rewards', 'commodity'].includes(acc.type))
-      .sort((a, b) => {
-        const ai = TYPE_ORDER.indexOf(a.type);
-        const bi = TYPE_ORDER.indexOf(b.type);
-        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-      })
-      .map(acc => ({
-        id: acc.id,
-        name: acc.name,
-        subtext: formatCurrency(calculateBalance(acc, data.transactions, currentMonth))
-      }));
-  }, [accounts, data.transactions]);
+  const accountOptions = useMemo(
+    // Keeps EPF, unlike the sheet that OPENS a debt: a provident fund is not somewhere a loan is
+    // made from, but a repayment can genuinely land in one.
+    () => debtAccountOptions(accounts, data.transactions, ['stocks', 'mutual_funds', 'rewards', 'commodity']),
+    [accounts, data.transactions]);
 
   const pendingType: DebtTransaction['type'] = type === 'repayment'
     ? (repaymentType === 'received' ? 'repayment_received' : 'repayment_sent')

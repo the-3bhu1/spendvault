@@ -1211,8 +1211,18 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     const oldMatch = oldTx ? parseDebtDescription(oldTx.description, oldTx.category || '', oldTx.type) : null;
     const newMatch = parseDebtDescription(updatedTx.description, updatedTx.category || '', updatedTx.type);
 
+    /* Does this row already point at a ledger entry that EXISTS? Then its debt side is already
+       written — by the Debts screen, which mints the entry itself — and Scenario A below must not
+       write a second one. It used to, because the entry was invisible to it: the screen called
+       addTransaction before committing the debt, so the sync looked at a debt that did not hold the
+       entry yet, minted its own, and appended the id; the screen's own debt write then replaced the
+       debt and dropped that entry, stranding the id on the row forever. Both halves are needed —
+       this check is only reachable because those two writes are now ordered the other way round. */
+    const alreadyHasLedgerEntry = (updatedTx.linkedTransactionIds || []).some(id =>
+      prevDebts.some(d => d.transactions.some(dt => dt.id === id)));
+
     // Scenario A: Was not matching debt, but now matches
-    if (!oldMatch && newMatch) {
+    if (!oldMatch && newMatch && !alreadyHasLedgerEntry) {
       const debtTxId = crypto.randomUUID();
       const newDebtTx: DebtTransaction = {
         id: debtTxId,
@@ -2232,9 +2242,12 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       {
         id: 'demo_split_1',
         name: 'Manali Road Trip',
-        // Rahul: owes user ₹1000  |  Priya: user owes ₹450  |  Sanjay: marked paid
+        // Rahul: owes user ₹1000  |  Priya: user owes ₹450  |  Sanjay: square with the user
+        // Sanjay's share is owed to Priya, not to us, so "Your Balance Per Person" leaves him out —
+        // the tour walks that list on Rahul and Priya. The stale paid mark below is what the filter
+        // exists to hide: a tick beside a name that never owed the user anything.
         people: ['Rahul', 'Priya', 'Sanjay'],
-        paidPeople: ['Sanjay'],
+        paidPeople: [],
         createdAt: Date.now() - 5 * 24 * 3600 * 1000,
         status: 'active',
         items: [

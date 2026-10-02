@@ -64,11 +64,29 @@ function deriveTitle(messages: ChatMessage[]): string {
   return clip(firstUserText || 'New chat');
 }
 
+/** Whether two transcripts say exactly the same thing. Compared turn by turn rather than by
+ *  JSON.stringify: a ChatMessage is two known fields, and stringify would also answer "different"
+ *  to a key order it has no business caring about. */
+function sameTranscript(a: ChatMessage[], b: ChatMessage[]): boolean {
+  return a.length === b.length && a.every((m, i) => m.role === b[i].role && m.text === b[i].text);
+}
+
 // Insert or update a session by id, returning the refreshed (sorted, capped) list.
+//
+// AN UNCHANGED TRANSCRIPT DOES NOT RESTAMP THE SESSION. Opening an old conversation replays its
+// stored messages into the same state the composer writes a new turn into, so the caller's persist
+// effect fires on open with nothing new said — and `updatedAt` is what the history list prints as
+// "how long ago". A chat from three weeks back read "less than a minute ago" the moment you tapped
+// it, which is the one question that label exists to answer. So the clock moves only when what was
+// SAID changes, which makes updatedAt the time of the last real turn rather than the last visit.
+//
+// Returning early also leaves the list order and the stored title alone, which is the point: a
+// visit is not an edit, and nothing about the session has changed to write down.
 export function upsertSession(id: string, messages: ChatMessage[]): ChatSession[] {
   const now = Date.now();
   const sessions = getSessions();
   const existing = sessions.find(s => s.id === id);
+  if (existing && sameTranscript(existing.messages, messages)) return sessions;
   const session: ChatSession = {
     id,
     title: deriveTitle(messages),

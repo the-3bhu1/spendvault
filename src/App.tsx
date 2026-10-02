@@ -459,7 +459,10 @@ function App() {
         {activeTab === 'cards' && <div className="fade-in" style={{ height: '100%' }}><CreditCards onExit={() => setActiveTab('dashboard')} onViewStatement={(acc, cycle) => setSelectedAccountForStatement({ account: acc, cycle })} /></div>}
         {activeTab === 'insights' && <div className="fade-in"><Insights /></div>}
         {activeTab === 'settings' && <div className="fade-in"><Settings /></div>}
-        {activeTab === 'splits' && <div className="fade-in"><Splits /></div>}
+        {/* height:100% like wealth and cards above: it gives the subview a definite box to measure
+            against, which is what lets an empty list centre itself in the space that is left rather
+            than hugging its heading. Content taller than the box still overflows and scrolls. */}
+        {activeTab === 'splits' && <div className="fade-in" style={{ height: '100%' }}><Splits /></div>}
         {activeTab === 'bills' && <div className="fade-in"><UpcomingBills /></div>}
         {activeTab === 'debts' && <div className="fade-in"><Debts /></div>}
       </main>
