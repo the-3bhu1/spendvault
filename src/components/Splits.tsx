@@ -7,7 +7,7 @@ import { Share } from '@capacitor/share';
 import ConfirmDialog from './ConfirmDialog';
 import { useFinance } from '../FinanceContext';
 import type { SplitEvent, SplitItem } from '../types';
-import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, shareSelfName, distributePaise, equalSplitShares, formatDateString, errorMessage } from '../utils';
+import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, shareSelfName, distributePaise, equalSplitShares, formatDateString, errorMessage, describeSplitPayers } from '../utils';
 import { scrollToFirstError } from '../utils/formErrors';
 import { buildSplitShareImages } from '../services/splitImage';
 import { blobToBase64 } from '../services/shareCanvas';
@@ -106,7 +106,7 @@ export default function Splits() {
         if (splitCount === 0) return;
         const isUnequal = item.splitType === 'unequal';
         const equal = isUnequal ? {} as Record<string, number> : equalSplitShares(item);
-        const payerName = splitDisplayName(item.paidBy || 'me', selfName);
+        const payerName = describeSplitPayers(item, k => splitDisplayName(k, selfName));
 
         message += `\n🔹 *${item.description}* (₹${item.amount.toFixed(2)}) - Paid by: *${payerName}*\n`;
 
@@ -160,7 +160,7 @@ export default function Splits() {
           return {
             description: it.description,
             amount: it.amount,
-            paidBy: splitDisplayName(it.paidBy || 'me', selfName),
+            paidBy: describeSplitPayers(it, k => splitDisplayName(k, selfName)),
             // Point-free `.map(splitDisplayName)` would hand map's index through as selfName.
             participantNames: parts.map(n => splitDisplayName(n, selfName)),
           };
@@ -428,6 +428,11 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
   const [customDescription, setCustomDescription] = useState('');
   const [customAmount, setCustomAmount] = useState('');
   const [paidBy, setPaidBy] = useState<string>('me');
+  // Several people fronting one bill (two friends paying ₹400 and ₹600 of a ₹1,000 dinner). Off is
+  // the old one-tap single payer; on, the chips toggle and each chosen payer gets an amount box.
+  const [multiPayer, setMultiPayer] = useState(false);
+  const [payers, setPayers] = useState<string[]>([]);
+  const [payerAmounts, setPayerAmounts] = useState<Record<string, string>>({});
 
   const [splitType, setSplitType] = useState<'equal' | 'unequal'>('equal');
   const [customShares, setCustomShares] = useState<Record<string, string>>({});
@@ -439,6 +444,9 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
     setInvolvedPeople(event.people);
     setIncludeMe(true);
     setPaidBy('me');
+    setMultiPayer(false);
+    setPayers([]);
+    setPayerAmounts({});
     setCustomDescription('');
     setCustomAmount('');
     setSplitType('equal');
@@ -449,10 +457,36 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
     ? { id: 'custom', description: customDescription, amount: parseFloat(customAmount) || 0 }
     : data.transactions.find(t => t.id === selectedTxId);
 
+  // Payer keys in roster order, "me" first — the order the chips and amount boxes are drawn in.
+  const orderedPayers = ['me', ...event.people].filter(k => payers.includes(k));
+
+  /* Who paid, as it will be saved — or null while the payer section can't be saved yet. Both the
+     save button and handleSaveItem go through this, so they cannot disagree. One payer picked in
+     multi mode is just a single payer: they paid the lot, and asking them to type the total back in
+     would be busywork. */
+  const resolvePayers = (total: number): { paidBy: string; paidAmounts?: Record<string, number> } | null => {
+    if (!multiPayer) return { paidBy };
+    if (orderedPayers.length === 0) return null;
+    if (orderedPayers.length === 1) return { paidBy: orderedPayers[0] };
+    const amounts: Record<string, number> = {};
+    for (const k of orderedPayers) {
+      const v = Math.round((parseFloat(payerAmounts[k]) || 0) * 100) / 100;
+      if (!(v > 0)) return null;
+      amounts[k] = v;
+    }
+    const sum = Object.values(amounts).reduce((a, b) => a + b, 0);
+    if (Math.abs(sum - total) >= 0.01) return null;
+    const largest = orderedPayers.reduce((a, b) => (amounts[b] > amounts[a] ? b : a));
+    return { paidBy: largest, paidAmounts: amounts };
+  };
+
   const handleSaveItem = () => {
     const finalAmount = selectedTxId === 'custom' ? (parseFloat(customAmount) || 0) : (selectedTx?.amount || 0);
     const finalDesc = selectedTxId === 'custom' ? (customDescription.trim() || 'Custom Expense') : (selectedTx?.description || '');
     if (finalAmount <= 0 || (involvedPeople.length === 0 && !includeMe)) return;
+    const payment = resolvePayers(finalAmount);
+    if (!payment) return;
+    const { paidBy, paidAmounts } = payment;
 
     let finalShares: Record<string, number> | undefined = undefined;
     if (splitType === 'unequal') {
@@ -467,13 +501,14 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
       if (editingItemId) {
         return currentItems.map(item => item.id === editingItemId ? {
           ...item, transactionId: selectedTxId || '', amount: finalAmount,
-          description: finalDesc, involvedPeople, includeMe, paidBy, splitType, shares: finalShares
+          description: finalDesc, involvedPeople, includeMe, paidBy, paidAmounts, splitType, shares: finalShares
         } : item);
       }
       const newItem: SplitItem = {
         id: generateId(), transactionId: selectedTxId || '',
         amount: finalAmount, description: finalDesc,
-        involvedPeople, includeMe, splitType, shares: finalShares, paidBy
+        involvedPeople, includeMe, splitType, shares: finalShares, paidBy,
+        ...(paidAmounts ? { paidAmounts } : {})
       };
       return [...currentItems, newItem];
     };
@@ -789,7 +824,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                         overflow: 'hidden', 
                         textOverflow: 'ellipsis' 
                       }}>{item.description}</span>
-                      <span className="text-xs text-muted">₹{item.amount.toFixed(2)} • {item.involvedPeople.length + (item.includeMe ? 1 : 0)} people • Paid by: {item.paidBy === 'me' || !item.paidBy ? 'Me' : item.paidBy}</span>
+                      <span className="text-xs text-muted">₹{item.amount.toFixed(2)} • {item.involvedPeople.length + (item.includeMe ? 1 : 0)} people • Paid by: {describeSplitPayers(item, k => splitDisplayName(k))}</span>
                     </div>
                     {event.status !== 'settled' && (
                       <div className="flex gap-3" style={{ flexShrink: 0, marginLeft: '0.5rem' }}>
@@ -802,6 +837,10 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                             setCustomDescription(item.description);
                             setCustomAmount(item.amount.toString());
                             setPaidBy(item.paidBy || 'me');
+                            const multi = item.paidAmounts && Object.keys(item.paidAmounts).length > 1 ? item.paidAmounts : undefined;
+                            setMultiPayer(!!multi);
+                            setPayers(multi ? Object.keys(multi) : []);
+                            setPayerAmounts(multi ? Object.fromEntries(Object.entries(multi).map(([k, v]) => [k, v.toString()])) : {});
                             setSplitType(item.splitType || 'equal');
                             const initialShares: Record<string, string> = {};
                             initialShares['me'] = "0";
@@ -1093,29 +1132,128 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                     </div>
 
                     <div className="input-group" style={{ marginBottom: '1.5rem' }}>
-                      <label>Who Paid?</label>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', marginTop: '0.5rem', width: '100%' }}>
+                      <div className="flex justify-between align-center" style={{ width: '100%' }}>
+                        <label>Who Paid?</label>
                         <button
                           type="button"
-                          className={`btn ${paidBy === 'me' ? 'btn-primary' : 'btn-secondary'}`}
-                          style={{ borderRadius: '0px', padding: '0.5rem 0', fontSize: '0.85rem', width: '100%', display: 'block', textAlign: 'center' }}
-                          onClick={() => setPaidBy('me')}
+                          className="text-xs font-bold"
+                          style={{ color: 'var(--accent)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.5px' }}
+                          onClick={() => {
+                            if (multiPayer) {
+                              // Back to one payer: keep whoever was first picked, else the old choice.
+                              if (orderedPayers.length > 0) setPaidBy(orderedPayers[0]);
+                              setMultiPayer(false);
+                            } else {
+                              setPayers([paidBy]);
+                              setPayerAmounts({});
+                              setMultiPayer(true);
+                            }
+                          }}
                         >
-                          Me
+                          {multiPayer ? 'Single payer' : 'Multiple payers'}
                         </button>
-                        {event.people.map(person => (
-                          <button
-                            key={person}
-                            type="button"
-                            className={`btn ${paidBy === person ? 'btn-primary' : 'btn-secondary'}`}
-                            style={{ borderRadius: '0px', padding: '0.5rem 0', fontSize: '0.85rem', width: '100%', display: 'block', textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-                            onClick={() => setPaidBy(person)}
-                            title={person}
-                          >
-                            {person}
-                          </button>
-                        ))}
                       </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', marginTop: '0.5rem', width: '100%' }}>
+                        {['me', ...event.people].map(key => {
+                          const selected = multiPayer ? payers.includes(key) : paidBy === key;
+                          const label = splitDisplayName(key);
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              className={`btn ${selected ? 'btn-primary' : 'btn-secondary'}`}
+                              style={{ borderRadius: '0px', padding: '0.5rem 0', fontSize: '0.85rem', width: '100%', display: 'block', textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                              onClick={() => {
+                                if (!multiPayer) { setPaidBy(key); return; }
+                                if (payers.includes(key)) {
+                                  setPayers(prev => prev.filter(p => p !== key));
+                                  setPayerAmounts(prev => { const next = { ...prev }; delete next[key]; return next; });
+                                } else {
+                                  setPayers(prev => [...prev, key]);
+                                }
+                              }}
+                              title={label}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {multiPayer && orderedPayers.length < 2 && (
+                        <span className="text-xs text-muted" style={{ marginTop: '0.5rem' }}>
+                          {orderedPayers.length === 0 ? 'Pick everyone who paid toward this bill.' : 'Pick everyone else who paid toward this bill.'}
+                        </span>
+                      )}
+
+                      {multiPayer && orderedPayers.length >= 2 && (() => {
+                        const paidSum = orderedPayers.reduce((sum, k) => sum + (parseFloat(payerAmounts[k]) || 0), 0);
+                        const paidRemaining = totalAmount - paidSum;
+                        const paidMatched = Math.abs(paidRemaining) < 0.01;
+                        const emptyPayers = orderedPayers.filter(k => !((parseFloat(payerAmounts[k]) || 0) > 0));
+                        return (
+                          <div className="flex-col" style={{ marginTop: '0.75rem', width: '100%' }}>
+                            {orderedPayers.map(key => (
+                              <div
+                                key={key}
+                                className="flex justify-between align-center"
+                                style={{ padding: '0.75rem 1rem', border: '1px solid var(--border-color)', background: 'var(--bg-hover)', marginBottom: '0.5rem', gap: '1rem' }}
+                              >
+                                <span className="font-bold" style={{ fontSize: '1rem' }}>{splitDisplayName(key)} paid</span>
+                                <div style={{ position: 'relative', width: '120px' }}>
+                                  <span style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.85rem', color: 'var(--text-muted)' }}>₹</span>
+                                  <input
+                                    type="number"
+                                    className="input-field"
+                                    placeholder="0.00"
+                                    value={payerAmounts[key] || ''}
+                                    onChange={e => {
+                                      const val = e.target.value;
+                                      setPayerAmounts(prev => ({ ...prev, [key]: val }));
+                                    }}
+                                    style={{ paddingLeft: '1.75rem', borderRadius: '0px', textAlign: 'right', width: '100%', height: '36px', background: 'var(--bg-color)' }}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                            <div
+                              className="card flex-col gap-2"
+                              style={{
+                                background: paidMatched ? 'rgba(34, 197, 94, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                                borderColor: paidMatched ? 'var(--success)' : 'var(--accent)',
+                                padding: '0.75rem 1rem',
+                                borderRadius: '0px',
+                                border: '1px solid',
+                                alignItems: 'stretch'
+                              }}
+                            >
+                              <span className="text-xs font-bold" style={{ color: paidMatched ? 'var(--success)' : 'var(--accent)' }}>
+                                {paidMatched
+                                  ? '✅  What everyone paid adds up to the bill.'
+                                  : `⚠️  Paid ₹${paidSum.toFixed(2)} of ₹${totalAmount.toFixed(2)} (${paidRemaining > 0 ? `₹${paidRemaining.toFixed(2)} not covered` : `₹${Math.abs(paidRemaining).toFixed(2)} over`})`}
+                              </span>
+                              {!paidMatched && paidRemaining > 0.01 && emptyPayers.length > 0 && (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary text-xs"
+                                  style={{ padding: '8px 10px', fontSize: '9px', borderRadius: '0px', border: '1px solid var(--accent)', boxShadow: 'none', width: '100%', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: 'center' }}
+                                  onClick={() => {
+                                    // The uncovered part goes to whoever has no amount yet, to the paisa.
+                                    const parts = distributePaise(paidRemaining, emptyPayers);
+                                    setPayerAmounts(prev => {
+                                      const next = { ...prev };
+                                      emptyPayers.forEach(k => { next[k] = parts[k].toString(); });
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  Fill Remaining
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     <div className="input-group" style={{ marginBottom: '1.5rem', width: '100%' }}>
@@ -1269,7 +1407,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                       const splitAmount = selectedTxId === 'custom' ? (parseFloat(customAmount) || 0) : (selectedTx?.amount || 0);
                       const isSplitValid = splitAmount > 0 && (splitType === 'equal'
                         ? (includeMe || involvedPeople.length > 0)
-                        : (sumOfShares > 0));
+                        : (sumOfShares > 0)) && resolvePayers(splitAmount) !== null;
                       const isSumMatched = Math.abs(remainingAmount) < 0.01;
 
                       return (

@@ -57,6 +57,7 @@ export const KEY_MAP: Record<string, string> = {
   // Hub / SplitEvent / SplitItem keys
   people: 'pp', items: 'it', involvedPeople: 'ip', includeMe: 'im',
   splitType: 'st', paidBy: 'pb', shares: 'sh', customDays: 'cd',
+  paidAmounts: 'pam', // several payers on one split item; 'pb' (paidBy) is still written beside it
   personName: 'pn', frequency: 'fq', nextDueDate: 'nd',
   isActive: 'ia', status: 'ss', createdAt: 'ca', updatedAt: 'ua',
   billingCycleYearMonth: 'bc', expected: 'ex', realized: 'rl',
@@ -103,6 +104,12 @@ const REVERSE_MAP: Record<string, string> = Object.fromEntries(
   Object.entries(KEY_MAP).map(([k, v]) => [v, k])
 );
 
+// Fields whose value is a map keyed by PERSON NAME ('me' or a friend), not by field name. Their keys
+// are data and must pass through untouched: renaming them meant a friend called "A" or "S" — both
+// short codes — came back from a restore as "accounts" / "cashbackStatements", silently moving their
+// share or payment onto a person who doesn't exist.
+const NAME_KEYED_FIELDS = new Set(['shares', 'paidAmounts']);
+
 // Recursively rename keys to their short codes (unmapped keys keep their full name).
 export const minifyPayload = (obj: any): any => {
   if (typeof obj === 'string') return obj.trim();
@@ -111,7 +118,7 @@ export const minifyPayload = (obj: any): any => {
     const minified: any = {};
     for (const key in obj) {
       const newKey = KEY_MAP[key] || key;
-      minified[newKey] = minifyPayload(obj[key]);
+      minified[newKey] = NAME_KEYED_FIELDS.has(key) ? obj[key] : minifyPayload(obj[key]);
     }
     return minified;
   }
@@ -126,7 +133,7 @@ export const expandPayload = (obj: any): any => {
     const expanded: any = {};
     for (const key in obj) {
       const originalKey = REVERSE_MAP[key] || key;
-      expanded[originalKey] = expandPayload(obj[key]);
+      expanded[originalKey] = NAME_KEYED_FIELDS.has(originalKey) ? obj[key] : expandPayload(obj[key]);
     }
     return expanded;
   }

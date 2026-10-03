@@ -199,7 +199,8 @@ async function renderSplitImage(input: RenderInput): Promise<Blob> {
         ctx.fillText(ellipsize(ctx, it.description || 'Expense', textMaxW), cx, y + 26);
         ctx.fillStyle = C.muted;
         ctx.font = '500 13px sans-serif';
-        ctx.fillText(`Paid by ${it.paidBy}`, cx, y + 46);
+        // Several payers make this long ("Ravi ₹400.00 + Me ₹600.00"), so it's held clear of the amount.
+        ctx.fillText(ellipsize(ctx, `Paid by ${it.paidBy}`, textMaxW), cx, y + 46);
         // split among — names only, so it's clear WHO each expense covers without bloating the row
         ctx.fillStyle = C.accent;
         ctx.font = '600 12px sans-serif';

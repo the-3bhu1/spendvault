@@ -250,6 +250,21 @@ export const equalSplitShares = (item: Pick<SplitItem, 'amount' | 'involvedPeopl
 
 export interface SplitSettlement { from: string; to: string; amount: number; }
 
+// Who fronted an item's bill and how much each — one entry for a single payer, several otherwise.
+export const splitPayments = (item: Pick<SplitItem, 'amount' | 'paidBy' | 'paidAmounts'>): Record<string, number> =>
+  item.paidAmounts && Object.keys(item.paidAmounts).length > 0
+    ? item.paidAmounts
+    : { [item.paidBy || 'me']: item.amount };
+
+// "Me" for one payer; "Ravi ₹400.00 + Me ₹600.00" for several. `nameOf` turns a key into what the
+// reader sees — splitDisplayName with or without the user's own name, depending on where it's going.
+export const describeSplitPayers = (item: Pick<SplitItem, 'amount' | 'paidBy' | 'paidAmounts'>, nameOf: (key: string) => string): string => {
+  const entries = Object.entries(splitPayments(item));
+  return entries.length === 1
+    ? nameOf(entries[0][0])
+    : entries.map(([k, v]) => `${nameOf(k)} ₹${v.toFixed(2)}`).join(' + ');
+};
+
 // Net balance per participant (including the self key 'me') across a set of split items.
 // Positive = they should RECEIVE money; negative = they OWE money. Unlike the old me-centric
 // calculation, this tracks EVERY participant, so a friend paying for another friend's share is
@@ -261,8 +276,8 @@ export const computeSplitNetBalances = (items: SplitItem[]): Record<string, numb
     const participants = item.includeMe ? [...item.involvedPeople, 'me'] : [...item.involvedPeople];
     if (participants.length === 0 || !(item.amount > 0)) return;
     const isUnequal = item.splitType === 'unequal';
-    const payer = item.paidBy || 'me';
-    bump(payer, item.amount); // the payer fronted the whole bill
+    // Each payer fronted their part of the bill — the whole of it when there is just one.
+    Object.entries(splitPayments(item)).forEach(([payer, paid]) => bump(payer, paid));
     const equal = isUnequal ? {} : equalSplitShares(item);
     participants.forEach(p => {
       const share = isUnequal ? (item.shares?.[p] ?? 0) : (equal[p] ?? 0);

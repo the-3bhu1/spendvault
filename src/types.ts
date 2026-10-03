@@ -367,6 +367,14 @@ export interface SplitItem {
   splitType: 'equal' | 'unequal';
   shares?: Record<string, number>; // Maps participant name (or 'me') to their custom share amount
   paidBy?: string; // Who paid for this expense: 'me' or name of friend
+  /**
+   * When MORE THAN ONE person paid: payer key ('me' or friend name) → what they put in, summing to
+   * `amount`. Absent means `paidBy` paid the whole bill, which is every item written before this
+   * existed. Read it through `splitPayments`, never directly. `paidBy` is still written beside it
+   * (the largest payer), so a backup restored into an older build degrades to one payer instead of
+   * losing who paid altogether.
+   */
+  paidAmounts?: Record<string, number>;
 }
 
 export interface SplitCycle {
