@@ -109,6 +109,15 @@ Actions (each account is a card on the Accounts tab):
   "+" to start, pencil to edit, ✓ to save, trash to remove. It holds cardholder name, card number,
   expiry, CVV, network (Visa/Mastercard/RuPay/Amex/Diners) and issuing bank; the bank is a search
   field, and if left blank it is inferred from the card's name. Stored on-device, behind the app PIN.
+- Tap to add a card (Android phones with NFC only): in that same block, the NFC button next to "+"
+  (or next to ✓ while editing) shows "Hold your card flat against the back of your phone". Tapping a
+  contactless credit/debit card fills in the card NUMBER, EXPIRY and NETWORK, then jumps to the CVV
+  box. It can never fill the CVV (it isn't on the card's chip), and usually not the cardholder name
+  (most cards hide it) or the issuing bank — type those yourself. The card is read on the phone;
+  nothing is sent anywhere. If NFC is off the panel says to turn it on in the phone's settings; if
+  the card is moved away too soon or isn't a payment card, it says so and keeps listening, so just
+  tap again. Cancel stops it. Not available on iPhone (Apple doesn't allow apps to read payment
+  cards) or on phones without NFC — the button doesn't appear there.
 - No card field is required and a partial card is fine (e.g. number and name but no CVV), but a field
   that IS filled must be valid: a 16-digit number (15 for Amex), a 3-digit CVV (4 for Amex), and an
   expiry with BOTH month and year, month 01–12. Saving is blocked until a filled field is valid.
@@ -487,6 +496,15 @@ import), and tapping it repairs them. It is always safe to press; it never shows
 - Each expense records who paid (Me or any participant), whether to include yourself, and which
   subset it is shared among; the pencil/trash on its card edit or delete it, and both disappear once
   the event is settled.
+- MORE THAN ONE PAYER: when several people paid toward one bill (e.g. a ₹1,000 dinner where one
+  friend paid ₹400 and another ₹600), tap "Multiple payers" beside "Who Paid?". The name buttons then
+  toggle, and everyone picked gets a "₹ … paid" box; the status line shows whether the amounts add
+  up to the bill, and "Fill Remaining" puts the uncovered amount on whoever has no amount yet.
+  Confirm stays disabled until the payers' amounts equal the bill. Picking just one person there is
+  the same as a single payer; "Single payer" switches back. Each payer is credited with what they
+  actually paid, and the bill is still divided among the people it is split among — so in that
+  example, split among 10, everyone's share is ₹100, the ₹400 payer is owed ₹300 and the ₹600 payer
+  ₹500. The expense, the shared text and the image read "Paid by: Ravi ₹400.00 + Me ₹600.00".
 Split shared expenses among people. Create an event with a name and people. Each item can be split
 equally or unequally, among any subset of people, and tracks who paid and who has settled. An event
 is a NAME plus a list of people — there are no recurring splits, cycles, frequencies or start dates;

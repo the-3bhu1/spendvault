@@ -156,7 +156,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
     splits: [
       {
         title: "Group Splits Tour",
-        description: "Welcome to Group Splits! This feature allows you to split shared expenses with friends or housemates. You can create one-time splits or recurring cycles.",
+        description: "Welcome to Group Splits! This feature allows you to split shared expenses with friends or housemates. Each expense can be paid by one person or several, and split equally or unequally.",
         icon: ShieldCheck
       },
       {
