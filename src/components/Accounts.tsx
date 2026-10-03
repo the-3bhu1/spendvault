@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown, CalendarDays } from 'lucide-react';
+import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown, CalendarDays, Nfc } from 'lucide-react';
 import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols, isCacheFresh, searchMFByName, searchStockByName, fetchCommodityPriceINR, getCachedCommodityPriceINR, isCommodityCacheFresh, getCommodityVendorFound } from '../services/MarketDataService';
 import type { MFSearchResult, StockSearchResult } from '../services/MarketDataService';
 import { getCommodityVendor } from '../services/GeminiConfig';
@@ -17,6 +17,9 @@ import { getCardCycleFigures } from '../services/CardDuesService';
 import { scrollToFirstError } from '../utils/formErrors';
 import { CardNetworkLogo, NETWORK_LABELS } from './CardNetworkLogo';
 import { ViewCardOverlay } from './ViewCardOverlay';
+import { getNfcAvailability, startCardScan, CARD_NFC_ERROR_TEXT } from '../services/CardNfcService';
+import type { ScannedCard } from '../services/CardNfcService';
+import { hapticTap } from '../utils/haptics';
 
 
 /**
@@ -278,6 +281,17 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   // input is focused — otherwise there is no blur to come. See the clear button below.
   const issuerInputRef = useRef<HTMLInputElement>(null);
 
+  // Tap-to-add over NFC (Android only — see CardNfcService). 'off' means the phone has NFC but
+  // it's switched off in system settings, which only the user can fix.
+  const [nfcSupported, setNfcSupported] = useState(false);
+  const [nfcState, setNfcState] = useState<null | 'scanning' | 'off'>(null);
+  const [nfcError, setNfcError] = useState('');
+  const nfcStopRef = useRef<(() => void) | null>(null);
+  // Bumped on every stop, so a start that resolves after the user already cancelled (or closed
+  // the modal) knows to tear itself straight back down.
+  const nfcSessionRef = useRef(0);
+  const cvvInputRef = useRef<HTMLInputElement>(null);
+
   // Banks a card can be attributed to. Co-brand keys (swiggy, jupiter, ...) and
   // 'axismark' are deliberately absent — those aren't issuers.
   const ISSUER_OPTIONS: BrandKey[] = ['hdfc', 'axis', 'icici', 'sbi', 'csb', 'federal', 'idfc', 'indusind', 'tide'];
@@ -389,6 +403,98 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       cashbackRates: prev.cashbackRates?.filter(r => r.id !== id)
     }));
   };
+
+  useEffect(() => {
+    getNfcAvailability().then(a => setNfcSupported(a.supported));
+  }, []);
+
+  const releaseNfc = () => {
+    nfcSessionRef.current++;
+    nfcStopRef.current?.();
+    nfcStopRef.current = null;
+  };
+
+  const stopNfcScan = () => {
+    releaseNfc();
+    setNfcState(null);
+    setNfcError('');
+  };
+
+  // Reader mode must not outlive the card block it was opened from: closing the modal, switching
+  // the type away from a card, or unmounting all release it. The effect only touches the native
+  // side; the panel's state is reset during render, the way React wants derived resets done.
+  const nfcBlockOpen = isModalOpen && (newAccount.type === 'credit_card' || newAccount.type === 'debit_card');
+  useEffect(() => {
+    if (!nfcBlockOpen) return;
+    return releaseNfc;
+  }, [nfcBlockOpen]);
+  const [prevNfcBlockOpen, setPrevNfcBlockOpen] = useState(nfcBlockOpen);
+  if (prevNfcBlockOpen !== nfcBlockOpen) {
+    setPrevNfcBlockOpen(nfcBlockOpen);
+    if (!nfcBlockOpen) { setNfcState(null); setNfcError(''); }
+  }
+
+  // Only the fields the chip actually carries. Name, CVV and issuer are left as the user had them.
+  const applyScannedCard = (card: ScannedCard) => {
+    stopNfcScan();
+    hapticTap(40);
+    const hasExpiry = card.expiryMonth !== undefined && card.expiryYear !== undefined;
+    setNewAccount(prev => ({
+      ...prev,
+      cardDetails: {
+        ...prev.cardDetails,
+        cardNumber: card.cardNumber,
+        ...(hasExpiry ? { expiryMonth: card.expiryMonth, expiryYear: card.expiryYear } : {}),
+        ...(card.network ? { network: card.network } : {}),
+      } as CardDetails,
+    }));
+    if (hasExpiry) {
+      setExpiryInput(`${String(card.expiryMonth).padStart(2, '0')}/${String(card.expiryYear).padStart(2, '0')}`);
+    }
+    setErrors(prev => ({ ...prev, cardNumber: '', expiry: '' }));
+    setIsEditingCardDetails(true);
+    // The CVV is the one thing on the card's face the chip never gives — send them straight there.
+    setTimeout(() => {
+      cardDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      cvvInputRef.current?.focus();
+    }, 150);
+  };
+
+  const startNfcScan = async () => {
+    stopNfcScan();
+    const session = nfcSessionRef.current;
+    try {
+      const stop = await startCardScan(applyScannedCard, code => setNfcError(CARD_NFC_ERROR_TEXT[code]));
+      if (session !== nfcSessionRef.current) { stop(); return; }
+      nfcStopRef.current = stop;
+      setNfcState('scanning');
+    } catch (e) {
+      if (session !== nfcSessionRef.current) return;
+      if ((e as { code?: string })?.code === 'DISABLED') setNfcState('off');
+      else setNfcError(CARD_NFC_ERROR_TEXT.READ_FAILED);
+    }
+  };
+
+  const nfcTapButton = (
+    <button
+      className="btn btn-secondary"
+      style={{
+        width: '30px',
+        height: '30px',
+        padding: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: nfcState === 'scanning' ? 'var(--accent)' : 'var(--text-muted)',
+        minHeight: 'auto',
+        boxShadow: '2px 2px 0 #000'
+      }}
+      onClick={() => (nfcState === 'scanning' ? stopNfcScan() : startNfcScan())}
+      title="Tap card to fill"
+    >
+      <Nfc size={14} />
+    </button>
+  );
 
   const openAddModal = () => {
     setEditId(null);
@@ -2475,6 +2581,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>💳 Card Details <span className="text-muted" style={{ fontWeight: 400 }}>(Optional)</span></span>
                       {newAccount.cardDetails ? (
                         <div className="flex gap-3">
+                          {nfcSupported && isEditingCardDetails && nfcTapButton}
                           {isEditingCardDetails ? (
                             <button
                               className="btn btn-secondary"
@@ -2547,35 +2654,55 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           </button>
                         </div>
                       ) : (
-                        <button
-                          className="btn btn-secondary"
-                          style={{
-                            width: '30px',
-                            height: '30px',
-                            padding: 0,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: 'var(--text-muted)',
-                            minHeight: 'auto',
-                            boxShadow: '2px 2px 0 #000'
-                          }}
-                          onClick={() => {
-                            setNewAccount({ ...newAccount, cardDetails: {} });
-                            setIsEditingCardDetails(true);
-                            setExpiryInput('');
-                            setIssuerQuery('');
-                            setIssuerDropdownOpen(false);
-                            setTimeout(() => {
-                              cardDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            }, 100);
-                          }}
-                          title="Add Details"
-                        >
-                          <Plus size={14} />
-                        </button>
+                        <div className="flex gap-3">
+                          {nfcSupported && nfcTapButton}
+                          <button
+                            className="btn btn-secondary"
+                            style={{
+                              width: '30px',
+                              height: '30px',
+                              padding: 0,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: 'var(--text-muted)',
+                              minHeight: 'auto',
+                              boxShadow: '2px 2px 0 #000'
+                            }}
+                            onClick={() => {
+                              setNewAccount({ ...newAccount, cardDetails: {} });
+                              setIsEditingCardDetails(true);
+                              setExpiryInput('');
+                              setIssuerQuery('');
+                              setIssuerDropdownOpen(false);
+                              setTimeout(() => {
+                                cardDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                              }, 100);
+                            }}
+                            title="Add Details"
+                          >
+                            <Plus size={14} />
+                          </button>
+                        </div>
                       )}
                     </div>
+
+                    {(nfcState || nfcError) && (
+                      <div className="flex-col gap-2" style={{ padding: '0.85rem', border: '1px dashed var(--border-color)', borderRadius: '8px', background: 'var(--bg-card)' }}>
+                        {nfcState === 'off' ? (
+                          <span className="text-sm" style={{ color: 'var(--text-primary)' }}>NFC is turned off. Turn it on in your phone's settings, then tap the card button again.</span>
+                        ) : nfcState === 'scanning' ? (
+                          <>
+                            <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{'📶\u2002Hold your card flat against the back of your phone'}</span>
+                            <span className="text-xs text-muted">Fills in the number, expiry and network. Read on this phone; nothing is sent anywhere.</span>
+                          </>
+                        ) : null}
+                        {nfcError && <span className="text-xs text-danger">{nfcError}</span>}
+                        <button className="btn btn-secondary" style={{ alignSelf: 'flex-start', minHeight: 'auto', padding: '0.35rem 0.85rem' }} onClick={stopNfcScan}>
+                          {nfcState === 'scanning' ? 'Cancel' : 'Dismiss'}
+                        </button>
+                      </div>
+                    )}
 
                     {newAccount.cardDetails && (
                       <div className="flex-col gap-3">
@@ -2667,6 +2794,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               {isEditingCardDetails ? (
                                 <div style={{ position: 'relative' }}>
                                   <input
+                                    ref={cvvInputRef}
                                     className={`input-field ${errors.cvv ? 'border-danger' : ''}`}
                                     placeholder="•••"
                                     type={showCvv ? 'text' : 'password'}

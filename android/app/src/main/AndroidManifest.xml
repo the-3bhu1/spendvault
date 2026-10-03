@@ -48,5 +48,9 @@
     <!-- Normal permission: granted at install, never prompts. Without it navigator.vibrate() is a
          silent no-op, which is what made the statement screen's long-press feel like a dead tap. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Tap-to-add a card (CardNfcPlugin). Normal permission, no prompt. required="false" keeps the
+         app installable on phones without NFC; the Tap card button just doesn't show there. -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
 </manifest>
 
