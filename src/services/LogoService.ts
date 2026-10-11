@@ -87,6 +87,16 @@ const AMC_REGISTRY: BrandEntry[] = [
 
 // --- Stock registry (base ticker → company domain) ------------------------------------
 // Keyed by the ticker WITHOUT its exchange suffix (RELIANCE.NS → RELIANCE). Covers the common
+// State Bank of India: official vector keyhole mark on circular blue badge so it renders razor-sharp
+// instead of upscaling the tiny 16x16 / 32x32 favicon from sbi.co.in.
+const SBI_LOGO_DATA_URL =
+  'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MDAgNTAwIj48Y2lyY2xlIGN4PSIyNTAiIGN5PSIyNTAiIHI9IjI1MCIgZmlsbD0iI2ZmZmZmZiIvPjxwYXRoIGZpbGw9IiMwMDgyYzkiIGQ9Im0yMzQsNDk5YTI0OSwyNDkgMCAxLDEgMzIsMFYyOTVhNDUsNDUgMCAxLDAtMzIsMCIvPjwvc3ZnPg==';
+
+// CheQ (cheq.one): official green emblem vector mark for the Indian rewards wallet app (CheQ Chips),
+// avoiding misattribution to cheq.com (pink cybersecurity brand).
+const CHEQ_LOGO_DATA_URL =
+  'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMDEgMzAxIj48cmVjdCB3aWR0aD0iMzAxIiBoZWlnaHQ9IjMwMSIgZmlsbD0iIzM4RDY3QiIgcng9IjgwIi8+PHBhdGggZmlsbD0iI2ZmZiIgZD0iTTExMy4zMzggMTIwLjk2OWMtNS4yNjMgOC4xODYtNy42MDUgMTcuODM1LTcuMDI3IDI3Ljc3OSAxLjQ2OCAyNS4xNDkgMjMuMTExIDQ0LjQ2MyA0OC4yODUgNDUuMDM4aDcyLjg2NmMyMS4zNjMgMCAzOC45MTYgMTcuMjU5IDM4LjkxNiAzOC45MDZIMTUzLjcyMmMtNDcuNjkyIDAtODYuNjA4LTM4LjkwNi04Ni42MDgtODYuNTc0IDAtOC43NzcgMS40NjgtMTYuOTY0IDMuODEtMjUuMTQ5em0zNy40NDctNTIuNjVjNDcuNjkyIDAgODYuNjA3IDM4LjkwNiA4Ni42MDggODYuNTc0IDAgOC43NzctMS40NjgtMTYuOTYzLTMuODExIDI1LjE0OWgtNDIuNDEzYzUuMjYyLTguMTg2IDcuNjA1LTE3LjgzNSA3LjAyNy0yNy43NzktMS40NjgtMjUuMTQ5LTIzLjExMi00NC40NjMtNDguMjg2LTQ1LjAzOEg3Ny4wNDVjLTIxLjM2MyAwLTM4LjkxNi0xNy4yNTktMzguOTE2LTM4LjkwN2gxMTIuNjU2WiIvPjwvc3ZnPg==';
+
 // Indian large-caps, where logo.dev's ticker endpoint is weakest. US/global tickers fall through
 // to logo.dev's ticker endpoint (token only).
 const STOCK_REGISTRY: Record<string, string> = {
@@ -95,7 +105,7 @@ const STOCK_REGISTRY: Record<string, string> = {
   INFY: 'infosys.com',
   HDFCBANK: 'hdfcbank.com',
   ICICIBANK: 'icicibank.com',
-  SBIN: 'sbi.co.in',
+  SBIN: SBI_LOGO_DATA_URL,
   HINDUNILVR: 'hul.co.in',
   ITC: 'itcportal.com',
   BHARTIARTL: 'airtel.in',
@@ -128,6 +138,9 @@ const STOCK_REGISTRY: Record<string, string> = {
   // NMDC Steel: logo.dev has no logo for its own nmdcsteel.com (nor does Google's favicon), so pin
   // it to the parent NMDC group domain, which logo.dev does cover, instead of falling to initials.
   NSLNISP: 'nmdc.co.in',
+  // OLA Electric Mobility: official vector SVG mark on circular black badge so it renders razor-sharp
+  // instead of upscaling the tiny 16x16 / 32x32 favicon from olaelectric.com / olacabs.com.
+  OLAELEC: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI1MCIgZmlsbD0iIzAwMDAwMCIvPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDE5LjUsIDM4LjUpIj48cGF0aCBkPSJNNDkuNTc3NiAxMS4yNTExLDU1LjI3NzIgMjEuOTIzN0g2MC44ODI4TDQ5LjU3NzYgMC43ODI4MzdMMzguMjcyNSAyMS45MjM3SDQzLjg3ODFMNDkuNTc3NiAxMS4yNTExWiIgZmlsbD0iI2ZmZmZmZiIvPjxwYXRoIGQ9Ik0zMS4wMjQ4IDE2Ljk3MTdMMzEuMDQwNCAwLjc1MDYwMkgyNi4wOTI0VjIxLjkyMjlIMzUuNjI4M0wzOC4yNzQ1IDE2Ljk3MTdIMzEuMDI0OFoiIGZpbGw9IiNmZmZmZmYiLz48cGF0aCBkPSJNMTIuMjAzNyAxLjA4OTAxZS0wNUM5Ljk2NzAzIC0wLjAwMzA5ODc5IDcuNzc5NzYgMC42NTk4MzQgNS45MTg1NyAxLjkwNDkzQzQuMDU3MzkgMy4xNTAwMyAyLjYwNTk0IDQuOTIxMzMgMS43NDc4NyA2Ljk5NDcyQzAuODg5ODEgOS4wNjgxMSAwLjY2MzY5NSAxMS4zNTA0IDEuMDk4MTQgMTMuNTUyOEMxLjUzMjU4IDE1Ljc1NTMgMi42MDgwNiAxNy43Nzg4IDQuMTg4NDkgMTkuMzY3NUM1Ljc2ODkyIDIwLjk1NjIgNy43ODMyOCAyMi4wMzg2IDkuOTc2NyAyMi40Nzc4QzEyLjE3MDEgMjIuOTE2OSAxNC40NDQgMjIuNjkzMSAxNi41MTA3IDIxLjgzNDZDMTguNTc3MyAyMC45NzYyIDIwLjM0MzkgMTkuNTIxNiAyMS41ODY4IDE3LjY1NUMyMi44Mjk3IDE1Ljc4ODQgMjMuNDkzMiAxMy41OTM3IDIzLjQ5MzIgMTEuMzQ4NUMyMy40OTMyIDguMzQxNDIgMjIuMzA0MiA1LjQ1NzI2IDIwLjE4NzUgMy4zMjk0NkMxOC4wNzA3IDEuMjAxNjYgMTUuMTk5MyAwLjAwNDE3NTgzIDEyLjIwMzcgMS4wODkwMWUtMDVaTTEyLjIwMzcgMTcuNDYyOUMxMC45OTgzIDE3LjQ2NiA5LjgxOTEzIDE3LjExIDguODE1NDEgMTYuNDRDNy44MTE2OSAxNS43NzAxIDcuMDI4NTUgMTQuODE2MiA2LjU2NTE0IDEzLjY5OTNDNi4xMDE3MiAxMi41ODIzIDUuOTc4ODYgMTEuMzUyNCA2LjIxMjExIDEwLjE2NTNDNi40NDUzNiA4Ljk3ODIxIDcuMDI0MjQgNy44ODcyNyA3Ljg3NTQ1IDcuMDMwNTlDOC43MjY2NyA2LjE3MzkxIDkuODExOTYgNS41OTAwMSAxMC45OTM5IDUuMzUyODFDMTIuMTc1OSA1LjExNTYxIDEzLjQwMTQgNS4yMzU3NyAxNC41MTUzIDUuNjk4MDlDMTUuNjI5MiA2LjE2MDQgMTYuNTgxNCA2Ljk0NDA4IDE3LjI1MTQgNy45NDk5MkMxNy45MjE0IDguOTU1NzYgMTguMjc5IDEwLjEzODUgMTguMjc5IDExLjM0ODVDMTguMjc0OSAxMi45NzE2IDE3LjYyOTcgMTQuNTI2NyAxNi40ODQ5IDE1LjY3M0MxNS4zNDAxIDE2LjgxOTIgMTMuNzg5MiAxNy40NjI5IDEyLjE3MjMgMTcuNDYyOUgxMi4yMDM3WiIgZmlsbD0iI2ZmZmZmZiIvPjwvZz48L3N2Zz4=',
 };
 
 // --- Bank / wallet registry (Wealth → Assets screen only) -----------------------------
@@ -138,7 +151,7 @@ const LIQUID_REGISTRY: BrandEntry[] = [
   // Banks
   { match: ['hdfc'], domain: 'hdfcbank.com' },
   { match: ['icici'], domain: 'icicibank.com' },
-  { match: ['sbi', 'state bank'], domain: 'sbi.co.in' },
+  { match: ['state bank of india', 'state bank', 'sbi'], domain: SBI_LOGO_DATA_URL },
   { match: ['axis'], domain: 'axisbank.com' },
   { match: ['kotak'], domain: 'kotak.com' },
   { match: ['canara'], domain: 'canarabank.com' },
@@ -200,6 +213,7 @@ const LIQUID_REGISTRY: BrandEntry[] = [
   // that can legitimately claim one co-branded card. All three resolve, so whichever name the
   // account carries is the mark that shows; see the note in getLiquidLogoUrl.
   { match: ['super.money', 'super money', 'supermoney'], domain: 'super.money' },
+  { match: ['cheq chips', 'cheq'], domain: CHEQ_LOGO_DATA_URL },
   { match: ['transcorp'], domain: 'transcorpint.com' },
   { match: ['tide'], domain: 'tide.co' },
   // Transit cards. These are government transit bodies, not brands logo.dev indexes, so they
@@ -235,6 +249,7 @@ const LIQUID_NOISE_TOKENS = new Set([
   'wallet', 'wallets', 'pay', 'payment', 'payments', 'balance', 'card', 'cards', 'bank',
   'account', 'acct', 'savings', 'saving', 'current', 'credit', 'debit', 'prepaid',
   'rewards', 'reward', 'points', 'cash', 'money', 'app', 'upi', 'my', 'the',
+  'chips', 'chip',
 ]);
 
 // Tokens that survive the strip but are ordinary nouns, not brands. Guessing "<word>.com" for one
@@ -281,7 +296,10 @@ function googleFaviconUrl(domain: string): string {
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`;
 }
 
-function logoFromDomain(domain: string): string {
+export function logoFromDomain(domain: string): string {
+  if (domain.startsWith('data:') || domain.startsWith('http://') || domain.startsWith('https://')) {
+    return domain;
+  }
   // No logo.dev token configured → skip img.logo.dev entirely and serve Google's no-key favicon
   // service directly. This is what lets the app show real brand marks with ZERO API keys set.
   if (!hasLogoDevToken()) return googleFaviconUrl(domain);
@@ -309,7 +327,7 @@ function baseTicker(symbol: string): string {
   return symbol.split('.')[0].replace(/[-]/g, '_').toUpperCase();
 }
 
-type AccountLike = { type: string; name: string; marketSymbol?: string };
+type AccountLike = { type: string; name: string; marketSymbol?: string; customLogoUrl?: string };
 
 // --- AI-resolved domain cache ---------------------------------------------------------
 // Domains resolved by Gemini for holdings AND liquid accounts the static registries miss. Cached
@@ -338,7 +356,7 @@ const domainCache: Record<string, string> = (() => {
 const inFlight = new Set<string>();
 
 export const LOGOS_UPDATED_EVENT = 'logosUpdated';
-function notifyLogosUpdated() {
+export function notifyLogosUpdated() {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(LOGOS_UPDATED_EVENT));
 }
 
@@ -713,6 +731,8 @@ export function getMFLogoUrl(accountName: string): string | null {
  *
  *  Used only by the Wealth → Assets screen's liquid rows; the Accounts tab keeps its own avatars. */
 export function getLiquidLogoUrl(account: AccountLike): string | null {
+  if (account.customLogoUrl?.trim()) return logoFromDomain(account.customLogoUrl.trim());
+
   const registry = resolveLiquidDomain(account.name);
   if (registry) return logoFromDomain(registry);
 
@@ -741,6 +761,8 @@ export function getLiquidLogoUrl(account: AccountLike): string | null {
  * (Jupiter, not CSB) — that is the mark printed on the plastic and the one on its detail hero.
  */
 export function getCardLogoUrl(account: AccountLike & { cardDetails?: { issuer?: BrandKey } }): string | null {
+  if (account.customLogoUrl?.trim()) return logoFromDomain(account.customLogoUrl.trim());
+
   const registry = resolveLiquidDomain(account.name);
   if (registry) return logoFromDomain(registry);
 
@@ -762,6 +784,7 @@ export function getCardLogoUrl(account: AccountLike & { cardDetails?: { issuer?:
  *  Mirrors ensureAssetLogo. No-op without a Gemini key — and deliberately caches NOTHING in that
  *  case, so adding a key later still triggers a fresh lookup. */
 export async function ensureLiquidLogo(account: AccountLike): Promise<void> {
+  if (account.customLogoUrl?.trim()) return; // custom override set by user
   if (account.type === 'cash' || account.type === 'offset') return; // neither has a brand to resolve
   if (resolveLiquidDomain(account.name)) return; // already covered deterministically
 
@@ -787,6 +810,8 @@ export async function ensureLiquidLogo(account: AccountLike): Promise<void> {
 /** Best-known logo URL for an investment account right now, or null for the initials fallback.
  *  Order: static registry → AI-resolved domain → (stocks) logo.dev ticker guess. */
 export function getAssetLogoUrl(account: AccountLike): string | null {
+  if (account.customLogoUrl?.trim()) return logoFromDomain(account.customLogoUrl.trim());
+
   if (account.type !== 'mutual_funds' && account.type !== 'stocks') return null;
 
   const registry = account.type === 'mutual_funds' ? getMFLogoUrl(account.name) : stockRegistryUrl(account.marketSymbol);
@@ -801,6 +826,7 @@ export function getAssetLogoUrl(account: AccountLike): string | null {
 /** Fire-and-forget: for a holding the static registry can't resolve, ask Gemini for its domain
  *  once, cache it, and emit LOGOS_UPDATED_EVENT so listeners re-render with the real logo. */
 export async function ensureAssetLogo(account: AccountLike): Promise<void> {
+  if (account.customLogoUrl?.trim()) return; // custom override set by user
   if (account.type !== 'mutual_funds' && account.type !== 'stocks') return;
 
   const registry = account.type === 'mutual_funds' ? resolveAmcDomain(account.name) : (account.marketSymbol ? STOCK_REGISTRY[baseTicker(account.marketSymbol)] : null);

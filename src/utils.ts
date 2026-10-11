@@ -488,7 +488,7 @@ export const calculateCycleBalanceForCycle = (
   cycle: string
 ): number => {
   const statementDay = account.statementDay || 1;
-  return transactions
+  const raw = transactions
     .filter(t => {
       if (t.accountId !== account.id) return false;
       // A points redemption isn't a charge on the card's credit line, so it must not enter the
@@ -508,6 +508,8 @@ export const calculateCycleBalanceForCycle = (
       return getAppliedBillingCycle(t, statementDay) === cycle;
     })
     .reduce((sum, t) => sum + (t.type === 'debit' ? t.amount : -t.amount), 0);
+  const rounded = Math.round(raw * 100) / 100;
+  return rounded === 0 ? 0 : rounded;
 };
 
 export const calculateCycleBalance = (
@@ -857,10 +859,12 @@ export const calculateBalance = (
     // Redemption legs are stored in RUPEES, like every other transaction amount in the app — that is
     // what keeps them summable by the ledger's day totals, the spend stats and the Insights charts,
     // none of which know about points. This balance is the one place denominated in points (its
-    // opening figure and the statement realizations below are point counts), so the rate is applied
-    // here, at the single boundary, rather than by storing a point count on the transaction. It also
-    // means splits logged before this conversion existed are read correctly without a migration.
-    const debitsTotal = rewardDebits.reduce((sum, t) => sum + rupeesToRewardPoints(t.amount, account), 0);
+    const debitsTotal = rewardDebits.reduce((sum, t) => {
+      if (t.points !== undefined && t.points > 0) {
+        return sum + t.points;
+      }
+      return sum + rupeesToRewardPoints(t.amount, account);
+    }, 0);
 
     // 2. Confirmed cashbacks (realized points) from cashbackStatements
     const confirmedCredits = cashbackStatements.filter(s => {
@@ -928,7 +932,9 @@ export const calculateBalance = (
     .filter(m => (!baseMonth || m >= baseMonth) && m <= monthStr)
     .reduce((sum, m) => sum + (adjustmentsMap[m] || 0), 0);
 
-  return opening + change + adjustment;
+  const raw = opening + change + adjustment;
+  const rounded = Math.round(raw * 100) / 100;
+  return rounded === 0 ? 0 : rounded;
 };
 
 /**

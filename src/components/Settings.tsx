@@ -2636,8 +2636,8 @@ export default function Settings() {
       {viewContent}
 
       {isActionSheetOpen && (
-        <div className="modal-overlay" onClick={() => setIsActionSheetOpen(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay action-sheet-modal" onClick={() => setIsActionSheetOpen(false)}>
+          <div className="modal-content action-sheet-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Profile Photo</h3>
               <button onClick={() => setIsActionSheetOpen(false)}>

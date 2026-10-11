@@ -422,6 +422,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
              Self-limiting: the flag it sets is part of the condition, and the account form has
              written it alongside the unit ever since, so the only shape this can fire on is the one
              no build produces any more. Transactions are untouched — those were always rupees. */
+          let processedAcc = acc;
           if (acc.type === 'rewards' && acc.rewardUnit && (acc.pointsConversionRate || 0) > 0
             && acc.rewardType !== 'points') {
             const rate = acc.pointsConversionRate as number;
@@ -429,7 +430,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
             const mapValues = (m: any) => Object.fromEntries(
               Object.entries(m || {}).map(([month, v]) => [month, toRupees(v)])
             );
-            return {
+            processedAcc = {
               ...acc,
               rewardType: 'points',
               openingBalances: mapValues(acc.openingBalances),
@@ -441,7 +442,36 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
               })),
             };
           }
-          return acc;
+
+          const cleanCurrencyMap = (m: any) => {
+            if (!m || typeof m !== 'object') return m;
+            return Object.fromEntries(
+              Object.entries(m).map(([k, v]) => {
+                if (typeof v === 'number' && Number.isFinite(v)) {
+                  const rounded = Math.round(v * 100) / 100;
+                  return [k, rounded === 0 ? 0 : rounded];
+                }
+                return [k, v];
+              })
+            );
+          };
+
+          return {
+            ...processedAcc,
+            openingBalances: cleanCurrencyMap(processedAcc.openingBalances) || {},
+            ...(processedAcc.balanceAdjustments ? { balanceAdjustments: cleanCurrencyMap(processedAcc.balanceAdjustments) } : {}),
+            ...(processedAcc.travelOpeningBalances ? { travelOpeningBalances: cleanCurrencyMap(processedAcc.travelOpeningBalances) } : {}),
+            ...(processedAcc.travelBalanceAdjustments ? { travelBalanceAdjustments: cleanCurrencyMap(processedAcc.travelBalanceAdjustments) } : {}),
+            ...(processedAcc.rewardOpeningBalances ? { rewardOpeningBalances: cleanCurrencyMap(processedAcc.rewardOpeningBalances) } : {}),
+            ...(processedAcc.rewardBalanceAdjustments ? { rewardBalanceAdjustments: cleanCurrencyMap(processedAcc.rewardBalanceAdjustments) } : {}),
+            ...(processedAcc.balanceEditHistory ? {
+              balanceEditHistory: processedAcc.balanceEditHistory.map((h: any) => ({
+                ...h,
+                previousBalance: typeof h.previousBalance === 'number' ? (Math.round(h.previousBalance * 100) / 100 === 0 ? 0 : Math.round(h.previousBalance * 100) / 100) : h.previousBalance,
+                newBalance: typeof h.newBalance === 'number' ? (Math.round(h.newBalance * 100) / 100 === 0 ? 0 : Math.round(h.newBalance * 100) / 100) : h.newBalance,
+              }))
+            } : {})
+          };
         });
 
         if (!parsed.customAccountTypes) {

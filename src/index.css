@@ -969,6 +969,8 @@ input[type="checkbox"]:disabled {
   box-shadow: inset 3px 3px 0 rgba(0, 0, 0, 0.4);
   transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   touch-action: pan-y;
+  box-sizing: border-box;
+  max-width: 100%;
 }
 
 .input-field:focus {
@@ -2569,11 +2571,15 @@ tr:hover td {
      mid-swipe is what makes a carousel feel like it is fighting the scroll. */
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .split-card {
   flex: 0 0 100%;
   width: 100%;
+  max-width: 100%;
   /* A grid child's min-content width can otherwise push the card wider than the
      panel — one long account name and the snap points stop lining up. */
   min-width: 0;
@@ -2582,6 +2588,7 @@ tr:hover td {
      own edge as a card slides past it. */
   padding: 0.35rem;
   box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 /* A sheet reached by HOLDING something opens under the finger while the finger is still
@@ -2666,4 +2673,31 @@ tr:hover td {
 .split-dot--error {
   background: var(--danger);
   opacity: 1;
+}
+
+/* Interactive Hero Avatar in Wealth detail screen */
+.interactive-hero-avatar {
+  display: inline-block;
+  border-radius: 50%;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), filter 0.18s ease;
+}
+
+.interactive-hero-avatar:hover {
+  transform: scale(1.05);
+}
+
+.interactive-hero-avatar:active {
+  transform: scale(0.95);
+}
+
+/* Action Sheet modal (e.g. Logo options menu, Profile photo menu) */
+.action-sheet-modal,
+.action-sheet-modal * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-touch-callout: none !important;
 }

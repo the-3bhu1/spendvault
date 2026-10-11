@@ -10,6 +10,7 @@ import CustomDatePicker from './CustomDatePicker';
 import { getAccountEmoji } from './transactionIcons';
 import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardFees, CardNetwork, BrandKey, RoundingRule } from '../types';
+import { notifyLogosUpdated } from '../services/LogoService';
 import { CardBrandLogo, brandLabel, BRAND_INK } from './CardBrandLogo';
 import { resolveCardIssuer } from '../utils';
 import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, getLatestBilledCycle, getOrdinalSuffix, affectsRupeeBalance, cardEarnsCashback, isUnitDenominated, rewardUnitBalance, rewardPointsToRupees, rupeesToRewardPoints } from '../utils';
@@ -462,6 +463,16 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
   const startNfcScan = async () => {
     stopNfcScan();
+    if (!newAccount.cardDetails) {
+      setNewAccount(prev => ({ ...prev, cardDetails: {} }));
+      setExpiryInput('');
+      setIssuerQuery('');
+      setIssuerDropdownOpen(false);
+    }
+    setIsEditingCardDetails(true);
+    setTimeout(() => {
+      cardDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
     const session = nfcSessionRef.current;
     try {
       const stop = await startCardScan(applyScannedCard, code => setNfcError(CARD_NFC_ERROR_TEXT[code]));
@@ -498,7 +509,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
   const openAddModal = () => {
     setEditId(null);
-    setNewAccount({ name: '', type: 'bank_account', openingBalances: {}, cashbackRates: [], isCashbackEnabled: false });
+    setNewAccount({ name: '', type: 'bank_account', openingBalances: {}, cashbackRates: [], isCashbackEnabled: false, customLogoUrl: '' });
     setOpeningBalanceInput('');
     setNewCbName('');
     setNewCbRate('');
@@ -558,13 +569,16 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     const currentBalance = isUnitDenominated(acc) && acc.type === 'rewards'
       ? rewardUnitBalance(acc, data.transactions, month, data.cashbackStatements)
       : calculateBalance(acc, data.transactions, month);
-    setOpeningBalanceInput(currentBalance.toString());
+    const cleanBalance = Math.round(currentBalance * 100) / 100;
+    setOpeningBalanceInput((cleanBalance === 0 ? 0 : cleanBalance).toString());
 
     const currentTravelBalance = calculateBalance(acc, data.transactions, month, true);
-    setTravelOpeningBalanceInput(currentTravelBalance.toString());
+    const cleanTravelBalance = Math.round(currentTravelBalance * 100) / 100;
+    setTravelOpeningBalanceInput((cleanTravelBalance === 0 ? 0 : cleanTravelBalance).toString());
 
     const currentRewardBalance = calculateBalance(acc, data.transactions, month, false, true, data.cashbackStatements);
-    setRewardOpeningBalanceInput(currentRewardBalance.toString());
+    const cleanRewardBalance = Math.round(currentRewardBalance * 100) / 100;
+    setRewardOpeningBalanceInput((cleanRewardBalance === 0 ? 0 : cleanRewardBalance).toString());
 
     // Pre-fill expiry string from saved cardDetails
     const cd = acc.cardDetails;
@@ -742,6 +756,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
           prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
           const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
           opening = calculateBalance(originalAcc, data.transactions, prevMonthStr);
+          const cleanOpening = Math.round(opening * 100) / 100;
+          opening = cleanOpening === 0 ? 0 : cleanOpening;
           updatedOpeningBalances[month] = opening;
         }
 
@@ -769,7 +785,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
           ? rewardPointsToRupees(parseFloat(openingBalanceInput) || 0, unitAccountForEntry)
           : (parseFloat(openingBalanceInput) || 0);
         const previousBalance = calculateBalance(originalAcc, data.transactions, month);
-        updatedBalanceAdjustments[month] = enteredCurrentBalance - opening - standardChange;
+        const rawBalAdj = enteredCurrentBalance - opening - standardChange;
+        const cleanBalAdj = Math.round(rawBalAdj * 100) / 100;
+        updatedBalanceAdjustments[month] = cleanBalAdj === 0 ? 0 : cleanBalAdj;
 
         if (enteredCurrentBalance !== previousBalance) {
           updatedBalanceEditHistory.push({
@@ -788,6 +806,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
             const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
             travelOpening = calculateBalance(originalAcc, data.transactions, prevMonthStr, true);
+            const cleanTravelOpening = Math.round(travelOpening * 100) / 100;
+            travelOpening = cleanTravelOpening === 0 ? 0 : cleanTravelOpening;
             updatedTravelOpeningBalances[month] = travelOpening;
           }
 
@@ -806,7 +826,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
           const enteredCurrentTravelBalance = parseFloat(travelOpeningBalanceInput) || 0;
           if (!updatedTravelBalanceAdjustments) updatedTravelBalanceAdjustments = {};
-          updatedTravelBalanceAdjustments[month] = enteredCurrentTravelBalance - travelOpening - travelChange;
+          const rawTravelAdj = enteredCurrentTravelBalance - travelOpening - travelChange;
+          const cleanTravelAdj = Math.round(rawTravelAdj * 100) / 100;
+          updatedTravelBalanceAdjustments[month] = cleanTravelAdj === 0 ? 0 : cleanTravelAdj;
         }
 
         // 3. Rewards Wallet Setup
@@ -817,6 +839,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
             const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
             rewardOpening = calculateBalance(originalAcc, data.transactions, prevMonthStr, false, true, data.cashbackStatements);
+            const cleanRewardOpening = Math.round(rewardOpening * 100) / 100;
+            rewardOpening = cleanRewardOpening === 0 ? 0 : cleanRewardOpening;
             updatedRewardOpeningBalances[month] = rewardOpening;
           }
 
@@ -831,26 +855,34 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
           const enteredCurrentRewardBalance = parseFloat(rewardOpeningBalanceInput) || 0;
           if (!updatedRewardBalanceAdjustments) updatedRewardBalanceAdjustments = {};
-          updatedRewardBalanceAdjustments[month] = enteredCurrentRewardBalance - rewardOpening - rewardChange;
+          const rawRewardAdj = enteredCurrentRewardBalance - rewardOpening - rewardChange;
+          const cleanRewardAdj = Math.round(rawRewardAdj * 100) / 100;
+          updatedRewardBalanceAdjustments[month] = cleanRewardAdj === 0 ? 0 : cleanRewardAdj;
         }
       }
     } else {
       // In add mode, set opening balance as input and reset adjustment for standard
-      updatedOpeningBalances[month] = (newAccount.type === 'mutual_funds' || newAccount.type === 'stocks')
+      const rawAddOpening = (newAccount.type === 'mutual_funds' || newAccount.type === 'stocks')
         ? 0
         : (entersBalanceInUnits
           ? rewardPointsToRupees(parseFloat(openingBalanceInput) || 0, unitAccountForEntry)
           : (parseFloat(openingBalanceInput) || 0));
+      const cleanAddOpening = Math.round(rawAddOpening * 100) / 100;
+      updatedOpeningBalances[month] = cleanAddOpening === 0 ? 0 : cleanAddOpening;
       updatedBalanceAdjustments[month] = 0;
 
       if (newAccount.isNcmcEnabled && updatedTravelOpeningBalances) {
-        updatedTravelOpeningBalances[month] = parseFloat(travelOpeningBalanceInput) || 0;
+        const rawTravelOpening = parseFloat(travelOpeningBalanceInput) || 0;
+        const cleanTravelOpening = Math.round(rawTravelOpening * 100) / 100;
+        updatedTravelOpeningBalances[month] = cleanTravelOpening === 0 ? 0 : cleanTravelOpening;
         if (!updatedTravelBalanceAdjustments) updatedTravelBalanceAdjustments = {};
         updatedTravelBalanceAdjustments[month] = 0;
       }
 
       if (hasInternalRewards && updatedRewardOpeningBalances) {
-        updatedRewardOpeningBalances[month] = parseFloat(rewardOpeningBalanceInput) || 0;
+        const rawRewardOpening = parseFloat(rewardOpeningBalanceInput) || 0;
+        const cleanRewardOpening = Math.round(rawRewardOpening * 100) / 100;
+        updatedRewardOpeningBalances[month] = cleanRewardOpening === 0 ? 0 : cleanRewardOpening;
         if (!updatedRewardBalanceAdjustments) updatedRewardBalanceAdjustments = {};
         updatedRewardBalanceAdjustments[month] = 0;
       }
@@ -863,6 +895,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       openingBalances: updatedOpeningBalances,
       balanceAdjustments: updatedBalanceAdjustments,
       balanceEditHistory: updatedBalanceEditHistory.length > 0 ? updatedBalanceEditHistory : undefined,
+      customLogoUrl: newAccount.customLogoUrl?.trim() || undefined,
       defaultCashbackRate: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.defaultCashbackRate : undefined,
       cashbackRates: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.cashbackRates : undefined,
       roundOffCashback: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.roundOffCashback : undefined,
@@ -916,6 +949,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     } else {
       addAccount(accountData);
     }
+    notifyLogosUpdated();
 
     setIsModalOpen(false);
   };

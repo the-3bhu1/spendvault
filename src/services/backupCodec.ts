@@ -69,7 +69,7 @@ export const KEY_MAP: Record<string, string> = {
   balanceEditHistory: 'beh', editedAt: 'eat', monthKey: 'mk', previousBalance: 'prb', newBalance: 'nwb',
   rewardType: 'ryt', rewardUnit: 'ryu', pointsConversionRate: 'pcr',
   rewardOpeningBalances: 'rob', rewardBalanceAdjustments: 'rba',
-  isRewardTransaction: 'irt', cashbackDestinationAccountId: 'cda',
+  isRewardTransaction: 'irt', cashbackDestinationAccountId: 'cda', points: 'pts',
   // New fields for tours, investments, recurring splits, and debts.
   // NOTE: 'saa'/'sc' were minted for the old field names sipAllottedAmount/sipCharges. Those fields
   // were RENAMED (not replaced) to allottedAmount/investmentCharges, so keeping the same codes is
@@ -98,6 +98,8 @@ export const KEY_MAP: Record<string, string> = {
   financialYear: 'fyr', annualRate: 'anr', notes: 'nte',
   // Soft-delete flag (see Account.archived)
   archived: 'arc',
+  // Custom logo override for accounts/assets
+  customLogoUrl: 'clu',
 };
 
 const REVERSE_MAP: Record<string, string> = Object.fromEntries(

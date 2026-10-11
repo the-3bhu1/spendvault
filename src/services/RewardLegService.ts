@@ -57,6 +57,7 @@ export interface RewardLegPatch {
    *  Always recomputed against the new source: moving a redemption from a card's own points to a
    *  rupee wallet has to flip it, or the wallet is debited nothing at all. */
   isRewardTransaction: boolean;
+  points?: number;
 }
 
 export interface RewardLegPlan {
@@ -79,6 +80,7 @@ const patchFor = (split: RewardSplitLeg, anchor: Transaction, leg: Transaction, 
     // tracks the anchor's description.
     description: isCCPayment ? leg.description : `Paid toward: ${anchor.description}`,
     isRewardTransaction: isPointsDenominated(source),
+    points: split.points,
   };
 };
 

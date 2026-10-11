@@ -146,6 +146,8 @@ export interface Account {
   balanceAdjustments?: Record<string, number>; // key: 'YYYY-MM', value: number
   travelBalanceAdjustments?: Record<string, number>; // key: 'YYYY-MM', value: number
   balanceEditHistory?: BalanceEditEntry[];
+  /** Optional custom logo URL or domain (e.g. 'sbi.co.in', 'cheq.one', or an image URL / data URL). Takes precedence over auto-detection. */
+  customLogoUrl?: string;
 
   // Specific to credit_card
   statementDay?: number;
@@ -233,6 +235,8 @@ export interface RewardSplitLeg {
   /** The debit leg this source generated. Absent for an external one-time reward — there is no
    *  account to debit — and for legacy single-source rows. */
   legId?: string;
+  /** Exact points deducted for this split (when custom/overridden or explicitly entered). */
+  points?: number;
 }
 
 export type TransactionType = 'credit' | 'debit';
@@ -287,6 +291,8 @@ export interface Transaction {
 
   isTravelTransaction?: boolean;
   isRewardTransaction?: boolean;
+  /** Exact points deducted on an isRewardTransaction debit leg. When absent, calculated from amount. */
+  points?: number;
   order?: number; // Added to support manual ordering
   linkedTransactionId?: string; // Legacy: ID of the auto-generated counterpart
   /** Ids of this row's counterparts (e.g. Bank + Reward Account on a 3-leg split).

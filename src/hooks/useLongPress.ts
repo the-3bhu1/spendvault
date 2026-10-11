@@ -51,6 +51,13 @@ export function useLongPress(onLongPress: () => void, enabled = true): LongPress
     origin.current = { x, y };
     timer.current = window.setTimeout(() => {
       timer.current = null;
+      if (typeof window !== 'undefined' && window.getSelection) {
+        try {
+          window.getSelection()?.removeAllRanges();
+        } catch {
+          // ignore
+        }
+      }
       hapticTap();
       cb.current();
     }, LONG_PRESS_MS);

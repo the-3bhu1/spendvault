@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Transaction, TransactionType, InvestmentKind, RewardSplitLeg } from '../types';
 import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, formatBillingCycleRange, cardEarnsCashback, cardRewardOn, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance } from '../utils';
-import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X, Plus, Ticket } from 'lucide-react';
+import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X, Plus, Ticket, RotateCcw } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, getInvestmentKindIcon, sortByAccountType } from './transactionIcons';
@@ -75,12 +75,15 @@ interface SplitDraft {
   legId?: string;
   input: string;
   unit: 'points' | 'rupee';
+  pointsInput?: string;
+  pointsOverride?: number;
+  driver?: 'rupee' | 'points';
 }
 
 /* Rupees until the user says otherwise. A blank card has no source yet, so the first thing typed
    into it is read as money — and picking a points wallet afterwards must not retroactively decide
-   that those digits were Chips. PTS is only ever reached through the toggle. */
-const blankSplit = (): SplitDraft => ({ accountId: '', amount: 0, input: '', unit: 'rupee' });
+   that those digits were Chips. */
+const blankSplit = (): SplitDraft => ({ accountId: '', amount: 0, input: '', unit: 'rupee', pointsInput: '' });
 
 /** How the stored anchor reads as carousel cards. Leg ids are recovered for a legacy row that never
  *  recorded them, by looking for the linked leg sitting on each source's account — with ids in hand
@@ -91,16 +94,23 @@ const splitDraftsFrom = (
 ): SplitDraft[] => {
   const linkedIds = anchor?.linkedTransactionIds || (anchor?.linkedTransactionId ? [anchor.linkedTransactionId] : []);
   return getRewardSplits(anchor).map(split => {
-    const legId = split.legId ?? transactions.find(t =>
+    const leg = transactions.find(t =>
       t.id !== anchor?.id
       && linkedIds.includes(t.id)
       && t.category !== 'Cashback'
-      && t.accountId === split.accountId)?.id;
-    // 'rupee' whatever this source is, like a blank card: the unit a split was typed in isn't
-    // stored, so an edit reopens in the one unit every source shares rather than guessing that a
-    // points wallet was entered in its issuer's figure. The toggle is still a click away, and the
-    // hint line underneath already reads the amount back in Chips or Miles.
-    return { accountId: split.accountId, amount: split.amount, legId, unit: 'rupee', input: split.amount === 0 ? '' : String(split.amount) };
+      && t.accountId === split.accountId);
+    const legId = split.legId ?? leg?.id;
+    const points = split.points ?? leg?.points;
+    return {
+      accountId: split.accountId,
+      amount: split.amount,
+      legId,
+      unit: 'rupee',
+      input: split.amount === 0 ? '' : String(split.amount),
+      pointsInput: points ? String(points) : '',
+      pointsOverride: points,
+      driver: 'rupee',
+    };
   });
 };
 
@@ -875,11 +885,20 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       return { source, legId, isNew: !existing };
     });
     /** What the anchor will record: one entry per source, each pointing at its own leg. */
-    const anchorSplits: RewardSplitLeg[] = rewardSplitPlan.map(({ source, legId }) => ({
-      accountId: source.accountId,
-      amount: Number(source.amount) || 0,
-      legId,
-    }));
+    const anchorSplits: RewardSplitLeg[] = rewardSplitPlan.map(({ source, legId }) => {
+      const rewardsSourceAcc = data.accounts.find(a => a.id === source.accountId);
+      const pts = source.pointsOverride !== undefined
+        ? source.pointsOverride
+        : (source.pointsInput && parseFloat(source.pointsInput) > 0
+          ? parseFloat(source.pointsInput)
+          : (isPointsDenominated(rewardsSourceAcc) && source.amount > 0 ? rupeesToRewardPoints(source.amount, rewardsSourceAcc) : undefined));
+      return {
+        accountId: source.accountId,
+        amount: Number(source.amount) || 0,
+        legId,
+        points: pts && pts > 0 ? pts : undefined,
+      };
+    });
     const rewardUsedTotal = Math.round(anchorSplits.reduce((sum, sp) => sum + sp.amount, 0) * 100) / 100;
     const newRewardLegIds = rewardSplitPlan.filter(p => p.isNew).map(p => p.legId as string);
     // Anchoring, by contrast, IS CC-specific: a reward split anchors on the CARD leg (whose amount is
@@ -1022,6 +1041,11 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       // (the card is the hub). Credit POV: the main tx IS the card, so link to it as before.
       if (!anchorOnCounterpart) currentLinkedIds.push(legId as string);
       const rewardsSourceAcc = data.accounts.find(a => a.id === source.accountId);
+      const pts = source.pointsOverride !== undefined
+        ? source.pointsOverride
+        : (source.pointsInput && parseFloat(source.pointsInput) > 0
+          ? parseFloat(source.pointsInput)
+          : (isPointsDenominated(rewardsSourceAcc) && source.amount > 0 ? rupeesToRewardPoints(source.amount, rewardsSourceAcc) : undefined));
       addTransaction({
         id: legId as string,
         date: newTx.date as string,
@@ -1039,6 +1063,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         // money by the day totals and spend stats. calculateBalance applies the rate when it reads
         // this leg into the points balance. See docs/LINKED_TRANSACTIONS.md.
         amount: Number(source.amount) || 0,
+        points: pts && pts > 0 ? pts : undefined,
         category: isCCPayment ? 'CC Payment' : (newTx.category as string),
         isRecurring: false,
         // Deliberately isPointsDenominated, not isUnitDenominated: this flag routes the leg into an
@@ -1368,9 +1393,6 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
      values for "the" reward account — that shape is what made a second source impossible. */
   const sourceAccountOf = (split: SplitDraft) => data.accounts.find(a => a.id === split.accountId);
   const rewardUnitLabelOf = (split: SplitDraft) => sourceAccountOf(split)?.rewardUnit || 'Points';
-  // A rupee wallet has nothing to toggle, so it stays pinned to rupees whatever the card last held.
-  const unitOf = (split: SplitDraft): 'points' | 'rupee' =>
-    isUnitDenominated(sourceAccountOf(split)) ? split.unit : 'rupee';
   /* The balance the picker shows for this account, in the account's own unit. Reused by the shortfall
      message, which has to name the figure itself: the collapsed trigger deliberately shows only the
      account name. rewardUnitBalance is what knows the two kinds apart — a card's points wallet is a
@@ -1379,24 +1401,78 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     rewardUnitBalance(sourceAccountOf(split), data.transactions, getCurrentMonthStr(), data.cashbackStatements);
   const formatRewardBalanceOf = (split: SplitDraft, v: number) =>
     formatRewardBalance(sourceAccountOf(split), v);
-  // Typed value -> canonical rupees. Points divide by the rate; rupees pass straight through.
-  const inputToRupeesFor = (split: SplitDraft, n: number) =>
-    unitOf(split) === 'points' ? rewardPointsToRupees(n, sourceAccountOf(split)) : n;
 
-  /* The amount read back in the unit you are NOT typing in, or null when there is no second unit to
-     read it in — a rupee wallet, or nothing entered yet. */
-  const counterpartHintFor = (split: SplitDraft) => {
-    if (!isUnitDenominated(sourceAccountOf(split)) || !(split.amount > 0)) return null;
-    return unitOf(split) === 'points'
-      ? `= ${formatCurrency(split.amount)}`
-      : `= ${rupeesToRewardPoints(split.amount, sourceAccountOf(split))} ${rewardUnitLabelOf(split)}`;
+  const getPointsValue = (split: SplitDraft) => {
+    if (split.pointsInput !== undefined) return split.pointsInput;
+    if (split.pointsOverride !== undefined) return String(split.pointsOverride);
+    const acc = sourceAccountOf(split);
+    if (isUnitDenominated(acc) && split.amount > 0) {
+      return String(rupeesToRewardPoints(split.amount, acc));
+    }
+    return '';
   };
-  /* One card carrying that extra line while its neighbour doesn't put their pickers at different
-     heights, so swiping between two sources shifted the whole panel under your thumb. If ANY card
-     shows the line, every card reserves its space — an empty slot on the cards that have nothing to
-     say. Reserved per panel rather than always, so a split funded entirely from rupee wallets (which
-     can never have a counterpart) keeps the tighter card it has always had. */
-  const anySplitShowsHint = splits.some(sp => counterpartHintFor(sp) !== null);
+
+  const isSplitOverrideActive = (split: SplitDraft) => {
+    const acc = sourceAccountOf(split);
+    if (!isUnitDenominated(acc) || !(split.amount > 0)) return false;
+    if (split.pointsOverride === undefined) return false;
+    const defaultPoints = rupeesToRewardPoints(split.amount, acc);
+    return Math.abs(split.pointsOverride - defaultPoints) > 0.001;
+  };
+
+  const handleRupeesChange = (i: number, val: string) => {
+    if (val === '' || /^\d*\.?\d*$/.test(val)) {
+      const numVal = parseFloat(val);
+      const rupees = isNaN(numVal) ? 0 : numVal;
+      const split = splits[i];
+      const acc = sourceAccountOf(split);
+      const autoPoints = isUnitDenominated(acc) && rupees > 0 ? rupeesToRewardPoints(rupees, acc) : 0;
+      patchSplit(i, {
+        input: val,
+        amount: rupees,
+        pointsOverride: undefined,
+        pointsInput: autoPoints > 0 ? String(autoPoints) : (val === '' ? '' : '0'),
+        driver: val === '' ? undefined : 'rupee',
+      });
+    }
+  };
+
+  const handlePointsChange = (i: number, val: string) => {
+    if (val === '' || /^\d*\.?\d*$/.test(val)) {
+      const pts = parseFloat(val);
+      const split = splits[i];
+      const acc = sourceAccountOf(split);
+
+      // If the user hasn't explicitly entered rupees, typing points drives the rupees amount
+      if (split.driver !== 'rupee') {
+        const autoRupees = !isNaN(pts) && pts > 0 ? rewardPointsToRupees(pts, acc) : 0;
+        patchSplit(i, {
+          pointsInput: val,
+          pointsOverride: undefined,
+          input: autoRupees > 0 ? String(autoRupees) : '',
+          amount: autoRupees,
+          driver: val === '' ? undefined : 'points',
+        });
+        return;
+      }
+
+      // If rupees was already entered, editing points is an override for this transaction
+      patchSplit(i, {
+        pointsInput: val,
+        pointsOverride: isNaN(pts) ? undefined : pts,
+      });
+    }
+  };
+
+  const handleResetPoints = (i: number) => {
+    const split = splits[i];
+    const acc = sourceAccountOf(split);
+    const autoPoints = isUnitDenominated(acc) && split.amount > 0 ? rupeesToRewardPoints(split.amount, acc) : 0;
+    patchSplit(i, {
+      pointsOverride: undefined,
+      pointsInput: autoPoints > 0 ? String(autoPoints) : '',
+    });
+  };
 
   /* Sources still on offer for one card: everything eligible, minus what the OTHER cards already
      spend from — including "Other", which is a single one-off by definition and would be
@@ -2459,46 +2535,6 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                 Split Payment
               </span>
               <div className="flex align-center" style={{ gap: '0.6rem' }}>
-                {/* Only a points account has two units to switch between. 'PTS' rather than the
-                    account's own unit name because that name is free text with no length limit
-                    ("Reward Points" would not fit), and rather than a glyph because none of the
-                    bundled font subsets carry one — a diamond or star would fall back to a system
-                    font and sit at a different size than the ₹ beside it. */}
-                {!!splits[activeSplit] && isUnitDenominated(sourceAccountOf(splits[activeSplit])) && (
-                  <div className="flex" style={{ border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden', height: SPLIT_CONTROL_HEIGHT, boxSizing: 'border-box' }}>
-                    {(['rupee', 'points'] as const).map(mode => {
-                      const card = splits[activeSplit];
-                      const active = mode === unitOf(card);
-                      return (
-                        <button
-                          key={mode}
-                          type="button"
-                          className="text-mono text-xs font-bold"
-                          style={{
-                            padding: '0 0.7rem',
-                            height: '100%',
-                            minHeight: 'auto',
-                            border: 'none',
-                            cursor: 'pointer',
-                            background: active ? 'var(--accent)' : 'transparent',
-                            color: active ? '#ffffff' : 'var(--text-secondary)'
-                          }}
-                          onClick={() => {
-                            if (active) return;
-                            // Lossless switch: the rupee value is canonical, so re-render the field
-                            // from it in the new unit rather than reinterpreting the typed digits.
-                            const shown = mode === 'points'
-                              ? rupeesToRewardPoints(card.amount, sourceAccountOf(card))
-                              : card.amount;
-                            patchSplit(activeSplit, { unit: mode, input: shown === 0 ? '' : String(shown) });
-                          }}
-                        >
-                          {mode === 'points' ? 'PTS' : '₹'}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
                 {/* One more source, once the LAST card is actually funding something — see
                     canAddSplitSource for why it belongs to that card alone. Sits left of the remove
                     button, and is gone when every eligible source is already spoken for: the same
@@ -2555,6 +2591,11 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
             <div
               ref={splitScrollRef}
               className="split-carousel no-scrollbar"
+              style={{
+                width: '100%',
+                maxWidth: '100%',
+                overflowX: splits.length > 1 ? 'auto' : 'hidden',
+              }}
               onScroll={e => {
                 const el = e.currentTarget;
                 // Mid-flight frames of a scroll WE started say nothing about which card the user
@@ -2569,53 +2610,113 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
               }}
             >
               {splits.map((split, i) => {
-                const unit = unitOf(split);
                 const amountError = errors[`rewardUsed_${i}`];
+                const acc = sourceAccountOf(split);
+                const hasUnit = isUnitDenominated(acc);
+                const unitLabel = rewardUnitLabelOf(split);
+                const displayUnitLabel = unitLabel.toLowerCase().includes('point') ? unitLabel : `${unitLabel} (PTS)`;
+
                 return (
                   <div
                     key={i}
                     className="split-card grid grid-cols-2 gap-4"
+                    style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflowX: 'hidden', boxSizing: 'border-box' }}
                   >
-                    <div className="input-group">
-                      {/* "Amount", not "Rewards Used": the panel is reached from a button that says
-                          Split Payment and pairs this field with "Paid from", so naming the
-                          money after one particular KIND of source contradicted both — and does so
-                          on every split funded from an e-wallet.
-                          No "(Optional)" either. It described the panel, not the field: the split as
-                          a whole is optional, but you get here by asking for one, and the card has an
-                          X to close if you change your mind. Inside an open card the amount is
-                          required the moment a source is picked (see validate). */}
-                      <label>Amount{unit === 'points' ? ` (${rewardUnitLabelOf(split)})` : ''}</label>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        className={`input-field ${amountError ? 'border-danger' : ''}`}
-                        value={split.input}
-                        onChange={e => {
-                          const val = e.target.value;
-                          if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                            const numVal = parseFloat(val);
-                            // Store rupees, always — utils' balance math and FinanceContext's leg
-                            // rebalance both treat a split's amount as money. The points figure is
-                            // derived, for display and on save.
-                            patchSplit(i, { input: val, amount: isNaN(numVal) ? 0 : inputToRupeesFor(split, numVal) });
-                          }
-                        }}
-                        placeholder={unit === 'points' ? '0' : '0.00'}
-                      />
-                      {/* The counterpart value, same treatment as the instant-cashback percent hint.
-                          The empty twin holds the line's space open on a card that has no counterpart
-                          to show, so every card in the panel puts its picker at the same height. */}
-                      {counterpartHintFor(split) !== null ? (
-                        <span className="text-xs text-muted text-mono" style={{ marginTop: '0.25rem', opacity: 0.8 }}>
-                          {counterpartHintFor(split)}
-                        </span>
-                      ) : anySplitShowsHint && (
-                        <span aria-hidden className="text-xs text-mono" style={{ marginTop: '0.25rem', visibility: 'hidden' }}>
-                          &nbsp;
+                    <div className="flex-col" style={{ width: '100%', maxWidth: '100%', minWidth: 0 }}>
+                      {hasUnit ? (
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 130px), 1fr))',
+                            gap: '0.75rem',
+                            alignItems: 'flex-start',
+                            width: '100%',
+                            maxWidth: '100%',
+                            minWidth: 0,
+                          }}
+                        >
+                          <div className="input-group" style={{ marginBottom: 0, minWidth: 0, width: '100%' }}>
+                            <div className="flex align-center" style={{ minHeight: '20px', marginBottom: '0.35rem' }}>
+                              <label style={{ marginBottom: 0 }}>Amount (₹)</label>
+                            </div>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              className={`input-field ${amountError ? 'border-danger' : ''}`}
+                              style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }}
+                              value={split.input}
+                              onChange={e => handleRupeesChange(i, e.target.value)}
+                              placeholder="0.00"
+                            />
+                            <div style={{ minHeight: '22px', marginTop: '0.35rem' }} />
+                          </div>
+                          <div className="input-group" style={{ marginBottom: 0, minWidth: 0, width: '100%' }}>
+                            <div className="flex align-center" style={{ minHeight: '20px', marginBottom: '0.35rem' }}>
+                              <label style={{ marginBottom: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {displayUnitLabel}
+                              </label>
+                            </div>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              className="input-field"
+                              style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }}
+                              value={getPointsValue(split)}
+                              onChange={e => handlePointsChange(i, e.target.value)}
+                              placeholder="0"
+                            />
+                            <div style={{ minHeight: '22px', marginTop: '0.35rem', display: 'flex', alignItems: 'center' }}>
+                              {isSplitOverrideActive(split) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleResetPoints(i)}
+                                  className="btn btn-secondary text-mono"
+                                  style={{
+                                    padding: '2px 8px',
+                                    fontSize: '0.72rem',
+                                    height: 'auto',
+                                    minHeight: 'auto',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    color: 'var(--accent)',
+                                    cursor: 'pointer',
+                                    boxShadow: 'none',
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: '4px',
+                                    lineHeight: 1,
+                                    flexShrink: 0
+                                  }}
+                                  title="Reset to standard conversion rate"
+                                >
+                                  <RotateCcw size={10} />
+                                  <span>Reset ({rupeesToRewardPoints(split.amount, sourceAccountOf(split))} default)</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="input-group" style={{ marginBottom: 0, minWidth: 0, width: '100%' }}>
+                          <div className="flex align-center" style={{ minHeight: '20px', marginBottom: '0.35rem' }}>
+                            <label style={{ marginBottom: 0 }}>Amount (₹)</label>
+                          </div>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className={`input-field ${amountError ? 'border-danger' : ''}`}
+                            style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }}
+                            value={split.input}
+                            onChange={e => handleRupeesChange(i, e.target.value)}
+                            placeholder="0.00"
+                          />
+                        </div>
+                      )}
+                      {amountError && (
+                        <span className="text-xs text-danger" style={{ marginTop: '0.25rem', display: 'block' }}>
+                          {amountError}
                         </span>
                       )}
-                      {amountError && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{amountError}</span>}
                     </div>
                     <CustomPicker
                       label={splits.length > 1 ? `Paid from ${i + 1}` : 'Paid from'}
@@ -2658,17 +2759,13 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                           : [{ id: EXTERNAL_REWARD_SOURCE_ID, name: 'Other', subtext: 'One-time reward, not tracked', group: 'No Account' }])
                       ]}
                       onChange={val => {
-                        // Accounts can differ in unit and rate, so the typed digits would change
-                        // meaning on a switch. Hold the rupee value steady and re-render the field for
-                        // the new account: 430 Jewels (₹86) picked over to a rupee wallet shows 86,
-                        // still ₹86.
                         const nextAcc = data.accounts.find(a => a.id === val);
-                        const nextUnit = isUnitDenominated(nextAcc) ? split.unit : 'rupee';
-                        const shown = nextUnit === 'points' ? rupeesToRewardPoints(split.amount, nextAcc) : split.amount;
+                        const autoPoints = isUnitDenominated(nextAcc) && split.amount > 0 ? rupeesToRewardPoints(split.amount, nextAcc) : 0;
                         patchSplit(i, {
                           accountId: val,
-                          input: shown === 0 ? '' : String(shown),
-                          ...(!val && split.amount <= 0 ? { amount: 0 } : {})
+                          pointsOverride: undefined,
+                          pointsInput: autoPoints > 0 ? String(autoPoints) : '',
+                          ...(!val && split.amount <= 0 ? { amount: 0, input: '' } : {})
                         });
                       }}
                       // "None" stands in for a reward source, so it wears one's mark rather than the

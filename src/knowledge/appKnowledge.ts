@@ -834,6 +834,8 @@ can tap "Restore from backup" on the first step to import an existing backup fil
   If no logo resolves it falls back to a Google favicon and finally a 2-letter coloured monogram;
   physical-cash accounts always show a wallet icon. No API keys are required — without them the chain
   still yields favicons or initials, and logos already loaded are cached on-device for offline use.
+  In Wealth detail screens, long-pressing the account/asset logo mark opens options to View Logo enlarged,
+  set a Custom Logo (by website domain e.g. cheq.one, image URL, or SVG data URL), or reset back to default.
 - Background Guide (Android): Settings → Background Guide gives per-brand battery-optimization steps so
   SMS auto-log keeps working in the background.
 

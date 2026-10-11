@@ -5,14 +5,15 @@ import type { Account, Transaction } from '../types';
 import { BUILT_IN_ACCOUNT_TYPES } from '../types';
 import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHistoryByRange, getLatestFetchedAt, getLatestCommodityFetchedAt, getCacheFetchedAt, fetchCommodityPriceINR, getCachedPrice, getCachedCommodityPriceINR, fetchPrevClosesForSymbols, getCachedPrevPrice, getCachedPrevCommodityPriceINR } from '../services/MarketDataService';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { TrendingUp, RotateCcw, ChevronLeft, ChevronRight, ChevronDown, Landmark, ShieldCheck } from 'lucide-react';
+import { TrendingUp, RotateCcw, ChevronLeft, ChevronRight, ChevronDown, Landmark, ShieldCheck, Eye, Camera, Trash2, X } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
 import WealthBackdrop from './WealthBackdrop';
 import { PortfolioBackdrop, AssetsBackdrop, RetirementBackdrop } from './WealthCategoryBackdrops';
 import { LogoAvatar } from './LogoAvatar';
 import { DetailHeroBand, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
 import { CategoryCard, CategoryHero, HERO_MIN_H, SubviewHeader, SealedMark, FilterPills, SectionHeading } from './TreeUi';
-import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT } from '../services/LogoService';
+import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT, logoFromDomain, notifyLogosUpdated } from '../services/LogoService';
+import { useLongPress } from '../hooks/useLongPress';
 import { calculateEPFProjection, getEPFInterestRate, getFinancialYearForDate } from '../utils/epfEngine';
 import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance, isStatsExcludedCategory, statsAmount, errorMessage, userPossessive, rupeesToRewardPoints } from '../utils';
 import { getCategoryIcon } from './transactionIcons';
@@ -224,8 +225,67 @@ function currentDayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function InteractiveHeroAvatar({
+  onTrigger,
+  children,
+}: {
+  onTrigger: () => void;
+  children: ReactNode;
+}) {
+  const justLongPressed = useRef(false);
+  const triggerWithCleanup = () => {
+    if (typeof window !== 'undefined' && window.getSelection) {
+      try {
+        window.getSelection()?.removeAllRanges();
+      } catch {
+        // ignore
+      }
+    }
+    onTrigger();
+  };
+
+  const handlers = useLongPress(() => {
+    justLongPressed.current = true;
+    triggerWithCleanup();
+    setTimeout(() => {
+      justLongPressed.current = false;
+    }, 350);
+  });
+
+  return (
+    <div
+      {...handlers}
+      onMouseDown={(e) => {
+        // Prevent browser from initiating drag text selection
+        e.preventDefault();
+        handlers.onMouseDown?.(e);
+      }}
+      onClick={(e) => {
+        if (justLongPressed.current) return;
+        e.stopPropagation();
+        triggerWithCleanup();
+      }}
+      title="Long press or tap for logo options"
+      className="interactive-hero-avatar"
+      style={{
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        WebkitTouchCallout: 'none',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function Wealth({ onExit }: { onExit?: () => void }) {
-  const { data } = useFinance();
+  const { data, updateAccount } = useFinance();
+
+  // Logo interaction states (long press / tap on hero mark)
+  const [logoMenuTarget, setLogoMenuTarget] = useState<{ account: Account; logoUrl: string | null } | null>(null);
+  const [enlargedLogoTarget, setEnlargedLogoTarget] = useState<{ account: Account; logoUrl: string | null } | null>(null);
+  const [customLogoTarget, setCustomLogoTarget] = useState<Account | null>(null);
+  const [customLogoInput, setCustomLogoInput] = useState('');
 
   const [prices, setPrices] = useState<Record<string, number>>(() => {
     const cached: Record<string, number> = {};
@@ -1365,7 +1425,11 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
           replaces the old -28px pull over the back button's row: the panel now covers that row. */}
         <div style={{ padding: '0 1.5rem 0.5rem', marginTop: `-${DETAIL_HERO_LIFT}px`, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
           {renderSealedMark(
-            <LogoAvatar name={account.name} logoUrl={getLiquidLogoUrl(account)} size={DETAIL_HERO_AVATAR} accountType={account.type} />
+            <InteractiveHeroAvatar
+              onTrigger={() => setLogoMenuTarget({ account, logoUrl: getLiquidLogoUrl(account) })}
+            >
+              <LogoAvatar name={account.name} logoUrl={getLiquidLogoUrl(account)} size={DETAIL_HERO_AVATAR} accountType={account.type} />
+            </InteractiveHeroAvatar>
           )}
 
           <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.35, maxWidth: '90%' }}>
@@ -2057,7 +2121,11 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
               {/* Lifted into the panel above, as on the liquid detail — see renderSealedMark. */}
               <div style={{ padding: `0 1.5rem ${hasPriceChart ? '0.5rem' : '1.5rem'}`, marginTop: `-${DETAIL_HERO_LIFT}px`, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
                 {renderSealedMark(
-                  <LogoAvatar name={selectedAsset.name} logoUrl={getAssetLogoUrl(selectedAsset)} size={DETAIL_HERO_AVATAR} metal={selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'silver' : 'gold') : undefined} isEpf={selectedAsset.type === 'epf'} />
+                  <InteractiveHeroAvatar
+                    onTrigger={() => setLogoMenuTarget({ account: selectedAsset, logoUrl: getAssetLogoUrl(selectedAsset) })}
+                  >
+                    <LogoAvatar name={selectedAsset.name} logoUrl={getAssetLogoUrl(selectedAsset)} size={DETAIL_HERO_AVATAR} metal={selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'silver' : 'gold') : undefined} isEpf={selectedAsset.type === 'epf'} />
+                  </InteractiveHeroAvatar>
                 )}
 
                 <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.35, maxWidth: '90%' }}>
@@ -2332,6 +2400,235 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
           </div>
         );
       })()}
+
+      {/* ── Logo Options Menu (Action Sheet) ─────────────── */}
+      {logoMenuTarget && (
+        <div
+          className="modal-overlay action-sheet-modal"
+          style={{
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            WebkitTouchCallout: 'none',
+          }}
+          onClick={() => setLogoMenuTarget(null)}
+        >
+          <div
+            className="modal-content action-sheet-modal"
+            style={{
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+              WebkitTouchCallout: 'none',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3>Logo</h3>
+              <button onClick={() => setLogoMenuTarget(null)} aria-label="Close">
+                <X />
+              </button>
+            </div>
+            <div className="modal-body flex-col gap-3">
+              <button
+                className="btn btn-secondary w-100 flex-row align-center gap-3"
+                style={{ justifyContent: 'flex-start', padding: '1rem' }}
+                onClick={() => {
+                  const target = logoMenuTarget;
+                  setLogoMenuTarget(null);
+                  setEnlargedLogoTarget(target);
+                }}
+              >
+                <Eye size={20} /> View Logo
+              </button>
+              <button
+                className="btn btn-secondary w-100 flex-row align-center gap-3"
+                style={{ justifyContent: 'flex-start', padding: '1rem' }}
+                onClick={() => {
+                  const target = logoMenuTarget;
+                  setLogoMenuTarget(null);
+                  setCustomLogoTarget(target.account);
+                  setCustomLogoInput(target.account.customLogoUrl || '');
+                }}
+              >
+                <Camera size={20} /> Custom Logo
+              </button>
+              {logoMenuTarget.account.customLogoUrl && (
+                <button
+                  className="btn btn-secondary w-100 flex-row align-center gap-3 text-danger"
+                  style={{ justifyContent: 'flex-start', padding: '1rem' }}
+                  onClick={() => {
+                    const canonical = data.accounts.find(a => a.id === logoMenuTarget.account.id) || logoMenuTarget.account;
+                    const updated = { ...canonical, customLogoUrl: undefined };
+                    updateAccount(updated);
+                    if (selectedAsset && selectedAsset.id === canonical.id) {
+                      setSelectedAsset(updated);
+                    }
+                    notifyLogosUpdated();
+                    setLogoMenuTarget(null);
+                  }}
+                >
+                  <Trash2 size={20} /> Reset to Default Logo
+                </button>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary w-100" style={{ padding: '1rem' }} onClick={() => setLogoMenuTarget(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Fullscreen Logo Viewing ──────────────────── */}
+      {enlargedLogoTarget && (
+        <div className="modal-overlay" style={{ background: '#000' }} onClick={() => setEnlargedLogoTarget(null)}>
+          <button
+            style={{
+              position: 'absolute',
+              top: 'calc(var(--safe-area-inset-top, 0px) + 1rem)',
+              right: '1rem',
+              background: 'rgba(255,255,255,0.1)',
+              border: 'none',
+              borderRadius: '50%',
+              width: '40px',
+              height: '40px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              zIndex: 100,
+              cursor: 'pointer',
+            }}
+            onClick={() => setEnlargedLogoTarget(null)}
+          >
+            <X size={24} />
+          </button>
+          <div
+            style={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '1.5rem',
+            }}
+          >
+            <div
+              style={{
+                width: 'min(78vw, 320px)',
+                height: 'min(78vw, 320px)',
+                borderRadius: '50%',
+                overflow: 'hidden',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 0 60px rgba(0, 0, 0, 0.9)',
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              <LogoAvatar
+                name={enlargedLogoTarget.account.name}
+                logoUrl={enlargedLogoTarget.logoUrl}
+                size={320}
+                accountType={enlargedLogoTarget.account.type}
+                metal={enlargedLogoTarget.account.commodityMetal}
+                isEpf={enlargedLogoTarget.account.type === 'epf'}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Custom Logo Edit Modal (SpendVault NeoPOP Modal) ─────────────────────────────── */}
+      {customLogoTarget && (
+        <div className="modal-overlay" onClick={() => setCustomLogoTarget(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Custom Logo</h3>
+              <button onClick={() => setCustomLogoTarget(null)}>
+                <X />
+              </button>
+            </div>
+            <div className="modal-body flex-col gap-3">
+              {(() => {
+                const defaultUrl = isLiquidAccount(customLogoTarget)
+                  ? getLiquidLogoUrl(customLogoTarget)
+                  : getAssetLogoUrl(customLogoTarget);
+                const previewUrl = customLogoInput.trim()
+                  ? logoFromDomain(customLogoInput.trim())
+                  : defaultUrl;
+
+                return (
+                  <div
+                    className="flex-row align-center gap-3"
+                    style={{
+                      padding: '0.85rem',
+                      background: 'var(--bg-hover)',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                    }}
+                  >
+                    <LogoAvatar
+                      name={customLogoTarget.name}
+                      logoUrl={previewUrl}
+                      size={52}
+                      accountType={customLogoTarget.type}
+                      metal={customLogoTarget.commodityMetal}
+                      isEpf={customLogoTarget.type === 'epf'}
+                    />
+                    <div className="flex-col" style={{ minWidth: 0, flex: 1 }}>
+                      <span className="text-sm font-bold" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
+                        {customLogoTarget.name}
+                      </span>
+                      <span className="text-xs text-muted">
+                        {customLogoInput.trim() ? 'Previewing custom mark' : 'Using default mark'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="input-group">
+                <label>Domain or Image URL</label>
+                <input
+                  className="input-field"
+                  value={customLogoInput}
+                  onChange={e => setCustomLogoInput(e.target.value)}
+                  placeholder="e.g. sbi.co.in, cheq.one, or https://..."
+                  autoFocus
+                />
+                <span className="text-xs text-muted" style={{ marginTop: '0.25rem' }}>
+                  Enter a website domain (e.g. <code>cheq.one</code>, <code>sbi.co.in</code>), image URL, or SVG. Leave empty for default.
+                </span>
+              </div>
+            </div>
+            <div className="modal-footer flex-row gap-2">
+              <button className="btn btn-secondary flex-1" style={{ padding: '1rem' }} onClick={() => setCustomLogoTarget(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary flex-1"
+                style={{ padding: '1rem' }}
+                onClick={() => {
+                  const canonical = data.accounts.find(a => a.id === customLogoTarget.id) || customLogoTarget;
+                  const updated: Account = {
+                    ...canonical,
+                    customLogoUrl: customLogoInput.trim() || undefined,
+                  };
+                  updateAccount(updated);
+                  if (selectedAsset && selectedAsset.id === canonical.id) {
+                    setSelectedAsset(updated);
+                  }
+                  notifyLogosUpdated();
+                  setCustomLogoTarget(null);
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
