@@ -41,7 +41,7 @@ type FeeMode = 'ltf' | 'annual' | 'joining_annual';
 const FEE_MODE_OPTIONS = [
   { id: 'ltf', name: 'Lifetime free', subtext: 'No joining fee, no annual fee' },
   { id: 'annual', name: 'Annual fee', subtext: 'Charged every renewal' },
-  { id: 'joining_annual', name: 'Joining + annual fee', subtext: 'One-time at issue, then every renewal' },
+  { id: 'joining_annual', name: 'Joining + Annual fee', subtext: 'One-time at issue, then every renewal' },
 ];
 
 /**
@@ -1935,8 +1935,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         />
                       </div>
 
-                      <div className="input-group">
-                        <label className="flex align-center" style={{ cursor: 'pointer', margin: '0.5rem 0', fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
+                      <div className="input-group" style={{ margin: '1.25rem 0' }}>
+                        <label className="flex align-center" style={{ cursor: 'pointer', margin: 0, fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
                           <input
                             type="checkbox"
                             style={{ margin: 0, width: '16px', height: '16px' }}
@@ -1956,8 +1956,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
               {newAccount.type === 'debit_card' && (
                 <>
-                  <div className="input-group">
-                    <label className="flex align-center" style={{ cursor: 'pointer', margin: '0.5rem 0', fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
+                  <div className="input-group" style={{ margin: '1.25rem 0' }}>
+                    <label className="flex align-center" style={{ cursor: 'pointer', margin: 0, fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
                       <input
                         type="checkbox"
                         style={{ margin: 0, width: '16px', height: '16px' }}
@@ -1985,8 +1985,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     </div>
                   )}
 
-                  <div className="input-group">
-                    <label className="flex align-center" style={{ cursor: 'pointer', margin: '0.5rem 0', fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
+                  <div className="input-group" style={{ margin: '1.5rem 0' }}>
+                    <label className="flex align-center" style={{ cursor: 'pointer', margin: 0, fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
                       <input
                         type="checkbox"
                         style={{ margin: 0, width: '16px', height: '16px' }}
@@ -2364,8 +2364,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       }}
                     />
                   </div>
-                  <div className="input-group" style={{ marginTop: '0.5rem' }}>
-                    <label className="flex align-center" style={{ cursor: 'pointer', margin: '0.5rem 0', fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
+                  <div className="input-group" style={{ margin: '1.5rem 0' }}>
+                    <label className="flex align-center" style={{ cursor: 'pointer', margin: 0, fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
                       <input
                         type="checkbox"
                         style={{ margin: 0, width: '16px', height: '16px' }}
@@ -2491,8 +2491,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     />
                     {errors.defaultCashbackRate && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.defaultCashbackRate}</span>}
                   </div>
-                  <div className="input-group">
-                    <label className="flex align-center" style={{ cursor: 'pointer', margin: '0.5rem 0', fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
+                  <div className="input-group" style={{ margin: '1.25rem 0' }}>
+                    <label className="flex align-center" style={{ cursor: 'pointer', margin: 0, fontWeight: 500, color: 'var(--text-primary)', gap: '10px' }}>
                       <input
                         type="checkbox"
                         style={{ margin: 0, width: '16px', height: '16px' }}
