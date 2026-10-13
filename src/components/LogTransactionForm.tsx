@@ -2648,7 +2648,6 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                               onChange={e => handleRupeesChange(i, e.target.value)}
                               placeholder="0.00"
                             />
-                            <div style={{ minHeight: '22px', marginTop: '0.35rem' }} />
                           </div>
                           <div className="input-group" style={{ marginBottom: 0, minWidth: 0, width: '100%' }}>
                             <div className="flex align-center" style={{ minHeight: '20px', marginBottom: '0.35rem' }}>
@@ -2665,36 +2664,37 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                               onChange={e => handlePointsChange(i, e.target.value)}
                               placeholder="0"
                             />
-                            <div style={{ minHeight: '22px', marginTop: '0.35rem', display: 'flex', alignItems: 'center' }}>
-                              {isSplitOverrideActive(split) && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleResetPoints(i)}
-                                  className="btn btn-secondary text-mono"
-                                  style={{
-                                    padding: '2px 8px',
-                                    fontSize: '0.72rem',
-                                    height: 'auto',
-                                    minHeight: 'auto',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                    color: 'var(--accent)',
-                                    cursor: 'pointer',
-                                    boxShadow: 'none',
-                                    border: '1px solid var(--border-color)',
-                                    borderRadius: '4px',
-                                    lineHeight: 1,
-                                    flexShrink: 0
-                                  }}
-                                  title="Reset to standard conversion rate"
-                                >
-                                  <RotateCcw size={10} />
-                                  <span>Reset ({rupeesToRewardPoints(split.amount, sourceAccountOf(split))} default)</span>
-                                </button>
-                              )}
-                            </div>
                           </div>
+                          {isSplitOverrideActive(split) && (
+                            <button
+                              type="button"
+                              onClick={() => handleResetPoints(i)}
+                              className="btn btn-secondary text-mono"
+                              style={{
+                                gridColumn: '1 / -1',
+                                width: '100%',
+                                padding: '6px 8px',
+                                fontSize: '0.72rem',
+                                height: 'auto',
+                                minHeight: 'auto',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '6px',
+                                color: 'var(--accent)',
+                                cursor: 'pointer',
+                                boxShadow: 'none',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '4px',
+                                lineHeight: 1,
+                                boxSizing: 'border-box',
+                              }}
+                              title="Reset to standard conversion rate"
+                            >
+                              <RotateCcw size={12} />
+                              <span>Reset ({rupeesToRewardPoints(split.amount, sourceAccountOf(split))} default)</span>
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <div className="input-group" style={{ marginBottom: 0, minWidth: 0, width: '100%' }}>
