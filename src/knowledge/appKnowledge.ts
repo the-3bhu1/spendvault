@@ -449,7 +449,7 @@ Archived cards are excluded from all of this, as they are from balances everywhe
 
 ## What a card costs to hold
 A credit card's fees are set when adding or editing it on the Accounts tab. "Card Fees" is a picker
-with three shapes — Lifetime free, Annual fee, or Joining + annual fee — and only the amounts that
+with three shapes — Lifetime free, Annual fee, or Joining + Annual fee — and only the amounts that
 shape implies are asked for; picking a fee-charging shape and leaving the amount blank will not save.
 Alongside the amounts sit "First year free?" and "Annual Fee Waived On Yearly Spend", which is the
 spend inside one membership year that cancels the next annual fee.
@@ -831,6 +831,8 @@ can tap "Restore from backup" on the first step to import an existing backup fil
   rewards wallets) on Wealth → Assets, resolved from the account's NAME: a built-in registry first, then
   a cached background Gemini lookup for brands the registry misses (cached permanently, so it's a
   one-time lookup per name and counts against the daily AI cap), then a conservative domain guess.
+  Stocks resolve from their market SYMBOL instead: the built-in registry covers every NIFTY 500
+  company, so those holdings get a logo with no Gemini key and no AI lookup.
   If no logo resolves it falls back to a Google favicon and finally a 2-letter coloured monogram;
   physical-cash accounts always show a wallet icon. No API keys are required — without them the chain
   still yields favicons or initials, and logos already loaded are cached on-device for offline use.

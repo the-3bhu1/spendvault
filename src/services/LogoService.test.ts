@@ -45,6 +45,24 @@ describe('LogoService resolution & overrides', () => {
     expect(ola).toContain('data:image/svg+xml;base64,');
   });
 
+  it('resolves NIFTY 500 holdings from the built-in table without a Gemini lookup', () => {
+    expect(getAssetLogoUrl({ type: 'stocks', name: 'Sagility', marketSymbol: 'SAGILITY.NS' })).toContain('sagility.com');
+    expect(getAssetLogoUrl({ type: 'stocks', name: 'Varun Beverages', marketSymbol: 'VBL.NS' })).toContain('varunbeverages.com');
+    expect(getAssetLogoUrl({ type: 'stocks', name: '360 ONE WAM', marketSymbol: '360ONE.NS' })).toContain('360.one');
+  });
+
+  it('normalizes & and - in symbols to match the table', () => {
+    expect(getAssetLogoUrl({ type: 'stocks', name: 'Mahindra & Mahindra', marketSymbol: 'M&M.NS' })).toContain('mahindra.com');
+    expect(getAssetLogoUrl({ type: 'stocks', name: 'Bajaj Auto', marketSymbol: 'BAJAJ-AUTO.NS' })).toContain('bajajauto.com');
+    expect(getAssetLogoUrl({ type: 'stocks', name: 'J&K Bank', marketSymbol: 'J&KBANK.BO' })).toContain('jkbank.com');
+  });
+
+  it('keeps hand-tuned overrides and pre-rename symbols', () => {
+    expect(getAssetLogoUrl({ type: 'stocks', name: 'NMDC Steel', marketSymbol: 'NSLNISP.NS' })).toContain('nmdc.co.in');
+    expect(getAssetLogoUrl({ type: 'stocks', name: 'Zomato', marketSymbol: 'ZOMATO.NS' })).toContain('zomato.com');
+    expect(getAssetLogoUrl({ type: 'stocks', name: 'Tata Motors', marketSymbol: 'TATAMOTORS.NS' })).toContain('tatamotors.com');
+  });
+
   it('honors customLogoUrl override over any auto-detected brand', () => {
     const overriddenBank = getLiquidLogoUrl({
       type: 'bank_account',

@@ -17,6 +17,7 @@
 import { resolveBrandDomain } from './GeminiService';
 import { hasGeminiKey } from './GeminiConfig';
 import { resolveCardIssuer } from '../utils';
+import { NSE_STOCK_DOMAINS } from './nseStockDomains';
 import type { BrandKey } from '../types';
 
 const LOGO_DEV_TOKEN_KEY = 'logo_dev_token';
@@ -100,41 +101,10 @@ const CHEQ_LOGO_DATA_URL =
 // Indian large-caps, where logo.dev's ticker endpoint is weakest. US/global tickers fall through
 // to logo.dev's ticker endpoint (token only).
 const STOCK_REGISTRY: Record<string, string> = {
-  RELIANCE: 'ril.com',
-  TCS: 'tcs.com',
-  INFY: 'infosys.com',
-  HDFCBANK: 'hdfcbank.com',
-  ICICIBANK: 'icicibank.com',
-  SBIN: SBI_LOGO_DATA_URL,
-  HINDUNILVR: 'hul.co.in',
-  ITC: 'itcportal.com',
-  BHARTIARTL: 'airtel.in',
-  LT: 'larsentoubro.com',
-  KOTAKBANK: 'kotak.com',
-  AXISBANK: 'axisbank.com',
-  BAJFINANCE: 'bajajfinserv.in',
-  BAJAJFINSV: 'bajajfinserv.in',
-  ASIANPAINT: 'asianpaints.com',
-  MARUTI: 'marutisuzuki.com',
-  WIPRO: 'wipro.com',
-  HCLTECH: 'hcltech.com',
-  SUNPHARMA: 'sunpharma.com',
-  TATAMOTORS: 'tatamotors.com',
-  TATASTEEL: 'tatasteel.com',
-  TITAN: 'titancompany.in',
-  ULTRACEMCO: 'ultratechcement.com',
-  NESTLEIND: 'nestle.in',
-  POWERGRID: 'powergrid.in',
-  NTPC: 'ntpc.co.in',
-  ONGC: 'ongcindia.com',
-  ADANIENT: 'adanienterprises.com',
-  ADANIPORTS: 'adaniports.com',
-  COALINDIA: 'coalindia.in',
-  TECHM: 'techmahindra.com',
-  M_M: 'mahindra.com',
+  ...NSE_STOCK_DOMAINS,
   ZOMATO: 'zomato.com',
-  PAYTM: 'paytm.com',
-  DMART: 'dmart.in',
+  TATAMOTORS: 'tatamotors.com',
+  SBIN: SBI_LOGO_DATA_URL,
   // NMDC Steel: logo.dev has no logo for its own nmdcsteel.com (nor does Google's favicon), so pin
   // it to the parent NMDC group domain, which logo.dev does cover, instead of falling to initials.
   NSLNISP: 'nmdc.co.in',
@@ -324,7 +294,7 @@ function resolveAmcDomain(name: string): string | null {
 
 function baseTicker(symbol: string): string {
   // Strip Yahoo exchange suffix (.NS/.BO/etc.) and normalize separators.
-  return symbol.split('.')[0].replace(/[-]/g, '_').toUpperCase();
+  return symbol.split('.')[0].replace(/[-&]/g, '_').toUpperCase();
 }
 
 type AccountLike = { type: string; name: string; marketSymbol?: string; customLogoUrl?: string };
