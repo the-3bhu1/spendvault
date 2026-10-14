@@ -87,7 +87,7 @@ function StatRow({ label, value, color }: { label: string; value: ReactNode; col
         fontWeight: 700,
         letterSpacing: '1px',
         color: 'var(--text-secondary)',
-        flexShrink: 0
+        minWidth: 0
       }}>
         {label}
       </span>
@@ -96,7 +96,8 @@ function StatRow({ label, value, color }: { label: string; value: ReactNode; col
         fontWeight: 700,
         color: color || 'var(--text-primary)',
         textAlign: 'right',
-        overflowWrap: 'anywhere'
+        whiteSpace: 'nowrap',
+        flexShrink: 0
       }}>
         {value}
       </span>
@@ -690,7 +691,10 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
   };
 
   const formatFullCurrency = (value: number) =>
-    `₹${value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    `₹${value.toLocaleString('en-IN', {
+      minimumFractionDigits: Math.round(value * 100) % 100 === 0 ? 0 : 2,
+      maximumFractionDigits: 2,
+    })}`;
 
   const buildStats = (accounts: Account[]) => {
     const invested = accounts.reduce((sum, acc) => sum + getAccountStats(acc).totalInvested, 0);
