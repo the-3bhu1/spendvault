@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { format } from 'date-fns';
-import { Plus, Users, ChevronRight, Trash2, Check, Search, ChevronDown, Calendar, Edit2, ChevronLeft, ArrowRight, ImageDown, ReceiptIndianRupee, Loader2, X } from 'lucide-react';
+import { Plus, Users, CheckCircle2, ChevronRight, Trash2, Check, Search, ChevronDown, Calendar, Edit2, ChevronLeft, ArrowRight, ImageDown, ReceiptIndianRupee, Loader2, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
@@ -271,7 +271,7 @@ export default function Splits() {
                           background: event.status === 'settled' ? 'var(--bg-hover)' : 'var(--primary-color)', 
                           color: event.status === 'settled' ? 'var(--text-muted)' : 'white' 
                         }}>
-                          <Users size={20} />
+                          {event.status === 'settled' ? <CheckCircle2 size={20} /> : <Users size={20} />}
                         </div>
                         <div className="flex-col">
                           <div className="flex align-center gap-2">
