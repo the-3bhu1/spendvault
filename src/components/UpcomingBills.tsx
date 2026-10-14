@@ -325,7 +325,7 @@ export default function UpcomingBills() {
                             {namedStatements('isCC' in bill ? bill.overdueCycles : [])} unpaid
                           </span>
                           <span className="text-sm font-bold" style={{ fontFamily: 'var(--font-mono)', color: 'var(--danger)', flexShrink: 0 }}>
-                            ₹{ccOverdue.toLocaleString()}
+                            ₹{ccOverdue.toLocaleString('en-IN')}
                           </span>
                         </div>
                         {'isCC' in bill && bill.billed > 0 && (
@@ -334,7 +334,7 @@ export default function UpcomingBills() {
                               This statement · {formatDays(daysLeft)}
                             </span>
                             <span className="text-sm font-bold" style={{ fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
-                              ₹{bill.billed.toLocaleString()}
+                              ₹{bill.billed.toLocaleString('en-IN')}
                             </span>
                           </div>
                         )}
@@ -355,7 +355,7 @@ export default function UpcomingBills() {
                         <span className="text-muted text-xs font-bold uppercase tracking-wider" style={{ marginRight: 'auto' }}>To clear</span>
                       )}
                       <span className="text-xl font-bold" style={{ fontFamily: 'var(--font-mono)', color: isOverdue && !isPaidCC ? 'var(--danger)' : undefined }}>
-                        {bill.amount > 0 ? `₹${bill.amount.toLocaleString()}` : isPaidCC ? 'PAID' : '--'}
+                        {bill.amount > 0 ? `₹${bill.amount.toLocaleString('en-IN')}` : isPaidCC ? 'PAID' : '--'}
                       </span>
                       <div className="flex align-center gap-1 text-xs font-bold px-2 py-1" style={{
                         borderRadius: '6px',
