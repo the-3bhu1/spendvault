@@ -142,14 +142,14 @@ export default function Dashboard({ onOpenCards, onOpenWealth }: {
               exactly what sits above the figure, and centring a block with that much dead space below
               it lifts the figure by half of it: onto the centre. Derived from the label's own values
               rather than a measured pixel count, so it tracks if either changes. */}
-          <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', paddingBottom: 'calc(0.8rem * 1.5 + 0.7rem)' }}>
+          <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', paddingBottom: 'calc(0.95rem * 1.5 + 0.7rem)' }}>
             {/* Same ink as the figure it scopes. RollingNumber sets no colour and inherits
                 --text-primary, so this matches by naming that token rather than by omitting one —
                 the label would otherwise inherit it too, which reads as an accident waiting to be
                 "fixed" back to secondary. The month stays subordinate on size, weight and tracking,
                 which is enough: dimming it as well made the coin's denomination look like two
                 different pieces of type. */}
-            <div className="text-mono uppercase" style={{ fontSize: '0.8rem', fontWeight: 700, letterSpacing: '3.5px', color: 'var(--text-primary)', marginBottom: '0.7rem' }}>
+            <div className="text-mono uppercase" style={{ fontSize: '0.95rem', fontWeight: 700, letterSpacing: '3.5px', color: 'var(--text-primary)', marginBottom: '0.7rem' }}>
               {monthLabel}
             </div>
             {/* Whole rupees: this is a glance surface, and the paise belong on the screens where a

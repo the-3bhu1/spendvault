@@ -64,7 +64,7 @@ const Plaque: React.FC<{
       style={{
         position: 'relative',
         zIndex: 1,
-        fontSize: '0.7rem',
+        fontSize: '0.82rem',
         fontWeight: 800,
         letterSpacing: '2.5px',
         color: 'var(--text-primary)',
