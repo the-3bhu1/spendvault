@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   Plus,
   User as UserIcon,
+  UserCheck,
   ArrowUpRight,
   ArrowDownLeft,
   Trash2,
@@ -20,6 +21,7 @@ import {
   Calendar,
   Share2,
   Loader2,
+  ListTodo,
   X
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
@@ -68,11 +70,14 @@ export default function Debts() {
   );
 
   const filteredDebts = useMemo(() => {
+    const latestEntry = (d: Debt) => d.transactions.reduce((max, t) => Math.max(max, new Date(t.date).getTime()), 0);
     return debts.filter(d =>
       d.personName.toLowerCase().includes(searchQuery.toLowerCase())
     ).sort((a, b) => {
       if (a.status !== b.status) return a.status === 'settled' ? 1 : -1;
-      return b.updatedAt - a.updatedAt;
+      const touched = b.updatedAt - a.updatedAt;
+      if (Math.abs(touched) > 1000) return touched;
+      return (latestEntry(b) - latestEntry(a)) || touched;
     });
   }, [debts, searchQuery]);
 
@@ -350,7 +355,7 @@ export default function Debts() {
                   >
                     <div className="flex align-center gap-4">
                       <div className="flex-center" style={{ width: '44px', height: '44px', borderRadius: '12px', background: isSettled ? 'var(--bg-hover)' : 'var(--primary-soft)', color: isSettled ? 'var(--text-muted)' : 'var(--accent)' }}>
-                        <UserIcon size={20} />
+                        {isSettled ? <UserCheck size={20} /> : <UserIcon size={20} />}
                       </div>
                       <div className="flex-col">
                         <span className="font-bold">{debt.personName}</span>
@@ -449,8 +454,12 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
   /* Shares the history as PNG(s) — image only, no accompanying message. The text a share sheet
      carries is dropped by half the apps it lands in and duplicated by the other half, and every
      figure it would have restated is already on the image. One page per dozen entries, however many
-     that comes to; see debtImage for why the whole history goes and not a filtered slice of it. */
-  const handleShare = async () => {
+     that comes to; see debtImage for how an open-items share still adds up to the balance. */
+  const [isShareMenuOpen, setIsShareMenuOpen] = useState(false);
+  const openCount = debt.transactions.filter(t => !t.markedDone).length;
+  const canShareOpenOnly = openCount > 0 && openCount < debt.transactions.length;
+
+  const handleShare = async (openOnly: boolean) => {
     if (sharingRef.current) return;   // ignore a second tap while a share is already in flight
     sharingRef.current = true;
     setIsSharing(true);
@@ -458,13 +467,20 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
       /* The running balance after each entry, keyed by id — the same figures the add/edit form
          previews as "as of this date", from the same helper rather than a second opinion about
          them. The log renders newest-first, hence the lookup. */
-      const balanceAfter = debtRunningBalances(debt.transactions);
+      const openTransactions = debt.transactions.filter(t => !t.markedDone);
+      const broughtForward = openOnly ? netBalance - debtNetBalance(openTransactions) : 0;
+      const balanceAfter = openOnly
+        ? new Map([...debtRunningBalances(openTransactions)].map(([id, b]) => [id, b + broughtForward]))
+        : debtRunningBalances(debt.transactions);
+      const shared = openOnly ? orderedTransactions.filter(t => !t.markedDone) : orderedTransactions;
 
       const blobs = await buildDebtShareImages({
         personName: debt.personName,
         netBalance,
         settled: debt.status === 'settled',
-        entries: orderedTransactions.map(t => ({
+        openOnly,
+        broughtForward,
+        entries: shared.map(t => ({
           date: format(parseISO(t.date), 'dd/MM/yyyy'),
           description: t.description,
           amount: t.amount,
@@ -615,7 +631,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
               <button
                 className={`btn btn-secondary${isSharing ? ' is-busy' : ''}`}
                 style={{ width: '36px', height: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                onClick={handleShare}
+                onClick={() => canShareOpenOnly ? setIsShareMenuOpen(true) : handleShare(false)}
                 disabled={isSharing || debt.transactions.length === 0}
                 title={isSharing ? 'Preparing image…'
                   : debt.transactions.length === 0 ? 'Nothing to share yet' : 'Share history'}
@@ -748,7 +764,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
                       textDecoration: tx.markedDone ? 'line-through' : 'none',
                       color: tx.markedDone ? 'var(--text-muted)' : undefined
                     }}>{tx.description}</span>
-                    <span className="text-xs text-muted" style={{ fontSize: '10px' }}>{new Date(tx.date).toLocaleDateString()}</span>
+                    <span className="text-xs text-muted" style={{ fontSize: '10px' }}>{format(parseISO(tx.date), 'dd/MM/yyyy')}</span>
                   </div>
                 </div>
                 <div className="flex align-center gap-3" style={{ flexShrink: 0, marginLeft: '0.5rem' }}>
@@ -973,6 +989,40 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
         >
           <Check size={16} className="text-accent" />
           <span className="text-mono text-sm">{hint}</span>
+        </div>
+      )}
+
+      {isShareMenuOpen && (
+        <div className="modal-overlay action-sheet-modal" onClick={() => setIsShareMenuOpen(false)}>
+          <div className="modal-content action-sheet-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Share</h3>
+              <button onClick={() => setIsShareMenuOpen(false)} aria-label="Close">
+                <X />
+              </button>
+            </div>
+            <div className="modal-body flex-col gap-3">
+              <button
+                className="btn btn-secondary w-100 flex-row align-center gap-3"
+                style={{ justifyContent: 'flex-start', padding: '1rem' }}
+                onClick={() => { setIsShareMenuOpen(false); handleShare(true); }}
+              >
+                <ListTodo size={20} /> Open items only ({openCount})
+              </button>
+              <button
+                className="btn btn-secondary w-100 flex-row align-center gap-3"
+                style={{ justifyContent: 'flex-start', padding: '1rem' }}
+                onClick={() => { setIsShareMenuOpen(false); handleShare(false); }}
+              >
+                <History size={20} /> Full debt summary ({debt.transactions.length})
+              </button>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary w-100" style={{ padding: '1rem' }} onClick={() => setIsShareMenuOpen(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>

@@ -567,10 +567,13 @@ twelve to a page. Each entry shows its amount and, beneath it, the RUNNING BALAN
 — the same "as of this date" figure the add/edit form previews — so a row says both what moved and
 what it left owing. Read down the column it counts backwards, the log being newest-first, so the top
 entry's balance is the net at the top of the image; a long history simply becomes several images rather than one very tall one, and
-each one repeats the header so it stands alone. It is always the WHOLE history — there is no "open
-entries only" or date-range option, and that is deliberate: a tick is a checkoff that does not
-change the balance, and this ledger is cumulative, so either filter would list rows that do not add
-up to the figure printed above them. On a phone this opens the share sheet; on a desktop browser
+each one repeats the header so it stands alone. When some entries are ticked and some are not, the
+share icon first asks: "Open items only" or "Full debt summary". Open items only lists just the
+un-ticked entries under an OPEN ITEMS heading; because a tick does not change the balance, the
+ticked entries' combined effect appears as a final "Brought forward from ticked-off entries" row,
+so the rows still add up to the net at the top. If nothing is ticked, or everything is, it shares
+the full history straight away. There is no date-range option, because this ledger is cumulative.
+On a phone this opens the share sheet; on a desktop browser
 that cannot share files, the PNGs download instead.
 The add/edit entry form previews the balance AS OF THAT ENTRY'S OWN DATE — the running balance just
 before it, then after it — not the debt's final net. So editing the 2nd of 10 entries shows what the

@@ -1230,6 +1230,15 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     };
   };
 
+  const restampChangedDebts = (before: Debt[], after: Debt[]): Debt[] =>
+    after.map(debt => {
+      const old = before.find(b => b.id === debt.id);
+      const unchanged = !!old
+        && old.transactions.length === debt.transactions.length
+        && old.transactions.every((t, i) => t === debt.transactions[i]);
+      return unchanged ? debt : updateDebtStatus(debt);
+    });
+
   const syncDebtsForTransaction = (
     prevDebts: Debt[],
     oldTx: Transaction | undefined,
@@ -1286,14 +1295,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
     // Scenario B: Was matching debt, but now does NOT match
     else if (oldMatch && !newMatch) {
-      updatedDebts = updatedDebts.map(debt => {
+      updatedDebts = restampChangedDebts(prevDebts, updatedDebts.map(debt => {
         const filteredTxs = debt.transactions.filter(dt => dt.linkedTxId !== updatedTx.id && !(updatedTx.linkedTransactionIds || []).includes(dt.id));
         return {
           ...debt,
           transactions: filteredTxs
         };
-      })
-      .map(updateDebtStatus)
+      }))
       .filter(debt => debt.transactions.length > 0);
 
       updatedTx.linkedTransactionIds = (updatedTx.linkedTransactionIds || []).filter(id => {
@@ -1710,7 +1718,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         })).filter(debt => debt.transactions.length > 0);
       }
       
-      updatedDebts = updatedDebts.map(updateDebtStatus);
+      updatedDebts = restampChangedDebts(prev.debts || [], updatedDebts);
       
       // When the edit moved the date to a different day, the old `order` is stale for the new day's
       // group (a tx that was order 0 on its old day would jump to the top of the new day). Re-stamp
@@ -1830,9 +1838,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
             }
             return t;
           });
-        const debtsAfter = (prev.debts || [])
-          .map(debt => ({ ...debt, transactions: debt.transactions.filter(dt => dt.id !== tx.id && dt.linkedTxId !== tx.id) }))
-          .map(updateDebtStatus)
+        const debtsAfter = restampChangedDebts(prev.debts || [], (prev.debts || [])
+          .map(debt => ({ ...debt, transactions: debt.transactions.filter(dt => dt.id !== tx.id && dt.linkedTxId !== tx.id) })))
           .filter(debt => debt.transactions.length > 0);
         return { ...prev, transactions: remaining, debts: debtsAfter };
       }
@@ -1840,11 +1847,10 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       const linkedIds = (tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []));
       
       let updatedDebts = prev.debts || [];
-      updatedDebts = updatedDebts.map(debt => ({
+      updatedDebts = restampChangedDebts(updatedDebts, updatedDebts.map(debt => ({
         ...debt,
         transactions: debt.transactions.filter(dt => !linkedIds.includes(dt.id) && dt.linkedTxId !== tx.id)
-      }))
-      .map(updateDebtStatus)
+      })))
       .filter(debt => debt.transactions.length > 0);
 
       // Leg-type links (Transfer/CC/NCMC/Mutual Funds/Stocks/Commodity) form a STAR around the parent:

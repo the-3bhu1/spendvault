@@ -4,18 +4,13 @@ import { C, W, PADX, roundRect, ellipsize, newCanvas, canvasToBlob, drawFooter }
 // Renders a person's debt history as shareable PNG(s) — the image you send the other person so you
 // both agree on where you stand. Built on the same canvas primitives as the split summary.
 //
-// EVERY ENTRY, ALWAYS, and that is a decision rather than an omission. The obvious alternatives are
-// "just the open ones" and "just this date range", and neither can be told honestly:
+// Either every entry, or only the un-ticked ones. A tick is a checkoff, not a settlement — it
+// changes nothing about the balance (see the netBalance reduce in Debts.tsx) — so an open-items
+// image carries the ticked entries' net as a brought-forward row, and its rows still add up to the
+// figure printed above them, which is the one thing a statement between two people must never miss.
 //
-//   - "Open ones" would mean the un-ticked entries, but a tick is a checkoff, not a settlement — it
-//     changes nothing about the balance (see the netBalance reduce in Debts.tsx). So a filtered
-//     image would list rows that do not add up to the figure printed above them, which is the one
-//     thing a statement between two people must never do.
-//   - A date range is worse for the same reason turned around: this ledger is cumulative, so the
-//     entries BEFORE the window are precisely what makes the balance non-zero. A window is only
-//     honest with a brought-forward opening balance, and that is a statement, not a share button.
-//
-// So: everything, newest first, paginated as far as it needs to go.
+// A date range is still not offered: this ledger is cumulative, so the entries BEFORE the window are
+// precisely what makes the balance non-zero.
 
 export interface DebtImageEntry {
   date: string;          // ISO — rendered as dd/MM/yyyy
@@ -36,11 +31,14 @@ export interface DebtImageOpts {
   netBalance: number;
   settled: boolean;
   entries: DebtImageEntry[];
+  openOnly?: boolean;
+  broughtForward?: number;
 }
 
 /** Entries per page. The header block is repeated on each, so every image stands on its own. */
 const ENTRIES_PER_PAGE = 12;
 const ENTRY_ROW = 78; // two-line entry card height + gap
+const BROUGHT_FORWARD_ROW = 58;
 
 const TYPE_LABEL: Record<DebtImageEntry['type'], string> = {
   lent: 'Lent',
@@ -68,6 +66,8 @@ async function renderDebtPage(
   let H = 44 + 34 + 40 + 30;                        // top pad + kicker + name + balance line
   H += 30 + 30;                                     // divider gap + section header
   H += entries.length ? entries.length * ENTRY_ROW : 56;
+  const showBroughtForward = page === pages - 1 && !!opts.openOnly && !!opts.broughtForward;
+  if (showBroughtForward) H += BROUGHT_FORWARD_ROW;
   H += 72;                                          // footer
 
   const { canvas, ctx } = newCanvas(H);
@@ -116,9 +116,10 @@ async function renderDebtPage(
   // ---- Entries ----
   ctx.fillStyle = C.accent;
   ctx.font = '700 13px monospace';
+  const title = opts.openOnly ? 'OPEN ITEMS' : 'TRANSACTION LOG';
   const label = pages > 1
-    ? `TRANSACTION LOG (${page + 1}/${pages})`
-    : `TRANSACTION LOG (${entries.length})`;
+    ? `${title} (${page + 1}/${pages})`
+    : `${title} (${entries.length})`;
   ctx.fillText(label, PADX, y + 4);
   y += 22;
 
@@ -147,6 +148,7 @@ async function renderDebtPage(
       ctx.fillStyle = e.markedDone ? C.muted : C.text;
       ctx.font = '700 16px sans-serif';
       const descT = ellipsize(ctx, e.description || TYPE_LABEL[e.type], W - PADX * 2 - amtW - 70);
+      const descW = ctx.measureText(descT).width;
       ctx.fillText(descT, cx, y + 26);
 
       /* The kind is dropped when the description already IS it. Most entries are logged with a
@@ -181,7 +183,7 @@ async function renderDebtPage(
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(cx, y + 21);
-        ctx.lineTo(cx + ctx.measureText(descT).width, y + 21);
+        ctx.lineTo(cx + descW, y + 21);
         ctx.moveTo(W - PADX - 20 - amtW, y + 26);
         ctx.lineTo(W - PADX - 20, y + 26);
         ctx.stroke();
@@ -189,6 +191,24 @@ async function renderDebtPage(
 
       y += ENTRY_ROW;
     });
+  }
+
+  if (showBroughtForward) {
+    const rowH = BROUGHT_FORWARD_ROW - 12;
+    ctx.strokeStyle = C.panelBorder;
+    ctx.lineWidth = 1;
+    roundRect(ctx, PADX + 0.5, y + 0.5, W - PADX * 2 - 1, rowH - 1, 14);
+    ctx.stroke();
+
+    const balT = `Balance ${formatCurrency(opts.broughtForward!)}`;
+    ctx.font = '600 12px sans-serif';
+    const balW = ctx.measureText(balT).width;
+    ctx.fillStyle = C.muted;
+    ctx.fillText(balT, W - PADX - 20 - balW, y + 28);
+
+    ctx.font = '600 14px sans-serif';
+    ctx.fillText(ellipsize(ctx, 'Brought forward from ticked-off entries', W - PADX * 2 - balW - 60), PADX + 20, y + 28);
+    y += BROUGHT_FORWARD_ROW;
   }
 
   y += 18;
