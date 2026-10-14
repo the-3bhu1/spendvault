@@ -2341,7 +2341,7 @@ export default function Settings() {
     // Vendor (price reference) only — the Gemini key and its daily usage live under AI Features.
     const storedVendor = getCommodityVendor();
     const effectiveInputVendor = geminiVendorInput.trim().toUpperCase() || 'MMTC-PAMP';
-    const vendorDirty = effectiveInputVendor !== storedVendor;
+    const vendorDirty = geminiKeySaved && effectiveInputVendor !== storedVendor;
     viewContent = (
       <SubviewWrapper title="Commodity Prices" onBack={() => setActiveView('main')}>
         <div className="flex-col gap-4">
@@ -2355,10 +2355,11 @@ export default function Settings() {
                 → Add your Gemini key under Settings → AI Features to enable auto-fetch.
               </span>
             )}
-            <div className="input-group" style={{ marginBottom: 0 }}>
+            <div className="input-group" style={{ marginBottom: 0, opacity: geminiKeySaved ? 1 : 0.5 }}>
               <label>Vendor (price reference)</label>
               <input
                 className="input-field"
+                disabled={!geminiKeySaved}
                 value={geminiVendorInput}
                 onChange={e => setGeminiVendorInput(e.target.value.toUpperCase())}
                 placeholder="MMTC-PAMP"
@@ -2366,33 +2367,36 @@ export default function Settings() {
                 autoCorrect="off"
                 spellCheck={false}
               />
-              <div className="flex align-center flex-wrap" style={{ marginTop: '0.75rem', gap: '0.85rem', paddingBottom: '0.25rem' }}>
-                <span className="text-xs text-muted" style={{ fontSize: '0.72rem', fontWeight: 600 }}>Popular:</span>
-                {POPULAR_COMMODITY_VENDORS.map(v => {
-                  const isSelected = effectiveInputVendor === v && geminiVendorInput.trim() !== '';
-                  return (
-                    <button
-                      key={v}
-                      type="button"
-                      className="btn btn-secondary text-xs"
-                      style={{
-                        padding: '0.35rem 0.75rem',
-                        fontSize: '0.72rem',
-                        fontWeight: 800,
-                        fontFamily: 'var(--font-mono)',
-                        borderRadius: '4px',
-                        boxShadow: '3px 3px 0 #000',
-                        border: isSelected ? '1px solid var(--accent)' : '1px solid var(--border-color)',
-                        backgroundColor: isSelected ? 'var(--accent)' : 'var(--bg-hover)',
-                        color: isSelected ? '#ffffff' : 'var(--text-primary)',
-                        cursor: 'pointer',
-                      }}
-                      onClick={() => setGeminiVendorInput(v)}
-                    >
-                      {v}
-                    </button>
-                  );
-                })}
+              <div className="flex" style={{ marginTop: '0.75rem', gap: '0.85rem', paddingBottom: '0.25rem', alignItems: 'baseline' }}>
+                <span className="text-xs text-muted" style={{ fontSize: '0.72rem', fontWeight: 600, flexShrink: 0 }}>Popular:</span>
+                <div className="flex align-center flex-wrap" style={{ gap: '0.85rem', minWidth: 0 }}>
+                  {POPULAR_COMMODITY_VENDORS.map(v => {
+                    const isSelected = effectiveInputVendor === v && geminiVendorInput.trim() !== '';
+                    return (
+                      <button
+                        key={v}
+                        type="button"
+                        className="btn btn-secondary text-xs"
+                        disabled={!geminiKeySaved}
+                        style={{
+                          padding: '0.35rem 0.75rem',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          fontFamily: 'var(--font-mono)',
+                          borderRadius: '4px',
+                          boxShadow: '3px 3px 0 #000',
+                          border: isSelected ? '1px solid var(--accent)' : '1px solid var(--border-color)',
+                          backgroundColor: isSelected ? 'var(--accent)' : 'var(--bg-hover)',
+                          color: isSelected ? '#ffffff' : 'var(--text-primary)',
+                          cursor: geminiKeySaved ? 'pointer' : 'not-allowed',
+                        }}
+                        onClick={() => setGeminiVendorInput(v)}
+                      >
+                        {v}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
             <span className="text-xs text-muted">
