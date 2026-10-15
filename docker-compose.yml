@@ -15,9 +15,10 @@ services:
     stdin_open: true
     tty: true
 
-  # Release-APK builder. Not part of the dev stack — start it explicitly, one run at a time:
+  # Release-APK builder. Not part of the dev stack. Start it through the wrapper, which fills in the
+  # two variables below for this machine:
   #
-  #   docker compose run --rm spendvault-apk
+  #   npm run release:apk -- --docker
   #
   # It exits when the build finishes. Setup and keystore handling: docs/RELEASE.md
   spendvault-apk:
@@ -26,24 +27,41 @@ services:
       context: .
       dockerfile: Dockerfile.android
 
+    # The aapt2 binary Gradle downloads exists only for x86-64 Linux, so the builder is always amd64:
+    # native on Windows and Intel, emulated by Docker Desktop on an Apple-silicon Mac.
+    platform: linux/amd64
+
     volumes:
       - .:/app
-      # Anonymous volume, same trick as the dev service: the host's node_modules is built for the
-      # host OS, and letting it show through would hand the Linux build the wrong native binaries.
-      - /app/node_modules
-      # Gradle downloads ~hundreds of MB of dependencies on a cold run. Keeping them in a named
-      # volume makes every later build minutes rather than tens of minutes.
+      # The host's node_modules is built for the host OS; the Linux build gets its own.
+      - apk-node-modules:/app/node_modules
+      - npm-cache:/root/.npm
+      # Gradle downloads hundreds of MB on a cold run; later builds reuse them.
       - gradle-cache:/root/.gradle
-      # Your keystore, read-only, from wherever you keep it on this machine. Defaults to ./.keys
-      # (gitignored) so the service still starts unconfigured — it just builds unsigned.
-      - ${SV_KEYSTORE_DIR:-./.keys}:/keys:ro
+      # Every Gradle state and build directory lives in a volume, not in the checkout. The container's
+      # /app/... paths then never mix with a host build's paths in android/.gradle or android/**/build,
+      # so switching between this and an Android Studio build can't confuse either — and the build
+      # skips writing through the (slow, on Windows) bind mount. The APK is copied out to release/.
+      - apk-android-dotgradle:/app/android/.gradle
+      - apk-android-dotkotlin:/app/android/.kotlin
+      - apk-android-build:/app/android/build
+      - apk-app-build:/app/android/app/build
+      # Not android/capacitor-cordova-android-plugins/build: `cap sync` deletes and regenerates that whole
+      # folder on every build (host or container alike), so nothing in it can go stale — and a volume
+      # mounted inside it makes the delete fail with EBUSY.
+      # This machine's signing folder (keystore + signing.properties), read-only, at the path where
+      # android/app/build.gradle looks: <home>/.spendvault. Started without the wrapper, it mounts the
+      # gitignored ./.keys instead and the build stops with "No release signing configured".
+      - ${SV_SIGNING_DIR:-./.keys}:/root/.spendvault:ro
 
     environment:
-      # Path INSIDE the container, so it starts with /keys — e.g. /keys/spendvault.jks
-      SV_KEYSTORE_FILE: ${SV_KEYSTORE_FILE:-}
-      SV_KEYSTORE_PASSWORD: ${SV_KEYSTORE_PASSWORD:-}
-      SV_KEY_ALIAS: ${SV_KEY_ALIAS:-}
-      SV_KEY_PASSWORD: ${SV_KEY_PASSWORD:-}
+      SV_APK_NAME: ${SV_APK_NAME:-app-release.apk}
 
 volumes:
+  apk-node-modules:
+  npm-cache:
   gradle-cache:
+  apk-android-dotgradle:
+  apk-android-dotkotlin:
+  apk-android-build:
+  apk-app-build:

@@ -1,3 +1,8 @@
+# Text is stored with LF in the repository, whatever each machine's core.autocrlf says. A Windows
+# checkout and a macOS checkout then commit byte-identical text, and no file shows as modified just
+# because it was opened on the other OS. (Binary files are detected and left alone.)
+* text=auto
+
 # Files that are EXECUTED on Linux must keep LF endings, whatever the checkout platform does.
 #
 # core.autocrlf=true on Windows rewrites text files to CRLF on checkout. For a shell script that is
@@ -6,8 +11,18 @@
 # with CRLF, so the release-builder container (Dockerfile.android) could never have run it.
 *.sh text eol=lf
 gradlew text eol=lf
+.githooks/* text eol=lf
 
 # Read by the Docker daemon rather than by Windows.
 Dockerfile text eol=lf
 Dockerfile.* text eol=lf
 docker-compose.yml text eol=lf
+
+# cmd.exe misreads labels and GOTOs in a batch file with LF endings.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never diffed or merged as text.
+*.jks binary
+*.keystore binary
+*.apk binary

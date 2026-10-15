@@ -1,0 +1,4 @@
+#!/bin/sh
+# Wired up per clone by `npm run release:setup` (git config core.hooksPath .githooks).
+# Git for Windows runs this through its bundled sh too, so one hook serves every machine.
+exec node "$(git rev-parse --show-toplevel)/scripts/guard-commit.mjs"

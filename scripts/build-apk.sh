@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 #
-# Release build, start to finish. This is step 5 of .claude/commands/generate-release-apk.md, run
-# inside the container from Dockerfile.android so it behaves the same on any machine.
+# Release build inside the Dockerfile.android container — step 5 of
+# .claude/commands/generate-release-apk.md on the Docker route.
 #
-# Run it via:  docker compose run --rm spendvault-apk
-# Configuration and keystore setup: docs/RELEASE.md
+# Start it with `npm run release:apk -- --docker` (scripts/release-apk.mjs). That mounts this
+# machine's signing folder at /root/.spendvault, where android/app/build.gradle looks for it, and
+# names the output. Gradle refuses to build if the key is missing or is not the SpendVault release
+# key, so a signed APK at the end is the only way this script succeeds. See docs/RELEASE.md.
 set -euo pipefail
 
 cd /app
+built="android/app/build/outputs/apk/release/app-release.apk"
+name="${SV_APK_NAME:-app-release.apk}"
 
-echo "==> 1/4  Installing dependencies"
-# npm ci needs the lockfile to match package.json exactly; fall back rather than fail the build.
-if [ -f package-lock.json ]; then
-  npm ci || npm install
-else
-  npm install
-fi
+echo "==> 1/4  Installing dependencies (npm ci)"
+# Never `npm install`: it can rewrite package-lock.json, and this checkout is the host's own.
+npm ci --no-audit --no-fund
 
 echo "==> 2/4  Building web bundle (tsc -b && vite build)"
 npm run build
@@ -23,34 +23,23 @@ npm run build
 echo "==> 3/4  Syncing the web build into the Android project"
 npx cap sync android
 
-if [ -z "${SV_KEYSTORE_FILE:-}" ] && [ ! -f android/key.properties ]; then
-  echo
-  echo "!!  No signing key configured — this APK will be UNSIGNED and cannot be installed over an"
-  echo "!!  existing SpendVault install. Mount your keystore and set SV_KEYSTORE_*; see docs/RELEASE.md."
-  echo
-elif [ -n "${SV_KEYSTORE_FILE:-}" ] && [ ! -f "${SV_KEYSTORE_FILE}" ]; then
-  echo "ERROR: SV_KEYSTORE_FILE is set to '${SV_KEYSTORE_FILE}' but no file is there." >&2
-  echo "       Check that SV_KEYSTORE_DIR points at the folder holding your .jks." >&2
-  exit 1
-fi
-
 echo "==> 4/4  Assembling release APK"
-# --no-daemon: the container is thrown away after each run, so a lingering daemon only wastes memory.
-( cd android && ./gradlew assembleRelease --no-daemon )
+rm -f "$built"
+# `sh ./gradlew`, not `./gradlew`: a checkout made on Windows may not carry the executable bit through
+# the mount. --no-daemon: the container is thrown away after each run.
+#
+# Sized for Docker Desktop's default VM (4 GB on a Mac, emulating amd64 on Apple silicon). Left to its
+# defaults Gradle ran a separate Kotlin compiler JVM beside its own and one worker per CPU, and the
+# kernel killed it mid-compile ("Gradle build daemon disappeared unexpectedly"). Kotlin compiles inside
+# Gradle's JVM instead, two workers at a time, and file watching — pointless in a throwaway container,
+# and erroring through the bind mount — is off.
+( cd android && sh ./gradlew assembleRelease --no-daemon --no-watch-fs --max-workers=2 \
+    -Pkotlin.compiler.execution.strategy=in-process )
 
-out="android/app/build/outputs/apk/release"
-if [ -f "$out/app-release.apk" ]; then
-  apk="$out/app-release.apk"
-  state="signed"
-elif [ -f "$out/app-release-unsigned.apk" ]; then
-  apk="$out/app-release-unsigned.apk"
-  state="UNSIGNED — will not install over an existing build"
-else
-  echo "ERROR: gradle reported success but produced no APK in $out" >&2
-  exit 1
-fi
-
+# android/app/build is a Docker volume (see docker-compose.yml), invisible to the host — copy the APK
+# out to release/, which is part of the bind-mounted checkout.
+mkdir -p release
+cp "$built" "release/$name"
 echo
-echo "==> Done — $state"
-ls -lh "$apk"
-echo "    On the host: ./$apk"
+echo "==> Done — release/$name"
+ls -lh "release/$name"

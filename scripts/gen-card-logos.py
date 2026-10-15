@@ -8,7 +8,8 @@ on one page can't collide, and applies a per-logo colour policy.
 import re, os, sys
 import xml.etree.ElementTree as ET
 
-REPO = '/Users/tribhuvankomarla/Documents/Expense Tracker'
+# The repo root, wherever this checkout lives — not one machine's absolute path.
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SVG = 'http://www.w3.org/2000/svg'
 
 # 'white'    -> every fill becomes currentColor (single-colour lockups)

@@ -8,7 +8,10 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "node -r ./scripts/vitest-shim.cjs ./node_modules/vitest/vitest.mjs run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "release:doctor": "node scripts/release-apk.mjs doctor",
+    "release:setup": "node scripts/release-apk.mjs setup",
+    "release:apk": "node scripts/release-apk.mjs build"
   },
   "dependencies": {
     "@capacitor/android": "^8.2.0",

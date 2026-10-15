@@ -62,7 +62,8 @@ Check whether recent user-facing UI changes, feature renames, tab additions, or 
 
 - Review recent changes (`git log`/`git diff` since the last release build) for renamed tabs, updated button labels, new Hub features, or modified UI layouts.
 - Check `src/components/AppTour.tsx` to verify that step titles, descriptions, target CSS selectors, sample mock data, and feature tour titles (e.g. Wealth, Mutual Funds, EPF, Hub cards) accurately match the current UI.
-- Fix any stale tour text, target selectors, or broken tour steps, and verify with `npx tsc --noEmit`.
+- Fix any stale tour text, target selectors, or broken tour steps, and verify with `npx tsc -b`
+  (`tsc --noEmit` is a no-op here: the root tsconfig has `files: []`).
 
 ## 4. Push and merge to `build-ver-2.1`
 
@@ -74,28 +75,33 @@ Unless told otherwise for this run, `build-ver-2.1` is always the target branch 
 - Push `build-ver-2.1` to `origin`.
 - Pushing affects the shared remote — confirm with the user before pushing unless they've
   already told you to push as part of this request.
+- The repo's pre-commit guard (`.githooks/pre-commit`) blocks keystores, passwords and
+  machine-specific paths. If it blocks a commit, fix what it names — never `--no-verify` past it
+  without asking the user. Never stage `android/gradle.properties` changes that add
+  `org.gradle.java.home`, nor `android/local.properties`, `key.properties` or anything in `release/`.
 
 ## 5. Build the release APK
 
-Two routes. Check which one this machine can actually do BEFORE starting — a machine with no Android
-SDK fails on the first gradle invocation, and a machine with no keystore builds an APK that cannot be
-installed over an existing SpendVault. `docs/RELEASE.md` covers both in full.
+This works the same on macOS and Windows (from any shell, Git Bash included). `docs/RELEASE.md`
+covers the machinery and the one-time setup per machine.
 
-- **Local toolchain** — needs the Android SDK (`ANDROID_HOME` set, or `sdk.dir` in
-  `android/local.properties`; note `local.properties` is gitignored so it never arrives with a clone)
-  and `android/key.properties` for signing:
-  - `npm run build` (runs `tsc -b && vite build`) to produce `dist/`.
-  - `npx cap sync android` to copy the web build into the native Android project.
-  - `cd android && ./gradlew assembleRelease`.
-- **Docker** — needs only Docker plus a copy of the keystore, and works from a fresh clone on any
-  machine: `docker compose run --rm spendvault-apk` (see `docs/RELEASE.md` §3 for the `.env` it
-  reads). Runs the same four commands inside `Dockerfile.android`.
+1. Run `npm run release:doctor` FIRST. It reports this machine's signing setup, JDK, Android SDK and
+   Docker, and which route `release:apk` will take. If neither route is READY, stop and report the
+   `[!!]` lines to the user — the fixes (copying in the keystore, `npm run release:setup`, starting
+   Docker Desktop) need them, and `release:setup` asks for passwords interactively, so the user must
+   run it in their own terminal. Never create, regenerate or download a keystore: a different key
+   produces an APK that cannot update an installed SpendVault, and reinstalling wipes localStorage,
+   which is where all user data lives.
+2. Run `npm run release:apk` (auto-picks: the local toolchain if ready, else Docker). Force a route
+   with `npm run release:apk -- --local` or `-- --docker`. The Docker route's first run on a machine
+   builds a multi-GB image and is slow (run it in the background); later runs are minutes.
+3. Gradle itself refuses to package a release with no signing configured, with the wrong password,
+   or with any keystore whose certificate is not SpendVault's — so a finished build is a correctly
+   signed one. The output is copied to `release/SpendVault-<APP_VERSION>-<commit>.apk` (a `-dirty`
+   suffix means uncommitted changes went in — build from the pushed commit instead).
 
-Either way the output lands at `android/app/build/outputs/apk/release/app-release.apk`. If you get
-`app-release-unsigned.apk` instead, signing was not configured — report that as a failure, not a
-successful build. It cannot upgrade an installed app, and reinstalling wipes localStorage, which is
-where all user data lives.
 - Do NOT bump `versionCode` (currently `1`) or `versionName` in `android/app/build.gradle`, and
   do NOT bump `APP_VERSION` in `src/utils.ts` (currently `'v2.1.0'`) — unless the user explicitly
   asks for a version bump in this run.
-- Report the final APK path, its size, and confirm the build succeeded.
+- Report the final APK path, its size and SHA-256 (all printed by `release:apk`), which route built
+  it, and confirm the build succeeded.
