@@ -193,7 +193,7 @@ deleting one keeps the legs in sync / removes them together. By category:
   - Which accounts can be used: the "Paid from" picker is grouped under account-type headings and
     offers three kinds, all of them unconditionally.
     (1) Standalone "rewards" wallets, whether counted in rupees (CRED coins) or in their own unit
-    (Cheq Chips at 10 = ₹1 — the picker shows "500 Chips" and the ₹ | PTS toggle appears).
+    (Cheq Chips at 10 = ₹1 — the picker shows "500 Chips" and a Chips field appears beside the ₹ amount).
     (2) E-WALLETS — a Flipkart, Amazon Pay, AJIO or Uber balance and the like. A purchase part-paid
     from stored value is therefore ONE entry with two legs, not two unrelated entries: the wallet's
     leg is an ordinary rupee debit, so that wallet's balance drops by exactly what it paid, and the
@@ -227,15 +227,19 @@ the "Other" source below covers one-off rewards.
   the full price minus every source together, and the save is refused if the sources together exceed
   the price. Each source produces its OWN debit leg, so a two-wallet split lists two redemptions under
   the spend in the ledger, and the "×" removes only the card on screen (the last one closes the panel).
-- Unit toggle (₹ | PTS): when the source is a card's own points wallet, the "Amount" field
-  can be typed in either unit and a "= ..." line underneath shows the converted value. It always
-  STARTS in ₹, including after picking a points wallet — picking a source never re-reads digits
-  already typed as points. PTS is only ever reached by tapping the toggle, and that choice then
-  sticks for that card. Typing 430 in
-  PTS mode and typing 86 in ₹ mode are the same redemption when the rate is 5 Jewels = ₹1 — pick
-  whichever the issuer's app showed you. A rupee-denominated rewards wallet has nothing to convert, so
-  it shows no toggle. The conversion rate is set per account (Accounts → edit the card → reward unit
-  and conversion rate).
+- Points sources get TWO fields side by side: when the source counts in a unit (a card's own points
+  wallet, or a rewards wallet in Chips/Miles), the card shows "Amount (₹)" next to a points field
+  labelled with the unit (e.g. "Jewels (PTS)"). Type in whichever the issuer's app showed you and the
+  other fills in at the account's conversion rate — typing 430 points or ₹86 is the same redemption
+  when the rate is 5 Jewels = ₹1. There is no ₹ | PTS toggle any more.
+- Overriding the points: if the rupee amount was typed first, editing the points field afterwards
+  keeps the rupees and records that exact point count for this redemption instead — for when the
+  issuer deducted a different number of points than the standard rate implies. A "Reset (N default)"
+  button then appears under the two fields and puts the points back to the standard conversion. The
+  overridden count is what comes off a CARD's own points ledger; a standalone rewards wallet's balance
+  still follows the rupee amount at its rate. A rupee-denominated wallet has nothing to convert, so it
+  shows only "Amount (₹)". The conversion rate is set per account (Accounts → edit the card → reward
+  unit and conversion rate).
 - Redeeming more than the wallet holds is refused on save, and the message names what IS available in
   that account's own unit (e.g. "Only 432 Jewels available"). Editing an existing split can always be
   re-saved or lowered — its own already-recorded redemption counts as available.
@@ -509,7 +513,8 @@ Split shared expenses among people. Create an event with a name and people. Each
 equally or unequally, among any subset of people, and tracks who paid and who has settled. An event
 is a NAME plus a list of people — there are no recurring splits, cycles, frequencies or start dates;
 every event is one-off, mark people paid as they settle and close the whole thing with the tick
-(Mark as Settled) in its header, which can be re-opened. Unequal splits have an "Auto-Split
+(Mark as Settled) in its header, which can be re-opened. In the events list a settled event shows
+a check-circle icon in place of the group icon. Unequal splits have an "Auto-Split
 Remaining" helper. Amounts are divided in whole paise so the shares always add up exactly to the
 expense: ₹613.73 among 6 is five shares of ₹102.29 and one of ₹102.28 (the extra paise go to the first
 people in the list, you last). This applies to equal splits and to Auto-Split Remaining alike.
@@ -541,6 +546,11 @@ a lone "K" would be no more use than "Me". It falls back to "Me" if no name is s
   so un-tick it first. Deleting the last entry left removes that person entirely.
 - A person's header carries share, tick (mark all done), pencil (rename) and trash (delete the whole
   history, irreversible); the main list has a search-by-name box.
+- List order: open debts come first and settled ones sink to the bottom, where a settled person shows
+  a check-mark icon instead of the plain person icon. Within each group the person whose ledger was
+  changed most recently is on top; only a person whose entries actually changed moves up — editing
+  some unrelated transaction no longer bumps everyone. People touched at the same moment are ordered
+  by their latest entry date.
 - Deleting a whole person removes only their ledger of entries — any real transactions those entries
   created stay in the Transactions tab, just unlinked.
 - If the name in a "Name: Lent/Borrowed/Repayment" description doesn't exist yet, the ledger creates
@@ -713,7 +723,8 @@ the Gemini key, and may lag the live rate. Supported vendors include MMTC-PAMP, 
   select or type the vendor name (MMTC-PAMP, SafeGold, Augmont, etc.) → Save. The next fetch uses that source.
 - Set an exact price: open the commodity account's editor and set a manual ₹/gram override, which
   takes precedence over the AI estimate.
-- Auto-fetch needs the Gemini key (Settings → AI Features); without it, use the manual ₹/gram.
+- Auto-fetch needs the Gemini key (Settings → AI Features); without it, use the manual ₹/gram. Until a
+  key is saved, the Vendor field and its "Popular" chips are greyed out and can't be changed.
 There's a daily safety cap on AI price/logo lookups, and prices are cached for about an hour.
 
 # Insights
