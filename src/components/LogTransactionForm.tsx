@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import type { Transaction, TransactionType, InvestmentKind, RewardSplitLeg } from '../types';
-import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, formatBillingCycleRange, cardEarnsCashback, cardRewardOn, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance } from '../utils';
+import type { Account, Transaction, TransactionType, InvestmentKind, RewardSplitLeg } from '../types';
+import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, formatBillingCycleRange, cardEarnsCashback, cardRewardOn, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance, redemptionUnits } from '../utils';
 import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X, Plus, Ticket, RotateCcw } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
@@ -112,6 +112,19 @@ const splitDraftsFrom = (
       driver: 'rupee',
     };
   });
+};
+
+/** The point count a source's leg will record: an override typed over the rupees, else what is in
+ *  the points field, else (for a card's own points) the standard conversion. Undefined for a rupee
+ *  source. The save and the "Only N available" check both read this, so a redemption is tested
+ *  against the same figure it will take out of the wallet. */
+const splitPointsOf = (source: SplitDraft, acc: Account | undefined): number | undefined => {
+  const pts = source.pointsOverride !== undefined
+    ? source.pointsOverride
+    : (source.pointsInput && parseFloat(source.pointsInput) > 0
+      ? parseFloat(source.pointsInput)
+      : (isPointsDenominated(acc) && source.amount > 0 ? rupeesToRewardPoints(source.amount, acc) : undefined));
+  return pts && pts > 0 ? pts : undefined;
 };
 
 const blankTx = (): Partial<Transaction> => ({
@@ -328,7 +341,12 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     setActiveSplit(0);
     // What each source had already redeemed when the form opened. Per account, because the balance
     // check hands a source's own committed amount back to it and to nothing else.
-    committedRewardRef.current = Object.fromEntries(seededSplits.map(sp => [sp.accountId, sp.amount]));
+    // Held in the source's own unit, as calculateBalance took it out — an overridden point count
+    // included, which the rupee amount alone would misstate.
+    committedRewardRef.current = Object.fromEntries(seededSplits.map(sp => {
+      const acc = data.accounts.find(a => a.id === sp.accountId);
+      return [sp.accountId, redemptionUnits(acc, sp.amount, splitPointsOf(sp, acc))];
+    }));
     setTempCreatedActiveTags([]);
     setTempCreatedEventTags([]);
   };
@@ -696,8 +714,10 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
           // would fail. Per account, so money spent from a source that has since been swapped out is
           // no help against the new one's balance.
           const reusable = committedRewardRef.current[sp.accountId] || 0;
-          const available = rewardBalanceOf(sp) + (points ? rupeesToRewardPoints(reusable, acc) : reusable);
-          const needed = points ? rupeesToRewardPoints(amount, acc) : amount;
+          const available = rewardBalanceOf(sp) + reusable;
+          // The point count this redemption will actually take — an override, not the rupees at the
+          // standard rate, which is the whole reason it was typed.
+          const needed = redemptionUnits(acc, amount, points ? splitPointsOf(sp, acc) : undefined);
           if (needed - available > 0.001) {
             newErrors[`rewardUsed_${i}`] = `Only ${formatRewardBalanceOf(sp, available)} available`;
           }
@@ -887,16 +907,12 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     /** What the anchor will record: one entry per source, each pointing at its own leg. */
     const anchorSplits: RewardSplitLeg[] = rewardSplitPlan.map(({ source, legId }) => {
       const rewardsSourceAcc = data.accounts.find(a => a.id === source.accountId);
-      const pts = source.pointsOverride !== undefined
-        ? source.pointsOverride
-        : (source.pointsInput && parseFloat(source.pointsInput) > 0
-          ? parseFloat(source.pointsInput)
-          : (isPointsDenominated(rewardsSourceAcc) && source.amount > 0 ? rupeesToRewardPoints(source.amount, rewardsSourceAcc) : undefined));
+      const pts = splitPointsOf(source, rewardsSourceAcc);
       return {
         accountId: source.accountId,
         amount: Number(source.amount) || 0,
         legId,
-        points: pts && pts > 0 ? pts : undefined,
+        points: pts,
       };
     });
     const rewardUsedTotal = Math.round(anchorSplits.reduce((sum, sp) => sum + sp.amount, 0) * 100) / 100;
@@ -1041,11 +1057,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       // (the card is the hub). Credit POV: the main tx IS the card, so link to it as before.
       if (!anchorOnCounterpart) currentLinkedIds.push(legId as string);
       const rewardsSourceAcc = data.accounts.find(a => a.id === source.accountId);
-      const pts = source.pointsOverride !== undefined
-        ? source.pointsOverride
-        : (source.pointsInput && parseFloat(source.pointsInput) > 0
-          ? parseFloat(source.pointsInput)
-          : (isPointsDenominated(rewardsSourceAcc) && source.amount > 0 ? rupeesToRewardPoints(source.amount, rewardsSourceAcc) : undefined));
+      const pts = splitPointsOf(source, rewardsSourceAcc);
       addTransaction({
         id: legId as string,
         date: newTx.date as string,
@@ -1063,7 +1075,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         // money by the day totals and spend stats. calculateBalance applies the rate when it reads
         // this leg into the points balance. See docs/LINKED_TRANSACTIONS.md.
         amount: Number(source.amount) || 0,
-        points: pts && pts > 0 ? pts : undefined,
+        points: pts,
         category: isCCPayment ? 'CC Payment' : (newTx.category as string),
         isRecurring: false,
         // Deliberately isPointsDenominated, not isUnitDenominated: this flag routes the leg into an

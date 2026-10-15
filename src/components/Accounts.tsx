@@ -13,7 +13,7 @@ import type { Account, AccountType, CardDetails, CardFees, CardNetwork, BrandKey
 import { notifyLogosUpdated } from '../services/LogoService';
 import { CardBrandLogo, brandLabel, BRAND_INK } from './CardBrandLogo';
 import { resolveCardIssuer } from '../utils';
-import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, getLatestBilledCycle, getOrdinalSuffix, affectsRupeeBalance, cardEarnsCashback, isUnitDenominated, rewardUnitBalance, rewardPointsToRupees, rupeesToRewardPoints } from '../utils';
+import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, getLatestBilledCycle, getOrdinalSuffix, affectsRupeeBalance, cardEarnsCashback, isUnitDenominated, rewardUnitBalance, rewardPointsToRupees, rupeesToRewardPoints, rupeeLedgerAmount, rewardPointsAdjustmentFor } from '../utils';
 import { getCardCycleFigures } from '../services/CardDuesService';
 import { scrollToFirstError } from '../utils/formErrors';
 import { CardNetworkLogo, NETWORK_LABELS } from './CardNetworkLogo';
@@ -770,7 +770,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
         const standardChange = currentMonthTransactions.reduce((acc, t) => {
           // Already net of any reward split — see the same note in calculateBalance. This block mirrors
           // it so a re-entered opening balance derives the same figure the account displays.
-          const effectiveAmount = t.amount;
+          const effectiveAmount = rupeeLedgerAmount(originalAcc, t);
           if (originalAcc.type === 'credit_card') {
             return t.type === 'debit' ? acc + effectiveAmount : acc - effectiveAmount;
           } else {
@@ -844,20 +844,13 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             updatedRewardOpeningBalances[month] = rewardOpening;
           }
 
-          const rewardTransactions = data.transactions.filter(t => {
-            if (t.accountId !== editId) return false;
-            const tMonth = t.date.slice(0, 7);
-            return tMonth === month && !!t.isRewardTransaction;
-          });
-          const rewardChange = rewardTransactions.reduce((acc, t) => {
-            return t.type === 'credit' ? acc + t.amount : acc - t.amount;
-          }, 0);
-
           const enteredCurrentRewardBalance = parseFloat(rewardOpeningBalanceInput) || 0;
           if (!updatedRewardBalanceAdjustments) updatedRewardBalanceAdjustments = {};
-          const rawRewardAdj = enteredCurrentRewardBalance - rewardOpening - rewardChange;
-          const cleanRewardAdj = Math.round(rawRewardAdj * 100) / 100;
-          updatedRewardBalanceAdjustments[month] = cleanRewardAdj === 0 ? 0 : cleanRewardAdj;
+          // At the rate being saved: a redemption logged without a point count converts at it, so
+          // changing the rate in this same edit must not leave the balance off what was typed.
+          updatedRewardBalanceAdjustments[month] = rewardPointsAdjustmentFor(
+            { ...originalAcc, pointsConversionRate: newAccount.pointsConversionRate },
+            data.transactions, month, rewardOpening, enteredCurrentRewardBalance, data.cashbackStatements);
         }
       }
     } else {

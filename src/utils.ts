@@ -615,6 +615,24 @@ export const rewardPointsToRupees = (points: number, account?: Account) =>
 export const rupeesToRewardPoints = (rupees: number, account?: Account) =>
   Math.round((rupees * rewardPointsRate(account)) * 100) / 100;
 
+/** Did this redemption record a point count other than the standard rate gives — i.e. the issuer
+ *  deducted a different number of points than its rupee value implies, and the user typed that in?
+ *  The form saves `points` on every unit-counted leg, override or not, so presence alone says nothing;
+ *  a saved figure that IS the standard conversion must not be re-read, or rounding would nudge
+ *  every existing wallet balance by a paisa. */
+export const isPointsOverride = (amount: number, points: number | undefined, account?: Account) =>
+  points !== undefined && points > 0 && Math.abs(points - rupeesToRewardPoints(amount, account)) > 0.001;
+
+/** What a redemption took out of its source, IN THAT SOURCE'S OWN UNIT — the same figure
+ *  calculateBalance removes, so the form's "Only N available" check tests against it. A card's points
+ *  ledger takes any saved point count; a rewards wallet takes it only as an override (see above);
+ *  a rupee source takes the rupees. */
+export const redemptionUnits = (account: Account | undefined, amount: number, points: number | undefined) => {
+  if (!isUnitDenominated(account)) return amount;
+  if (isPointsDenominated(account)) return points !== undefined && points > 0 ? points : rupeesToRewardPoints(amount, account);
+  return isPointsOverride(amount, points, account) ? (points as number) : rupeesToRewardPoints(amount, account);
+};
+
 // ---- Reward splits: one anchor, many sources ------------------------------------------------
 // A split is a list, not a pair. `rewardSplits` is authoritative when present; the legacy
 // `rewardUsed` + `rewardUsedAccountId` pair is the same thing with one entry, and is what every row
@@ -821,6 +839,17 @@ export const cardEarnsCashback = (account?: Account | null) =>
 export const affectsRupeeBalance = (t: Transaction) =>
   !t.isTravelTransaction && !t.isRewardTransaction;
 
+/** What a row moves an account's RUPEE ledger by — its amount, except on a rewards wallet counted in
+ *  a unit (Cheq Chips), which keeps one rupee ledger: a redemption whose point count was overridden
+ *  draws it down by those points' worth. ₹50 paid with 450 Chips at 10 = ₹1 leaves the wallet 450
+ *  Chips (₹45) lighter; the leg's own amount stays ₹50, the share of the price it covered. Shared by
+ *  calculateBalance and the Accounts balance editor, which must derive the same figure. */
+export const rupeeLedgerAmount = (account: Account, t: Transaction) =>
+  account.type === 'rewards' && t.type === 'debit'
+    && isUnitDenominated(account) && isPointsOverride(t.amount, t.points, account)
+    ? rewardPointsToRupees(t.points as number, account)
+    : t.amount;
+
 export const calculateBalance = (
   account: Account,
   transactions: Transaction[],
@@ -858,13 +887,11 @@ export const calculateBalance = (
     });
     // Redemption legs are stored in RUPEES, like every other transaction amount in the app — that is
     // what keeps them summable by the ledger's day totals, the spend stats and the Insights charts,
-    // none of which know about points. This balance is the one place denominated in points (its
-    const debitsTotal = rewardDebits.reduce((sum, t) => {
-      if (t.points !== undefined && t.points > 0) {
-        return sum + t.points;
-      }
-      return sum + rupeesToRewardPoints(t.amount, account);
-    }, 0);
+    // none of which know about points. This balance is the one place denominated in points, so each
+    // leg is read in points here: the exact count saved on it when there is one (the issuer deducted
+    // a figure the standard rate doesn't give), else its rupees at the rate — which is also how
+    // splits logged before `points` existed read correctly without a migration.
+    const debitsTotal = rewardDebits.reduce((sum, t) => sum + redemptionUnits(account, t.amount, t.points), 0);
 
     // 2. Confirmed cashbacks (realized points) from cashbackStatements
     const confirmedCredits = cashbackStatements.filter(s => {
@@ -911,7 +938,7 @@ export const calculateBalance = (
       // ₹60 of rewards stored ₹388 and reported only ₹328 spent, leaving the funding account ₹60 richer
       // than it is. Unreachable while splits were CC-Payment-only: that anchor is the card CREDIT, and
       // the guard was on debits.
-      const effectiveAmount = t.amount;
+      const effectiveAmount = rupeeLedgerAmount(account, t);
 
       if (account.type === 'credit_card') {
         // Credit card logic: debit means spending (adds to balance), credit means payment (reduces balance)
@@ -934,6 +961,32 @@ export const calculateBalance = (
 
   const raw = opening + change + adjustment;
   const rounded = Math.round(raw * 100) / 100;
+  return rounded === 0 ? 0 : rounded;
+};
+
+/**
+ * The adjustment that makes a card's POINTS balance read `entered` in `month`, given `opening` as its
+ * opening figure there. The month's movement is read off calculateBalance itself, not re-summed: the
+ * Accounts editor used to keep its own sum, which counted the rupee "Cashback" credit row that a
+ * confirmation leaves on the card and missed the confirmed statement the balance actually counts. As
+ * the editor re-derives this on every save, a card at 5 Jewels = ₹1 with 100 points confirmed that
+ * month gained 80 points each time it was saved, even by an edit that never touched the field.
+ */
+export const rewardPointsAdjustmentFor = (
+  account: Account,
+  transactions: Transaction[],
+  month: string,
+  opening: number,
+  entered: number,
+  cashbackStatements: CashbackStatement[] = [],
+) => {
+  const unadjusted = calculateBalance({
+    ...account,
+    rewardOpeningBalances: { ...(account.rewardOpeningBalances || {}), [month]: opening },
+    rewardBalanceAdjustments: Object.fromEntries(
+      Object.entries(account.rewardBalanceAdjustments || {}).filter(([m]) => m !== month)),
+  }, transactions, month, false, true, cashbackStatements);
+  const rounded = Math.round((entered - unadjusted) * 100) / 100;
   return rounded === 0 ? 0 : rounded;
 };
 

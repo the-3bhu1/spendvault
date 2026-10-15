@@ -236,9 +236,11 @@ the "Other" source below covers one-off rewards.
   keeps the rupees and records that exact point count for this redemption instead — for when the
   issuer deducted a different number of points than the standard rate implies. A "Reset (N default)"
   button then appears under the two fields and puts the points back to the standard conversion. The
-  overridden count is what comes off a CARD's own points ledger; a standalone rewards wallet's balance
-  still follows the rupee amount at its rate. A rupee-denominated wallet has nothing to convert, so it
-  shows only "Amount (₹)". The conversion rate is set per account (Accounts → edit the card → reward
+  overridden count is exactly what leaves the source — a card's points ledger or a Chips/Miles wallet
+  alike (₹50 paid with 450 Chips at 10 = ₹1 leaves the wallet 450 Chips lighter, not 500) — while the
+  entry itself still reads ₹50, the share of the price it covered. The "Only N available" check on
+  save tests that same point count. A rupee-denominated wallet has nothing to convert, so it shows only
+  "Amount (₹)". The conversion rate is set per account (Accounts → edit the card → reward
   unit and conversion rate).
 - Redeeming more than the wallet holds is refused on save, and the message names what IS available in
   that account's own unit (e.g. "Only 432 Jewels available"). Editing an existing split can always be
