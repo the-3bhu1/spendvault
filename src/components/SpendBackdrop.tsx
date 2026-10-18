@@ -3,7 +3,7 @@
 // Same relief language as the Wealth and Cards backdrops — see the COMPOSITION and RELIEF notes in
 // relief.tsx. Three pieces:
 //
-//   THE LEGEND RING, from the app's own logo (public/logo.png), which is itself a coin: a ring of
+//   THE LEGEND RING, as on a struck coin: a ring of
 //   repeating text around a field with a device struck in the middle. A rim carrying nothing but
 //   milling is a wheel; a rim carrying engraved words is a coin, and it says whose. Set with
 //   textLength across the full circumference so the ring closes exactly however the mono face
