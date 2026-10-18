@@ -45,7 +45,7 @@ requests **RECEIVE_SMS only** (no READ_SMS, no SEND_SMS).
   > feature is opt-in: the app shows a prominent disclosure that the user must accept before the system
   > permission prompt.
 
-- **Demo video** (unlisted YouTube or a Drive link, 1–2 minutes, recorded on a real phone):
+- **Demo video** (unlisted YouTube or a Drive link, 1–2 minutes; an emulator recording is fine — `adb emu sms send` delivers a real SMS through the telephony stack):
   1. Settings → Smart Features → tap **Auto-Log SMS**.
   2. Show the full disclosure dialog, then tap **Agree & Continue**.
   3. Show Android's SMS permission prompt, then tap Allow.
