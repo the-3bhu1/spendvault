@@ -2533,6 +2533,7 @@ export default function Settings() {
                           message: "Would you also like to receive push-style local alerts when new transactions are auto-detected in the background?",
                           confirmLabel: "Enable Alerts",
                           cancelLabel: "Skip",
+                          isDanger: false,
                           onConfirm: async () => {
                             try {
                               if (Capacitor.isNativePlatform()) {
@@ -2589,8 +2590,10 @@ export default function Settings() {
                               return;
                             }
 
-                            // 1. Request SMS permission first
-                            const result = await SmsReader.requestPermissions();
+                            // 1. Request SMS permission first — SMS alone. With no argument the plugin asks for
+                            // every alias it declares, so Android put its notification prompt up before the
+                            // "Notification Alerts" explanation below ever had a chance to say what it's for.
+                            const result = await SmsReader.requestPermissions({ permissions: ['sms'] });
                             if (result.sms === 'granted') {
                               // SMS granted! Immediately enable SMS auto-logging
                               updateUser({ ...data.user!, autoLogSms: true });

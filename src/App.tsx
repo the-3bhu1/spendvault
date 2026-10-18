@@ -93,6 +93,17 @@ function App() {
     return () => appRoot.removeEventListener('scroll', handleScroll);
   }, [activeTab]);
 
+  // The native SmsReceiver runs with the app closed, so it can't read `data`: it checks its own
+  // copy of the Auto-Log switch, and this is the only thing that writes it. 8b9d4fc dropped this
+  // effect, after which turning Auto-Log on did nothing on any install that hadn't already synced
+  // it — every new user's bank SMS were received and ignored.
+  useEffect(() => {
+    if (Capacitor.getPlatform() !== 'android') return;
+    SmsReader.setEnabled({ enabled: !!data.user?.autoLogSms }).catch((e) => {
+      console.error("Failed to sync SMS auto-log setting to native:", e);
+    });
+  }, [data.user?.autoLogSms]);
+
   useEffect(() => {
     const checkAndOpenPending = async () => {
       // Launch intent check is Android-only (SMS notification deep-link)

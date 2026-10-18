@@ -81,7 +81,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       <div className="confirm-dialog" onClick={e => e.stopPropagation()}>
         <div className="confirm-dialog-body">
           <h3 className="confirm-dialog-title">{title}</h3>
-          <p className="confirm-dialog-message">{message}</p>
+          <p className={`confirm-dialog-message${message.includes('\n') ? ' long' : ''}`}>{message}</p>
         </div>
         <div className="confirm-dialog-actions" style={{ flexDirection: isStacked ? 'column' : 'row' }}>
           {isStacked
