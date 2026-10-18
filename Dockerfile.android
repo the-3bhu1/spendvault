@@ -9,11 +9,11 @@
 # cannot supply: it is mounted at run time, never baked in.
 FROM eclipse-temurin:21-jdk-jammy
 
-# Kept in step with the project: android/variables.gradle pins compileSdk/targetSdk 35, the Gradle
+# Kept in step with the project: android/variables.gradle pins compileSdk/targetSdk 36, the Gradle
 # wrapper pins 8.13, and ./Dockerfile uses Node 22. Bump these together with those.
 ARG NODE_MAJOR=22
-ARG ANDROID_PLATFORM=35
-ARG BUILD_TOOLS=35.0.0
+ARG ANDROID_PLATFORM=36
+ARG BUILD_TOOLS=36.0.0
 # Google's command-line tools bundle. Only used to run sdkmanager; bump when you need a newer one.
 ARG CMDLINE_TOOLS=11076708
 

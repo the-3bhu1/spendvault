@@ -1,6 +1,6 @@
 # Releasing SpendVault
 
-How to produce a signed release APK from any machine — macOS or Windows — and why the signing key
+How to produce a signed release APK (or a Play Store App Bundle) from any machine — macOS or Windows — and why the signing key
 matters more here than in most apps.
 
 The end-to-end release process (backup-codec audit → Ask Vault doc → tour audit → push → build) is
@@ -11,6 +11,7 @@ uses, and the one-time setup each machine needs.
 npm run release:doctor            what this machine can build with, and what is missing
 npm run release:setup -- ...      one-time setup per machine (signing folder, git hooks)
 npm run release:apk               build a signed APK into release/  (-- --local | -- --docker)
+npm run release:aab               the same, as the App Bundle Google Play takes
 ```
 
 ---
@@ -62,7 +63,7 @@ Everything machine-specific lives in **your home folder**, never in the repo:
   - **Docker route** — Docker Desktop, nothing else. On Windows use the WSL 2 backend. On an
     Apple-silicon Mac, turn on *Settings → General → Use Rosetta for x86_64/amd64 emulation*: the
     builder is an amd64 image (Google ships the `aapt2` build tool for x86-64 Linux only).
-  - **Local route** — **JDK 21** and the Android SDK (platform 35, build-tools 35.0.0; installing
+  - **Local route** — **JDK 21** and the Android SDK (platform 36, build-tools 36.0.0; installing
     Android Studio provides both).
 
 ### 2.2 Signing
@@ -125,6 +126,7 @@ Every line should read `[ok]`, and at least one route `READY`.
 npm run release:apk              # local toolchain if ready, otherwise Docker
 npm run release:apk -- --docker  # force a route
 npm run release:apk -- --local
+npm run release:aab              # an App Bundle (.aab) for Google Play, same routes and checks
 ```
 
 Both routes run the same steps — `npm run build` (tsc -b && vite build) → `npx cap sync android` →
@@ -213,6 +215,21 @@ one machine's paths into shared files, and leave each other's build state around
 `@capacitor/core` and `@capacitor/android` are both `8.2.0`. `npx cap sync` currently works, but
 `npm i -D @capacitor/cli@^8` is worth doing on a run where you can verify the sync output.
 
-**Version numbers are not bumped automatically.** `versionCode`/`versionName` in
-`android/app/build.gradle` and `APP_VERSION` in `src/utils.ts` are left alone by both routes. Bump
-them deliberately.
+**Version numbers come from `APP_VERSION` alone.** `android/app/build.gradle` reads `APP_VERSION` from
+`src/utils.ts`: `versionName` is it without the `v`, and `versionCode` packs it as
+MAJOR·10000 + MINOR·100 + PATCH (`v2.1.0` → 20100). Nothing bumps it for you — but bumping it is the
+whole job, and it must go up for every Play upload: Play rejects a versionCode it has seen, and
+Android won't install over a higher one. Minor and patch stay under 100.
+
+---
+
+## 8. Google Play
+
+Upload the `.aab` from `npm run release:aab`. Play doesn't accept APKs for new apps.
+
+**Play App Signing — use the existing key.** On the first upload Play asks who holds the app signing
+key. Choose to **upload your own** (Play Console walks through exporting it from the `.jks` with its
+PEPK tool) rather than letting Google generate one. Play re-signs every download with the app signing
+key; if that isn't this key (`b3d34d28…`), the Play build can't update a phone that already has a
+sideloaded SpendVault, and that update means uninstalling first, which wipes the user's data.
+The `.jks` then stays the upload key as well.

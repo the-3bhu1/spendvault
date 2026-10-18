@@ -41,6 +41,7 @@ android/key.properties
 # losing control of that key is worse than losing the key, and losing the key is already bad.
 .keys/
 *.apk
+*.aab
 *.p12
 *.pfx
 # Signed APKs copied out by scripts/release-apk.mjs

@@ -3,7 +3,8 @@
 //
 //   npm run release:doctor                 what this machine can build with, and what is missing
 //   npm run release:setup [-- <options>]   one-time setup per machine (signing folder, git hooks)
-//   npm run release:apk [-- --local|--docker]
+//   npm run release:apk [-- --local|--docker]   a signed APK, to install directly
+//   npm run release:aab [-- --local|--docker]   a signed App Bundle, to upload to Google Play
 //
 // The signing key never lives in the repo. Each machine keeps it in <home>/.spendvault/ — the
 // keystore plus signing.properties — which android/app/build.gradle reads directly and the Docker
@@ -22,7 +23,12 @@ const SIGNING_DIR = path.join(os.homedir(), '.spendvault');
 const SIGNING_FILE = path.join(SIGNING_DIR, 'signing.properties');
 const DEFAULT_STORE_NAME = 'spendvault-release-key.jks';
 const LEGACY_KEY_PROPS = path.join(ROOT, 'android', 'key.properties');
-const APK_BUILT = path.join(ROOT, 'android', 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');
+// What each kind of release runs and where Gradle leaves it. Play only accepts an App Bundle (.aab);
+// an APK is what installs straight onto a phone. Both are signed with the same verified key.
+const ARTIFACTS = {
+  apk: { task: 'assembleRelease', label: 'APK', built: path.join(ROOT, 'android', 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk') },
+  aab: { task: 'bundleRelease', label: 'App Bundle', built: path.join(ROOT, 'android', 'app', 'build', 'outputs', 'bundle', 'release', 'app-release.aab') },
+};
 const RELEASE_DIR = path.join(ROOT, 'release');
 const REQUIRED_JAVA = 21; // android/app/capacitor.build.gradle compiles for Java 21
 
@@ -297,30 +303,31 @@ async function setup(args) {
 
 // ---- build -------------------------------------------------------------------------------------
 
-function apkName(git) {
+function artifactName(git, kind) {
   const utils = fs.readFileSync(path.join(ROOT, 'src', 'utils.ts'), 'utf8');
   const version = /export const APP_VERSION = '([^']+)'/.exec(utils)?.[1] || 'v0';
-  return `SpendVault-${version}-${git.sha}${git.dirty ? '-dirty' : ''}.apk`;
+  return `SpendVault-${version}-${git.sha}${git.dirty ? '-dirty' : ''}.${kind}`;
 }
 
-function buildLocal(s, name) {
+function buildLocal(s, name, kind) {
+  const { task, built } = ARTIFACTS[kind];
   const env = { ...process.env };
   if (s.sdk.needsEnv) env.ANDROID_HOME = s.sdk.dir;
   if (!fs.existsSync(path.join(ROOT, 'node_modules'))) run('npm', ['ci', '--no-audit', '--no-fund']);
   run('npm', ['run', 'build']);
   run('npx', ['cap', 'sync', 'android']);
-  fs.rmSync(APK_BUILT, { force: true });
+  fs.rmSync(built, { force: true });
   const androidDir = path.join(ROOT, 'android');
   // sh rather than ./gradlew: the executable bit does not always survive a checkout made elsewhere.
-  if (IS_WIN) run('gradlew.bat', ['assembleRelease'], { cwd: androidDir, env });
-  else run('sh', ['./gradlew', 'assembleRelease'], { cwd: androidDir, env, shell: false });
-  if (!fs.existsSync(APK_BUILT)) fail(`Gradle finished but ${path.relative(ROOT, APK_BUILT)} is missing.`);
+  if (IS_WIN) run('gradlew.bat', [task], { cwd: androidDir, env });
+  else run('sh', ['./gradlew', task], { cwd: androidDir, env, shell: false });
+  if (!fs.existsSync(built)) fail(`Gradle finished but ${path.relative(ROOT, built)} is missing.`);
   fs.mkdirSync(RELEASE_DIR, { recursive: true });
-  fs.copyFileSync(APK_BUILT, path.join(RELEASE_DIR, name));
+  fs.copyFileSync(built, path.join(RELEASE_DIR, name));
 }
 
-function buildDocker(name) {
-  const env = { ...process.env, SV_SIGNING_DIR: SIGNING_DIR, SV_APK_NAME: name };
+function buildDocker(name, kind) {
+  const env = { ...process.env, SV_SIGNING_DIR: SIGNING_DIR, SV_APK_NAME: name, SV_ARTIFACT: kind };
   run('docker', ['compose', 'build', 'spendvault-apk'], { env, shell: false });
   run('docker', ['compose', 'run', '--rm', 'spendvault-apk'], { env, shell: false });
 }
@@ -332,18 +339,19 @@ function build(args) {
   if (!route) { doctor(); fail('this machine cannot build a signed release yet — see the [!!] items above.'); }
   if (route === 'local' && !s.localReady) { doctor(); fail('the local route is not ready on this machine.'); }
   if (route === 'docker' && !s.dockerReady) { doctor(); fail('the Docker route is not ready on this machine.'); }
-  if (s.git.dirty) say('WARNING: uncommitted changes — the APK is named -dirty and is not reproducible from a commit.');
+  if (s.git.dirty) say('WARNING: uncommitted changes — the build is named -dirty and is not reproducible from a commit.');
 
-  const name = apkName(s.git);
+  const kind = args.includes('--aab') ? 'aab' : 'apk';
+  const name = artifactName(s.git, kind);
   const out = path.join(RELEASE_DIR, name);
   fs.rmSync(out, { force: true });
   say(`==> Building ${name} via the ${route} route`);
-  if (route === 'local') buildLocal(s, name);
-  else buildDocker(name);
+  if (route === 'local') buildLocal(s, name, kind);
+  else buildDocker(name, kind);
   if (!fs.existsSync(out)) fail(`build finished but ${path.relative(ROOT, out)} was not produced.`);
 
   const size = fs.statSync(out).size;
-  say('\n==> Signed release APK (certificate verified against the SpendVault release key)');
+  say(`\n==> Signed release ${ARTIFACTS[kind].label} (certificate verified against the SpendVault release key)`);
   say(`    ${out}`);
   say(`    ${(size / 1024 / 1024).toFixed(1)} MB (${size} bytes)`);
   say(`    SHA-256 ${sha256File(out)}`);
@@ -359,6 +367,6 @@ else {
   say('usage: node scripts/release-apk.mjs <doctor|setup|build> [options]');
   say('  setup --keystore <file.jks> [--force]   import a keystore into ~/.spendvault (asks for passwords)');
   say('  setup --from-key-properties [--force]   move an existing android/key.properties setup there');
-  say('  build [--local|--docker]                build a signed APK into release/');
+  say('  build [--local|--docker] [--aab]        build a signed APK (or, with --aab, an App Bundle) into release/');
   process.exit(command ? 1 : 0);
 }

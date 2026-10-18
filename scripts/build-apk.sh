@@ -10,8 +10,15 @@
 set -euo pipefail
 
 cd /app
-built="android/app/build/outputs/apk/release/app-release.apk"
-name="${SV_APK_NAME:-app-release.apk}"
+# SV_ARTIFACT=aab builds the App Bundle Google Play takes instead of an installable APK.
+if [ "${SV_ARTIFACT:-apk}" = "aab" ]; then
+  task="bundleRelease"
+  built="android/app/build/outputs/bundle/release/app-release.aab"
+else
+  task="assembleRelease"
+  built="android/app/build/outputs/apk/release/app-release.apk"
+fi
+name="${SV_APK_NAME:-app-release.${SV_ARTIFACT:-apk}}"
 
 echo "==> 1/4  Installing dependencies (npm ci)"
 # Never `npm install`: it can rewrite package-lock.json, and this checkout is the host's own.
@@ -23,7 +30,7 @@ npm run build
 echo "==> 3/4  Syncing the web build into the Android project"
 npx cap sync android
 
-echo "==> 4/4  Assembling release APK"
+echo "==> 4/4  Gradle $task"
 rm -f "$built"
 # `sh ./gradlew`, not `./gradlew`: a checkout made on Windows may not carry the executable bit through
 # the mount. --no-daemon: the container is thrown away after each run.
@@ -33,7 +40,7 @@ rm -f "$built"
 # kernel killed it mid-compile ("Gradle build daemon disappeared unexpectedly"). Kotlin compiles inside
 # Gradle's JVM instead, two workers at a time, and file watching — pointless in a throwaway container,
 # and erroring through the bind mount — is off.
-( cd android && sh ./gradlew assembleRelease --no-daemon --no-watch-fs --max-workers=2 \
+( cd android && sh ./gradlew "$task" --no-daemon --no-watch-fs --max-workers=2 \
     -Pkotlin.compiler.execution.strategy=in-process )
 
 # android/app/build is a Docker volume (see docker-compose.yml), invisible to the host — copy the APK

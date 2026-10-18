@@ -100,8 +100,11 @@ covers the machinery and the one-time setup per machine.
    signed one. The output is copied to `release/SpendVault-<APP_VERSION>-<commit>.apk` (a `-dirty`
    suffix means uncommitted changes went in — build from the pushed commit instead).
 
-- Do NOT bump `versionCode` (currently `1`) or `versionName` in `android/app/build.gradle`, and
-  do NOT bump `APP_VERSION` in `src/utils.ts` (currently `'v2.1.0'`) — unless the user explicitly
-  asks for a version bump in this run.
+- Do NOT bump `APP_VERSION` in `src/utils.ts` (currently `'v2.1.0'`) unless the user explicitly asks
+  for a version bump in this run. `versionCode`/`versionName` are derived from it by
+  `android/app/build.gradle` (`v2.1.0` → 20100 / `2.1.0`) — never hand-edit them.
+- For a Google Play upload, build the App Bundle instead: `npm run release:aab` (same routes, same
+  key check, output `release/SpendVault-<APP_VERSION>-<commit>.aab`). Play rejects a versionCode it
+  has already seen, so a Play upload needs a bumped `APP_VERSION` — ask the user first.
 - Report the final APK path, its size and SHA-256 (all printed by `release:apk`), which route built
   it, and confirm the build succeeded.
