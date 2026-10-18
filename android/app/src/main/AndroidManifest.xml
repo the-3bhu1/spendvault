@@ -8,12 +8,20 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
         
-        <receiver android:name=".SmsReceiver" android:exported="true">
+        <!-- BROADCAST_SMS is held only by the system's telephony stack, so no other app can hand this
+             receiver a forged bank SMS. Debug builds add a TEST_SMS action for adb on top of this
+             (src/debug/AndroidManifest.xml). -->
+        <receiver
+            android:name=".SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
             <intent-filter>
                 <action android:name="android.provider.Telephony.SMS_RECEIVED" />
-                <action android:name="com.spendvault.app.TEST_SMS" />
             </intent-filter>
         </receiver>
+
+        <!-- The notification's Ignore button. Reached only through the app's own PendingIntent. -->
+        <receiver android:name=".NotificationActionReceiver" android:exported="false" />
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
@@ -41,9 +49,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
-    <uses-permission android:name="android.permission.READ_SMS" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <!-- Writing an export to Documents needs these on Android 10 and below only; from 11 they do
+         nothing, and Play's review flags them. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Normal permission: granted at install, never prompts. Without it navigator.vibrate() is a
          silent no-op, which is what made the statement screen's long-press feel like a dead tap. -->

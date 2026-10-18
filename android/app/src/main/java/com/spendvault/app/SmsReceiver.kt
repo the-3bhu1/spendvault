@@ -3,28 +3,24 @@ package com.spendvault.app
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.provider.Telephony
 import android.util.Log
-import android.app.NotificationManager
 
+// Exported, but the manifest requires BROADCAST_SMS of whoever sends to it — a permission only the
+// system's telephony stack holds — so no other installed app can hand SpendVault a forged bank SMS.
+// The notification's Ignore button lives on NotificationActionReceiver for the same reason: the
+// app's own broadcasts don't carry BROADCAST_SMS either.
 class SmsReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
-        
-        if (action == "com.spendvault.app.CANCEL_NOTIFICATION") {
-            val notifId = intent.getIntExtra("notification_id", -1)
-            Log.d("SpendVaultSms", "Cancel notification broadcast received: ID = $notifId")
-            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (notifId != -1) {
-                manager.cancel(notifId)
-            }
-            // Clear the group summary notification (ID 9900) as well to keep the status bar 100% clean
-            manager.cancel(9900)
-            return
-        }
+        // TEST_SMS is for `adb shell am broadcast` while developing. Only debug builds register it
+        // (src/debug/AndroidManifest.xml); the check here keeps a release build ignoring it regardless.
+        val isTest = action == "com.spendvault.app.TEST_SMS" &&
+            (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
-        if (action == Telephony.Sms.Intents.SMS_RECEIVED_ACTION || action == "com.spendvault.app.TEST_SMS") {
+        if (action == Telephony.Sms.Intents.SMS_RECEIVED_ACTION || isTest) {
             if (!SmsReaderPlugin.isSmsLoggingEnabled(context)) {
                 Log.d("SmsReceiver", "Auto-Log SMS is disabled. Ignoring incoming SMS.")
                 return
@@ -33,7 +29,7 @@ class SmsReceiver : BroadcastReceiver() {
             var body = ""
             var sender = "Unknown"
 
-            if (action == "com.spendvault.app.TEST_SMS") {
+            if (isTest) {
                 body = intent.getStringExtra("message") ?: ""
                 sender = intent.getStringExtra("sender") ?: "TEST-SENDER"
             } else {
@@ -47,7 +43,9 @@ class SmsReceiver : BroadcastReceiver() {
             }
 
             if (body.isEmpty()) return
-            Log.d("SmsReceiver", "Processing SMS from $sender: $body")
+            // Never the body: logcat is readable over adb and in bug reports, and these messages
+            // carry balances, card digits and OTPs.
+            Log.d("SmsReceiver", "Processing an incoming SMS")
 
             try {
                 val transaction = SmsParser.parse(body, sender)

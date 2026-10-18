@@ -28,8 +28,9 @@ import androidx.core.app.NotificationCompat
         Permission(
             alias = "sms",
             strings = [
-                android.Manifest.permission.RECEIVE_SMS,
-                android.Manifest.permission.READ_SMS
+                // RECEIVE_SMS only: the app never reads the inbox, and READ_SMS is one more
+                // restricted permission for Play to question.
+                android.Manifest.permission.RECEIVE_SMS
             ]
         ),
         Permission(
@@ -153,8 +154,8 @@ class SmsReaderPlugin : Plugin() {
             val openPendingIntent = PendingIntent.getActivity(context, notificationId, launchIntent, pendingFlags)
 
             // 3. Setup Ignore Action PendingIntent (Broadcast to cancelling receiver)
-            val ignoreIntent = Intent(context, SmsReceiver::class.java).apply {
-                action = "com.spendvault.app.CANCEL_NOTIFICATION"
+            val ignoreIntent = Intent(context, NotificationActionReceiver::class.java).apply {
+                action = NotificationActionReceiver.ACTION_CANCEL
                 putExtra("notification_id", notificationId)
             }
             
@@ -169,7 +170,7 @@ class SmsReaderPlugin : Plugin() {
             val title = "Transaction Detected"
             val message = "$formattedAmount $typeWord$merchantText. Tap to review."
 
-            android.util.Log.d("SpendVaultSms", "Posting Notification: ID = $notificationId, content = $message")
+            android.util.Log.d("SpendVaultSms", "Posting Notification: ID = $notificationId")
 
             // 4.5 Load application icon as Bitmap for Large Icon branding (supports modern Adaptive Icons)
             val appIconBitmap = try {

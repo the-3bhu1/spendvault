@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Debug builds only. Lets a fake bank SMS be injected while developing, with
+       adb shell am broadcast -a com.spendvault.app.TEST_SMS -n com.spendvault.app/.SmsReceiver
+     plus "es sender" and "es message" string extras (written without their leading dashes here:
+     XML comments cannot hold a double hyphen). The release receiver refuses this, as the shell
+     user doesn't hold BROADCAST_SMS. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application>
+        <receiver android:name=".SmsReceiver" tools:remove="android:permission">
+            <intent-filter>
+                <action android:name="com.spendvault.app.TEST_SMS" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
