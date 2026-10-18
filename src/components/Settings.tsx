@@ -17,7 +17,8 @@ import {
 import { getGeminiUsageToday, testGeminiKey } from '../services/GeminiService';
 import { invalidateCommodityCache } from '../services/MarketDataService';
 import { minifyPayload, expandPayload } from '../services/backupCodec';
-import { APP_VERSION } from '../utils';
+import { stripCardSecrets } from '../services/cardSecrets';
+import { APP_VERSION, PRIVACY_POLICY_URL, SUPPORT_EMAIL } from '../utils';
 import { BUILT_IN_ACCOUNT_TYPES, isOffsetTypeAlias } from '../types';
 
 const GridButton = ({ icon: Icon, label, onClick }: { icon: React.ElementType, label: string, onClick?: () => void }) => (
@@ -877,7 +878,8 @@ export default function Settings() {
     version: BACKUP_VERSION,
     exportedAt: format(new Date(), "yyyy-MM-dd'T'HH:mm:ss.SSSxxx"),
     user: data.user,
-    accounts: data.accounts,
+    // CVVs stay on this phone: encrypted under a key that can't leave it, and never in a backup.
+    accounts: stripCardSecrets(data.accounts),
     transactions: data.transactions,
     categories: data.categories || [],
     categoryBudgets: data.categoryBudgets || {},
@@ -1854,8 +1856,14 @@ export default function Settings() {
           <p className="text-sm text-muted">spendvault is a private finance tracker. your data is stored locally on this device.</p>
           <div className="flex-col gap-2">
             <span className="text-xs text-muted font-bold uppercase">support contact</span>
-            <a href="mailto:tribhuvankomarla@gmail.com" className="btn btn-secondary flex align-center justify-center gap-2" style={{ textDecoration: 'none' }}>
-              <Mail size={16} /> tribhuvankomarla@gmail.com
+            <a href={`mailto:${SUPPORT_EMAIL}`} className="btn btn-secondary flex align-center justify-center gap-2" style={{ textDecoration: 'none' }}>
+              <Mail size={16} /> {SUPPORT_EMAIL}
+            </a>
+          </div>
+          <div className="flex-col gap-2">
+            <span className="text-xs text-muted font-bold uppercase">privacy</span>
+            <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer" className="btn btn-secondary flex align-center justify-center gap-2" style={{ textDecoration: 'none' }}>
+              <ShieldAlert size={16} /> Privacy Policy
             </a>
           </div>
         </div>
@@ -1911,7 +1919,7 @@ export default function Settings() {
           <div className="flex-col gap-2 w-100" style={{ textAlign: 'left', marginTop: '0.5rem' }}>
             <span className="text-xs text-muted font-bold uppercase" style={{ letterSpacing: '1px' }}>Developer</span>
             <a
-              href="mailto:tribhuvankomarla@gmail.com"
+              href={`mailto:${SUPPORT_EMAIL}`}
               className="flex justify-between align-center"
               style={{
                 padding: '0.75rem',
@@ -2555,10 +2563,23 @@ export default function Settings() {
                         console.error("SMS permission check failed:", e);
                       }
 
+                      // Google Play's prominent disclosure for RECEIVE_SMS: shown in the app, before the
+                      // system prompt, saying what is read, what is kept, and what (if anything) leaves
+                      // the phone — and the user must actively agree. Keep it in step with the privacy
+                      // policy (docs/privacy-policy.html) and docs/PLAY_STORE.md.
                       setConfirmConfig({
-                        title: "SMS Permissions",
-                        message: "SpendVault only reads financial SMS from banks to help you log spends automatically. No personal messages are ever accessed or uploaded. Grant SMS permission?",
-                        confirmLabel: "Grant Permission",
+                        title: "Auto-Log SMS",
+                        message: [
+                          "SpendVault receives your incoming SMS — including while the app is closed — to spot bank, card and UPI transaction alerts and turn them into entries for you to review.",
+                          "• Each new SMS is checked on this phone. Messages that aren't transaction alerts are dropped straight away and never saved.",
+                          "• A detected alert waits on this phone until you add or dismiss it. The entry you add keeps only the amount, merchant, account and date — never the message itself.",
+                          "• SMS are never uploaded to SpendVault or shared — except that if you turn on the AI SMS filter, a detected alert's text is sent to Google Gemini with your own API key to double-check it.",
+                          "• Messages already in your inbox are never read.",
+                          "Turn this off here any time.",
+                        ].join("\n\n"),
+                        confirmLabel: "Agree & Continue",
+                        cancelLabel: "No Thanks",
+                        isDanger: false,
                         onConfirm: async () => {
                           try {
                             const status = await SmsReader.checkPermissions();

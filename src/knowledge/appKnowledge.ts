@@ -109,6 +109,8 @@ Actions (each account is a card on the Accounts tab):
   "+" to start, pencil to edit, ✓ to save, trash to remove. It holds cardholder name, card number,
   expiry, CVV, network (Visa/Mastercard/RuPay/Amex/Diners) and issuing bank; the bank is a search
   field, and if left blank it is inferred from the card's name. Stored on-device, behind the app PIN.
+  The CVV is additionally encrypted with a key locked inside this phone, and it is never put in a
+  backup — after restoring a backup (or moving to a new phone) CVVs are blank and must be re-typed.
 - Tap to add a card (Android phones with NFC only): in that same block, the NFC button next to "+"
   (or next to ✓ while editing) shows "Hold your card flat against the back of your phone". Tapping a
   contactless credit/debit card fills in the card NUMBER, EXPIRY and NETWORK, then jumps to the CVV
@@ -757,8 +759,10 @@ A partially excluded transaction still counts as one — only the excluded rupee
 transaction. So the count can be lower than the number of rows you see on the Ledger for that month.
 
 # SMS auto-log (Android only)
-- Turn it on at Settings → Smart Features → "Auto-Log SMS": it asks for SMS permission, then
-  optionally for notification permission so background detections can alert you.
+- Turn it on at Settings → Smart Features → "Auto-Log SMS". It first explains exactly what it does
+  with your SMS (checked on the phone, non-transaction messages dropped, the inbox never read, nothing
+  uploaded unless the AI SMS filter is on) and asks you to "Agree & Continue"; then Android asks for
+  SMS permission, then optionally notification permission so background detections can alert you.
 On Android the app can read bank SMS on-device and create transactions automatically (opt-in:
 autoLogSms). OTPs and personal messages are excluded on-device and never sent anywhere. Paired bank
 messages (e.g. a payment and its confirmation) are de-duplicated. An optional AI second filter
@@ -825,6 +829,8 @@ can tap "Restore from backup" on the first step to import an existing backup fil
 # Backup, restore & data
 - A backup carries your finances and settings but NOT your Gemini API key or logo.dev token (those
   live in the device keystore/local storage), so re-enter them after restoring on a new device.
+- Backups never contain card CVVs (card numbers and expiry are included). CVVs are encrypted with a
+  key that can't leave the phone, so after a restore, re-enter each card's CVV in its edit form.
 - Wipe Data also erases your saved Ask Vault conversations, after which the app restarts into
   first-launch setup.
 - Export: Settings → Export Data, with two different outcomes:
@@ -875,4 +881,7 @@ create the stock account, and log them as stock buy transactions (sell rows are 
 the Gemini key. It's opt-in (Settings → AI Features), and the first time you open it you must tap
 "Enable & continue" to consent. It sends a summary of your finances plus your question to Gemini to
 answer; card numbers, CVVs and the PIN are never sent.
+- Report an answer: every answer has a small "Report" link under it. It opens your email app with a
+  report to the developer, prefilled with the question and the answer — edit it, say what was wrong
+  (offensive, harmful or inaccurate), and send. Nothing is sent until you send that email.
 `.trim();

@@ -1351,6 +1351,35 @@ export const getCardGradients = (themeIndex: number, network?: CardNetwork, card
 
 export const APP_VERSION = 'v2.1.0';
 
+// Where support mail and Ask Vault answer reports go.
+export const SUPPORT_EMAIL = 'tribhuvankomarla@gmail.com';
+
+// docs/privacy-policy.html, served by GitHub Pages from the repo's docs/ folder. The Play listing links
+// the same URL.
+export const PRIVACY_POLICY_URL = 'https://the-3bhu1.github.io/spendvault/privacy-policy.html';
+
+/**
+ * A mailto: link reporting one Ask Vault answer. Google Play requires a way to flag a generative-AI
+ * answer as offensive or wrong, and for the report to reach the developer. The user's own mail app
+ * opens with it, so they see — and can trim — exactly what is sent before anything leaves the phone.
+ */
+export const askVaultReportHref = (question: string, answer: string): string => {
+  const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
+  const body = [
+    'What was wrong with this answer (offensive, harmful, inaccurate…)?',
+    '',
+    '',
+    '— Question —',
+    clip(question.trim(), 600),
+    '',
+    '— Answer —',
+    clip(answer.trim(), 1500),
+    '',
+    `SpendVault ${APP_VERSION}. Edit out anything above you'd rather not share.`,
+  ].join('\n');
+  return `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Ask Vault answer report')}&body=${encodeURIComponent(body)}`;
+};
+
 export const CATEGORY_PALETTE = [
   '#38bdf8', // Sky Blue
   '#f59e0b', // Amber Gold

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpendVault Privacy Policy</title>
+<meta name="description" content="How the SpendVault app handles your data: everything stays on your phone.">
+<style>
+  :root { --bg: #ffffff; --text: #1a1a1a; --muted: #5b5b66; --rule: #e4e4ea; --accent: #4f46e5; --box: #f6f6f9; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1012; --text: #ececf1; --muted: #a0a0ab; --rule: #2a2b31; --accent: #8b85ff; --box: #18191d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 40px 16px 64px; }
+  h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 4px; }
+  h2 { font-size: 1.2rem; margin: 2.2em 0 0.5em; padding-top: 1.2em; border-top: 1px solid var(--rule); }
+  h3 { font-size: 1rem; margin: 1.4em 0 0.3em; }
+  p, li { color: var(--text); }
+  .muted { color: var(--muted); }
+  .summary { background: var(--box); border-radius: 12px; padding: 16px 20px; margin: 24px 0; }
+  .summary ul { margin: 0; padding-left: 1.2em; }
+  a { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.95rem; margin: 12px 0; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--rule); }
+  th { color: var(--muted); font-weight: 600; }
+  @media (max-width: 560px) { table, thead, tbody, tr, th, td { display: block; } thead { display: none; } td { border: 0; padding: 2px 0; } tr { border-bottom: 1px solid var(--rule); padding: 10px 0; } td:first-child { font-weight: 600; } }
+</style>
+</head>
+<body>
+<main>
+<h1>SpendVault Privacy Policy</h1>
+<p class="muted">Effective 18 October 2026 · Applies to the SpendVault app for Android (package <code>com.spendvault.app</code>)</p>
+
+<div class="summary">
+  <strong>In short</strong>
+  <ul>
+    <li>SpendVault has no accounts and no servers. Everything you enter stays on your phone.</li>
+    <li>We don't collect, sell or share your data, and the app has no ads, analytics or tracking.</li>
+    <li>SMS are checked on your phone. Messages that aren't bank alerts are dropped straight away, and your inbox is never read.</li>
+    <li>Data leaves your phone only for optional features you turn on, and only to the service named for that feature.</li>
+  </ul>
+</div>
+
+<p>SpendVault ("the app", "we") is a personal finance tracker built by Tribhuvan Komarla. This policy explains what the app does with your information. If something here is unclear, email <a href="mailto:tribhuvankomarla@gmail.com">tribhuvankomarla@gmail.com</a>.</p>
+
+<h2>1. What the app stores, and where</h2>
+<p>Everything you enter or the app creates for you is stored <strong>only in the app's private storage on your phone</strong>. The developer cannot see it, and there is no copy on any server. This includes:</p>
+<ul>
+  <li><strong>Your finances:</strong> transactions, accounts and balances, categories, budgets, tags, bills, group splits, money lent or borrowed, investments and reward points.</li>
+  <li><strong>Card details you choose to save:</strong> cardholder name, card number, expiry date, network and issuing bank. A card's <strong>CVV</strong> is also encrypted with a key that's generated inside your phone's secure hardware (the Android Keystore). That key can't be exported, so a CVV can only ever be read on the phone where you entered it.</li>
+  <li><strong>Your profile:</strong> your name and an optional profile photo.</li>
+  <li><strong>App lock:</strong> if you set a PIN, only a one-way hash of it is stored, never the PIN itself. If you use fingerprint or face unlock, Android does the check, and the app only learns whether it passed. Your biometric data never reaches the app.</li>
+  <li><strong>Ask Vault conversations</strong> and your settings.</li>
+  <li><strong>Your own API keys</strong> (Google Gemini, logo.dev), if you add them. The Gemini key is kept in the Android Keystore.</li>
+</ul>
+
+<h2>2. SMS (Auto-Log SMS, optional)</h2>
+<p>If you turn on <strong>Auto-Log SMS</strong>, the app asks for Android's permission to receive SMS. It explains what follows and asks you to agree before Android shows its own permission prompt. Once you agree:</p>
+<ul>
+  <li>The app receives each <strong>new</strong> incoming SMS, including while it's closed, and checks <strong>on your phone</strong> whether it's a bank, card or UPI transaction alert.</li>
+  <li>Messages that aren't transaction alerts, such as personal messages and OTPs, are <strong>dropped immediately</strong>. They're never stored or sent anywhere.</li>
+  <li>A detected alert waits on your phone until you add it to your ledger or dismiss it. The entry you add keeps only the amount, merchant, account or card digits and date, never the message itself.</li>
+  <li>The app <strong>never reads messages already in your inbox</strong>, and it never sends SMS.</li>
+  <li>SMS are never uploaded to the developer or shared with anyone. The one exception is the optional AI SMS filter (section 4), which sends a detected alert's text to Google Gemini.</li>
+</ul>
+<p>You can turn Auto-Log SMS off at any time in Settings, or revoke the SMS permission in Android's settings.</p>
+
+<h2>3. Other phone features</h2>
+<ul>
+  <li><strong>NFC (tap to add a card):</strong> when you hold a card to your phone, the app reads its number, expiry and network on the phone and fills them into the form. Nothing is sent anywhere.</li>
+  <li><strong>Notifications:</strong> used only to alert you to a transaction detected from an SMS.</li>
+  <li><strong>Files:</strong> the app reads or writes a file only when you export a backup, import one, or attach a contract note.</li>
+</ul>
+
+<h2>4. Optional features that use the internet</h2>
+<p>SpendVault works offline. The features below connect to a third-party service only when you use them. The request goes directly from your phone to that service, never through us. Like any internet request, the service can see your IP address. Its own privacy policy covers what it does with the request.</p>
+<table>
+  <thead><tr><th>Feature</th><th>Service</th><th>What is sent</th></tr></thead>
+  <tbody>
+    <tr><td>Ask Vault (AI assistant)</td><td>Google Gemini API, using your own key</td><td>Your question, the conversation so far, and a summary of your finances (totals, balances, recent transactions). Card numbers, CVVs and your PIN are never sent.</td></tr>
+    <tr><td>AI SMS filter</td><td>Google Gemini API, using your own key</td><td>The text of an SMS the app has already detected as a transaction alert, so Gemini can double-check it isn't a promotion or offer.</td></tr>
+    <tr><td>Contract note import</td><td>Google Gemini API, using your own key</td><td>The broker contract note image or PDF you attach, so the trades can be read from it.</td></tr>
+    <tr><td>Gold and silver prices; fund and stock logos</td><td>Google Gemini API, using your own key</td><td>A general price question, or the name of a fund or company. No personal data.</td></tr>
+    <tr><td>Stock and mutual fund prices</td><td>Yahoo Finance, mfapi.in</td><td>The ticker symbol, scheme code or search text for the investments you track.</td></tr>
+    <tr><td>Brand logos</td><td>Google favicon service, logo.dev</td><td>A company's web domain or ticker symbol.</td></tr>
+  </tbody>
+</table>
+<p>The AI features are off until you add your own Gemini API key and turn them on. Google processes those requests under the <a href="https://ai.google.dev/gemini-api/terms">Gemini API Terms</a> and <a href="https://policies.google.com/privacy">Google's Privacy Policy</a>. Depending on your Google account's plan, Google may use content sent with a free-tier key to improve its products, so check those terms before using these features.</p>
+
+<h2>5. Backups and emails</h2>
+<ul>
+  <li><strong>Backups you export:</strong> a backup file or code contains your financial data so you can restore it later. It goes wherever you choose to save or share it, and it isn't encrypted, so keep it somewhere safe. Backups <strong>never include card CVVs</strong>, your PIN or your API keys.</li>
+  <li><strong>Android device backup:</strong> if you've turned on backup to your Google account, Android may include the app's data in it. That's controlled by Android and your Google account settings. CVVs in such a backup stay encrypted and can't be read on another phone.</li>
+  <li><strong>Emails to us:</strong> if you email support, or use "Report" on an Ask Vault answer (which opens your email app with the question and answer filled in), we receive only what you choose to send. We use it only to reply and to improve the app.</li>
+</ul>
+
+<h2>6. What we don't do</h2>
+<ul>
+  <li>We don't collect or receive your personal or financial data.</li>
+  <li>We don't sell, rent or share data with anyone.</li>
+  <li>The app has no ads, no analytics or crash-reporting SDKs, and no tracking.</li>
+  <li>You don't need an account to use the app.</li>
+</ul>
+
+<h2>7. Deleting your data</h2>
+<p>Because your data lives only on your phone, you control it completely:</p>
+<ul>
+  <li><strong>Settings → Wipe Data</strong> erases your finances, card details, profile, settings, pending SMS detections and Ask Vault conversations. Your API keys stay until you remove them in Settings.</li>
+  <li><strong>Uninstalling</strong> the app deletes all of its data from your phone.</li>
+  <li>Remove any backup files you exported, and delete any emails you sent us if you want those gone too. We'll delete our copy of an email on request.</li>
+</ul>
+<p>We hold no data about you on any server, so there's nothing else to delete.</p>
+
+<h2>8. Security</h2>
+<p>Your data is kept in storage that only SpendVault can access on your phone, behind an optional PIN or biometric lock, and CVVs are also encrypted with a hardware-backed key. No method of storage is perfectly secure, so we recommend a screen lock on your phone and keeping exported backups private.</p>
+
+<h2>9. Children</h2>
+<p>SpendVault is meant for adults managing their own finances. It isn't directed at children under 13, and we don't knowingly collect data from anyone.</p>
+
+<h2>10. Changes to this policy</h2>
+<p>If this policy changes, we'll update it on this page and change the effective date at the top.</p>
+
+<h2>11. Contact</h2>
+<p>Tribhuvan Komarla · <a href="mailto:tribhuvankomarla@gmail.com">tribhuvankomarla@gmail.com</a></p>
+</main>
+</body>
+</html>

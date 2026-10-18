@@ -8,6 +8,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(SmsReaderPlugin.class);
         registerPlugin(CardNfcPlugin.class);
+        registerPlugin(CardSecretPlugin.class);
         super.onCreate(savedInstanceState);
     }
 

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
-import { Sparkles, X, Plus, ArrowUp, Settings as SettingsIcon, History, Trash2, ArrowLeft, Paperclip } from 'lucide-react';
+import { Sparkles, X, Plus, ArrowUp, Settings as SettingsIcon, History, Trash2, ArrowLeft, Paperclip, Flag } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import { hasGeminiKey } from '../services/GeminiConfig';
@@ -8,7 +8,7 @@ import {
   getSessions, upsertSession, deleteSession, newSessionId, type ChatSession,
 } from '../services/ChatHistoryService';
 import { parseContractNote, allocateCharges, type AllocationResult } from '../services/ContractNoteService';
-import { errorMessage } from '../utils';
+import { askVaultReportHref, errorMessage } from '../utils';
 import ContractNoteReview from './ContractNoteReview';
 
 type PendingReview =
@@ -62,6 +62,7 @@ const SUGGESTIONS = [
 
 interface Msg extends ChatMessage {
   error?: boolean;
+  reported?: boolean;
 }
 
 // Inline: split on **bold** spans (the model's only inline marker we care about).
@@ -402,6 +403,15 @@ export default function AskVault({ isOpen: _isOpen, onClose, onOpenSettings, isD
                   {m.role === 'model' && !m.error ? renderMarkdown(m.text) : m.text}
                   {m.error && (
                     <button className="askvault-retry" onClick={retry}>Retry</button>
+                  )}
+                  {m.role === 'model' && !m.error && (
+                    <a
+                      className="askvault-report"
+                      href={askVaultReportHref([...messages.slice(0, i)].reverse().find(p => p.role === 'user')?.text || '', m.text)}
+                      onClick={() => setMessages(prev => prev.map((p, j) => (j === i ? { ...p, reported: true } : p)))}
+                    >
+                      <Flag size={11} /> {m.reported ? 'Reported — thanks' : 'Report'}
+                    </a>
                   )}
                 </div>
               </div>

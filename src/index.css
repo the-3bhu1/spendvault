@@ -2037,6 +2037,7 @@ tr:hover td {
   font-size: 0.95rem;
   color: var(--text-secondary);
   line-height: 1.5;
+  white-space: pre-line;
 }
 
 .confirm-dialog-actions {
@@ -2424,6 +2425,19 @@ tr:hover td {
   font-size: 0.8rem;
   cursor: pointer;
 }
+
+.askvault-report {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 0.45rem;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+  opacity: 0.75;
+}
+.askvault-report:active { opacity: 1; }
 
 .askvault-typing { display: flex; gap: 4px; align-items: center; }
 .askvault-typing span {

@@ -82,7 +82,8 @@ export type BrandKey =
 export interface CardDetails {
   cardholderName?: string;
   cardNumber?: string;    // Full card number (stored locally, app is PIN-protected)
-  cvv?: string;           // 3 or 4 digit CVV
+  cvv?: string;           // 3 or 4 digit CVV — in memory only; storage holds cvvEnc (services/cardSecrets.ts)
+  cvvEnc?: string;        // the CVV encrypted with this device's key; never in a backup
   expiryMonth?: number;   // 1–12
   expiryYear?: number;    // 2-digit, e.g. 27
   network?: CardNetwork;

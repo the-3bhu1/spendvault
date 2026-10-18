@@ -3,6 +3,7 @@ import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitE
 import { BUILT_IN_ACCOUNT_TYPES, isOffsetTypeAlias } from './types';
 import { classifySmsIsTransaction } from './services/GeminiService';
 import { clearChatHistory } from './services/ChatHistoryService';
+import { decryptSecret, encryptSecret, openAccounts, sealAccounts } from './services/cardSecrets';
 import {
   INVESTMENT_CATEGORY, isInvestmentCategory, inferInvestmentKind, getInvestmentKind,
   getRewardSplits, isRewardSourceOf, redistributeRewardSplits, rewardLegIdsOf,
@@ -327,7 +328,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       try {
         const ok = await classifySmsIsTransaction(tx.raw);
         if (!ok) {
-          console.log("SpendVaultSms: Gemini second filter rejected SMS as non-transaction:", tx.raw);
+          console.log("SpendVaultSms: Gemini second filter rejected an SMS as non-transaction");
           // Don't just vanish: the placeholder turns into a verdict and retires itself, so the
           // user learns the SMS was judged and dropped rather than being left waiting for a
           // card that is never coming.
@@ -1075,9 +1076,39 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     document.documentElement.setAttribute('data-theme', data.theme || 'dark');
   }, [data.theme]);
 
+  // CVVs are encrypted on the way to storage and decrypted once per launch (services/cardSecrets.ts).
+  // sealedCvvs maps each CVV to its ciphertext so an ordinary save stays synchronous; only a new or
+  // changed CVV waits on the cipher, and then only the newest save writes.
+  const sealedCvvs = useRef(new Map<string, string>());
+  const persistSeq = useRef(0);
+
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
+    const seq = ++persistSeq.current;
+    const write = () => {
+      const { accounts } = sealAccounts(data.accounts, sealedCvvs.current);
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({ ...data, accounts }));
+    };
+    const { missing } = sealAccounts(data.accounts, sealedCvvs.current);
+    if (missing.length === 0) { write(); return; }
+    Promise.all(missing.map(async cvv => { sealedCvvs.current.set(cvv, await encryptSecret(cvv)); }))
+      .catch(err => {
+        // Never hold every other change hostage to the cipher: save without the unsealed CVVs
+        // (they stay in memory for this session) rather than not at all.
+        console.error('[cardSecrets] could not encrypt a CVV; it will not be saved', err);
+      })
+      .finally(() => { if (seq === persistSeq.current) write(); });
   }, [data]);
+
+  useEffect(() => {
+    const encs = [...new Set(data.accounts.map(a => a.cardDetails?.cvvEnc).filter((e): e is string => !!e))];
+    if (encs.length === 0) return;
+    Promise.all(encs.map(async enc => [enc, await decryptSecret(enc)] as const)).then(pairs => {
+      for (const [enc, cvv] of pairs) if (cvv) sealedCvvs.current.set(cvv, enc);
+      setData(prev => ({ ...prev, accounts: openAccounts(prev.accounts, new Map(pairs)) }));
+    });
+    // Once, on launch: everything after that holds CVVs in the clear in memory.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Persisted separately from `data` (see SMS_QUEUE_STORAGE_KEY above) — survives an app kill or
   // the OS reclaiming a backgrounded WebView, so an unconfirmed SMS detection isn't silently lost
@@ -2400,6 +2431,9 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const clearAllData = () => {
     localStorage.removeItem(LOCAL_STORAGE_KEY);
+    // Unconfirmed SMS detections hold the message text: a wipe that left them would keep exactly the
+    // data the privacy policy promises is gone.
+    localStorage.removeItem(SMS_QUEUE_STORAGE_KEY);
     clearChatHistory();   // Ask Vault chats can quote finances — wipe them too.
     setData({ user: { id: 'default', name: 'spendvault user', biometricsEnabled: false }, accounts: [], transactions: [], cashbackStatements: [], categories: DEFAULT_CATEGORIES, tags: DEFAULT_TAGS, customAccountTypes: DEFAULT_CUSTOM_ACCOUNT_TYPES, theme: 'dark' });
     window.location.reload();
