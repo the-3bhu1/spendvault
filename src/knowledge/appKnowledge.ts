@@ -499,6 +499,15 @@ import), and tapping it repairs them. It is always safe to press; it never shows
   settles.
 - "+ Add Expense" opens "Select Transaction" first: search your ledger and tap a real debit to split
   it, or tap "Add Custom / Manual Expense" for something paid directly by you or a friend.
+- ONLY YOUR SHARE COUNTS AS SPEND: with Settings → Smart Features → Passive Logs on, splitting a
+  ledger debit turns that entry into a partial Passive Log automatically — everything except your
+  share is excluded from Spends (a ₹812 locker split four ways counts ₹203; split among others
+  without you, the whole entry is excluded). A line above "Confirm Split" previews the amount
+  before you save. Changing your share re-adjusts it; deleting the expense, deleting the event, or
+  switching it to another transaction puts the entry back to how it was — unless you've edited
+  its passive amount in the ledger since, in which case your edit stays. Custom expenses and
+  system categories (Transfer, CC Payment, investments, Lending & Borrowing) are never touched. Expenses
+  added before this existed pick it up the next time you open and save them.
 - Each expense records who paid (Me or any participant), whether to include yourself, and which
   subset it is shared among; the pencil/trash on its card edit or delete it, and both disappear once
   the event is settled.

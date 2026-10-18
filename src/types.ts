@@ -381,6 +381,17 @@ export interface SplitItem {
    * losing who paid altogether.
    */
   paidAmounts?: Record<string, number>;
+  /**
+   * Set when linking this item carved the friends' part out of its ledger row as a Passive Log, so
+   * only your share counts toward Spends. `excludedAmount` is what was written; `prior` is the row's
+   * passive state before that, put back when the item is deleted or relinked — unless the row has
+   * since been edited away from `excludedAmount`, in which case the user's own edit wins.
+   * See syncSplitLedgerPassive in utils.ts.
+   */
+  ledgerPassive?: {
+    excludedAmount: number;
+    prior: { excludeFromStats?: boolean; excludedAmount?: number };
+  };
 }
 
 export interface SplitCycle {

@@ -248,6 +248,81 @@ export const distributePaise = (amount: number, keys: string[]): Record<string, 
 export const equalSplitShares = (item: Pick<SplitItem, 'amount' | 'involvedPeople' | 'includeMe'>): Record<string, number> =>
   distributePaise(item.amount, item.includeMe ? [...item.involvedPeople, 'me'] : [...item.involvedPeople]);
 
+// What you yourself bear of a split item: your share, or nothing when you're left out of it.
+export const mySplitShare = (item: Pick<SplitItem, 'amount' | 'involvedPeople' | 'includeMe' | 'splitType' | 'shares'>) =>
+  !item.includeMe ? 0
+    : item.splitType === 'unequal' ? (item.shares?.['me'] ?? 0)
+    : (equalSplitShares(item)['me'] ?? 0);
+
+// How much of a row a Passive Log currently takes out of Spends — statsAmount's carve-out, alone.
+const rowExclusion = (tx: Pick<Transaction, 'amount' | 'excludedAmount' | 'excludeFromStats'>) =>
+  tx.excludeFromStats ? (tx.excludedAmount ?? tx.amount) : 0;
+
+/* A ledger row linked to a split item holds the whole bill, but only your share of it is your spend —
+   the rest is money the friends owe back. With Passive Logs on, linking carves that rest out of the
+   row as a Passive Log (excluded = row amount − your share), so Spends counts just your part.
+
+   Called with an event's items before and after an edit, it:
+   - puts back the row of an item that was deleted or relinked to another row, to the passive state
+     it had before the split touched it — unless the row has been edited since (it no longer holds
+     what the split wrote), in which case that later hand edit is left standing;
+   - carves the row of an item that is new, relinked, or whose share of yours changed, and of an
+     item that had not carved yet and was saved again. An item already carved and otherwise untouched
+     (someone marked paid, the event renamed) leaves its row alone, so a later edit made in the
+     ledger is not quietly overwritten.
+   Only ordinary spends are carved: system categories are out of Spends already, and the Passive
+   toggle is hidden for them. An item that carved before keeps its row in step even with Passive Logs
+   since switched off, so the row never goes stale against the split. */
+export const syncSplitLedgerPassive = (
+  transactions: Transaction[],
+  oldItems: SplitItem[],
+  newItems: SplitItem[],
+  passiveEnabled: boolean,
+): { transactions: Transaction[]; items: SplitItem[] } => {
+  const patches = new Map<string, Pick<Transaction, 'excludeFromStats' | 'excludedAmount'>>();
+  const rowNow = (id: string) => {
+    const tx = transactions.find(t => t.id === id);
+    return tx && { ...tx, ...patches.get(id) };
+  };
+  const newById = new Map(newItems.map(i => [i.id, i]));
+
+  for (const old of oldItems) {
+    if (!old.ledgerPassive || newById.get(old.id)?.transactionId === old.transactionId) continue;
+    const tx = rowNow(old.transactionId);
+    if (!tx || Math.abs(rowExclusion(tx) - old.ledgerPassive.excludedAmount) >= 0.005) continue;
+    patches.set(tx.id, { ...old.ledgerPassive.prior });
+  }
+
+  const oldById = new Map(oldItems.map(i => [i.id, i]));
+  const items = newItems.map(item => {
+    const { ledgerPassive: _stale, ...bare } = item;
+    const old = oldById.get(item.id);
+    const carried = old?.ledgerPassive && old.transactionId === item.transactionId ? old.ledgerPassive : undefined;
+    const share = mySplitShare(item);
+    const resplit = !old || old.transactionId !== item.transactionId
+      || Math.abs(mySplitShare(old) - share) >= 0.005
+      || (old !== item && !carried);
+    if (!resplit) return carried ? { ...bare, ledgerPassive: carried } : bare;
+
+    const tx = rowNow(item.transactionId);
+    if (!tx || tx.type !== 'debit' || isStatsExcludedCategory(tx.category) || !(passiveEnabled || carried)) return bare;
+    const excludedAmount = Math.round(Math.max(0, Math.min(tx.amount, tx.amount - share)) * 100) / 100;
+    // Your share covers the whole row: nothing to carve, and a Passive Log you set by hand stays put.
+    if (excludedAmount < 0.005 && !carried) return bare;
+
+    patches.set(tx.id, excludedAmount >= 0.005
+      ? { excludeFromStats: true, excludedAmount }
+      : { excludeFromStats: false, excludedAmount: undefined });
+    const prior = carried?.prior ?? { excludeFromStats: tx.excludeFromStats, excludedAmount: tx.excludedAmount };
+    return { ...bare, ledgerPassive: { excludedAmount, prior } };
+  });
+
+  return {
+    transactions: patches.size === 0 ? transactions : transactions.map(t => (patches.has(t.id) ? { ...t, ...patches.get(t.id) } : t)),
+    items,
+  };
+};
+
 export interface SplitSettlement { from: string; to: string; amount: number; }
 
 // Who fronted an item's bill and how much each — one entry for a single payer, several otherwise.

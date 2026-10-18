@@ -7,7 +7,7 @@ import {
   INVESTMENT_CATEGORY, isInvestmentCategory, inferInvestmentKind, getInvestmentKind,
   getRewardSplits, isRewardSourceOf, redistributeRewardSplits, rewardLegIdsOf,
   rewardSplitIndexOfLeg, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits,
-  insertIntoDay, linkedGroupOf, linkedIdsOf, sortDayByOrder,
+  insertIntoDay, linkedGroupOf, linkedIdsOf, sortDayByOrder, syncSplitLedgerPassive,
 } from './utils';
 import { resolveRewardLegPlan } from './services/RewardLegService';
 
@@ -1983,18 +1983,32 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     }));
   };
 
+  // Every item add, edit and delete lands here, so this is where a linked ledger row gets its
+  // friends' part carved out as a Passive Log (and put back) — see syncSplitLedgerPassive.
   const updateSplitEvent = (event: SplitEvent) => {
-    setData(prev => ({
-      ...prev,
-      splitEvents: (prev.splitEvents || []).map(e => e.id === event.id ? event : e)
-    }));
+    setData(prev => {
+      const before = (prev.splitEvents || []).find(e => e.id === event.id);
+      const { transactions, items } = syncSplitLedgerPassive(
+        prev.transactions, before?.items || [], event.items || [], !!prev.user?.enablePassiveTransactions,
+      );
+      return {
+        ...prev,
+        transactions,
+        splitEvents: (prev.splitEvents || []).map(e => e.id === event.id ? { ...event, items } : e)
+      };
+    });
   };
 
   const deleteSplitEvent = (id: string) => {
-    setData(prev => ({
-      ...prev,
-      splitEvents: (prev.splitEvents || []).filter(e => e.id !== id)
-    }));
+    setData(prev => {
+      const gone = (prev.splitEvents || []).find(e => e.id === id);
+      const { transactions } = syncSplitLedgerPassive(prev.transactions, gone?.items || [], [], false);
+      return {
+        ...prev,
+        transactions,
+        splitEvents: (prev.splitEvents || []).filter(e => e.id !== id)
+      };
+    });
   };
 
   const addRecurringBill = (bill: RecurringBill) => {

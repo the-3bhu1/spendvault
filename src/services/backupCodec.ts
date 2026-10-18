@@ -58,6 +58,8 @@ export const KEY_MAP: Record<string, string> = {
   people: 'pp', items: 'it', involvedPeople: 'ip', includeMe: 'im',
   splitType: 'st', paidBy: 'pb', shares: 'sh', customDays: 'cd',
   paidAmounts: 'pam', // several payers on one split item; 'pb' (paidBy) is still written beside it
+  // The Passive Log a split item carved into its ledger row; its fields reuse 'ea'/'e'.
+  ledgerPassive: 'lgp', prior: 'lgpr',
   personName: 'pn', frequency: 'fq', nextDueDate: 'nd',
   isActive: 'ia', status: 'ss', createdAt: 'ca', updatedAt: 'ua',
   billingCycleYearMonth: 'bc', expected: 'ex', realized: 'rl',

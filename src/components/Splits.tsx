@@ -7,7 +7,7 @@ import { Share } from '@capacitor/share';
 import ConfirmDialog from './ConfirmDialog';
 import { useFinance } from '../FinanceContext';
 import type { SplitEvent, SplitItem } from '../types';
-import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, shareSelfName, distributePaise, equalSplitShares, formatDateString, errorMessage, describeSplitPayers } from '../utils';
+import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, shareSelfName, distributePaise, equalSplitShares, formatDateString, errorMessage, describeSplitPayers, mySplitShare, isStatsExcludedCategory } from '../utils';
 import { scrollToFirstError } from '../utils/formErrors';
 import { buildSplitShareImages } from '../services/splitImage';
 import { blobToBase64 } from '../services/shareCanvas';
@@ -529,10 +529,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
 
     effectiveItems.forEach(item => {
       totalSpent += item.amount;
-      if (!item.includeMe) return;
-      myTotalShare += item.splitType === 'unequal'
-        ? (item.shares?.['me'] ?? 0)
-        : (equalSplitShares(item)['me'] ?? 0);
+      myTotalShare += mySplitShare(item);
     });
 
     // Per-person figures come from the SAME simplified payments as "Settle Up", not from each
@@ -1409,6 +1406,17 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                         ? (includeMe || involvedPeople.length > 0)
                         : (sumOfShares > 0)) && resolvePayers(splitAmount) !== null;
                       const isSumMatched = Math.abs(remainingAmount) < 0.01;
+                      // What linking will carve out of the ledger row as a Passive Log — the same
+                      // rule syncSplitLedgerPassive applies on save, previewed so it isn't a surprise.
+                      const ledgerRow = selectedTxId !== 'custom' ? data.transactions.find(t => t.id === selectedTxId) : undefined;
+                      const alreadyCarves = !!(event.items || []).find(i => i.id === editingItemId && i.transactionId === selectedTxId)?.ledgerPassive;
+                      const carvesRow = !!ledgerRow && ledgerRow.type === 'debit' && !isStatsExcludedCategory(ledgerRow.category)
+                        && (!!data.user?.enablePassiveTransactions || alreadyCarves);
+                      const liveMyShare = mySplitShare({
+                        amount: splitAmount, involvedPeople, includeMe, splitType,
+                        shares: splitType === 'unequal' ? { me: parseFloat(customShares['me']) || 0 } : undefined,
+                      });
+                      const carvedOut = ledgerRow ? Math.max(0, ledgerRow.amount - liveMyShare) : 0;
 
                       return (
                         <>
@@ -1479,6 +1487,14 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                                 </button>
                               )}
                             </div>
+                          )}
+
+                          {carvesRow && isSplitValid && carvedOut >= 0.005 && (
+                            <span className="text-xs text-muted" style={{ marginTop: '1rem' }}>
+                              {liveMyShare >= 0.005
+                                ? `Passive Log: ₹${carvedOut.toFixed(2)} of this ledger entry is left out of your Spends — only your ₹${liveMyShare.toFixed(2)} share counts.`
+                                : `Passive Log: you're not part of this split, so the whole ₹${carvedOut.toFixed(2)} is left out of your Spends.`}
+                            </span>
                           )}
 
                           <div className="modal-footer" style={{ marginTop: 'auto', paddingTop: '2rem' }}>
