@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Account, Transaction, TransactionType, InvestmentKind, RewardSplitLeg } from '../types';
-import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, formatBillingCycleRange, cardEarnsCashback, cardRewardOn, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance, redemptionUnits } from '../utils';
+import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, formatBillingCycleRange, cardEarnsCashback, cardRewardOn, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance, redemptionUnits, isInvestmentSell, investmentHoldingSideType, investmentLegAmount, holdingPositionOn, sellCostBasis } from '../utils';
 import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X, Plus, Ticket, RotateCcw } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
@@ -505,6 +505,24 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   const investmentDescriptionFor = (kind: InvestmentKind, accountIds: (string | undefined)[]) =>
     investmentAccountAmong(kind, accountIds)?.name || investmentKindLabel(kind);
 
+  // A sell flips the pair, so "is the main account the holding?" is a comparison against the
+  // holding side's direction, never a bare `type === 'credit'`.
+  const isSellLog = !!activeInvestmentKind && isInvestmentSell(newTx);
+  const holdingSideType = investmentHoldingSideType(isSellLog ? 'sell' : 'buy');
+  const sellHolding = isSellLog && activeInvestmentKind
+    ? investmentAccountAmong(activeInvestmentKind, [newTx.accountId, paymentSourceAccountId])
+    : undefined;
+  // The position the sale comes out of, as of its own date and without the pair being edited.
+  const sellPosition = (() => {
+    if (!sellHolding || !newTx.date) return undefined;
+    const editing = editId ? data.transactions.find(t => t.id === editId) : undefined;
+    const excludeIds = editing ? [editing.id, ...(editing.linkedTransactionIds || [])] : [];
+    return holdingPositionOn(sellHolding, data.transactions, newTx.date, excludeIds);
+  })();
+  const sellUnits = Number(newTx.numberOfShares) || 0;
+  const sellCost = sellPosition ? sellCostBasis(sellPosition, sellUnits) : 0;
+  const sellProceeds = Number(newTx.amount) || 0;
+
   // Picking a category — and, for Investments, picking the kind — settles the same five things: the
   // auto-filled description, which account selections are still valid, whether the amount splits into
   // invested + charges, whether a quantity applies, and the passive-log toggle. The Category picker
@@ -591,7 +609,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       // Keep the chosen account only if it's still valid for this kind and direction — otherwise a
       // fund→stock switch would silently save the buy against a mutual-fund account.
       const currentAcc = data.accounts.find(a => a.id === updatedAccountId);
-      const isValid = !!currentAcc && (newTx.type === 'credit'
+      const isValid = !!currentAcc && (newTx.type === investmentHoldingSideType(newTx.investmentAction)
         ? currentAcc.type === investmentAccountTypeFor(nextKind)
         : (currentAcc.type === 'bank_account' || currentAcc.type === 'e_wallet'));
       if (!isValid) updatedAccountId = '';
@@ -624,6 +642,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       ...newTx,
       category: nextCategory,
       investmentKind: nextKind,
+      investmentAction: nextKind ? newTx.investmentAction : undefined,
+      costBasis: nextKind ? newTx.costBasis : undefined,
       description: updatedDesc,
       accountId: updatedAccountId,
       isTravelTransaction: updatedIsTravel,
@@ -663,6 +683,21 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     }
     if (activeInvestmentKind === 'commodity' && !newTx.numberOfShares) {
       newErrors.numberOfShares = 'Grams is required';
+    }
+    if (isSellLog) {
+      if (!sellHolding) {
+        newErrors.investmentHolding = `Pick the ${investmentKindLabel(activeInvestmentKind).toLowerCase()} account being sold`;
+      }
+      if (!newTx.numberOfShares) {
+        newErrors.numberOfShares = activeInvestmentKind === 'mutual_funds' ? 'Units redeemed is required'
+          : (activeInvestmentKind === 'commodity' ? 'Grams is required' : 'No. of Shares is required');
+      } else if (sellPosition && sellUnits - sellPosition.units > 1e-9) {
+        newErrors.numberOfShares = `Only ${parseFloat(sellPosition.units.toFixed(4))} held on ${newTx.date}`;
+      }
+      if ((activeInvestmentKind === 'mutual_funds' || activeInvestmentKind === 'stocks')
+          && Number(newTx.allottedAmount) > 0 && Number(newTx.allottedAmount) + 0.001 < sellProceeds) {
+        newErrors.allottedAmount = 'Sale value cannot be less than the amount received';
+      }
     }
     // Measured against the full price. With a reward split active the excess over what this account
     // paid is carried by the reward leg, so the whole purchase can be excluded in one figure.
@@ -830,8 +865,30 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     // "isInvestment" here means the allotted-vs-charges pair applies (funds and stocks quote an
     // invested amount plus AMC/brokerage on top). Commodity buys are a single gross amount.
     const isInvestment = isMf || isStocks;
-    const allottedAmount = isInvestment ? (newTx.allottedAmount !== undefined ? Number(newTx.allottedAmount) : Number(newTx.amount)) : Number(newTx.amount);
-    const investmentCharges = isInvestment ? (newTx.investmentCharges !== undefined ? Number(newTx.investmentCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined;
+    const isSell = isSellLog;
+    // A sell with no sale value typed means nothing was deducted: the gross is what arrived.
+    const allottedAmount = isSell
+      ? (Number(newTx.allottedAmount) || Number(newTx.amount))
+      : (isInvestment ? (newTx.allottedAmount !== undefined ? Number(newTx.allottedAmount) : Number(newTx.amount)) : Number(newTx.amount));
+    // On a sell the Amount field is what landed in the bank, so charges are what the sale value lost
+    // on the way there; on a buy they are what was paid on top of the invested amount.
+    const investmentCharges = isSell
+      ? Math.max(0, Math.round((allottedAmount - Number(newTx.amount)) * 100) / 100)
+      : (isInvestment ? (newTx.investmentCharges !== undefined ? Number(newTx.investmentCharges) : Math.max(0, Number(newTx.amount) - allottedAmount)) : undefined);
+    // Every sell carries the gross/charges pair, commodity included, so its proceeds can be read off
+    // either leg (the holding leg's amount is the cost basis, not what was received).
+    const carriesAllotted = isInvestment || isSell;
+    const investmentFields = {
+      investmentAction: isSell ? 'sell' as const : undefined,
+      costBasis: isSell ? sellCost : undefined,
+      allottedAmount: carriesAllotted ? allottedAmount : undefined,
+      investmentCharges: carriesAllotted ? investmentCharges : undefined,
+    };
+    const legAmountFor = (legType: TransactionType) => investmentLegAmount(
+      legType === holdingSideType,
+      { amount: Number(newTx.amount), ...investmentFields },
+      isInvestment
+    );
 
     // Does an investment counterpart leg already exist (i.e. we're editing, not creating)? If so,
     // we skip re-creating it here — updateTransaction() in FinanceContext keeps it in sync, and
@@ -937,14 +994,13 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         description: (newTx.description as string).trim(),
         accountId: paymentSourceAccountId,
         type: counterpartType,
-        amount: counterpartType === 'credit' ? allottedAmount : (allottedAmount + (investmentCharges || 0)),
+        amount: legAmountFor(counterpartType),
         category: INVESTMENT_CATEGORY,
         investmentKind: 'stocks',
         isRecurring: false,
         linkedTransactionIds: [mainTxId],
         numberOfShares: newTx.numberOfShares,
-        allottedAmount: allottedAmount,
-        investmentCharges: investmentCharges
+        ...investmentFields
       });
     } else if (isCommodity && paymentSourceAccountId && !hasCommodityLeg) {
       const bankCounterpartId = generateId();
@@ -956,12 +1012,13 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         description: (newTx.description as string).trim(),
         accountId: paymentSourceAccountId,
         type: counterpartType,
-        amount: Number(newTx.amount),
+        amount: legAmountFor(counterpartType),
         category: INVESTMENT_CATEGORY,
         investmentKind: 'commodity',
         isRecurring: false,
         linkedTransactionIds: [mainTxId],
-        numberOfShares: newTx.numberOfShares
+        numberOfShares: newTx.numberOfShares,
+        ...investmentFields
       });
     } else if (isMf && paymentSourceAccountId && !hasMfLeg) {
       const bankCounterpartId = generateId();
@@ -974,14 +1031,13 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         description: (newTx.description as string).trim(),
         accountId: paymentSourceAccountId,
         type: counterpartType,
-        amount: counterpartType === 'credit' ? allottedAmount : (allottedAmount + (investmentCharges || 0)),
+        amount: legAmountFor(counterpartType),
         category: INVESTMENT_CATEGORY,
         investmentKind: 'mutual_funds',
         isRecurring: false,
         linkedTransactionIds: [mainTxId],
-        allottedAmount: allottedAmount,
-        investmentCharges: investmentCharges,
-        numberOfShares: newTx.numberOfShares
+        numberOfShares: newTx.numberOfShares,
+        ...investmentFields
       });
     } else if ((isTransfer || isCCPayment) && paymentSourceAccountId && !hasTransferOrCCLeg) {
       const bankCounterpartId = generateId();
@@ -1086,8 +1142,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       });
     });
 
-    const mainAccountAmount = isInvestment 
-      ? (newTx.type === 'debit' ? (allottedAmount + (investmentCharges || 0)) : allottedAmount) 
+    const mainAccountAmount = carriesAllotted
+      ? legAmountFor(newTx.type as TransactionType)
       : ((newTx.type === 'debit')
         ? Math.max(0, Number(newTx.amount) - rewardUsed)
         : Number(newTx.amount));
@@ -1227,8 +1283,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       // passive amount was set) must never exceed the amount, or the row reads as fully passive.
       excludedAmount: passiveOn ? anchorExcluded : undefined,
       paymentSourceAccountId: paymentSourceAccountId,
-      allottedAmount: isInvestment ? allottedAmount : undefined,
-      investmentCharges: isInvestment ? investmentCharges : undefined,
+      ...investmentFields,
       numberOfShares: investmentKind ? newTx.numberOfShares : undefined,
       investmentKind: investmentKind,
       tags: (newTx.tags || []).length > 0 ? newTx.tags : undefined,
@@ -1642,7 +1697,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                   const finalAmount = isNaN(numVal) ? 0 : numVal;
                   const isInvestment = activeInvestmentKind === 'mutual_funds' || activeInvestmentKind === 'stocks';
                   const allotted = newTx.allottedAmount || 0;
-                  const charges = isInvestment ? Math.max(0, finalAmount - allotted) : undefined;
+                  // Buy: charges ride on top of the invested amount. Sell: they come out of the sale value.
+                  const charges = isInvestment ? Math.max(0, isSellLog ? allotted - finalAmount : finalAmount - allotted) : undefined;
 
                   setNewTx(prev => ({
                     ...prev,
@@ -1783,6 +1839,59 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
           />
         )}
 
+        {activeInvestmentKind && (
+          <div className="input-group" style={{ marginBottom: '1rem' }}>
+            <label>Trade</label>
+            <div className="flex" style={{ border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
+              {(['buy', 'sell'] as const).map(action => {
+                const active = (action === 'sell') === isSellLog;
+                return (
+                  <button
+                    key={action}
+                    type="button"
+                    className="text-mono text-xs font-bold"
+                    style={{
+                      flex: 1,
+                      padding: '0.6rem 0.5rem',
+                      background: active ? 'var(--accent)' : 'transparent',
+                      color: active ? 'var(--btn-text)' : 'var(--text-secondary)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      letterSpacing: '0.5px',
+                    }}
+                    onClick={() => {
+                      if (active) return;
+                      // Flipping the direction keeps both picked accounts in their roles: the bank
+                      // that paid for a buy is the bank that receives a sell, so only the type flips.
+                      // The gross/charges pair restarts from the amount, since charges mean the
+                      // opposite thing on the other side of the trade.
+                      const splitsCharges = activeInvestmentKind === 'mutual_funds' || activeInvestmentKind === 'stocks';
+                      const amount = Number(newTx.amount) || 0;
+                      setNewTx(prev => ({
+                        ...prev,
+                        investmentAction: action === 'sell' ? 'sell' : undefined,
+                        costBasis: undefined,
+                        type: prev.type === 'credit' ? 'debit' : 'credit',
+                        allottedAmount: splitsCharges ? amount : undefined,
+                        investmentCharges: splitsCharges ? 0 : undefined,
+                      }));
+                      setInputStrings(s => ({
+                        ...s,
+                        allottedAmount: splitsCharges && amount ? String(amount) : '',
+                        investmentCharges: '',
+                      }));
+                      setErrors(prev => ({ ...prev, investmentHolding: '', numberOfShares: '', allottedAmount: '', accountId: '' }));
+                    }}
+                  >
+                    {action === 'sell' ? (activeInvestmentKind === 'mutual_funds' ? 'SELL / REDEEM' : 'SELL') : 'BUY'}
+                  </button>
+                );
+              })}
+            </div>
+            {errors.investmentHolding && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.investmentHolding}</span>}
+          </div>
+        )}
+
         <CustomPicker
           label="Account"
           value={newTx.accountId || ''}
@@ -1815,10 +1924,10 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
               if (isCCPayment) {
                 return newTx.type === 'debit' ? (acc.type === 'bank_account' || acc.type === 'e_wallet') : acc.type === 'credit_card';
               }
-              // Credit = the holding account receives the units/shares/grams; debit = the bank
-              // or wallet funding the buy. One rule per kind, keyed off the matching account type.
+              // On the holding side's direction (credit on a buy, debit on a sell) Account is the
+              // holding; otherwise it is the bank or wallet the money moves through.
               if (activeInvestmentKind) {
-                return newTx.type === 'credit'
+                return newTx.type === holdingSideType
                   ? acc.type === investmentAccountTypeFor(activeInvestmentKind)
                   : (acc.type === 'bank_account' || acc.type === 'e_wallet');
               }
@@ -1879,9 +1988,9 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
             <CustomPicker
               label={
                 activeInvestmentKind
-                  ? (newTx.type === 'debit'
-                    ? `Credit To ${investmentKindLabel(activeInvestmentKind)} Account`
-                    : 'Debit From Account')
+                  ? (newTx.type !== holdingSideType
+                    ? `${isSellLog ? 'Debit From' : 'Credit To'} ${investmentKindLabel(activeInvestmentKind)} Account`
+                    : (isSellLog ? 'Credit To Account' : 'Debit From Account'))
                   : (newTx.type === 'debit'
                     ? (isCCPayment ? 'Pay To Card (Auto-Credit)' : 'Credit To Account (Auto-Credit)')
                     : 'Debit From Account (Auto-Debit)')
@@ -1910,10 +2019,10 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                     // debit cards etc. through).
                     return newTx.type === 'debit' ? a.type === 'credit_card' : (a.type === 'bank_account' || a.type === 'e_wallet');
                   }
-                  // Mirror of the main Account filter, one direction over: on a debit the
-                  // counterpart is the holding account receiving the units/shares/grams.
+                  // Mirror of the main Account filter: when Account is the cash side, the
+                  // counterpart is the holding the units/shares/grams go into or come out of.
                   if (activeInvestmentKind) {
-                    return newTx.type === 'debit'
+                    return newTx.type !== holdingSideType
                       ? a.type === investmentAccountTypeFor(activeInvestmentKind)
                       : (a.type === 'bank_account' || a.type === 'e_wallet');
                   }
@@ -2049,7 +2158,11 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
 
         {(activeInvestmentKind === 'stocks' || activeInvestmentKind === 'commodity') && (
           <div className="input-group" style={{ marginTop: '0.5rem', marginBottom: '1rem' }}>
-            <label>{activeInvestmentKind === 'commodity' ? 'Grams' : 'No. of Shares'}</label>
+            <label>
+              {activeInvestmentKind === 'commodity'
+                ? (isSellLog ? 'Grams Sold' : 'Grams')
+                : (isSellLog ? 'Shares Sold' : 'No. of Shares')}
+            </label>
             <input
               type="text"
               inputMode="decimal"
@@ -2077,7 +2190,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
             <div style={{ marginTop: '0.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', marginBottom: '1rem' }}>
               <div className="grid grid-cols-2 gap-4">
                 <div className="input-group" style={{ marginBottom: 0 }}>
-                  <label>{isStock ? 'Invested Amount' : 'Allotted Amount'}</label>
+                  <label>{isSellLog ? (isStock ? 'Sale Value' : 'Redemption Value') : (isStock ? 'Invested Amount' : 'Allotted Amount')}</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -2088,9 +2201,11 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                       if (val === '' || /^\d*\.?\d*$/.test(val)) {
                         setInputStrings(prev => ({ ...prev, allottedAmount: val }));
                         const allotted = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
-                        // Charges is the complement: charges = amount − invested.
+                        // Charges is the complement: amount − invested on a buy, sale value − amount
+                        // received on a sell.
                         const totalAmount = Number(newTx.amount || 0);
-                        const charges = Math.max(0, totalAmount - allotted);
+                        const charges = Math.max(0, isSellLog ? allotted - totalAmount : totalAmount - allotted);
+                        if (errors.allottedAmount) setErrors(prev => ({ ...prev, allottedAmount: '' }));
                         setInputStrings(s => ({ ...s, investmentCharges: parseFloat(charges.toFixed(2)) === 0 ? '' : parseFloat(charges.toFixed(2)).toString() }));
                         setNewTx(prev => ({
                           ...prev,
@@ -2103,7 +2218,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                   />
                 </div>
                 <div className="input-group" style={{ marginBottom: 0 }}>
-                  <label>{isStock ? 'Brokerage / Taxes' : 'Stamp Duty / Charges'}</label>
+                  <label>{isStock ? 'Brokerage / Taxes' : (isSellLog ? 'Exit Load / Charges' : 'Stamp Duty / Charges')}</label>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -2114,10 +2229,10 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                       if (val === '' || /^\d*\.?\d*$/.test(val)) {
                         setInputStrings(prev => ({ ...prev, investmentCharges: val }));
                         const charges = val === '' ? 0 : (val === '.' ? 0 : parseFloat(val));
-                        // Complement of invested: invested = amount − charges, so you can fill in
-                        // whichever you know (invested or charges) and the other is derived.
+                        // Complement of invested: invested = amount − charges (sale value = amount
+                        // received + charges on a sell), so you can fill in whichever you know.
                         const totalAmount = Number(newTx.amount || 0);
-                        const invested = Math.max(0, totalAmount - charges);
+                        const invested = Math.max(0, isSellLog ? totalAmount + charges : totalAmount - charges);
                         setInputStrings(s => ({ ...s, allottedAmount: parseFloat(invested.toFixed(2)) === 0 ? '' : parseFloat(invested.toFixed(2)).toString() }));
                         setNewTx(prev => ({
                           ...prev,
@@ -2132,21 +2247,69 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
               </div>
               {isMf && (
                 <div className="input-group" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
-                  <label>Units Allotted</label>
+                  <label>{isSellLog ? 'Units Redeemed' : 'Units Allotted'}</label>
                   <input
                     type="text"
                     inputMode="decimal"
-                    className="input-field"
+                    className={`input-field ${errors.numberOfShares ? 'border-danger' : ''}`}
                     value={inputStrings.numberOfShares}
                     onChange={e => {
                       const val = e.target.value;
                       if (val === '' || /^\d*\.?\d*$/.test(val)) {
                         setInputStrings(prev => ({ ...prev, numberOfShares: val }));
                         setNewTx(prev => ({ ...prev, numberOfShares: val === '' ? undefined : parseFloat(val) }));
+                        if (errors.numberOfShares) setErrors(prev => ({ ...prev, numberOfShares: '' }));
                       }
                     }}
                     placeholder="e.g. 78.234"
                   />
+                  {errors.numberOfShares && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.numberOfShares}</span>}
+                </div>
+              )}
+              {errors.allottedAmount && <span className="text-xs text-danger" style={{ display: 'block', marginTop: '0.5rem' }}>{errors.allottedAmount}</span>}
+            </div>
+          );
+        })()}
+
+        {/* What the sale comes out of and what it made. The cost basis is what leaves the holding,
+            so its average price is unchanged; the gain or loss is the difference to the proceeds. */}
+        {isSellLog && sellPosition && (() => {
+          const kind = activeInvestmentKind;
+          const unitLabel = kind === 'commodity' ? 'g' : (kind === 'mutual_funds' ? 'units' : 'shares');
+          const held = parseFloat(sellPosition.units.toFixed(4));
+          const pnl = Math.round((sellProceeds - sellCost) * 100) / 100;
+          const showResult = sellUnits > 0 && sellProceeds > 0;
+          return (
+            <div style={{ marginTop: '-0.25rem', padding: '0.9rem 1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px', marginBottom: '1rem' }}>
+              <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                <span className="text-xs text-muted">
+                  Held {held} {unitLabel} · avg {formatCurrency(sellPosition.avgPrice)}
+                </span>
+                {held > 0 && (
+                  <button
+                    type="button"
+                    className="text-mono text-xs font-bold"
+                    style={{ padding: '0.3rem 0.6rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--accent)', cursor: 'pointer' }}
+                    onClick={() => {
+                      setNewTx(prev => ({ ...prev, numberOfShares: held }));
+                      setInputStrings(prev => ({ ...prev, numberOfShares: String(held) }));
+                      if (errors.numberOfShares) setErrors(prev => ({ ...prev, numberOfShares: '' }));
+                    }}
+                  >
+                    SELL ALL
+                  </button>
+                )}
+              </div>
+              {showResult && (
+                <div style={{ marginTop: '0.6rem', display: 'grid', gridTemplateColumns: '1fr auto', columnGap: '1rem', rowGap: '0.4rem', alignItems: 'baseline' }}>
+                  <span className="text-xs text-muted">Cost basis</span>
+                  <span className="text-xs text-mono" style={{ textAlign: 'right' }}>{formatCurrency(sellCost)}</span>
+                  <span className="text-xs text-muted">Received</span>
+                  <span className="text-xs text-mono" style={{ textAlign: 'right' }}>{formatCurrency(sellProceeds)}</span>
+                  <span className="text-xs font-bold">Realized P&amp;L</span>
+                  <span className="text-xs text-mono font-bold" style={{ textAlign: 'right', color: pnl >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                    {pnl >= 0 ? '+' : '−'}{formatCurrency(Math.abs(pnl))}
+                  </span>
                 </div>
               )}
             </div>

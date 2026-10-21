@@ -110,6 +110,7 @@ check would think the whole balance was its own to spend.
 | **Mutual Funds** | ✅ | ✅ allotted/charges/shares/amount/description | ✅ deletes both legs |
 | **Stocks** | ✅ | ✅ allotted/charges/shares/amount/description | ✅ deletes both legs |
 | **Commodity** | ✅ | ✅ 1:1 amount + shares + description | ✅ deletes both legs |
+| **Investment sell** (any kind) | ✅ holding leg **debited** `costBasis`, cash leg **credited** net proceeds | ✅ `investmentAction`/`costBasis`/allotted/charges/shares sync; the leg's type is forced opposite the parent's, so a buy edited into a sell flips both | ✅ deletes both legs |
 | **Debt ↔ Ledger** | n/a | ⚠️ **date only — by design** (amount is intentionally NOT synced) | ✅ deletes linked ledger / debt entry |
 
 ### Notes / intentional exceptions

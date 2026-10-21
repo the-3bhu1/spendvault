@@ -9,6 +9,7 @@ import {
   getRewardSplits, isRewardSourceOf, redistributeRewardSplits, rewardLegIdsOf,
   rewardSplitIndexOfLeg, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits,
   insertIntoDay, linkedGroupOf, linkedIdsOf, sortDayByOrder, syncSplitLedgerPassive,
+  investmentHoldingSideType, investmentLegAmount,
 } from './utils';
 import { resolveRewardLegPlan } from './services/RewardLegService';
 
@@ -1569,26 +1570,18 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
                   // Standard 1:1
                   updated.amount = updatedTransaction.amount;
                 }
-              } else if (isMf) {
-                if (updated.type === 'credit') {
-                  updated.amount = Number(updatedTransaction.allottedAmount) || 0;
-                } else {
-                  updated.amount = (Number(updatedTransaction.allottedAmount) || 0) + (Number(updatedTransaction.investmentCharges) || 0);
-                }
-                updated.allottedAmount = updatedTransaction.allottedAmount;
-                updated.investmentCharges = updatedTransaction.investmentCharges;
-                updated.numberOfShares = updatedTransaction.numberOfShares;
-              } else if (isStocks) {
-                if (updated.type === 'credit') {
-                  updated.amount = Number(updatedTransaction.allottedAmount) || updatedTransaction.amount;
-                } else {
-                  updated.amount = (Number(updatedTransaction.allottedAmount) || updatedTransaction.amount) + (Number(updatedTransaction.investmentCharges) || 0);
-                }
-                updated.allottedAmount = updatedTransaction.allottedAmount;
-                updated.investmentCharges = updatedTransaction.investmentCharges;
-                updated.numberOfShares = updatedTransaction.numberOfShares;
-              } else if (isCommodity) {
-                updated.amount = updatedTransaction.amount;
+              } else if (isMf || isStocks || isCommodity) {
+                // An investment pair always moves in opposite directions, and a buy edited into a
+                // sell (or back) flips which side is which, so the leg takes the opposite of the
+                // parent rather than keeping its stored type.
+                updated.type = updatedTransaction.type === 'credit' ? 'debit' : 'credit';
+                updated.investmentAction = updatedTransaction.investmentAction;
+                updated.costBasis = updatedTransaction.costBasis;
+                const isHoldingLeg = updated.type === investmentHoldingSideType(updatedTransaction.investmentAction);
+                const isSell = updatedTransaction.investmentAction === 'sell';
+                updated.amount = investmentLegAmount(isHoldingLeg, updatedTransaction, isMf || isStocks);
+                updated.allottedAmount = (isMf || isStocks || isSell) ? updatedTransaction.allottedAmount : undefined;
+                updated.investmentCharges = (isMf || isStocks || isSell) ? updatedTransaction.investmentCharges : undefined;
                 updated.numberOfShares = updatedTransaction.numberOfShares;
               } else {
                 /* Transfers are 1:1 unless the row says otherwise. counterpartAmount is what the
@@ -1888,8 +1881,11 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       // children link to the parent, not to each other. Deleting one child must take the whole
       // group — otherwise a 3-leg reward-split CC payment orphans its sibling leg. So we expand
       // to the full transitively-linked leg group. See docs/LINKED_TRANSACTIONS.md.
-      const LEG_CATS = ['transfer', 'cc payment', 'ncmc travel recharge', 'mutual funds', 'stocks', 'commodity'];
-      const isLegCat = (c?: string) => LEG_CATS.includes((c || '').toLowerCase());
+      // Investments go through isInvestmentCategory(): every investment row is 'Investments' since the
+      // category merge, which the old 'mutual funds'/'stocks'/'commodity' entries never matched, so
+      // deleting either leg of a buy left the other one behind.
+      const LEG_CATS = ['transfer', 'cc payment', 'ncmc travel recharge'];
+      const isLegCat = (c?: string) => LEG_CATS.includes((c || '').toLowerCase()) || isInvestmentCategory(c);
       const legGroup = new Set<string>([id]);
       if (isLegCat(tx.category)) {
         let changed = true;

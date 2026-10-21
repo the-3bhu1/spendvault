@@ -1471,11 +1471,14 @@ export function getInvestmentAccountStats(
 
   // Average price paid per unit — derived, never stored. Nothing asks the user for it: it is
   // exactly the two numbers above divided, so a saved copy could only ever disagree with them.
-  //
-  // Caveat worth knowing when reading this figure: totalInvested is net cash flow, and a sell leg
-  // subtracts its full proceeds (market price), not the cost of the units sold. So after a partial
-  // sale at a profit this sits BELOW the true cost basis. Exact for accumulate-only holdings.
+  // A sell logged through the form debits the holding by the units' cost basis rather than the
+  // proceeds, so this stays the true average after a partial sale. A hand-made debit on a holding
+  // that carries proceeds instead would still skew it.
   const avgPrice = totalUnits > 0 ? totalInvested / totalUnits : 0;
+
+  const realizedPnl = transactions
+    .filter((t) => t.accountId === account.id)
+    .reduce((sum, t) => sum + (realizedPnlOf(t) ?? 0), 0);
 
   return {
     totalUnits,
@@ -1484,8 +1487,69 @@ export function getInvestmentAccountStats(
     currentValue,
     totalReturn,
     totalReturnPct,
+    realizedPnl,
     currentPrice
   };
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+export const isInvestmentSell = (tx: Pick<Transaction, 'investmentAction'>) => tx.investmentAction === 'sell';
+
+// The direction the HOLDING account's leg takes: a buy credits it with units, a sell debits them out.
+// Whichever account the form's main row is on, comparing its type with this says which side it is.
+export const investmentHoldingSideType = (action?: Transaction['investmentAction']): Transaction['type'] =>
+  action === 'sell' ? 'debit' : 'credit';
+
+// Net proceeds of a sell: the gross sale value less what the broker / AMC / exit load took.
+export const sellProceedsOf = (tx: Pick<Transaction, 'allottedAmount' | 'investmentCharges' | 'amount'>) =>
+  tx.allottedAmount !== undefined
+    ? round2(Number(tx.allottedAmount) - (Number(tx.investmentCharges) || 0))
+    : tx.amount;
+
+// Realized gain on a sell leg, or undefined for anything else. Only meaningful once per pair, so
+// callers that total it should read the holding-side legs (accountId = the holding account).
+export const realizedPnlOf = (tx: Transaction): number | undefined =>
+  isInvestmentSell(tx) && tx.costBasis !== undefined
+    ? round2(sellProceedsOf(tx) - tx.costBasis)
+    : undefined;
+
+// The amount each leg of an investment pair carries. Buy: the holding gets what was invested, the
+// cash account pays that plus charges. Sell: the holding gives up its cost basis, the cash account
+// receives the net proceeds. `splitsCharges` is false for commodity buys, which have one gross figure.
+export const investmentLegAmount = (
+  isHoldingLeg: boolean,
+  tx: Pick<Transaction, 'investmentAction' | 'amount' | 'allottedAmount' | 'investmentCharges' | 'costBasis'>,
+  splitsCharges: boolean
+): number => {
+  if (isInvestmentSell(tx)) {
+    return isHoldingLeg ? round2(Number(tx.costBasis) || 0) : sellProceedsOf(tx);
+  }
+  if (!splitsCharges) return tx.amount;
+  const invested = Number(tx.allottedAmount) || tx.amount;
+  return isHoldingLeg ? invested : round2(invested + (Number(tx.investmentCharges) || 0));
+};
+
+// What a holding stood at on a given date: units and invested cost from the opening figures plus
+// every leg on the account dated on or before it. `excludeIds` drops the sell being edited, so
+// re-saving it is measured against the position it was taken out of, not the one it left behind.
+export function holdingPositionOn(
+  account: Account,
+  transactions: Transaction[],
+  date: string,
+  excludeIds: string[] = []
+) {
+  const relevant = transactions.filter(t => t.date <= date && !excludeIds.includes(t.id));
+  const { totalUnits, totalInvested, avgPrice } = getInvestmentAccountStats(account, relevant);
+  return { units: totalUnits, invested: totalInvested, avgPrice };
+}
+
+// Cost of `units` taken out of a holding at its average price. Selling the whole position returns
+// the whole invested figure, so a full exit leaves exactly zero rather than a rounding residue.
+export function sellCostBasis(position: { units: number; invested: number; avgPrice: number }, units: number) {
+  if (units <= 0 || position.units <= 0) return 0;
+  if (units >= position.units - 1e-9) return round2(position.invested);
+  return round2(position.avgPrice * units);
 }
 
 // ---------------------------------------------------------------------------

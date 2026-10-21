@@ -8,13 +8,15 @@
 // with responseSchema set, the model can still truncate on MAX_TOKENS or emit near-JSON.
 
 import { getGeminiKey, getGeminiModel } from './GeminiConfig';
+import { holdingPositionOn, sellCostBasis } from '../utils';
+import type { Account, Transaction } from '../types';
 
 export interface ParsedTradeRow {
   name: string;
   isin?: string;
   side: 'buy' | 'sell';
   quantity: number;
-  buyValueBeforeCharges: number;
+  tradeValueBeforeCharges: number;
   brokerage?: number; // present only if the note itemizes brokerage per row
 }
 
@@ -32,17 +34,17 @@ export interface ParsedContractNote {
 }
 
 export interface AllocatedTrade {
-  key: string;            // stable grouping key (isin || name)
+  key: string;            // stable grouping key (side + isin || name)
+  side: 'buy' | 'sell';
   name: string;
   isin?: string;
   quantity: number;
-  investedAmount: number; // sum of buyValueBeforeCharges across this stock's rows
+  tradeValue: number;     // sum of tradeValueBeforeCharges across this stock's rows on this side
   brokerageTaxes: number; // allocated brokerage + allocated share of pooled other charges
 }
 
 export interface AllocationResult {
   trades: AllocatedTrade[];
-  skippedSellRows: number;
   reconciliationWarning?: string;
 }
 
@@ -60,10 +62,10 @@ const RESPONSE_SCHEMA = {
           isin: { type: 'string' },
           side: { type: 'string', enum: ['buy', 'sell'] },
           quantity: { type: 'number' },
-          buyValueBeforeCharges: { type: 'number' },
+          tradeValueBeforeCharges: { type: 'number' },
           brokerage: { type: 'number' },
         },
-        required: ['name', 'side', 'quantity', 'buyValueBeforeCharges'],
+        required: ['name', 'side', 'quantity', 'tradeValueBeforeCharges'],
       },
     },
     brokerage: { type: 'number' },
@@ -88,7 +90,7 @@ For each row report:
 - isin: the ISIN code if visible, otherwise omit
 - side: "buy" or "sell"
 - quantity: number of shares in that row
-- buyValueBeforeCharges: that row's gross trade value BEFORE brokerage/taxes. Compute it as quantity × the PRE-brokerage per-share price — the plain rate column (often "WAP per Share" or "Rate/Price"), NOT the "WAP per Share after brokerage" column and NOT the "Total Value after brokerage" / net-payable figure. Read the digits carefully and double-check quantity × price matches.
+- tradeValueBeforeCharges: that row's gross trade value BEFORE brokerage/taxes (the purchase value for a buy, the sale value for a sell). Compute it as quantity × the PRE-brokerage per-share price — the plain rate column (often "WAP per Share" or "Rate/Price"), NOT the "WAP per Share after brokerage" column and NOT the "Total Value after brokerage" / net-payable figure. Read the digits carefully and double-check quantity × price matches.
 - brokerage: ONLY if this note itemizes brokerage per row (some brokers do, some pool it into a single footer total). Omit this field entirely if brokerage is only shown as a single pooled total for the whole note.
 
 Also report these note-level POOLED totals (each as a plain non-negative number, 0 if not present/not applicable):
@@ -179,7 +181,7 @@ export async function parseContractNote(imageBase64: string, mimeType: string): 
     isin: r.isin ? String(r.isin) : undefined,
     side: r.side === 'sell' ? 'sell' : 'buy',
     quantity: Number(r.quantity) || 0,
-    buyValueBeforeCharges: Number(r.buyValueBeforeCharges) || 0,
+    tradeValueBeforeCharges: Number(r.tradeValueBeforeCharges) || 0,
     brokerage: r.brokerage !== undefined && r.brokerage !== null ? Number(r.brokerage) : undefined,
   })) : [];
 
@@ -233,63 +235,129 @@ function reconcileToCents(floorCents: number[], totalCents: number, rawCents?: n
 }
 
 export function allocateCharges(parsed: ParsedContractNote): AllocationResult {
-  const buyRows = parsed.rows.filter(r => r.side === 'buy');
-  const skippedSellRows = parsed.rows.length - buyRows.length;
+  const tradeRows = parsed.rows.filter(r => r.quantity > 0 || r.tradeValueBeforeCharges > 0);
 
-  if (buyRows.length === 0) {
-    return { trades: [], skippedSellRows };
+  if (tradeRows.length === 0) {
+    return { trades: [] };
   }
 
   // Brokerage per row: prefer the printed per-row figure; only flat-split the pooled total
   // across rows that don't have one (covers notes that itemize some rows but pool others,
   // e.g. a mixed per-leg fee schedule — rare, but cheap to handle correctly).
-  const rowsMissingBrokerage = buyRows.filter(r => r.brokerage === undefined);
+  const rowsMissingBrokerage = tradeRows.filter(r => r.brokerage === undefined);
   const perRowFlatBrokerage = rowsMissingBrokerage.length > 0
     ? parsed.brokerage / rowsMissingBrokerage.length
     : 0;
-  const rowBrokerage = buyRows.map(r => r.brokerage !== undefined ? r.brokerage : perRowFlatBrokerage);
+  const rowBrokerage = tradeRows.map(r => r.brokerage !== undefined ? r.brokerage : perRowFlatBrokerage);
 
   // All other pooled charges split proportional to each row's pre-brokerage trade value.
   const otherChargesTotal = parsed.exchangeCharges + parsed.gst + parsed.stt + parsed.stampDuty
     + parsed.sebiFees + parsed.ipft + parsed.other;
   const rowOtherCharges = allocateProportionally(
     otherChargesTotal,
-    buyRows.map(r => r.buyValueBeforeCharges)
+    tradeRows.map(r => r.tradeValueBeforeCharges)
   );
 
   // Group allocated rows by stock (ISIN preferred, else normalized name) — a stock bought
   // across multiple rows/orders must sum its allocated shares, not just take one row's.
   const groups = new Map<string, AllocatedTrade>();
-  buyRows.forEach((row, i) => {
-    const key = row.isin || row.name.trim().toLowerCase();
+  tradeRows.forEach((row, i) => {
+    const key = `${row.side}:${row.isin || row.name.trim().toLowerCase()}`;
     const existing = groups.get(key);
     const brokerage = rowBrokerage[i];
     const otherCharges = rowOtherCharges[i];
     if (existing) {
       existing.quantity += row.quantity;
-      existing.investedAmount += row.buyValueBeforeCharges;
+      existing.tradeValue += row.tradeValueBeforeCharges;
       existing.brokerageTaxes = parseFloat((existing.brokerageTaxes + brokerage + otherCharges).toFixed(2));
     } else {
       groups.set(key, {
         key,
+        side: row.side,
         name: row.name,
         isin: row.isin,
         quantity: row.quantity,
-        investedAmount: row.buyValueBeforeCharges,
+        tradeValue: row.tradeValueBeforeCharges,
         brokerageTaxes: parseFloat((brokerage + otherCharges).toFixed(2)),
       });
     }
   });
 
-  const trades = Array.from(groups.values());
+  const trades = Array.from(groups.values()).sort((a, b) => a.side === b.side ? 0 : a.side === 'buy' ? -1 : 1);
 
   let reconciliationWarning: string | undefined;
   if (parsed.netAmount > 0) {
-    const computedTotal = trades.reduce((s, t) => s + t.investedAmount + t.brokerageTaxes, 0);
-    if (Math.abs(computedTotal - parsed.netAmount) > 1) {
-      reconciliationWarning = `Computed total ₹${computedTotal.toFixed(2)} doesn't match the note's printed net amount ₹${parsed.netAmount.toFixed(2)} — please check the figures below before logging.`;
+    const computedNet = Math.abs(trades.reduce((s, t) => t.side === 'buy'
+      ? s + t.tradeValue + t.brokerageTaxes
+      : s - (t.tradeValue - t.brokerageTaxes), 0));
+    if (Math.abs(computedNet - parsed.netAmount) > 1) {
+      reconciliationWarning = `Computed net ₹${computedNet.toFixed(2)} doesn't match the note's printed net amount ₹${parsed.netAmount.toFixed(2)} — please check the figures below before logging.`;
     }
   }
 
-  return { trades, skippedSellRows, reconciliationWarning };
+  return { trades, reconciliationWarning };
+}
+
+export interface NoteTradeLeg {
+  rowId: string;
+  side: 'buy' | 'sell';
+  accountId: string;
+  quantity: number;
+  tradeValue: number;
+  charges: number;
+}
+
+export type SellPlan =
+  | { ok: true; held: number; costBasis: number; proceeds: number; realizedPnl: number }
+  | { ok: false; held: number; error: string };
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+export function planContractNoteSells(
+  legs: NoteTradeLeg[],
+  accounts: Account[],
+  transactions: Transaction[],
+  date: string
+): Map<string, SellPlan> {
+  const positions = new Map<string, { units: number; invested: number }>();
+  const positionOf = (accountId: string) => {
+    let pos = positions.get(accountId);
+    if (!pos) {
+      const account = accounts.find(a => a.id === accountId);
+      const start = account ? holdingPositionOn(account, transactions, date) : { units: 0, invested: 0 };
+      pos = { units: start.units, invested: start.invested };
+      positions.set(accountId, pos);
+    }
+    return pos;
+  };
+
+  legs.filter(l => l.side === 'buy' && l.accountId).forEach(l => {
+    const pos = positionOf(l.accountId);
+    pos.units += l.quantity;
+    pos.invested += l.tradeValue;
+  });
+
+  const plans = new Map<string, SellPlan>();
+  legs.filter(l => l.side === 'sell').forEach(l => {
+    if (!l.accountId) {
+      plans.set(l.rowId, { ok: false, held: 0, error: 'Pick the stock account these shares came from.' });
+      return;
+    }
+    const pos = positionOf(l.accountId);
+    const held = round2(pos.units);
+    if (!(l.quantity > 0)) {
+      plans.set(l.rowId, { ok: false, held, error: 'No. of shares sold is required.' });
+      return;
+    }
+    if (l.quantity > pos.units + 1e-9) {
+      plans.set(l.rowId, { ok: false, held, error: `Only ${held} held on this date.` });
+      return;
+    }
+    const costBasis = sellCostBasis({ ...pos, avgPrice: pos.invested / pos.units }, l.quantity);
+    pos.units -= l.quantity;
+    pos.invested -= costBasis;
+    const proceeds = round2(l.tradeValue - l.charges);
+    plans.set(l.rowId, { ok: true, held, costBasis, proceeds, realizedPnl: round2(proceeds - costBasis) });
+  });
+  return plans;
 }

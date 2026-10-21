@@ -5,13 +5,14 @@ import { useFinance } from '../FinanceContext';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import { getAccountTypeIcon } from './transactionIcons';
-import { generateId, INVESTMENT_CATEGORY } from '../utils';
-import type { AllocatedTrade } from '../services/ContractNoteService';
+import { generateId, INVESTMENT_CATEGORY, investmentLegAmount, investmentHoldingSideType } from '../utils';
+import { planContractNoteSells, type AllocatedTrade } from '../services/ContractNoteService';
 
 const CREATE_NEW = '__create_new__';
 
 interface EditableRow {
   rowId: string;
+  side: 'buy' | 'sell';
   name: string;
   quantityStr: string;
   investedStr: string;
@@ -19,37 +20,37 @@ interface EditableRow {
   accountSelection: string; // existing account id, or CREATE_NEW
 }
 
-function fuzzyMatchAccountId(tradeName: string, accounts: { id: string; name: string }[]): string {
+function fuzzyMatchAccountId(tradeName: string, accounts: { id: string; name: string }[], fallback: string): string {
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
   const target = norm(tradeName);
-  if (!target) return CREATE_NEW;
+  if (!target) return fallback;
   const match = accounts.find(a => {
     const n = norm(a.name);
     return n === target || n.includes(target) || target.includes(n);
   });
-  return match?.id || CREATE_NEW;
+  return match?.id || fallback;
 }
 
 interface ContractNoteReviewProps {
   trades: AllocatedTrade[];
-  skippedSellRows: number;
   reconciliationWarning?: string;
   onConfirm: (summary: string) => void;
   onDismiss: () => void;
 }
 
-export default function ContractNoteReview({ trades, skippedSellRows, reconciliationWarning, onConfirm, onDismiss }: ContractNoteReviewProps) {
+export default function ContractNoteReview({ trades, reconciliationWarning, onConfirm, onDismiss }: ContractNoteReviewProps) {
   const { data, addAccount, addTransaction } = useFinance();
   const stocksAccounts = data.accounts.filter(a => a.type === 'stocks' && !a.archived);
   const fundingAccounts = data.accounts.filter(a => (a.type === 'bank_account' || a.type === 'e_wallet') && !a.archived);
 
   const [rows, setRows] = useState<EditableRow[]>(() => trades.map(t => ({
     rowId: t.key,
+    side: t.side,
     name: t.name,
     quantityStr: t.quantity ? t.quantity.toString() : '',
-    investedStr: t.investedAmount ? t.investedAmount.toString() : '',
+    investedStr: t.tradeValue ? t.tradeValue.toString() : '',
     chargesStr: t.brokerageTaxes ? t.brokerageTaxes.toString() : '',
-    accountSelection: fuzzyMatchAccountId(t.name, stocksAccounts),
+    accountSelection: fuzzyMatchAccountId(t.name, stocksAccounts, t.side === 'sell' ? '' : CREATE_NEW),
   })));
   const [fundingAccountId, setFundingAccountId] = useState(fundingAccounts[0]?.id || '');
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -67,18 +68,41 @@ export default function ContractNoteReview({ trades, skippedSellRows, reconcilia
     if (val === '' || /^\d*\.?\d*$/.test(val)) updateRow(rowId, { [field]: val } as Partial<EditableRow>);
   };
 
-  const accountOptions = [
-    { id: CREATE_NEW, name: 'Create new account' },
-    ...stocksAccounts.map(a => ({ id: a.id, name: a.name, subtext: 'stocks' })),
-  ];
+  const holdingOptions = stocksAccounts.map(a => ({ id: a.id, name: a.name, subtext: 'stocks' }));
+  const accountOptions = [{ id: CREATE_NEW, name: 'Create new account' }, ...holdingOptions];
+
+  const hasSells = rows.some(r => r.side === 'sell');
+  const sellPlans = planContractNoteSells(
+    rows.map(r => ({
+      rowId: r.rowId,
+      side: r.side,
+      accountId: r.accountSelection === CREATE_NEW ? '' : r.accountSelection,
+      quantity: parseFloat(r.quantityStr) || 0,
+      tradeValue: parseFloat(r.investedStr) || 0,
+      charges: parseFloat(r.chargesStr) || 0,
+    })),
+    data.accounts,
+    data.transactions,
+    date
+  );
+  const inr = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const signedInr = (n: number) => `${n < 0 ? '−' : '+'}₹${inr(Math.abs(n))}`;
 
   const handleLogAll = () => {
     if (!fundingAccountId) { setError('Select a funding account.'); return; }
     if (rows.length === 0) { setError('No trades to log.'); return; }
     for (const r of rows) {
       if (!r.name.trim() || !r.investedStr || parseFloat(r.investedStr) <= 0) {
-        setError(`"${r.name || 'A row'}" needs a name and invested amount.`);
+        setError(`"${r.name || 'A row'}" needs a name and ${r.side === 'sell' ? 'sale value' : 'invested amount'}.`);
         return;
+      }
+      if (r.side === 'sell') {
+        const plan = sellPlans.get(r.rowId);
+        if (plan && !plan.ok) { setError(`"${r.name}": ${plan.error}`); return; }
+        if ((parseFloat(r.chargesStr) || 0) > parseFloat(r.investedStr)) {
+          setError(`"${r.name}": charges can't exceed the sale value.`);
+          return;
+        }
       }
     }
     setError('');
@@ -107,8 +131,8 @@ export default function ContractNoteReview({ trades, skippedSellRows, reconcilia
       }
     }
 
-    const inr = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    let totalLogged = 0;
+    let totalInvested = 0;
+    let totalReceived = 0;
     const reportLines: string[] = [];
     for (const r of rows) {
       const stocksAccountId = accountIdByRow.get(r.rowId)!;
@@ -123,6 +147,51 @@ export default function ContractNoteReview({ trades, skippedSellRows, reconcilia
       // ALL-CAPS text is only used to name/describe a NEWLY created account.
       const existingAcc = r.accountSelection === CREATE_NEW ? undefined : data.accounts.find(a => a.id === r.accountSelection);
       const description = (existingAcc?.name || r.name).trim();
+
+      if (r.side === 'sell') {
+        const plan = sellPlans.get(r.rowId);
+        if (!plan || !plan.ok) continue;
+        const sellFields = {
+          investmentAction: 'sell' as const,
+          costBasis: plan.costBasis,
+          allottedAmount: invested,
+          investmentCharges: charges,
+        };
+        const holdingSide = investmentHoldingSideType('sell');
+        const cashSide = holdingSide === 'credit' ? 'debit' : 'credit';
+        addTransaction({
+          id: counterpartId,
+          date,
+          description,
+          accountId: fundingAccountId,
+          type: cashSide,
+          amount: investmentLegAmount(false, { amount: plan.proceeds, ...sellFields }, true),
+          category: INVESTMENT_CATEGORY,
+          investmentKind: 'stocks',
+          isRecurring: false,
+          linkedTransactionIds: [mainTxId],
+          numberOfShares: quantity,
+          ...sellFields,
+        });
+        addTransaction({
+          id: mainTxId,
+          date,
+          description,
+          accountId: stocksAccountId,
+          type: holdingSide,
+          amount: investmentLegAmount(true, { amount: plan.proceeds, ...sellFields }, true),
+          category: INVESTMENT_CATEGORY,
+          investmentKind: 'stocks',
+          isRecurring: false,
+          linkedTransactionIds: [counterpartId],
+          paymentSourceAccountId: fundingAccountId,
+          numberOfShares: quantity,
+          ...sellFields,
+        });
+        totalReceived += plan.proceeds;
+        reportLines.push(`• **${description}** — sold ${quantity} sh · ₹${inr(invested)} − ₹${inr(charges)} charges · P&L ${signedInr(plan.realizedPnl)}`);
+        continue;
+      }
 
       // Mirrors Transactions.tsx's isStocks branch: a stock purchase credits the stocks
       // account (shares acquired) and debits the funding account for invested + charges.
@@ -157,7 +226,7 @@ export default function ContractNoteReview({ trades, skippedSellRows, reconcilia
         allottedAmount: invested,
         investmentCharges: charges,
       });
-      totalLogged += invested + charges;
+      totalInvested += invested + charges;
       // Per-stock recap line — rendered by AskVault's markdown renderer (bold + bullet list),
       // so the logged report stays visible in chat history, not just the total.
       const qtyPart = quantity !== undefined ? `${quantity} sh · ` : '';
@@ -165,7 +234,11 @@ export default function ContractNoteReview({ trades, skippedSellRows, reconcilia
     }
 
     setSaving(false);
-    const header = `✅ Logged ${rows.length} stock trade${rows.length === 1 ? '' : 's'} from your contract note (₹${inr(totalLogged)} total).`;
+    const totals = [
+      totalInvested > 0 ? `₹${inr(totalInvested)} invested` : '',
+      totalReceived > 0 ? `₹${inr(totalReceived)} received` : '',
+    ].filter(Boolean).join(', ');
+    const header = `✅ Logged ${rows.length} stock trade${rows.length === 1 ? '' : 's'} from your contract note (${totals}).`;
     onConfirm(`${header}\n\n${reportLines.join('\n')}`);
   };
 
@@ -175,10 +248,6 @@ export default function ContractNoteReview({ trades, skippedSellRows, reconcilia
         <span className="font-bold" style={{ fontSize: '0.95rem' }}>Detected {rows.length} stock trade{rows.length === 1 ? '' : 's'}</span>
         <button className="askvault-icon-btn" onClick={onDismiss} title="Dismiss"><X size={18} /></button>
       </div>
-
-      {skippedSellRows > 0 && (
-        <div className="text-xs text-muted">Skipped {skippedSellRows} sell row{skippedSellRows === 1 ? '' : 's'} found on the note — only buys are logged here.</div>
-      )}
 
       {reconciliationWarning && (
         <div className="flex align-start gap-2 text-xs" style={{ padding: '0.6rem', borderRadius: '8px', background: 'rgba(234, 179, 8, 0.12)', color: '#eab308' }}>
@@ -191,6 +260,9 @@ export default function ContractNoteReview({ trades, skippedSellRows, reconcilia
         {rows.map(r => (
           <div key={r.rowId} className="flex-col gap-2" style={{ padding: '0.75rem', border: '1px solid var(--border-color)', borderRadius: '10px', background: 'var(--bg-hover)' }}>
             <div className="flex justify-between align-center gap-2">
+              <span className="text-xs font-bold" style={{ padding: '0.2rem 0.5rem', borderRadius: '6px', flexShrink: 0, color: r.side === 'sell' ? 'var(--danger)' : 'var(--success)', border: `1px solid ${r.side === 'sell' ? 'var(--danger)' : 'var(--success)'}` }}>
+                {r.side === 'sell' ? 'SELL' : 'BUY'}
+              </span>
               <input
                 className="input-field"
                 style={{ fontWeight: 600 }}
@@ -202,11 +274,11 @@ export default function ContractNoteReview({ trades, skippedSellRows, reconcilia
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="input-group" style={{ marginBottom: 0 }}>
-                <label>No. of Shares</label>
+                <label>{r.side === 'sell' ? 'Shares Sold' : 'No. of Shares'}</label>
                 <input type="text" inputMode="decimal" className="input-field" value={r.quantityStr} onChange={decimalOnChange(r.rowId, 'quantityStr')} placeholder="e.g. 10" />
               </div>
               <div className="input-group" style={{ marginBottom: 0 }}>
-                <label>Invested Amount</label>
+                <label>{r.side === 'sell' ? 'Sale Value' : 'Invested Amount'}</label>
                 <input type="text" inputMode="decimal" className="input-field" value={r.investedStr} onChange={decimalOnChange(r.rowId, 'investedStr')} placeholder="0.00" />
               </div>
             </div>
@@ -217,17 +289,34 @@ export default function ContractNoteReview({ trades, skippedSellRows, reconcilia
             <CustomPicker
               label="Stocks Account"
               value={r.accountSelection}
-              options={accountOptions}
+              placeholder="Select holding"
+              options={r.side === 'sell' ? holdingOptions : accountOptions}
               onChange={val => updateRow(r.rowId, { accountSelection: val })}
               iconGetter={id => id === CREATE_NEW ? <Plus size={18} /> : getAccountTypeIcon('stocks')}
               style={{ marginBottom: 0 }}
             />
+            {r.side === 'sell' && (() => {
+              const plan = sellPlans.get(r.rowId);
+              if (!plan) return null;
+              if (!plan.ok) return <span className="text-xs text-danger">{plan.error}</span>;
+              return (
+                <div className="flex-col gap-1 text-xs">
+                  <span className="text-muted">Held {plan.held} on this date</span>
+                  <div className="flex justify-between"><span className="text-muted">Cost basis</span><span className="text-mono">₹{inr(plan.costBasis)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted">Received</span><span className="text-mono">₹{inr(plan.proceeds)}</span></div>
+                  <div className="flex justify-between">
+                    <span className="text-muted">Realized P&amp;L</span>
+                    <span className="text-mono font-bold" style={{ color: plan.realizedPnl < 0 ? 'var(--danger)' : 'var(--success)' }}>{signedInr(plan.realizedPnl)}</span>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         ))}
       </div>
 
       <CustomPicker
-        label="Funding Account"
+        label={hasSells ? 'Bank Account' : 'Funding Account'}
         value={fundingAccountId}
         placeholder="Select account"
         options={fundingAccounts.map(a => ({ id: a.id, name: a.name, subtext: a.type.replace('_', ' ') }))}

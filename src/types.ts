@@ -246,6 +246,7 @@ export type RewardEarnedType = 'delayed' | 'instant' | 'none';
 // Account['type'] ('mutual_funds' | 'stocks' | 'commodity') — that 1:1 pairing is what lets the kind
 // of a legacy investment transaction be recovered from the account it moved money into or out of.
 export type InvestmentKind = 'mutual_funds' | 'stocks' | 'commodity';
+export type InvestmentAction = 'buy' | 'sell';
 
 export interface Transaction {
   id: string;
@@ -326,6 +327,15 @@ export interface Transaction {
    *  category is 'Investments'; read it via getInvestmentKind(), which also infers it for rows
    *  written before this field existed. */
   investmentKind?: InvestmentKind;
+  /** Absent means 'buy', which is every investment row written before sells existed.
+   *  A sell flips the pair: the holding account is DEBITED by `costBasis` and the cash account
+   *  CREDITED with the net proceeds. On a sell, `allottedAmount` is the gross sale value and
+   *  `investmentCharges` what was deducted from it, so proceeds = allottedAmount − investmentCharges. */
+  investmentAction?: InvestmentAction;
+  /** Sell only: what the units sold had cost (units × average cost on the sale date). This, not the
+   *  proceeds, is what leaves the holding, so its average price survives a partial sale. Snapshotted
+   *  on save and on both legs; realized P&L is proceeds − costBasis. */
+  costBasis?: number;
   tags?: string[];
 }
 

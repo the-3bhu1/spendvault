@@ -237,7 +237,7 @@ export default function AskVault({ isOpen: _isOpen, onClose, onOpenSettings, isD
       const parsed = await parseContractNote(base64, mimeType);
       const result = allocateCharges(parsed);
       if (result.trades.length === 0) {
-        setPendingReview({ status: 'error', fileLabel, message: "Couldn't find any buy trades on that note — try a clearer screenshot, or log it manually." });
+        setPendingReview({ status: 'error', fileLabel, message: "Couldn't find any trades on that note — try a clearer screenshot, or log it manually." });
         return;
       }
       setPendingReview({ status: 'success', fileLabel, result });
@@ -449,7 +449,6 @@ export default function AskVault({ isOpen: _isOpen, onClose, onOpenSettings, isD
         {pendingReview?.status === 'success' && (
           <ContractNoteReview
             trades={pendingReview.result.trades}
-            skippedSellRows={pendingReview.result.skippedSellRows}
             reconciliationWarning={pendingReview.result.reconciliationWarning}
             onConfirm={handleReviewConfirm}
             onDismiss={handleReviewDismiss}

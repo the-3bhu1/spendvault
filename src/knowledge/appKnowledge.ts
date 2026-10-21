@@ -311,6 +311,19 @@ the "Other" source below covers one-off rewards.
       account. Commodity has no invested-vs-charges split.
     The transaction is described automatically after the holding account (e.g. the fund or stock name),
     and switching type clears any account or quantity that no longer applies.
+  - A "Trade" toggle under Investment Type switches between BUY and SELL (SELL / REDEEM for mutual
+    funds). A sell is the buy in reverse: the holding account is debited the units/shares/grams and
+    the bank or wallet is credited what actually arrived. The Amount is that received figure; for funds
+    and stocks the form also takes the gross Sale / Redemption Value, and the difference is the
+    Brokerage/Taxes or Exit Load/Charges. Flipping the toggle keeps both picked accounts in their roles.
+  - On a sell the form shows what was held on the sale date and its average price, a SELL ALL chip,
+    and a live Cost basis / Received / Realized P&L preview. It refuses to sell more than was held on
+    that date. The holding is reduced by the COST of the units sold (units × average price), not by the
+    proceeds, so the average buy price of what remains is unchanged; the difference to the proceeds is
+    the realized P&L. A full exit takes the holding to exactly zero.
+  - The holding's detail screen in Wealth shows a "Realized P&L" row once it has a sell, and the
+    returns row above it is then labelled "Unrealized Returns". Ask Vault sees the realized figure too.
+  - Deleting either leg of an investment (buy or sell) deletes its other leg as well.
 - Cashback (instant): on a debit with instant cashback, an extra credit posts to the chosen rewards
   account (category "Cashback"). Offered on ANY debit from a bank or e-wallet — including transfers,
   card bill payments and NCMC recharges — because it is the payment app (super.money, CRED, …) that
@@ -875,9 +888,12 @@ can tap "Restore from backup" on the first step to import an existing backup fil
 # This assistant (Ask Vault)
 Mostly read-only: it explains the app and reports on your data, and cannot edit or delete anything.
 The one exception is contract-note import: tap the paperclip in the Ask Vault input to attach a broker
-contract note (image or PDF, e.g. Groww/Zerodha style). It parses the buy trades and allocates the
-pooled charges (brokerage/STT/GST/stamp duty) across them, then lets you review/edit the rows, pick or
-create the stock account, and log them as stock buy transactions (sell rows are skipped). This needs
+contract note (image or PDF, e.g. Groww/Zerodha style). It parses the buy and sell trades and allocates
+the pooled charges (brokerage/STT/GST/stamp duty) across them, then lets you review/edit the rows, pick
+the stock account (or create one for a buy), and log them. Buys are logged as stock buys; sells are
+logged exactly like a Sell from the transaction log: each sell row must point at a holding you already
+have, shows the shares held on the note's date, the cost basis, what you received and the realized P&L,
+and won't log more shares than you held. Buys on the same note count towards what a sell can take. This needs
 the Gemini key. It's opt-in (Settings → AI Features), and the first time you open it you must tap
 "Enable & continue" to consent. It sends a summary of your finances plus your question to Gemini to
 answer; card numbers, CVVs and the PIN are never sent.

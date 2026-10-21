@@ -141,6 +141,7 @@ function buildSummary(data: FinanceData): string {
         invLine += `Total Invested ${formatCurrency(stats.totalInvested)} (Units: ${stats.totalUnits}` +
           (stats.avgPrice > 0 ? `, Avg. buy price ${formatCurrency(stats.avgPrice)}/${unitWord}` : '') + ')';
       }
+      if (stats.realizedPnl !== 0) invLine += ` [Realized P&L from sells: ${stats.realizedPnl >= 0 ? '+' : ''}${formatCurrency(stats.realizedPnl)}]`;
       if (a.type === 'commodity' && a.commodityMetal) invLine += ` (${a.commodityMetal})`;
       out.push(invLine);
       return;

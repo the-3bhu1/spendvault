@@ -653,6 +653,7 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
         currentValue: proj.balance,
         totalReturn: 0,
         totalReturnPct: 0,
+        realizedPnl: 0,
         currentPrice: proj.balance
       };
     }
@@ -2382,10 +2383,19 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
                     />
                   )}
                   <StatRow
-                    label="Total Returns"
+                    label={stats.realizedPnl !== 0 ? 'Unrealized Returns' : 'Total Returns'}
                     value={signedAmount(stats.totalReturn >= 0, `₹${Math.abs(stats.totalReturn).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${stats.totalReturnPct >= 0 ? '+' : ''}${stats.totalReturnPct.toFixed(2)}%)`)}
                     color={stats.totalReturn >= 0 ? '#4ade80' : '#f87171'}
                   />
+                  {/* Booked on sells: proceeds less the cost of the units sold. Only shown once a
+                    sell exists, so a buy-only holding reads exactly as it did. */}
+                  {stats.realizedPnl !== 0 && (
+                    <StatRow
+                      label="Realized P&L"
+                      value={signedAmount(stats.realizedPnl >= 0, `₹${Math.abs(stats.realizedPnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)}
+                      color={stats.realizedPnl >= 0 ? '#4ade80' : '#f87171'}
+                    />
+                  )}
                   {oneDay && (
                     <StatRow
                       label="1 Day Returns"
