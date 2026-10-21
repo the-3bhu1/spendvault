@@ -1325,21 +1325,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         updatedDebts.push(newDebt);
       }
     }
-    // Scenario B: Was matching debt, but now does NOT match
-    else if (oldMatch && !newMatch) {
-      updatedDebts = restampChangedDebts(prevDebts, updatedDebts.map(debt => {
-        const filteredTxs = debt.transactions.filter(dt => dt.linkedTxId !== updatedTx.id && !(updatedTx.linkedTransactionIds || []).includes(dt.id));
-        return {
-          ...debt,
-          transactions: filteredTxs
-        };
-      }))
-      .filter(debt => debt.transactions.length > 0);
-
-      updatedTx.linkedTransactionIds = (updatedTx.linkedTransactionIds || []).filter(id => {
-        return !prevDebts.some(d => d.transactions.some(dt => dt.id === id));
-      });
-    }
+    /* Scenario B — was matching, now does NOT match — deliberately does nothing. It used to delete
+       the debt entry and unlink the row, so moving a blank-description repayment ("Dad: Repayment")
+       to Food wiped the repayment off Dad's balance, while the same move on a row with its own text
+       ("Paid back via GPay") kept it: the parse only recognises the default wording. The pair is
+       linked by id, not by description, so both now behave the same — the entry stays, and the
+       category alone decides whether its amount keeps following the row (see updateTransaction).
+       Deleting the row, or the entry from the person's screen, is how an entry goes away. */
     // Scenario C: Was matching debt, and still matches
     else if (oldMatch && newMatch) {
       let linkedDebtTxId = (updatedTx.linkedTransactionIds || []).find(id => 
@@ -1735,7 +1727,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
             .filter(dt => !txsToDelete.includes(dt.id))
             .map(dt => {
               if (allLinkedIds.includes(dt.id)) {
-                return { ...dt, date: updatedTransaction.date };
+                // A Lending & Borrowing row is the debt entry's own money, so it carries its amount
+                // over whatever its description says — the "<Person>: Repayment" parse above only
+                // catches the default wording. Any other row linked by hand keeps the entry's own
+                // amount: the entry may be only part of that spend.
+                return updatedTransaction.category === 'Lending & Borrowing'
+                  ? { ...dt, date: updatedTransaction.date, amount: updatedTransaction.amount }
+                  : { ...dt, date: updatedTransaction.date };
               }
               return dt;
             })

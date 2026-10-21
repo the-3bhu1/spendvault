@@ -42,6 +42,8 @@ Rupees (₹). The app is also packaged for Android/iOS via Capacitor.
 # Accounts
 - Tap any account-type heading to collapse or expand that group; the Archived section at the bottom
   starts collapsed and opens the same way.
+- Scrolled more than about one screen down, an ↑ button appears at the bottom right, above the nav
+  bar; tap it to jump back to the top. Same button and same rule as the Transactions ledger.
 - Cashback tracking is per card and off until you tick "Enable Cashback / Rewards?" in the account's
   add/edit form, where you also set the Reward Type (rupee statement credit or a custom points unit),
   the default rate, "Round off cashback?" (also per custom level), and "Apply Statement Credits To" —
@@ -141,6 +143,11 @@ the editor — a transaction is marked recurring only when logged through a Bill
 Actions (Transactions tab):
 - Add: tap "+", fill details, save.
 - Edit: tap a transaction row (a quick tap) to open its editor.
+- Description suggestions: after 2 typed letters the Description field lists up to 5 past
+  descriptions containing them; picking one also fills in that past transaction's amount, category,
+  account and type where you haven't set them yet.
+- Scroll to top: scrolled more than about one screen down the ledger, an ↑ button appears at the
+  bottom right, above the nav bar; tap it to jump straight back to the top.
 - Delete: swipe the row to the RIGHT until the red DELETE appears, then release. Deleting also
   removes any linked counterpart legs.
 - Reorder: long-press a row and drag up/down. Reordering works only WITHIN the same date and moves a
@@ -568,6 +575,10 @@ a lone "K" would be no more use than "Me". It falls back to "Me" if no name is s
   entry form, "Log in Ledger" is what creates the matching transaction and moves an account balance,
   while "Link Ledger" attaches an EXISTING transaction instead (tap again to unlink); leave both off
   for a ledger-only record.
+- The entry forms' Description (Optional) suggests as you type, like Log Transaction: after 2 letters,
+  up to 5 past descriptions — people's debt entries first, then the Transactions log — and the list
+  scrolls itself into view. Picking one fills in the text only, not an amount or account. The default
+  words ("Repayment", "Dad: Repayment") are never suggested.
 - An entry marked done is locked — the pencil and trash answer "Untick to edit"/"Untick to delete",
   so un-tick it first. Deleting the last entry left removes that person entirely.
 - A person's header carries share, tick (mark all done), pencil (rename) and trash (delete the whole
@@ -586,7 +597,11 @@ A per-person ledger of money lent or borrowed, plus repayments. Add a person/deb
 net balance: they owe you, or you owe them. This feature supports 2-way sync: logging an entry in the
 Debt ledger can automatically create a transaction, and conversely, logging, editing, or deleting a
 transaction under the "Lending & Borrowing" category with a description format of "<PersonName> : <Lent/Borrowed/Repayment>"
-automatically creates, updates, or deletes the corresponding entry in the Debt ledger in real-time. Ledger
+automatically creates or updates the corresponding entry in the Debt ledger in real-time. Editing such a row into another
+description or category never deletes its entry; deleting the row (or the entry) does. An entry logged from a person's screen
+gives its ledger row the text you typed, unchanged; left blank, the row reads "<PersonName>: Lent/Borrowed/Repayment". While
+the row's category is Lending & Borrowing its amount and the entry's stay equal, edited from either side; under any other
+category (e.g. an expense linked by hand) each keeps its own amount. Ledger
 entries can be linked to real transactions; when you delete a linked entry you can choose to delete both
 or keep the ledger transaction ("Remove from History Only"). Settling a debt that still has a balance
 offers "Settle Now", which adds a closing Final Settlement entry. The tick in the debt's header is
@@ -691,7 +706,7 @@ Invested vs. current value with gain/loss, today's gain/loss, a "Refresh prices"
 refresh at" timestamp. Prices: stocks/funds are fetched online; gold/silver are AI-estimated via the
 optional Gemini integration or set manually (₹/gram). Filter pills (All / MF / Stocks / Metals) appear
 only for the asset classes the user actually holds, and only when there's more than one. With a single
-class selected, a pill on that section's header cycles what every row shows on its right — Current
+class selected — or when only one class is held, so there are no filter pills — a pill on that section's header cycles what every row shows on its right — Current
 (Invested), 1D Change, or Returns — tap the label to step forward or the ‹ › chevrons to move either
 way. Metals offer only Current (Invested) and Returns, having no dependable previous close; on All the
 pill is hidden and rows show Current (Invested). Each class
@@ -720,7 +735,9 @@ Total cash and funds available, with filter pills (All / Bank / Cash / Wallets /
 the groups present. Each row shows the account's running balance and its type. Tapping a row opens
 that account's detail screen: its balance, what the month did to it, a balance trend (1M / 6M / 1Y /
 ALL — 1M is day by day, the longer windows month by month), the month's Income and Spends, and the
-five most recent transactions. Income and Spends there follow the same rule as the Transactions
+five most recent transactions under Recent Activity, latest first: newest day first, and within a day
+the reverse of the Transactions log's order (the log runs morning at the top to night at the bottom), so
+reordering a day in the log reorders this list too. Income and Spends there follow the same rule as the Transactions
 screen's: transfers, card bill payments, investment legs, lending & borrowing, NCMC recharges and
 Passive Logs are excluded, so the two figures state money genuinely earned and spent through that
 account rather than every rupee that crossed it — which is also why they do NOT add up to the balance
@@ -877,7 +894,8 @@ can tap "Restore from backup" on the first step to import an existing backup fil
   one-time lookup per name and counts against the daily AI cap), then a conservative domain guess.
   Stocks resolve from their market SYMBOL instead: the built-in registry covers every NIFTY 500
   company, so those holdings get a logo with no Gemini key and no AI lookup.
-  If no logo resolves it falls back to a Google favicon and finally a 2-letter coloured monogram;
+  If no logo resolves it falls back to a Google favicon and finally a 2-letter coloured monogram (on
+  Android, a domain Google has no icon for shows the monogram rather than a grey globe);
   physical-cash accounts always show a wallet icon. No API keys are required — without them the chain
   still yields favicons or initials, and logos already loaded are cached on-device for offline use.
   In Wealth detail screens, long-pressing the account/asset logo mark opens options to View Logo enlarged,

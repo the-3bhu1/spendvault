@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
+import { ScrollToTopButton } from './ScrollToTopButton';
 import type { Transaction, TransactionType, Account, InvestmentKind } from '../types';
 import { formatCurrency, formatAmount, formatDateString, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, getInvestmentKind, isCountableTransaction, isExternalRewardSource, isPointsDenominated, getRewardSplits, rewardSplitIndexOfLeg, rewardSplitOfLeg, rewardSplitTotal, rewardSplitGross, accountNameOf, linkedGroupOf, applyVisibleReorder, dayOrderUpdates, sortDayByOrder } from '../utils';
-import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, ChevronRight, ChevronDown, Hash, Shapes, Layers, Sparkles, Loader2, Filter, ArrowUp } from 'lucide-react';
+import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, ChevronRight, ChevronDown, Hash, Shapes, Layers, Sparkles, Loader2, Filter } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
 import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, getInvestmentKindIcon } from './transactionIcons';
@@ -545,9 +546,6 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
   );
 }
 
-/** How far down the ledger has to be before the jump-to-top button appears. Roughly one
- *  screenful — below that the top is already a short flick away. */
-const SCROLL_TOP_REVEAL_PX = 400;
 
 export default function Transactions() {
   const { data, pendingTransfer, setPendingTransfer, smsQueue, smsScreening, removeFromSmsQueue, reorderTransactions, deleteTransaction } = useFinance();
@@ -724,19 +722,6 @@ export default function Transactions() {
   const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>({
     [format(new Date(), 'yyyy-MM')]: true
   });
-
-  /* Scroll-to-top affordance. The ledger is the one screen that can run to hundreds of rows,
-     and the scroll container is .app-root (App.tsx owns it and restores per-tab positions),
-     not this component — so the listener has to reach for it rather than use a local ref. */
-  const [showScrollTop, setShowScrollTop] = useState(false);
-  useEffect(() => {
-    const root = document.querySelector('.app-root');
-    if (!root) return;
-    const onScroll = () => setShowScrollTop(root.scrollTop > SCROLL_TOP_REVEAL_PX);
-    onScroll();
-    root.addEventListener('scroll', onScroll, { passive: true });
-    return () => root.removeEventListener('scroll', onScroll);
-  }, []);
 
   const toggleMonth = (month: string) => {
     setExpandedMonths(prev => ({
@@ -1551,47 +1536,7 @@ export default function Transactions() {
         onCancel={() => setDeleteConfirmId(null)}
       />
 
-      {/* Sits clear of the floating nav bar (which is 0.6rem + its own height off the bottom
-          edge) and above the gesture bar. Jumps rather than animates: this is a "get me out of
-          August" control, and a smooth scroll through 300 rows is a long way to watch. */}
-      {/* Always mounted, never conditionally rendered: unmounting it the instant the scroll
-          crosses back under the threshold cut the exit off mid-frame, which read as a jerk.
-          Kept in the tree, both directions are the same transition played forwards or back,
-          and it drops out of the tab order while hidden. */}
-      <button
-        aria-label="Scroll to top"
-        aria-hidden={!showScrollTop}
-        tabIndex={showScrollTop ? 0 : -1}
-        onClick={() => {
-          const root = document.querySelector('.app-root');
-          if (root) root.scrollTop = 0;
-        }}
-        style={{
-          position: 'fixed',
-          right: '1.25rem',
-          bottom: 'calc(88px + var(--safe-area-inset-bottom))',
-          width: '46px',
-          height: '46px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'var(--bg-card-elevated)',
-          color: 'var(--text-primary)',
-          border: '1px solid var(--border-color)',
-          borderRadius: '4px',
-          boxShadow: '3px 3px 0 #000',
-          cursor: 'pointer',
-          zIndex: 999,
-          opacity: showScrollTop ? 1 : 0,
-          // Sinks toward the nav bar as it goes, so it reads as the button retiring rather
-          // than the pixels simply switching off.
-          transform: showScrollTop ? 'translateY(0) scale(1)' : 'translateY(10px) scale(0.9)',
-          pointerEvents: showScrollTop ? 'auto' : 'none',
-          transition: 'opacity 0.22s ease, transform 0.22s cubic-bezier(0.4, 0, 0.2, 1)',
-        }}
-      >
-        <ArrowUp size={20} />
-      </button>
+      <ScrollToTopButton />
     </div>
   );
 }

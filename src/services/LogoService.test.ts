@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { getLiquidLogoUrl, getCardLogoUrl, getAssetLogoUrl } from './LogoService';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { getLiquidLogoUrl, getCardLogoUrl, getAssetLogoUrl, cacheLogoImage, isDeadLogo } from './LogoService';
 
 describe('LogoService resolution & overrides', () => {
   it('resolves State Bank of India to SBI vector badge and NOT Bank of India', () => {
@@ -92,5 +92,31 @@ describe('LogoService resolution & overrides', () => {
       customLogoUrl: 'data:image/svg+xml;base64,customdata',
     });
     expect(assetOverride).toBe('data:image/svg+xml;base64,customdata');
+  });
+
+  it('resolves 7 Ring from the registry, the same on every device', () => {
+    // No registry entry left it to a per-device Gemini answer, which differed between web and phone.
+    expect(getLiquidLogoUrl({ type: 'e_wallet', name: '7 Ring' })).toContain('seven.ooo');
+  });
+});
+
+describe('Google favicon placeholder', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("marks a favicon source dead when Google answers 404 with its globe", async () => {
+    const url = 'https://www.google.com/s2/favicons?domain=7ring.com&sz=128';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob([new Uint8Array(8)], { type: 'image/png' }), { status: 404 })));
+
+    expect(isDeadLogo(url)).toBe(false);
+    expect(await cacheLogoImage(url)).toBe(true);
+    expect(isDeadLogo(url)).toBe(true);
+  });
+
+  it('leaves a 404 from any other host alone', async () => {
+    const url = 'https://img.logo.dev/7ring.com?token=pk_x&size=256';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 404 })));
+
+    expect(await cacheLogoImage(url)).toBe(false);
+    expect(isDeadLogo(url)).toBe(false);
   });
 });

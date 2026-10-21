@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Cuboid, Scale, ShieldUser, WalletMinimal } from 'lucide-react';
-import { getCachedLogo, cacheLogoImage, getLogoShape, ensureLogoShape } from '../services/LogoService';
+import { getCachedLogo, cacheLogoImage, getLogoShape, ensureLogoShape, isDeadLogo } from '../services/LogoService';
 
 // Circular avatar for an investment holding. Renders the real brand logo when a URL resolves and
 // loads; otherwise (no URL, or the image 404s / a registry domain is wrong) it falls back to the
@@ -50,8 +50,11 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf, isWallet, accoun
   // Resolved once per URL rather than on every render: caching a source mid-life would otherwise swap
   // a painted <img>'s src from the remote URL to its freshly-cached data: URL and flash it for a
   // frame. The cache is meant to be consumed on the NEXT mount, and this pins it to that.
+  // A source already known to serve only Google's 404 globe is dropped up front — see isDeadLogo.
   const { remoteSources, sources } = useMemo(() => {
-    const remote = logoUrl ? [logoUrl, faviconFallback(logoUrl)].filter((s): s is string => !!s) : [];
+    const remote = logoUrl
+      ? [logoUrl, faviconFallback(logoUrl)].filter((s): s is string => !!s && !isDeadLogo(s))
+      : [];
     return { remoteSources: remote, sources: remote.map(s => getCachedLogo(s) || s) };
   }, [logoUrl]);
   const [srcIdx, setSrcIdx] = useState(0);
@@ -191,8 +194,15 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf, isWallet, accoun
           // moment to measure its shape — and the reason the measurement hangs off onLoad rather than
           // an effect: a measurement that fails (offline, CORS) is deliberately not cached so a later
           // load can retry, and an effect keyed on "still unmeasured" would spin on that forever.
+          //
+          // The same fetch is the only way to see that a "successful" paint was Google's 404 globe,
+          // which then counts as an error: advance past it, but only if this source is still the one
+          // showing by the time the answer comes back.
           onLoad={() => {
-            cacheLogoImage(sources[srcIdx]);
+            const painted = srcIdx;
+            void cacheLogoImage(sources[painted]).then(dead => {
+              if (dead) setSrcIdx(i => (i === painted ? i + 1 : i));
+            });
             if (activeSrc && getLogoShape(activeSrc) === undefined) {
               void ensureLogoShape(activeSrc).then(() => bumpShape(n => n + 1));
             }

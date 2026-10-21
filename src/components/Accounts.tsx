@@ -18,6 +18,7 @@ import { getCardCycleFigures } from '../services/CardDuesService';
 import { scrollToFirstError } from '../utils/formErrors';
 import { CardNetworkLogo, NETWORK_LABELS } from './CardNetworkLogo';
 import { ViewCardOverlay } from './ViewCardOverlay';
+import { ScrollToTopButton } from './ScrollToTopButton';
 import { getNfcAvailability, startCardScan, CARD_NFC_ERROR_TEXT } from '../services/CardNfcService';
 import type { ScannedCard } from '../services/CardNfcService';
 import { hapticTap } from '../utils/haptics';
@@ -3155,6 +3156,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
           }}
         />
       )}
+      <ScrollToTopButton />
     </div>
   );
 }

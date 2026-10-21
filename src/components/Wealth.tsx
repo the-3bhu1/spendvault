@@ -53,9 +53,9 @@ type AssetsFilter = 'all' | 'bank' | 'cash' | 'ewallet' | 'other';
 
 // Which figure a holding row shows on its right. Cycled from a pill on the section header, so the
 // numbers a holding has are all reachable from the list instead of only inside its detail screen.
-// Only offered when the list is narrowed to ONE asset class — across mixed classes the rows would
-// be comparing figures that aren't comparable. Each class advertises only the stops it can answer:
-// Metals omit 'oneDay', having no dependable previous close.
+// Only offered when the list shows ONE asset class (filtered to, or the only one held) — across
+// mixed classes the rows would be comparing figures that aren't comparable. Each class advertises
+// only the stops it can answer: Metals omit 'oneDay', having no dependable previous close.
 type HoldingMetric = 'value' | 'oneDay' | 'returns';
 const HOLDING_METRICS: { v: HoldingMetric; label: string }[] = [
   { v: 'value', label: 'Current (Invested)' },
@@ -1190,8 +1190,9 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
     const isCollapsed = single ? false : collapsedSections.has(key);
     return (
       <div className={tourClass} style={{ padding: '1.5rem 1.5rem 0.5rem' }}>
-        {/* No label once a filter has narrowed the screen to this one section: the pill directly
-            above already says "MF", and the header's job is then the count and the cycler. */}
+        {/* No label once the screen is down to this one section: a filter pill directly above
+            already says "MF" (or, with only one class held, its rows say it), and the header's job
+            is then the count and the cycler. */}
         {renderSectionHeading(single ? '' : label, accounts.length, {
           // Every section on this screen counts accounts — the asset classes are accounts in the
           // data model and the liquid ones are accounts in plain speech too.
@@ -1401,8 +1402,12 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
     const monthLabel = new Date(monthTimestamp(currentMonth))
       .toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
+    // Latest first, all the way down. The log lays a day out morning at the top and night at the
+    // bottom, so a day's last row is its latest: newest day first, and within a day the log's own
+    // sequence reversed — which also makes a drag-reorder in the log show up here. Breaking
+    // same-day ties by id instead froze the rows in creation order.
     const shown = [...ledger]
-      .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
+      .sort((a, b) => b.date.localeCompare(a.date) || (b.order ?? 0) - (a.order ?? 0) || b.id.localeCompare(a.id))
       .slice(0, 5);
 
     // 1M needs a rupee ledger to walk day by day, which is why a points wallet is offered the monthly
@@ -1809,12 +1814,15 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
           tabs.length === 0 || tabs.some(t => t.v === portfolioFilter) ? portfolioFilter : 'all';
         const s = portfolioStats[activeFilter];
         const oneDay = filteredPortfolioOneDayReturn;
-        // Any single class gets the cycler; "All" doesn't, because its rows would be comparing
+        // The one class on screen, if there is only one: picked by a filter pill, or the only class
+        // held — then there are no pills and "All" is that class alone, so it reads like a filter.
+        const singleClass = activeFilter !== 'all' ? activeFilter : presentTabs.length === 1 ? presentTabs[0].v : null;
+        // Any single class gets the cycler; a mixed "All" doesn't, because its rows would be comparing
         // figures across classes that aren't comparable.
-        const showMetricCycler = activeFilter !== 'all';
+        const showMetricCycler = singleClass !== null;
         // Metals drop the 1D stop: a metal priced by an hourly AI estimate — or by hand — has no
         // dependable previous close, which is the same reason the hero hides their "today".
-        const metrics = activeFilter === 'commodity'
+        const metrics = singleClass === 'commodity'
           ? HOLDING_METRICS.filter(m => m.v !== 'oneDay')
           : HOLDING_METRICS;
         // Belt-and-braces: switching class already resets to 'value', so a metric this class can't
@@ -1932,17 +1940,19 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
                   </div>
                 )}
 
-                {/* The cycler rides the section header. `cycler` is non-null only when a single-class
-                  filter is active, and that filter leaves exactly one section on screen — so passing
-                  it to all three can't put a pill on more than one header. */}
+                {/* The cycler rides the section header. `cycler` is non-null only when a single class
+                  is on screen, which means exactly one section — so passing it to all three can't put
+                  a pill on more than one header. That lone section is drawn `single` either way: a
+                  label, count, rule, pill and collapse chevron don't fit one phone-width row, and
+                  collapsing the only list would leave the screen empty. */}
                 {mfAccounts.length > 0 && (activeFilter === 'all' || activeFilter === 'mf') &&
-                  renderHoldingSection('mf', 'Mutual Funds', mfAccounts, activeFilter !== 'all', rowRenderer, 'tour-wealth-holdings', cycler)}
+                  renderHoldingSection('mf', 'Mutual Funds', mfAccounts, singleClass !== null, rowRenderer, 'tour-wealth-holdings', cycler)}
 
                 {stockAccounts.length > 0 && (activeFilter === 'all' || activeFilter === 'stocks') &&
-                  renderHoldingSection('stocks', 'Stocks', stockAccounts, activeFilter !== 'all', rowRenderer, 'tour-wealth-holdings', cycler)}
+                  renderHoldingSection('stocks', 'Stocks', stockAccounts, singleClass !== null, rowRenderer, 'tour-wealth-holdings', cycler)}
 
                 {commodityAccounts.length > 0 && (activeFilter === 'all' || activeFilter === 'commodity') &&
-                  renderHoldingSection('commodity', 'Commodities', commodityAccounts, activeFilter !== 'all', rowRenderer, 'tour-wealth-holdings', cycler)}
+                  renderHoldingSection('commodity', 'Commodities', commodityAccounts, singleClass !== null, rowRenderer, 'tour-wealth-holdings', cycler)}
               </div>
             </div>
           </div>

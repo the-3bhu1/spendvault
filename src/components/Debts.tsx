@@ -53,6 +53,23 @@ interface ConfirmConfig {
 import { CustomPicker } from './CustomPicker';
 import { TransactionSelector } from './TransactionSelector';
 import { SubviewWrapper } from './SubviewWrapper';
+import { DescriptionField } from './DescriptionSuggestions';
+
+/** The description a debt entry falls back to when its Description field is left blank. */
+const defaultEntryWord = (type: DebtTransaction['type']) =>
+  type === 'lent' ? 'Lent' : type === 'borrowed' ? 'Borrowed' : 'Repayment';
+
+/* What the debt forms' Description suggests from: every person's entries first, newest first (they
+   are what this field last held), then the Transactions log. The words a blank description becomes
+   ("Repayment", "Dad: Repayment") are left out — they're what you get by typing nothing. */
+const debtDescriptionPool = (debts: Debt[], transactions: Transaction[]): string[] => {
+  const isDefault = (d: string) => /^(?:[^:]+:\s*)?(lent|borrowed|repayment)$/i.test(d.trim());
+  const entries = debts
+    .flatMap(d => d.transactions)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .map(t => t.description);
+  return [...entries, ...transactions.map(t => t.description)].filter(d => d && !isDefault(d));
+};
 
 // Signed effect of one entry on the net balance: positive means they owe you.
 export default function Debts() {
@@ -144,6 +161,13 @@ export default function Debts() {
     }, 0);
   };
 
+  /* The ledger row's description. Only a debt entry left on its default word ("Lent", "Borrowed",
+     "Repayment") is prefixed with the person — "Dad: Repayment" — since the bare word says nothing
+     in the Transactions list about who it was with. Text the user wrote is theirs and lands on the
+     row exactly as typed: prefixing it too made the row and its debt entry read differently. */
+  const ledgerDescriptionFor = (personName: string, entry: DebtTransaction) =>
+    entry.description === defaultEntryWord(entry.type) ? `${personName}: ${entry.description}` : entry.description;
+
   const handleAddDebt = (name: string, amount: number, type: 'lent' | 'borrowed', desc: string, date: string, accountId: string, logInLedger: boolean, linkedTxId?: string) => {
     const trimmedName = name.trim();
     const trimmedDesc = (desc || '').trim();
@@ -157,7 +181,7 @@ export default function Debts() {
       id: txId,
       amount,
       date: date || format(new Date(), 'yyyy-MM-dd'),
-      description: trimmedDesc || (type === 'lent' ? 'Lent' : 'Borrowed'),
+      description: trimmedDesc || defaultEntryWord(type),
       type,
       linkedTxId: ledgerTxId ?? linkedTxId
     };
@@ -198,7 +222,7 @@ export default function Debts() {
         amount,
         type: type === 'lent' ? 'debit' : 'credit',
         category: 'Lending & Borrowing',
-        description: `${trimmedName}: ${newTx.description}`,
+        description: ledgerDescriptionFor(trimmedName, newTx),
         date: newTx.date,
         isRecurring: false,
         linkedTransactionIds: [txId]
@@ -220,7 +244,7 @@ export default function Debts() {
       id: txId,
       amount,
       date: date || format(new Date(), 'yyyy-MM-dd'),
-      description: (desc || '').trim(),
+      description: (desc || '').trim() || defaultEntryWord(type),
       type,
       linkedTxId: ledgerTxId ?? linkedTxId
     };
@@ -249,7 +273,7 @@ export default function Debts() {
         amount,
         type: (type === 'lent' || type === 'repayment_sent') ? 'debit' : 'credit',
         category: 'Lending & Borrowing',
-        description: `${debt.personName}: ${newTx.description}`,
+        description: ledgerDescriptionFor(debt.personName, newTx),
         date: newTx.date,
         isRecurring: false,
         linkedTransactionIds: [txId]
@@ -901,7 +925,10 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
               const isMirror = ledgerTx.category === 'Lending & Borrowing';
               updateTransaction({
                 ...ledgerTx,
-                // Keep ledger amount and description as they are
+                // The amount is the same money on both sides, so a mirror follows it; the
+                // description is left alone — the two are allowed to read differently. A real
+                // transaction linked by hand keeps its own amount: the entry may be only part of it.
+                amount: isMirror ? amt : ledgerTx.amount,
                 type: isMirror
                   ? ((type === 'lent' || type === 'repayment_sent') ? 'debit' : 'credit')
                   : ledgerTx.type,
@@ -1086,6 +1113,7 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
   };
 
   const { data } = useFinance();
+  const descriptionPool = useMemo(() => debtDescriptionPool(data.debts || [], data.transactions), [data.debts, data.transactions]);
   const accountOptions = useMemo(
     () => debtAccountOptions(accounts, data.transactions, ['stocks', 'mutual_funds', 'rewards', 'commodity', 'epf']),
     [accounts, data.transactions]);
@@ -1301,15 +1329,13 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
             label="Log Date"
           />
 
-          <div className="input-group">
-            <label>Description (Optional)</label>
-            <input
-              className="input-field"
-              placeholder="What was it for?"
-              value={desc}
-              onChange={e => setDesc(e.target.value)}
-            />
-          </div>
+          <DescriptionField
+            label="Description (Optional)"
+            placeholder="What was it for?"
+            value={desc}
+            onChange={setDesc}
+            pool={descriptionPool}
+          />
         </div>
       </SubviewWrapper>
       <TransactionSelector
@@ -1342,6 +1368,7 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, tra
   onClose: () => void
 }) {
   const { data } = useFinance();
+  const descriptionPool = useMemo(() => debtDescriptionPool(data.debts || [], data.transactions), [data.debts, data.transactions]);
   const ledgerTx = useMemo(() => {
     if (!initialTx) return null;
     return data.transactions.find(t =>
@@ -1385,8 +1412,7 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, tra
     const numAmt = parseFloat(amount) || 0;
     if (numAmt <= 0) return;
 
-    const defaultDesc = type === 'lent' ? 'Lent' : (type === 'borrowed' ? 'Borrowed' : 'Repayment');
-    onAdd(numAmt, pendingType, desc || defaultDesc, date, accountId, logInLedger, linkedTxId || undefined);
+    onAdd(numAmt, pendingType, desc || defaultEntryWord(pendingType), date, accountId, logInLedger, linkedTxId || undefined);
   };
 
   // Balance as of this entry's own place in the timeline, not the debt's final net — so
@@ -1639,15 +1665,13 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, tra
               label="Transaction Date"
             />
 
-            <div className="input-group">
-              <label>Description (Optional)</label>
-              <input
-                className="input-field"
-                placeholder="What was it for?"
-                value={desc}
-                onChange={e => setDesc(e.target.value)}
-              />
-            </div>
+            <DescriptionField
+              label="Description (Optional)"
+              placeholder="What was it for?"
+              value={desc}
+              onChange={setDesc}
+              pool={descriptionPool}
+            />
 
             <button
               className="btn btn-primary"

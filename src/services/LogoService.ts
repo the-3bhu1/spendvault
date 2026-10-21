@@ -186,6 +186,10 @@ const LIQUID_REGISTRY: BrandEntry[] = [
   { match: ['cheq chips', 'cheq'], domain: CHEQ_LOGO_DATA_URL },
   { match: ['transcorp'], domain: 'transcorpint.com' },
   { match: ['tide'], domain: 'tide.co' },
+  // 7 Ring's name leaves no token liquidBrandGuess will take ("7" is too short, and a digit), so
+  // without this its logo was whatever Gemini answered on each device — seven.ooo on one, a
+  // logo-less domain (Google's grey globe) on another.
+  { match: ['7 ring', 'seven ring', '7ring'], domain: 'seven.ooo' },
   // Transit cards. These are government transit bodies, not brands logo.dev indexes, so they
   // land on the operator's site favicon rather than a clean logo.
   { match: ['namma metro', 'bmrcl', 'bmrc'], domain: 'bmrc.co.in' },
@@ -373,6 +377,33 @@ function persistImgCache(): void {
   }
 }
 
+// Google's favicon service answers a domain it has no icon for with a 404 whose body is still a
+// valid PNG: a generic grey globe. An <img> paints that body and fires onLoad, never onError, so the
+// avatar showed the globe instead of falling through to initials. Only a fetch() can see the status,
+// and cacheLogoImage already makes one: on device it goes through CapacitorHttp and gets it; on web
+// the host's missing CORS header blocks the fetch, so there the globe goes undetected (as before).
+// Recorded permanently, like a negative domain lookup — and keyed by source URL, so a custom logo or
+// a newly configured logo.dev token is a different source and gets its own chance.
+const LOGO_DEAD_KEY = 'logo_dead_sources';
+const deadSources: Set<string> = (() => {
+  try {
+    const raw = localStorage.getItem(LOGO_DEAD_KEY);
+    return new Set<string>(raw ? JSON.parse(raw) : []);
+  } catch { return new Set<string>(); }
+})();
+
+function isGoogleFavicon(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return (u.hostname === 'www.google.com' && u.pathname === '/s2/favicons') || u.hostname.endsWith('.gstatic.com');
+  } catch { return false; }
+}
+
+/** True when this source is known to paint only a placeholder (Google's 404 globe). Synchronous. */
+export function isDeadLogo(url: string): boolean {
+  return deadSources.has(imgCacheKey(url));
+}
+
 /** Cached base64 data: URL for a logo source URL, or null if not yet cached. Synchronous. */
 export function getCachedLogo(url: string): string | null {
   return imgCache[imgCacheKey(url)] || null;
@@ -380,26 +411,32 @@ export function getCachedLogo(url: string): string | null {
 
 /** Fire-and-forget: fetch a successfully-displayed logo URL's bytes and persist them as a base64
  *  data URL for offline / cold-cache renders. No-op if already cached, already a data URL, or the
- *  fetch fails or doesn't return a real image. */
-export async function cacheLogoImage(url: string): Promise<void> {
-  if (!url || url.startsWith('data:')) return;
+ *  fetch fails or doesn't return a real image. Resolves true when the "logo" that painted turned
+ *  out to be Google's 404 placeholder, so the caller can move on to its next source. */
+export async function cacheLogoImage(url: string): Promise<boolean> {
+  if (!url || url.startsWith('data:')) return false;
   const key = imgCacheKey(url);
-  if (imgCache[key] || imgInFlight.has(key)) return;
+  if (imgCache[key] || imgInFlight.has(key)) return false;
 
   imgInFlight.add(key);
   try {
     const res = await fetch(url);
-    if (!res.ok) return;
+    if (res.status === 404 && isGoogleFavicon(url)) {
+      deadSources.add(key);
+      try { localStorage.setItem(LOGO_DEAD_KEY, JSON.stringify([...deadSources])); } catch { /* ignore */ }
+      return true;
+    }
+    if (!res.ok) return false;
     const blob = await res.blob();
-    if (!blob.type.startsWith('image/')) return;        // guard against 404 HTML / text bodies
-    if (blob.size > LOGO_IMG_MAX_ASSET_BYTES) return;    // skip oversized assets
+    if (!blob.type.startsWith('image/')) return false;        // guard against 404 HTML / text bodies
+    if (blob.size > LOGO_IMG_MAX_ASSET_BYTES) return false;    // skip oversized assets
     const dataUrl: string = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result as string);
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(blob);
     });
-    if (!dataUrl.startsWith('data:image/')) return;      // final sanity check on the encoded result
+    if (!dataUrl.startsWith('data:image/')) return false;      // final sanity check on the encoded result
 
     // If this entry would push the cache past its budget, reset first (cheap, correct, rare).
     const projected = JSON.stringify(imgCache).length + key.length + dataUrl.length + 8;
@@ -413,8 +450,10 @@ export async function cacheLogoImage(url: string): Promise<void> {
     // No notifyLogosUpdated() here: the image is already on screen from the remote URL, and
     // swapping its src to the freshly-cached data URL would only cause a needless reload/flicker.
     // The cache is consumed on the NEXT mount, where getCachedLogo() serves it from the start.
+    return false;
   } catch {
     /* offline / CORS / decode failure — leave uncached; a later successful load retries */
+    return false;
   } finally {
     imgInFlight.delete(key);
   }

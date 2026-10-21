@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { matchDescriptions, SuggestionDropdown } from './DescriptionSuggestions';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Account, Transaction, TransactionType, InvestmentKind, RewardSplitLeg } from '../types';
@@ -432,16 +433,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   const handleDescriptionChange = (val: string) => {
     setNewTx(prev => ({ ...prev, description: val }));
     if (errors.description) setErrors(prev => ({ ...prev, description: '' }));
-    if (val.trim().length < 2) {
-      setDescriptionSuggestions([]);
-      return;
-    }
-
-    const uniqueDescs = Array.from(new Set(data.transactions.map(t => t.description)));
-    const matches = uniqueDescs
-      .filter(d => d.toLowerCase().includes(val.toLowerCase()) && d.toLowerCase() !== val.toLowerCase())
-      .slice(0, 5);
-    setDescriptionSuggestions(matches);
+    setDescriptionSuggestions(matchDescriptions(data.transactions.map(t => t.description), val));
   };
 
   const selectSuggestion = (suggestion: string) => {
@@ -1655,31 +1647,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
             autoComplete="off"
           />
           {errors.description && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.description}</span>}
-          {descriptionSuggestions.length > 0 && (
-            <div style={{
-              position: 'absolute',
-              top: '100%',
-              left: 0,
-              right: 0,
-              backgroundColor: 'var(--bg-card)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '0 0 12px 12px',
-              zIndex: 10,
-              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-              marginTop: '-4px'
-            }}>
-              {descriptionSuggestions.map(s => (
-                <div
-                  key={s}
-                  style={{ padding: '0.75rem 1rem', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: '0.9rem' }}
-                  onClick={() => selectSuggestion(s)}
-                  onMouseDown={e => e.preventDefault()}
-                >
-                  {s}
-                </div>
-              ))}
-            </div>
-          )}
+          <SuggestionDropdown items={descriptionSuggestions} onSelect={selectSuggestion} />
         </div>
 
         <div className="grid grid-cols-2 gap-4" style={{ marginBottom: '1rem' }}>
