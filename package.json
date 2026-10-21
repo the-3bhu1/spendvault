@@ -12,7 +12,10 @@
     "release:doctor": "node scripts/release-apk.mjs doctor",
     "release:setup": "node scripts/release-apk.mjs setup",
     "release:apk": "node scripts/release-apk.mjs build",
-    "release:aab": "node scripts/release-apk.mjs build --aab"
+    "release:aab": "node scripts/release-apk.mjs build --aab",
+    "brand": "node scripts/brand.mjs",
+    "brand:rbi": "node scripts/brand.mjs rbi",
+    "brand:vault": "node scripts/brand.mjs vault"
   },
   "dependencies": {
     "@capacitor/android": "^8.2.0",

@@ -16,6 +16,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { spawnOnPath } from './lib/spawn-on-path.mjs';
+import { activeBrand } from './brand.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const IS_WIN = process.platform === 'win32';
@@ -342,6 +343,9 @@ function build(args) {
   if (s.git.dirty) say('WARNING: uncommitted changes — the build is named -dirty and is not reproducible from a commit.');
 
   const kind = args.includes('--aab') ? 'aab' : 'apk';
+  const brand = activeBrand();
+  if (kind === 'aab' && brand !== 'vault') fail(`the ${brand} logo is in place, and an App Bundle is for Google Play — run: npm run brand:vault (and commit it)`);
+  if (brand !== 'vault') say(`NOTE: built with the ${brand} logo — for sideloaded testing only (npm run brand:vault switches back).`);
   const name = artifactName(s.git, kind);
   const out = path.join(RELEASE_DIR, name);
   fs.rmSync(out, { force: true });

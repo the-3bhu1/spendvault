@@ -12,7 +12,13 @@ npm run release:doctor            what this machine can build with, and what is 
 npm run release:setup -- ...      one-time setup per machine (signing folder, git hooks)
 npm run release:apk               build a signed APK into release/  (-- --local | -- --docker)
 npm run release:aab               the same, as the App Bundle Google Play takes
+npm run brand[:rbi|:vault]        which logo is in place / switch it (see below)
 ```
+
+**Logo.** Test APKs are currently built with the original e₹ Digital Rupee mark (`npm run brand:rbi`).
+That mark is the Reserve Bank of India's and must never reach Google Play, so `release:aab` refuses
+to build unless the vault dial is in place. Before Play testing: `npm run brand:vault`, then commit.
+`scripts/brand.mjs` explains how the swap works.
 
 ---
 
