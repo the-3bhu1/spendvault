@@ -171,6 +171,7 @@ export interface Account {
   cardOpenedOn?: string;
 
   // Specific to debit_card/ncmc travel
+  linkedBankAccountId?: string;
   isNcmcEnabled?: boolean;
   travelOpeningBalances?: Record<string, number>;
   isCashbackEnabled?: boolean;
@@ -314,6 +315,7 @@ export interface Transaction {
   excludedAmount?: number;
   recurringBillId?: string;
   paymentSourceAccountId?: string;
+  paidViaCardId?: string;
   ccPaymentCycleTarget?: 'current_cycle' | 'previous_statement';
   isCCPaymentRecord?: boolean;
   // Investment legs (Mutual Funds / Stocks): the amount actually invested vs. the broker/AMC

@@ -53,8 +53,29 @@ Rupees (₹). The app is also packaged for Android/iOS via Capacitor.
   the "PAYMENTS BALANCE" split on that card.
 - On an NCMC card the transaction form adds a "Section" toggle — 💳 Payments or 🚇 Travel — choosing
   which of the card's two balances the entry moves; a recharge auto-posts the matching leg.
+- Linking a debit card to its bank: in the debit card's add/edit form, pick the account in "Linked
+  Bank Account" (or "None (standalone card)" for a prepaid, forex or wallet card that holds its own
+  money). A linked card has NO balance of its own — the Opening Balance field disappears. To log a
+  spend made with the card, pick the CARD as the transaction's Account (its picker row reads "debit
+  card · from <bank>"); the app saves it against the bank, so the bank balance drops, and the ledger
+  row reads "<bank> · via <card>". Pick the bank itself for UPI/NEFT/net-banking spends. The card's
+  cashback rates still apply to spends logged via it, and its delayed cashback is credited into the
+  bank. The Transactions account filter for the card shows every spend made via it.
+- On Accounts, a linked card shows "<BANK> BALANCE" (the bank's balance) and "VIA CARD · <month>"
+  (net spent through the card this month); the bank's own card lists its linked "DEBIT CARD(S)"
+  ("None linked" if there are none) beside a "+ CARD" button.
+- Two shortcuts open the Add Account form already set to Debit Card, linked to that bank and named
+  "<bank> Debit" (editable): saving a NEW bank account asks "Add a debit card for <bank>?" (Add card /
+  Not now), and the "+ CARD" button on any bank account's tile does the same at any time — use it for
+  a bank added earlier, an add-on or replacement card, or after choosing "Not now".
+- Linking an existing card that already has its own transactions or balance asks first ("Link to
+  <bank>?"): its rupee transactions move to the bank, marked via the card, and the card's own balance
+  is dropped. If the same spends were also logged on the bank, delete those duplicates by hand. NCMC
+  travel-wallet entries and card points stay on the card. Unlinking (choose "None") brings back the
+  card's own balance field; past spends stay on the bank.
 An account is any place money sits or is owed. Built-in types:
-- bank_account, cash, debit_card, e_wallet — normal balances (a credit adds, a debit subtracts).
+- bank_account, cash, debit_card, e_wallet — normal balances (a credit adds, a debit subtracts). A
+  debit_card linked to a bank account has no balance of its own; see "Linking a debit card" above.
 - credit_card — a debit (spend) INCREASES the outstanding balance; a credit (payment) reduces it.
   Credit cards have an optional credit limit field (displayed on the account card as "Card Limit").
 - stocks / mutual_funds — investments; track invested value and units/shares and current value.
@@ -686,7 +707,9 @@ followed by up to three category cards, each with a chevron that opens its own s
 
 1. **Portfolio** — market investments: Stocks, Mutual Funds, Commodities (gold/silver).
 2. **Assets** — liquid money: Bank Accounts, Physical Cash, E-Wallets, plus an "Other" group holding
-   Debit Cards, Rewards wallets, Offset Ledgers and any user-created custom account types.
+   Debit Cards, Rewards wallets, Offset Ledgers and any user-created custom account types. A debit card
+   linked to a bank is left out of this list (its money is the bank's), unless it has an NCMC travel
+   wallet, which is still counted.
 3. **Retirement** — EPF (Employee Provident Fund).
 
 The headline Wealth total = Portfolio current value + Assets liquid balance + Retirement balance. It is

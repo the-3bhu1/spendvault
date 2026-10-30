@@ -110,7 +110,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       },
       {
         title: "Your Accounts Vault",
-        description: "Manage bank savings, credit cards, e-wallets, or NCMC travel cards. This shows your current balances and statement due tracking.",
+        description: "Manage bank savings, credit cards, e-wallets, or NCMC travel cards. This shows your current balances and statement due tracking. Tap + Card on a bank account to add its debit card: spends on the card come out of that bank's balance.",
         selector: ".tour-first-account",
         tab: "accounts",
         icon: Eye

@@ -914,6 +914,33 @@ export const cardEarnsCashback = (account?: Account | null) =>
 export const affectsRupeeBalance = (t: Transaction) =>
   !t.isTravelTransaction && !t.isRewardTransaction;
 
+export const linkedBankOf = (account: Partial<Account> | null | undefined, accounts: Account[]): Account | undefined =>
+  account?.type === 'debit_card' && account.linkedBankAccountId && account.linkedBankAccountId !== account.id
+    ? accounts.find(a => a.id === account.linkedBankAccountId)
+    : undefined;
+
+export const isLinkedDebitCard = (account: Partial<Account> | null | undefined, accounts: Account[]) =>
+  !!linkedBankOf(account, accounts);
+
+export const spendingAccountIdOf = (tx: Pick<Transaction, 'accountId' | 'paidViaCardId'>) =>
+  tx.paidViaCardId || tx.accountId;
+
+export const routeCardSpend = (tx: Transaction, accounts: Account[]): Transaction => {
+  if (!affectsRupeeBalance(tx)) return tx;
+  const card = accounts.find(a => a.id === tx.accountId);
+  const bank = linkedBankOf(card, accounts);
+  return bank && card ? { ...tx, accountId: bank.id, paidViaCardId: card.id } : tx;
+};
+
+export const routeCardSpends = (transactions: Transaction[], accounts: Account[]): Transaction[] => {
+  const linkedCardIds = new Set(accounts.filter(a => isLinkedDebitCard(a, accounts)).map(a => a.id));
+  if (linkedCardIds.size === 0 || !transactions.some(t => linkedCardIds.has(t.accountId))) return transactions;
+  return transactions.map(t => (linkedCardIds.has(t.accountId) ? routeCardSpend(t, accounts) : t));
+};
+
+export const cardMovableTransactions = (card: Account, transactions: Transaction[]) =>
+  transactions.filter(t => t.accountId === card.id && affectsRupeeBalance(t));
+
 /** What a row moves an account's RUPEE ledger by — its amount, except on a rewards wallet counted in
  *  a unit (Cheq Chips), which keeps one rupee ledger: a redemption whose point count was overridden
  *  draws it down by those points' worth. ₹50 paid with 450 Chips at 10 = ₹1 leaves the wallet 450

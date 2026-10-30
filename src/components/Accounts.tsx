@@ -12,7 +12,7 @@ import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardFees, CardNetwork, BrandKey, RoundingRule } from '../types';
 import { notifyLogosUpdated } from '../services/LogoService';
 import { CardBrandLogo, brandLabel, BRAND_INK } from './CardBrandLogo';
-import { resolveCardIssuer } from '../utils';
+import { resolveCardIssuer, linkedBankOf, cardMovableTransactions } from '../utils';
 import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, getLatestBilledCycle, getOrdinalSuffix, affectsRupeeBalance, cardEarnsCashback, isUnitDenominated, rewardUnitBalance, rewardPointsToRupees, rupeesToRewardPoints, rupeeLedgerAmount, rewardPointsAdjustmentFor } from '../utils';
 import { getCardCycleFigures } from '../services/CardDuesService';
 import { scrollToFirstError } from '../utils/formErrors';
@@ -80,6 +80,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const [editId, setEditId] = useState<string | null>(null);
   const [viewingCard, setViewingCard] = useState<Account | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [linkConfirm, setLinkConfirm] = useState<{ cardName: string; bankName: string; moving: number; ownBalance: number } | null>(null);
+  const [cardPromptBank, setCardPromptBank] = useState<Account | null>(null);
   const [datePickerTarget, setDatePickerTarget] = useState<{ type: 'joining' | 'revision' | 'cardOpened'; index?: number } | null>(null);
   // How the open card charges. Held beside newAccount rather than derived from it on every render:
   // picking 'Joining + annual' has to show the joining-fee box BEFORE anything is typed into it,
@@ -112,6 +114,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       if (viewingCard) {
         setViewingCard(null);
         e.preventDefault();
+      } else if (linkConfirm) {
+        setLinkConfirm(null);
+        e.preventDefault();
+      } else if (cardPromptBank) {
+        setCardPromptBank(null);
+        e.preventDefault();
       } else if (isModalOpen) {
         setIsModalOpen(false);
         e.preventDefault();
@@ -122,7 +130,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     };
     window.addEventListener('appBackButton', handleGlobalBack);
     return () => window.removeEventListener('appBackButton', handleGlobalBack);
-  }, [viewingCard, isModalOpen, deleteConfirmId]);
+  }, [viewingCard, isModalOpen, deleteConfirmId, linkConfirm, cardPromptBank]);
 
   /* EVERY SYMBOL THAT STILL WANTS A PRICE, tagged with where to get it, deduped and sorted into one
      string. This is the effect's dependency, and it is a string rather than `data.accounts` on
@@ -508,9 +516,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     </button>
   );
 
-  const openAddModal = () => {
+  const openAddModal = (prefill?: Partial<Account>) => {
     setEditId(null);
-    setNewAccount({ name: '', type: 'bank_account', openingBalances: {}, cashbackRates: [], isCashbackEnabled: false, customLogoUrl: '' });
+    setNewAccount({ name: '', type: 'bank_account', openingBalances: {}, cashbackRates: [], isCashbackEnabled: false, customLogoUrl: '', ...prefill });
     setOpeningBalanceInput('');
     setNewCbName('');
     setNewCbRate('');
@@ -612,7 +620,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     if (!newAccount.type) {
       newErrors.type = 'Account Type is required';
     }
-    if (newAccount.type !== 'mutual_funds' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && !openingBalanceInput.trim()) {
+    if (newAccount.type !== 'mutual_funds' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && !linkedBankOf(newAccount, data.accounts) && !openingBalanceInput.trim()) {
       newErrors.openingBalance = 'Opening Balance is required';
     }
     if ((newAccount.type === 'mutual_funds' || newAccount.type === 'stocks' || newAccount.type === 'commodity') && newAccount.numberOfShares === undefined) {
@@ -725,6 +733,17 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       scrollToFirstError(modalBodyRef.current);
       return;
     }
+    const newBank = linkedBankOf(newAccount, data.accounts);
+    const originalAcc = editId ? data.accounts.find(a => a.id === editId) : undefined;
+    if (newBank && originalAcc && originalAcc.linkedBankAccountId !== newBank.id && !linkConfirm) {
+      const moving = cardMovableTransactions(originalAcc, data.transactions).length;
+      const ownBalance = calculateBalance(originalAcc, data.transactions, getCurrentMonthStr());
+      if (moving > 0 || Math.round(ownBalance * 100) !== 0) {
+        setLinkConfirm({ cardName: originalAcc.name, bankName: newBank.name, moving, ownBalance });
+        return;
+      }
+    }
+    setLinkConfirm(null);
     const month = getCurrentMonthStr();
 
     const updatedOpeningBalances = { ...(newAccount.openingBalances || {}) };
@@ -886,9 +905,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       id: editId || generateId(),
       name: (newAccount.name || '').trim(),
       type: newAccount.type as AccountType,
-      openingBalances: updatedOpeningBalances,
-      balanceAdjustments: updatedBalanceAdjustments,
+      openingBalances: newBank ? {} : updatedOpeningBalances,
+      balanceAdjustments: newBank ? undefined : updatedBalanceAdjustments,
       balanceEditHistory: updatedBalanceEditHistory.length > 0 ? updatedBalanceEditHistory : undefined,
+      linkedBankAccountId: newBank?.id,
       customLogoUrl: newAccount.customLogoUrl?.trim() || undefined,
       defaultCashbackRate: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.defaultCashbackRate : undefined,
       cashbackRates: ((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled)) ? newAccount.cashbackRates : undefined,
@@ -946,7 +966,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     notifyLogosUpdated();
 
     setIsModalOpen(false);
+    if (!editId && accountData.type === 'bank_account') setCardPromptBank(accountData);
   };
+
+  const openAddDebitCard = (bank: Account) =>
+    openAddModal({ type: 'debit_card', name: `${bank.name} Debit`, linkedBankAccountId: bank.id });
 
   const currentMonth = getCurrentMonthStr();
 
@@ -967,7 +991,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     <div className="flex-col gap-6" style={{ maxWidth: '600px', margin: '0 auto', width: '100%' }}>
       <div className="flex justify-between align-center" style={{ marginBottom: '1rem' }}>
         <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>accounts</h2>
-        <button className="btn btn-primary" onClick={openAddModal}>
+        <button className="btn btn-primary" onClick={() => openAddModal()}>
           + Add New
         </button>
       </div>
@@ -1047,9 +1071,18 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                 {!isCollapsed && <div className="flex-col gap-6">
                   {grouped[type].map(acc => {
                     const todayStr = format(new Date(), 'yyyy-MM-dd');
+                    const linkedBank = linkedBankOf(acc, data.accounts);
+                    const cardMonthSpend = linkedBank
+                      ? data.transactions
+                        .filter(t => t.paidViaCardId === acc.id && t.date.startsWith(currentMonth) && affectsRupeeBalance(t))
+                        .reduce((sum, t) => t.type === 'debit' ? sum + t.amount : sum - t.amount, 0)
+                      : 0;
+                    const linkedCards = acc.type === 'bank_account'
+                      ? data.accounts.filter(c => !c.archived && linkedBankOf(c, data.accounts)?.id === acc.id)
+                      : [];
                     const rawBal = acc.type === 'credit_card'
                       ? calculateCycleBalance(acc, data.transactions, todayStr)
-                      : calculateBalance(acc, data.transactions, currentMonth);
+                      : calculateBalance(linkedBank ?? acc, data.transactions, currentMonth);
                     let bal = rawBal;
                     if (acc.type === 'credit_card') {
                       const rounding = acc.statementRounding || 'none';
@@ -1256,7 +1289,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
                             <div className="flex-col gap-1">
                               <span className="text-mono text-muted text-xs">
-                                {acc.isNcmcEnabled ? 'PAYMENTS BALANCE' : acc.type === 'credit_card' ? 'UNBILLED' : 'TOTAL BALANCE'}
+                                {linkedBank ? `${linkedBank.name.toUpperCase()} BALANCE` : acc.isNcmcEnabled ? 'PAYMENTS BALANCE' : acc.type === 'credit_card' ? 'UNBILLED' : 'TOTAL BALANCE'}
                               </span>
                               <span className="text-serif" style={{
                                 fontSize: '1.8rem',
@@ -1291,7 +1324,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                   <span>Send to Bank</span>
                                 </button>
                               )}
-                              {prevCycleDue !== null ? (
+                              {linkedBank ? (
+                                <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
+                                  <span className="text-mono text-muted text-xs">VIA CARD · {format(new Date(), 'MMM').toUpperCase()}</span>
+                                  <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
+                                    {formatCurrency(cardMonthSpend)}
+                                  </span>
+                                </div>
+                              ) : prevCycleDue !== null ? (
                                 <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
                                   <span className="text-mono text-muted text-xs">PREV BILL</span>
                                   <span className="text-serif" style={{ fontSize: '1.4rem', color: prevCycleDue > 0 ? 'var(--danger)' : 'var(--success)', marginTop: '0.1rem' }}>
@@ -1389,6 +1429,27 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               onClick={() => setViewingCard(acc)}
                             >
                               <CreditCard size={14} />
+                              <span>Card</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {acc.type === 'bank_account' && (
+                          <div className="flex justify-between align-center gap-4" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                            <div className="flex-col gap-1" style={{ minWidth: 0 }}>
+                              <span className="text-mono text-muted text-xs">DEBIT {linkedCards.length === 1 ? 'CARD' : 'CARDS'}</span>
+                              <span className="text-xs truncate" style={{ color: linkedCards.length > 0 ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                                {linkedCards.length > 0
+                                  ? linkedCards.map(c => `${getAccountIcon(c)} ${c.name}`).join(' · ')
+                                  : 'None linked'}
+                              </span>
+                            </div>
+                            <button
+                              className="btn btn-secondary flex align-center gap-2"
+                              style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, flexShrink: 0 }}
+                              onClick={() => openAddDebitCard(acc)}
+                            >
+                              <Plus size={14} />
                               <span>Card</span>
                             </button>
                           </div>
@@ -1790,7 +1851,38 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                 error={errors.type}
                 iconGetter={id => getAccountEmoji(id)}
               />
-              {newAccount.type !== 'mutual_funds' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && (
+              {newAccount.type === 'debit_card' && (() => {
+                const bankOptions = data.accounts.filter(a =>
+                  a.type === 'bank_account' && (!a.archived || a.id === newAccount.linkedBankAccountId));
+                const linkedBank = linkedBankOf(newAccount, data.accounts);
+                return (
+                  <>
+                    <CustomPicker
+                      label="Linked Bank Account"
+                      value={newAccount.linkedBankAccountId || ''}
+                      options={[
+                        { id: '', name: 'None (standalone card)', subtext: 'Prepaid, forex or wallet card with its own balance' },
+                        ...bankOptions.map(a => ({
+                          id: a.id,
+                          name: a.archived ? `${a.name} (deleted)` : a.name,
+                          subtext: formatCurrency(calculateBalance(a, data.transactions, getCurrentMonthStr())),
+                        })),
+                      ]}
+                      onChange={val => {
+                        setNewAccount({ ...newAccount, linkedBankAccountId: val || undefined });
+                        if (errors.openingBalance) setErrors(prev => ({ ...prev, openingBalance: '' }));
+                      }}
+                      iconGetter={id => getAccountEmoji(id ? 'bank_account' : 'debit_card')}
+                    />
+                    {linkedBank && (
+                      <p className="text-xs text-muted" style={{ margin: '-0.25rem 0 1rem' }}>
+                        Spends on this card come out of {linkedBank.name}. The card has no balance of its own.
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
+              {newAccount.type !== 'mutual_funds' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && !linkedBankOf(newAccount, data.accounts) && (
                 <div className="input-group">
                   {/* Named in the unit it is actually typed in, for a wallet that has one — the
                       field means 500 Chips, not ₹500, and nothing else on the form would say so. */}
@@ -3117,6 +3209,38 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
           }
         }}
         onCancel={() => setDeleteConfirmId(null)}
+      />
+
+      <ConfirmDialog
+        isOpen={!!linkConfirm}
+        title={`Link to ${linkConfirm?.bankName}?`}
+        message={linkConfirm
+          ? [
+              linkConfirm.moving > 0
+                ? `${linkConfirm.moving} ${linkConfirm.moving === 1 ? 'transaction' : 'transactions'} logged on ${linkConfirm.cardName} will move to ${linkConfirm.bankName}, marked "via ${linkConfirm.cardName}". If you also logged any of them on ${linkConfirm.bankName}, delete those duplicates afterwards.`
+                : '',
+              `The card's own balance of ${formatCurrency(linkConfirm.ownBalance)} will be dropped. From now on its money is ${linkConfirm.bankName}'s balance.`,
+            ].filter(Boolean).join(' ')
+          : ''}
+        confirmLabel="Link"
+        cancelLabel="Cancel"
+        isDanger={false}
+        onConfirm={() => handleSave()}
+        onCancel={() => setLinkConfirm(null)}
+      />
+
+      <ConfirmDialog
+        isOpen={!!cardPromptBank}
+        title={`Add a debit card for ${cardPromptBank?.name}?`}
+        message="It will be linked to this account, so spends made with the card come out of this balance. You can also add one later from the account's tile."
+        confirmLabel="Add card"
+        cancelLabel="Not now"
+        isDanger={false}
+        onConfirm={() => {
+          if (cardPromptBank) openAddDebitCard(cardPromptBank);
+          setCardPromptBank(null);
+        }}
+        onCancel={() => setCardPromptBank(null)}
       />
 
       {/* Custom Date Picker Modal */}

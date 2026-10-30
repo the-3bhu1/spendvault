@@ -1093,6 +1093,7 @@ export default function Settings() {
       if (min.lts) min.lts = min.lts.map(getTinyId);
       if (min.lt) min.lt = getTinyId(min.lt);
       if (min.psid) min.psid = getTinyId(min.psid);
+      if (min.pvc) min.pvc = getTinyId(min.pvc);
       if (min.rbid) min.rbid = getTinyId(min.rbid);
       if (min.d && min.d.length === 10) {
         min.d = min.d.replace(/-/g, '').substring(2);
@@ -1105,6 +1106,7 @@ export default function Settings() {
       const min = minifyPayload(a);
       if (min.i) min.i = getTinyId(min.i);
       if (min.cda) min.cda = getTinyId(min.cda);
+      if (min.lba) min.lba = getTinyId(min.lba);
       return min;
     });
 
@@ -1224,6 +1226,7 @@ export default function Settings() {
               if (t.linkedTransactionIds) t.linkedTransactionIds = t.linkedTransactionIds.map(expandId);
               if (t.linkedTransactionId) t.linkedTransactionId = expandId(t.linkedTransactionId);
               if (t.paymentSourceAccountId) t.paymentSourceAccountId = expandId(t.paymentSourceAccountId);
+              if (t.paidViaCardId) t.paidViaCardId = expandId(t.paidViaCardId);
               if (t.recurringBillId) t.recurringBillId = expandId(t.recurringBillId);
               if (t.date) t.date = expandDate(t.date);
               return t;
@@ -1231,6 +1234,7 @@ export default function Settings() {
             expanded.accounts = (expanded.accounts || []).map((a: any) => {
               if (a.id) a.id = expandId(a.id);
               if (a.cashbackDestinationAccountId) a.cashbackDestinationAccountId = expandId(a.cashbackDestinationAccountId);
+              if (a.linkedBankAccountId) a.linkedBankAccountId = expandId(a.linkedBankAccountId);
               return a;
             });
             expanded.debts = (expanded.debts || []).map((d: any) => {

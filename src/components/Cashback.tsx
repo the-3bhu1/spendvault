@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { format, addMonths } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import { formatCurrency, generateId, formatDateString, getAppliedBillingCycle, getBillingCycleDates, formatBillingCycleRange } from '../utils';
+import { formatCurrency, generateId, formatDateString, getAppliedBillingCycle, getBillingCycleDates, formatBillingCycleRange, linkedBankOf } from '../utils';
 import type { Account, CashbackStatement, Transaction } from '../types';
 import { buildRewardRows, getRewardUnit, type RewardRow as StatementRow } from '../services/RewardsService';
 import { Info, Pencil, Check, X, ChevronDown, RotateCcw, Calendar } from 'lucide-react';
@@ -67,14 +67,18 @@ export default function Cashback({ embedded = false, showAll, onShowAllChange }:
 
   const statements = buildRewardRows(data.transactions, data.accounts, data.cashbackStatements);
 
+  const ledgerIdOf = (accountId: string) =>
+    linkedBankOf(data.accounts.find(a => a.id === accountId), data.accounts)?.id ?? accountId;
+
   const consolidateCycleGroup = (accId: string, sts: StatementRow[]) => {
     const confirmedSts = sts.filter(s => s.confirmed);
     const allStIds = sts.map(s => s.transaction.id);
+    const accLedgerId = ledgerIdOf(accId);
 
     // If no items confirmed, we still need to delete any existing consolidated tx
     if (confirmedSts.length === 0) {
       const existingTxs = data.transactions.filter(t =>
-        t.accountId === accId &&
+        (t.accountId === accId || t.accountId === accLedgerId) &&
         t.type === 'credit' &&
         t.category === 'Cashback' &&
         t.linkedTransactionIds?.some(id => allStIds.includes(id))
@@ -88,7 +92,7 @@ export default function Cashback({ embedded = false, showAll, onShowAllChange }:
     const isInternalRewards = !!(acc?.isCashbackEnabled && acc?.rewardType === 'points');
     if (isInternalRewards) {
       const legacyTxs = data.transactions.filter(t =>
-        t.accountId === accId &&
+        (t.accountId === accId || t.accountId === accLedgerId) &&
         t.type === 'credit' &&
         t.category === 'Cashback' &&
         t.linkedTransactionIds?.some(id => allStIds.includes(id))
@@ -98,8 +102,9 @@ export default function Cashback({ embedded = false, showAll, onShowAllChange }:
     }
     const isCC = acc?.type === 'credit_card';
 
-    const finalDepositAccountId = acc?.cashbackDestinationAccountId || (isCC ? accId : (first.realizedIntoAccountId || accId));
-    const isStatementCredit = finalDepositAccountId === accId;
+    const depositAccountId = acc?.cashbackDestinationAccountId || (isCC ? accId : (first.realizedIntoAccountId || accId));
+    const isStatementCredit = depositAccountId === accId;
+    const finalDepositAccountId = ledgerIdOf(depositAccountId);
 
     // Determine target date and description
     let targetDate = format(new Date(), 'yyyy-MM-dd');
@@ -132,7 +137,7 @@ export default function Cashback({ embedded = false, showAll, onShowAllChange }:
 
     // Find ALL existing transactions in the ledger that are linked to ANY of these confirmed cashbacks
     const existingRelatedTxs = data.transactions.filter(t =>
-      t.accountId === finalDepositAccountId &&
+      (t.accountId === finalDepositAccountId || t.accountId === depositAccountId) &&
       t.type === 'credit' &&
       t.category === 'Cashback' &&
       (
@@ -205,7 +210,7 @@ export default function Cashback({ embedded = false, showAll, onShowAllChange }:
         id: generateId(),
         date: targetDate,
         description: consolidatedDescription,
-        accountId: finalDepositAccountId,
+        accountId: depositAccountId,
         type: 'credit',
         amount: mainAmount,
         category: 'Cashback',
@@ -864,7 +869,7 @@ export default function Cashback({ embedded = false, showAll, onShowAllChange }:
                       {destAcc ? (
                         <>This will be automatically deposited into <strong>{destAcc.name}</strong>.</>
                       ) : (
-                        <>This will be automatically applied as a credit to <strong>{acc?.name}</strong>.</>
+                        <>This will be automatically applied as a credit to <strong>{(linkedBankOf(acc, data.accounts) ?? acc)?.name}</strong>.</>
                       )}
                     </span>
                   </div>

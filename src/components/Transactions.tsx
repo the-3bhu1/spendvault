@@ -289,7 +289,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
             <div className="flex align-center gap-2" style={{ marginTop: '2px', flexWrap: 'wrap', rowGap: '4px' }}>
               {/* A one-time reward's redemption leg sits on no account at all, so this is where it
                   would otherwise read "Unknown" — accountNameOf gives it its name. */}
-              <span className="text-mono text-muted text-xs truncate" style={{ fontWeight: 600, flexShrink: 0, maxWidth: '100%' }}>{accountNameOf(tx.accountId, data.accounts)}{acc?.archived ? ' (deleted)' : ''}</span>
+              <span className="text-mono text-muted text-xs truncate" style={{ fontWeight: 600, flexShrink: 0, maxWidth: '100%' }}>{accountNameOf(tx.accountId, data.accounts)}{acc?.archived ? ' (deleted)' : ''}{tx.paidViaCardId ? ` · via ${accountNameOf(tx.paidViaCardId, data.accounts)}` : ''}</span>
               <span className="metric-pill truncate" style={{ flexShrink: 0, maxWidth: '100%' }}>{tx.category}</span>
               {/* 'Investments' alone doesn't say fund vs. stock vs. metal — the kind pill fills that in. */}
               {invKind && (
@@ -735,7 +735,8 @@ export default function Transactions() {
   const filteredTransactions = data.transactions
     .filter(tx => {
       const matchesType = filterType === 'all' || tx.type === filterType;
-      const matchesAccount = filterAccountId.includes('all') || filterAccountId.includes(tx.accountId);
+      const matchesAccount = filterAccountId.includes('all') || filterAccountId.includes(tx.accountId)
+        || (!!tx.paidViaCardId && filterAccountId.includes(tx.paidViaCardId));
       const matchesCategory = filterCategory.includes('all') || filterCategory.includes(tx.category);
       // Investment-kind sub-filter. Only constrains investment transactions — filtering by kind
       // alongside other categories shouldn't wipe out those other categories' rows. The kind is read

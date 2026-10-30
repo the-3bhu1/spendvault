@@ -3,7 +3,7 @@ import { matchDescriptions, SuggestionDropdown } from './DescriptionSuggestions'
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Account, Transaction, TransactionType, InvestmentKind, RewardSplitLeg } from '../types';
-import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, formatBillingCycleRange, cardEarnsCashback, cardRewardOn, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance, redemptionUnits, isInvestmentSell, investmentHoldingSideType, investmentLegAmount, holdingPositionOn, sellCostBasis } from '../utils';
+import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, formatBillingCycleRange, cardEarnsCashback, cardRewardOn, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance, redemptionUnits, isInvestmentSell, investmentHoldingSideType, investmentLegAmount, holdingPositionOn, sellCostBasis, linkedBankOf, isLinkedDebitCard, spendingAccountIdOf } from '../utils';
 import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X, Plus, Ticket, RotateCcw } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
@@ -238,6 +238,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     setErrors({});
     const sanitizedTx: Partial<Transaction> = {
       ...tx,
+      accountId: spendingAccountIdOf(tx),
+      paidViaCardId: undefined,
       date: tx.date.split('T')[0],
       type: (tx.type as string) === 'expense' ? 'debit' : ((tx.type as string) === 'income' ? 'credit' : tx.type)
     };
@@ -309,7 +311,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       paySrc = rewardSplitAnchor.accountId; // the card being paid
     } else if (!isRewardChild && !isCashbackChild) {
       const counterpartTx = linkedTxs.find(t => t.category !== 'Cashback' && !rewardSplitOfLeg(tx, t));
-      if (counterpartTx) paySrc = counterpartTx.accountId;
+      if (counterpartTx) paySrc = spendingAccountIdOf(counterpartTx);
     }
     setPaymentSourceAccountId(paySrc);
 
@@ -456,7 +458,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       description: suggestion,
       amount: !isAmountUnselected ? (newTx.amount ?? 0) : (pastTx?.amount ?? newTx.amount ?? 0),
       category: !isCategoryUnselected ? (newTx.category || '') : (pastTx?.category || newTx.category || ''),
-      accountId: !isAccountIdUnselected ? (newTx.accountId || '') : (pastTx?.accountId || newTx.accountId || ''),
+      accountId: !isAccountIdUnselected ? (newTx.accountId || '') : ((pastTx && spendingAccountIdOf(pastTx)) || newTx.accountId || ''),
       type: !isTypeUnselected ? (newTx.type || 'debit') : (pastTx?.type || newTx.type || 'debit'),
       isTravelTransaction: !isTravelUnselected ? (newTx.isTravelTransaction ?? false) : (pastTx?.isTravelTransaction ?? newTx.isTravelTransaction ?? false)
       // Deliberately do NOT carry cashback config (cashbackLevelId / rewardEarnedType /
@@ -467,6 +469,14 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     setNewTx(updatedTx);
     syncInputStrings(updatedTx);
     setDescriptionSuggestions([]);
+  };
+
+  const ledgerIdOf = (accId: string | undefined) =>
+    linkedBankOf(data.accounts.find(a => a.id === accId), data.accounts)?.id ?? accId;
+
+  const accountSubtext = (acc: Account) => {
+    const bank = linkedBankOf(acc, data.accounts);
+    return bank ? `debit card · from ${bank.name}` : acc.type.replace('_', ' ');
   };
 
   const getAccountIcon = (accId: string) => {
@@ -769,14 +779,15 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     if (newTx.accountId && newTx.type === 'debit' && !newTx.isTravelTransaction && newTx.category?.toLowerCase() === 'ncmc travel recharge') {
       const account = data.accounts.find(a => a.id === newTx.accountId);
       if (account?.isNcmcEnabled) {
+        const ledgerAccount = linkedBankOf(account, data.accounts) ?? account;
         const currentMonth = getCurrentMonthStr();
-        const currentBalance = calculateBalance(account, data.transactions, currentMonth, false);
+        const currentBalance = calculateBalance(ledgerAccount, data.transactions, currentMonth, false);
         const transferAmount = Number(newTx.amount) || 0;
 
         let availableBalance = currentBalance;
         if (editId) {
           const oldTx = data.transactions.find(t => t.id === editId);
-          if (oldTx && oldTx.accountId === account.id && oldTx.type === 'debit' && !oldTx.isTravelTransaction) {
+          if (oldTx && oldTx.accountId === ledgerAccount.id && oldTx.type === 'debit' && !oldTx.isTravelTransaction) {
             availableBalance += oldTx.amount;
           }
         }
@@ -785,7 +796,9 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         const roundedBalance = Math.round(availableBalance * 100) / 100;
 
         if (roundedAmount > roundedBalance) {
-          newErrors.amount = `Insufficient balance. Available Payments balance is ${formatCurrency(availableBalance)}`;
+          newErrors.amount = ledgerAccount === account
+            ? `Insufficient balance. Available Payments balance is ${formatCurrency(availableBalance)}`
+            : `Insufficient balance. ${ledgerAccount.name} has ${formatCurrency(availableBalance)}`;
         }
       }
     }
@@ -1888,7 +1901,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                  accountId === paymentSourceAccountId, and reversing the two would drop it out of
                  its own picker, which is precisely the unrenderable-value bug the note above
                  describes. Existing rows stay openable and repairable. */
-              if (acc.id === paymentSourceAccountId) return false;
+              if (paymentSourceAccountId && ledgerIdOf(acc.id) === ledgerIdOf(paymentSourceAccountId)) return false;
+              if (linkedBankOf(acc, data.accounts)?.archived) return false;
               if (isCCPayment) {
                 return newTx.type === 'debit' ? (acc.type === 'bank_account' || acc.type === 'e_wallet') : acc.type === 'credit_card';
               }
@@ -1904,7 +1918,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
             .map(acc => ({
               id: acc.id,
               name: acc.archived ? `${acc.name} (deleted)` : acc.name,
-              subtext: acc.type.replace('_', ' '),
+              subtext: accountSubtext(acc),
               group: getAccountGroupLabel(acc.type, acc.archived)
             }))}
           onChange={val => {
@@ -1945,7 +1959,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
           // A plain credit to a card (refund, reversal, statement credit) has no funding bank,
           // so don't offer the picker there. The debit_card case keeps its generic credit
           // auto-debit source.
-          (newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'debit_card' && !newTx.isTravelTransaction)
+          (newTx.type === 'credit' && data.accounts.find(a => a.id === newTx.accountId)?.type === 'debit_card' && !newTx.isTravelTransaction
+            && !isLinkedDebitCard(data.accounts.find(a => a.id === newTx.accountId), data.accounts))
           || isTransfer
           // CC Payment always needs the OTHER leg regardless of which account (if any) has been
           // picked yet — the counterpart's own options filter is keyed entirely off newTx.type,
@@ -1978,8 +1993,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                      Same rule the Account picker above keeps for its own value, for the same
                      reason. It subsumes the archived exception that used to live on the next line. */
                   if (a.id === paymentSourceAccountId) return true;
-                  if (a.id === newTx.accountId) return false;
-                  if (a.archived) return false;
+                  if (newTx.accountId && ledgerIdOf(a.id) === ledgerIdOf(newTx.accountId)) return false;
+                  if (a.archived || linkedBankOf(a, data.accounts)?.archived) return false;
                   if (isCCPayment) {
                     // Symmetric with the main Account filter for the debit leg (bank_account/
                     // e_wallet only) — the credit leg's funding side is the same set of real
@@ -1998,7 +2013,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                 }).map(acc => ({
                   id: acc.id,
                   name: acc.archived ? `${acc.name} (deleted)` : acc.name,
-                  subtext: acc.type.replace('_', ' '),
+                  subtext: accountSubtext(acc),
                   group: getAccountGroupLabel(acc.type, acc.archived)
                 }))
               ]}

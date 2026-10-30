@@ -9,6 +9,7 @@
 // Summing units into one figure would be arithmetic on incompatible things, so summarisePending
 // keeps rupees apart from every other unit and never converts between them.
 import type { Account, CashbackStatement, Transaction } from '../types';
+import { spendingAccountIdOf } from '../utils';
 
 /**
  * One reward-earning transaction together with the statement state tracked against it.
@@ -62,7 +63,7 @@ export const buildRewardRows = (
   const rows: Record<string, RewardRow> = {};
 
   transactions.forEach(tx => {
-    const account = accounts.find(a => a.id === tx.accountId);
+    const account = accounts.find(a => a.id === spendingAccountIdOf(tx));
     // Deleting an account archives it rather than removing it, so a reward transaction should always
     // resolve one. Skip the row if it somehow doesn't: every consumer reads row.account.name/.id/
     // .statementDay unguarded, so an orphan would blank the whole screen.

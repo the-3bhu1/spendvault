@@ -26,6 +26,7 @@ import {
   isPointsDenominated,
   debtNetBalance,
   debtRunningBalances,
+  linkedBankOf,
 } from '../utils';
 import { format, parseISO, subMonths } from 'date-fns';
 import { calculateEPFProjection } from '../utils/epfEngine';
@@ -153,6 +154,15 @@ function buildSummary(data: FinanceData): string {
        it: "500 Chips (worth ₹50 at 10 Chips = ₹1)". This used to ask calculateBalance for the
        account's SEPARATE points ledger (`isRewardPoints: isReward`), which a wallet does not have —
        so every rewards wallet was reported to the assistant as "0 pts". */
+    const linkedBank = linkedBankOf(a, data.accounts);
+    if (linkedBank) {
+      let cardLine = `  - ${a.name} [debit_card linked to ${linkedBank.name}]: no balance of its own — spends paid with it come out of ${linkedBank.name} and are marked "via ${a.name}"`;
+      if (a.isNcmcEnabled) {
+        cardLine += ` (+ NCMC travel balance: ${formatCurrency(calculateBalance(a, data.transactions, currentMonth, true, false, data.cashbackStatements))})`;
+      }
+      out.push(cardLine);
+      return;
+    }
     const isReward = a.type === 'rewards';
     const bal = calculateBalance(a, data.transactions, currentMonth, false, false, data.cashbackStatements);
     let line = `  - ${a.name} [${a.type}]: ${
@@ -371,7 +381,7 @@ function buildSlice(data: FinanceData, query: string): string {
   if (cat) { txs = txs.filter(t => t.category.toLowerCase() === cat.toLowerCase()); filtered = true; }
 
   const acc = data.accounts.find(a => a.name && lower.includes(a.name.toLowerCase()));
-  if (acc) { txs = txs.filter(t => t.accountId === acc.id); filtered = true; }
+  if (acc) { txs = txs.filter(t => t.accountId === acc.id || t.paidViaCardId === acc.id); filtered = true; }
 
   // Tags — matched either by "#tag" tokens in the question or by a whole-word mention of a
   // known tag name. Filtering is AND with any month/category/account already applied above,
@@ -405,7 +415,8 @@ function buildSlice(data: FinanceData, query: string): string {
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, filtered ? SLICE_CAP : RECENT_FALLBACK)
     .map(t => {
-      const acct = accountNameOf(t.accountId, data.accounts);
+      const acct = accountNameOf(t.accountId, data.accounts)
+        + (t.paidViaCardId ? ` via ${accountNameOf(t.paidViaCardId, data.accounts)}` : '');
       const tagStr = (t.tags && t.tags.length) ? ` | ${t.tags.map(tg => `#${tg}`).join(' ')}` : '';
       /* A reward split stores the anchor at what was PAID (handleSave writes `total − rewards`), so
          the row's amount is NOT the price. Left unsaid, the assistant quotes ₹362 for a ₹448 purchase

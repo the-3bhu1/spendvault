@@ -15,7 +15,7 @@ import { CategoryCard, CategoryHero, HERO_MIN_H, SubviewHeader, SealedMark, Filt
 import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT, logoFromDomain, notifyLogosUpdated } from '../services/LogoService';
 import { useLongPress } from '../hooks/useLongPress';
 import { calculateEPFProjection, getEPFInterestRate, getFinancialYearForDate } from '../utils/epfEngine';
-import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance, isStatsExcludedCategory, statsAmount, errorMessage, userPossessive, rupeesToRewardPoints } from '../utils';
+import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance, isStatsExcludedCategory, statsAmount, errorMessage, userPossessive, rupeesToRewardPoints, isLinkedDebitCard } from '../utils';
 import { getCategoryIcon } from './transactionIcons';
 
 type HistoryDataPoint = { date: number; close: number };
@@ -454,7 +454,8 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
       // screen — under the accounts that do count, where a line that is always ₹0 belongs.
       other: live
         .filter((a: Account) =>
-          a.type === 'debit_card' || a.type === 'rewards' || a.type === 'offset' || isCustomType(a.type)
+          (a.type === 'debit_card' && (a.isNcmcEnabled || !isLinkedDebitCard(a, activeAccounts)))
+          || a.type === 'rewards' || a.type === 'offset' || isCustomType(a.type)
         )
         .sort((a: Account, b: Account) =>
           (a.type === 'offset' ? 1 : 0) - (b.type === 'offset' ? 1 : 0)

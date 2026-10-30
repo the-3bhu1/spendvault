@@ -34,7 +34,7 @@ export const KEY_MAP: Record<string, string> = {
   cashbackLevelId: 'cl', linkedTxId: 'lx',
   appliedBillingCycleYearMonth: 'abc', cycleMovedManually: 'cmm', recurringBillId: 'rbid',
   paymentSourceAccountId: 'psid', ccPaymentCycleTarget: 'ctar', isCCPaymentRecord: 'iscr',
-  counterpartAmount: 'cpa',
+  counterpartAmount: 'cpa', paidViaCardId: 'pvc', linkedBankAccountId: 'lba',
   isRecurring: 'isrc', transactionId: 'txid', expectedCashback: 'exc',
   name: 'n', isNcmcEnabled: 'z',
   // MOSTLY RETIRED: 'c'/'o' mapped Account.color/icon, neither of which exists on Account any more

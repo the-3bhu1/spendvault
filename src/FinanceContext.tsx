@@ -9,7 +9,7 @@ import {
   getRewardSplits, isRewardSourceOf, redistributeRewardSplits, rewardLegIdsOf,
   rewardSplitIndexOfLeg, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits,
   insertIntoDay, linkedGroupOf, linkedIdsOf, sortDayByOrder, syncSplitLedgerPassive,
-  investmentHoldingSideType, investmentLegAmount,
+  investmentHoldingSideType, investmentLegAmount, routeCardSpend, routeCardSpends,
 } from './utils';
 import { resolveRewardLegPlan } from './services/RewardLegService';
 
@@ -1193,10 +1193,10 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const updateAccount = (account: Account) => {
-    setData(prev => ({
-      ...prev,
-      accounts: prev.accounts.map(a => a.id === account.id ? account : a)
-    }));
+    setData(prev => {
+      const accounts = prev.accounts.map(a => a.id === account.id ? account : a);
+      return { ...prev, accounts, transactions: routeCardSpends(prev.transactions, accounts) };
+    });
   };
 
   const deleteAccount = (id: string) => {
@@ -1407,7 +1407,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   const addTransaction = (transaction: Transaction) => {
     setData(prev => {
       const newTxId = transaction.id || crypto.randomUUID();
-      const initialTx = { ...transaction, id: newTxId };
+      const initialTx = routeCardSpend({ ...transaction, id: newTxId }, prev.accounts);
 
       const { updatedDebts, updatedTx } = syncDebtsForTransaction(prev.debts || [], undefined, initialTx);
 
@@ -1440,7 +1440,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       const isNowTransferOrCC = ownsCounterpartLeg(transaction.category);
       
       let txsToDelete: string[] = [];
-      let updatedTransaction = { ...transaction };
+      let updatedTransaction = routeCardSpend({ ...transaction }, prev.accounts);
 
       // Reward-split (3-leg CC Payment) edit detection — Option B keeps the card credit as the
       // fixed anchor; the non-edited funding leg absorbs the change. See docs/LINKED_TRANSACTIONS.md.
@@ -1602,6 +1602,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
               // Update counterpart account ID if changed
               if (updatedTransaction.paymentSourceAccountId) {
                 updated.accountId = updatedTransaction.paymentSourceAccountId;
+                updated.paidViaCardId = undefined;
                 
                 // Sync counterpart description
                 const parentAcc = prev.accounts.find(a => a.id === updatedTransaction.accountId);
@@ -1772,7 +1773,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
       }
 
-      return { ...prev, transactions: updatedTxs, debts: updatedDebts };
+      return { ...prev, transactions: routeCardSpends(updatedTxs, prev.accounts), debts: updatedDebts };
     });
   };
 
