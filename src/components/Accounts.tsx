@@ -9,10 +9,11 @@ import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import { getAccountEmoji } from './transactionIcons';
 import ConfirmDialog from './ConfirmDialog';
-import type { Account, AccountType, CardDetails, CardFees, CardNetwork, BrandKey, RoundingRule } from '../types';
+import type { Account, AccountType, CardDetails, CardFees, CardNetwork, BrandKey, IssuerMark, RoundingRule, EPFContributionBasis, EPFSalaryRevision } from '../types';
 import { notifyLogosUpdated } from '../services/LogoService';
-import { CardBrandLogo, brandLabel, BRAND_INK } from './CardBrandLogo';
-import { resolveCardIssuer, linkedBankOf, cardMovableTransactions } from '../utils';
+import { CardBrandLogo, CardIssuerMark, brandLabel, BRAND_INK } from './CardBrandLogo';
+import { resolveCardIssuer, resolveIssuerMark, linkedBankOf, cardMovableTransactions } from '../utils';
+import { calculateEPFProjection } from '../utils/epfEngine';
 import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, getLatestBilledCycle, getOrdinalSuffix, affectsRupeeBalance, cardEarnsCashback, isUnitDenominated, rewardUnitBalance, rewardPointsToRupees, rupeesToRewardPoints, rupeeLedgerAmount, rewardPointsAdjustmentFor } from '../utils';
 import { getCardCycleFigures } from '../services/CardDuesService';
 import { scrollToFirstError } from '../utils/formErrors';
@@ -73,6 +74,9 @@ const buildCardFees = (mode: FeeMode, draft?: CardFees): CardFees | undefined =>
   if (draft?.waiverSpend !== undefined) fees.waiverSpend = draft.waiverSpend;
   return fees;
 };
+
+const issuerMarkLabel = (mark: IssuerMark): string =>
+  'brand' in mark ? brandLabel(mark.brand) : mark.name;
 
 export default function Accounts({ onViewStatement }: { onViewStatement: (acc: Account) => void }) {
   const { data, setPendingTransfer, addAccount, updateAccount, archiveAccount, restoreAccount } = useFinance();
@@ -314,13 +318,16 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     indusind: ['indus ind'],
   };
   const selectedIssuer = newAccount.cardDetails?.issuer;
+  const selectedIssuerName = newAccount.cardDetails?.issuerName?.trim();
+  const formLinkedBankName = linkedBankOf(newAccount, data.accounts)?.name;
   // What the name alone would give, ignoring any explicit choice — used to tell
   // the user whether the mark they see is inferred or one they set.
   const detectedIssuer = resolveCardIssuer(newAccount.name, undefined);
-  const effectiveIssuer = resolveCardIssuer(newAccount.name, newAccount.cardDetails);
+  const effectiveIssuer = resolveCardIssuer(newAccount.name, newAccount.cardDetails, formLinkedBankName);
+  const effectiveIssuerMark = resolveIssuerMark(newAccount.name, newAccount.cardDetails, formLinkedBankName);
   // What the field is seeded with when the editor opens: the explicit choice if
   // there is one, otherwise whatever the name detected.
-  const issuerSeedLabel = effectiveIssuer ? brandLabel(effectiveIssuer) : '';
+  const issuerSeedLabel = effectiveIssuerMark ? issuerMarkLabel(effectiveIssuerMark) : '';
   // A field reading "HDFC Bank" shouldn't narrow the list to HDFC the moment
   // it's focused — you open it precisely to see what else is on offer. Keyed on
   // the SEED rather than on the explicit pick, so a detected bank the user never
@@ -344,11 +351,15 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     !issuerFilter ||
     [bank, brandLabel(bank).toLowerCase(), ...(ISSUER_ALIASES[bank] || [])].some(s => s.includes(issuerFilter))
   );
+  const customIssuerName = issuerQuery.trim();
+  const offerCustomIssuer = !!customIssuerName && customIssuerName !== selectedIssuerName &&
+    !ISSUER_OPTIONS.some(bank => [bank, brandLabel(bank).toLowerCase(), ...(ISSUER_ALIASES[bank] || [])].includes(customIssuerName.toLowerCase()));
+  const customIssuerFirst = offerCustomIssuer && !issuerFilter;
   // Brand marks are drawn to sit on white, and the single-tint ones (Axis, SBI,
   // Federal, IndusInd, CSB) are pure currentColor — over the dark sheet they can
   // only ever be grey silhouettes. A light plate is what lets every bank show its
   // own colours, so a row is recognisable before you've read the name.
-  const issuerPlate = (bank: BrandKey) => ({
+  const issuerPlate = (bank?: BrandKey) => ({
     background: '#f7f8fa',
     borderRadius: '6px',
     padding: '4px 7px',
@@ -356,11 +367,16 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
-    ['--card-ink' as string]: BRAND_INK[bank] ?? '17, 24, 39',
+    ['--card-ink' as string]: (bank ? BRAND_INK[bank] : undefined) ?? '17, 24, 39',
   });
   const chooseIssuer = (bank: BrandKey) => {
-    setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, issuer: bank } as CardDetails });
+    setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, issuer: bank, issuerName: undefined } as CardDetails });
     setIssuerQuery(brandLabel(bank));
+    setIssuerDropdownOpen(false);
+  };
+  const chooseIssuerName = (name: string) => {
+    setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, issuer: undefined, issuerName: name } as CardDetails });
+    setIssuerQuery(name);
     setIssuerDropdownOpen(false);
   };
   const [collapsedTypes, setCollapsedTypes] = useState<Set<string>>(new Set());
@@ -545,7 +561,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setErrors({});
     setNewAccount({
       ...acc,
-      isCashbackEnabled: cardEarnsCashback(acc)
+      isCashbackEnabled: cardEarnsCashback(acc),
+      ...(acc.type === 'epf' ? { basePensionBalance: calculateEPFProjection(acc, month).pensionBalance || undefined } : {})
     });
     setNewCbName('');
     setNewCbRate('');
@@ -600,8 +617,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     // inferred from its name showed that bank everywhere else and then opened this editor with the
     // field empty, which reads as the value having been lost. Seeding it does not make the inference
     // explicit — only chooseIssuer writes cardDetails.issuer — so Save still stores nothing extra.
-    const seeded = resolveCardIssuer(acc.name, cd);
-    setIssuerQuery(seeded ? brandLabel(seeded) : '');
+    const seeded = resolveIssuerMark(acc.name, cd, linkedBankOf(acc, data.accounts)?.name);
+    setIssuerQuery(seeded ? issuerMarkLabel(seeded) : '');
     setIssuerDropdownOpen(false);
     setShowCvv(false);
     setSymbolInput(acc.marketSymbol || '');
@@ -676,6 +693,9 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     if (newAccount.type === 'epf') {
       if (!newAccount.currentEmployer?.trim()) {
         newErrors.currentEmployer = 'Current Employer is required';
+      }
+      if ((newAccount.basePensionBalance || 0) > (parseFloat(openingBalanceInput) || 0)) {
+        newErrors.basePensionBalance = 'Cannot be more than the balance above';
       }
     }
 
@@ -949,6 +969,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       rewardBalanceAdjustments: updatedRewardBalanceAdjustments,
       baseBalance: newAccount.type === 'epf' ? (parseFloat(openingBalanceInput) || 0) : undefined,
       baseBalanceDate: newAccount.type === 'epf' ? `${getCurrentMonthStr()}-01` : undefined,
+      basePensionBalance: newAccount.type === 'epf' && (newAccount.basePensionBalance || 0) > 0 ? newAccount.basePensionBalance : undefined,
       currentEmployer: newAccount.type === 'epf' ? (newAccount.currentEmployer?.trim() || undefined) : undefined,
       joiningDate: newAccount.type === 'epf' ? newAccount.joiningDate : undefined,
       epfContributionBasis: newAccount.type === 'epf' ? (newAccount.epfContributionBasis || 'statutory_ceiling') : undefined,
@@ -1871,6 +1892,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       onChange={val => {
                         setNewAccount({ ...newAccount, linkedBankAccountId: val || undefined });
                         if (errors.openingBalance) setErrors(prev => ({ ...prev, openingBalance: '' }));
+                        if (issuerQuery === issuerSeedLabel) {
+                          const nextMark = resolveIssuerMark(newAccount.name, newAccount.cardDetails, bankOptions.find(a => a.id === val)?.name);
+                          setIssuerQuery(nextMark ? issuerMarkLabel(nextMark) : '');
+                        }
                       }}
                       iconGetter={id => getAccountEmoji(id ? 'bank_account' : 'debit_card')}
                     />
@@ -2133,6 +2158,23 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
               {newAccount.type === 'epf' && (
                 <>
+                  <div className="input-group">
+                    <label>Pension (EPS) share of this balance — ₹</label>
+                    <input
+                      type="number"
+                      className={`input-field ${errors.basePensionBalance ? 'border-danger' : ''}`}
+                      placeholder="0"
+                      value={newAccount.basePensionBalance ?? ''}
+                      onChange={e => {
+                        setNewAccount({ ...newAccount, basePensionBalance: e.target.value !== '' ? parseFloat(e.target.value) : undefined });
+                        if (errors.basePensionBalance) setErrors(prev => ({ ...prev, basePensionBalance: '' }));
+                      }}
+                    />
+                    {errors.basePensionBalance
+                      ? <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.basePensionBalance}</span>
+                      : <span className="text-xs text-muted" style={{ marginTop: '0.25rem' }}>The Pension column of your EPFO passbook, if the balance above includes it. It earns no interest. Leave empty if the balance is only your Employee + Employer share.</span>}
+                  </div>
+
                   {/* Current Employer */}
                   <div className="input-group">
                     <label>Current Employer</label>
@@ -2155,37 +2197,52 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       label="Contribution Basis"
                       value={newAccount.epfContributionBasis || 'statutory_ceiling'}
                       options={[
+                        { id: 'payslip', name: 'From my payslip', subtext: 'Enter the monthly PF deduction shown on your payslip' },
                         { id: 'statutory_ceiling', name: 'Statutory Wage Ceiling', subtext: '12% Capped at ₹15,000 Basic (Default EPFO Rule)' },
                         { id: 'actual_basic', name: 'Actual Basic + DA', subtext: '12% Calculated on Full Actual Basic Salary' }
                       ]}
-                      onChange={val => setNewAccount({ ...newAccount, epfContributionBasis: val as 'statutory_ceiling' | 'actual_basic' })}
-                      iconGetter={id => id === 'statutory_ceiling' ? '📜' : '💸'}
+                      onChange={val => setNewAccount({ ...newAccount, epfContributionBasis: val as EPFContributionBasis })}
+                      iconGetter={id => (id === 'payslip' ? '🧾' : id === 'statutory_ceiling' ? '📜' : '💸')}
                     />
                   </div>
 
-                  {/* Monthly Basic Salary */}
-                  <div className="input-group">
-                    <label>Monthly Basic + DA Salary — ₹</label>
-                    <input
-                      type="number"
-                      className="input-field"
-                      placeholder="e.g. 33700"
-                      value={newAccount.salaryRevisions?.[0]?.basicSalary || ''}
-                      onChange={e => {
-                        const basic = parseFloat(e.target.value) || 0;
-                        setNewAccount({
-                          ...newAccount,
-                          salaryRevisions: [{
-                            id: generateId(),
-                            effectiveDate: newAccount.joiningDate || `${getCurrentMonthStr()}-01`,
-                            basicSalary: basic,
-                            employeeContributionPct: 12,
-                            employerContributionPct: 12,
-                          }]
-                        });
-                      }}
-                    />
-                  </div>
+                  {(() => {
+                    const revision = newAccount.salaryRevisions?.[0];
+                    const isPayslipBasis = newAccount.epfContributionBasis === 'payslip';
+                    const setRevision = (patch: Partial<EPFSalaryRevision>) => setNewAccount({
+                      ...newAccount,
+                      salaryRevisions: [{
+                        ...revision,
+                        id: revision?.id || generateId(),
+                        effectiveDate: newAccount.joiningDate || `${getCurrentMonthStr()}-01`,
+                        basicSalary: revision?.basicSalary || 0,
+                        employeeContributionPct: 12,
+                        employerContributionPct: 12,
+                        ...patch,
+                      }]
+                    });
+                    const preview = revision ? calculateEPFProjection(newAccount as Account, getCurrentMonthStr()) : undefined;
+                    return (
+                      <div className="input-group">
+                        <label>{isPayslipBasis ? 'Monthly PF deduction (from payslip) — ₹' : 'Monthly Basic Salary (+ DA, if any) — ₹'}</label>
+                        <input
+                          type="number"
+                          className="input-field"
+                          placeholder={isPayslipBasis ? 'e.g. 1800' : 'e.g. 25000'}
+                          value={(isPayslipBasis ? revision?.employeeContribution : revision?.basicSalary) || ''}
+                          onChange={e => {
+                            const value = parseFloat(e.target.value) || 0;
+                            setRevision(isPayslipBasis ? { employeeContribution: value } : { basicSalary: value });
+                          }}
+                        />
+                        {preview && preview.employeeContribution > 0 && (
+                          <span className="text-xs text-muted" style={{ marginTop: '0.25rem' }}>
+                            Each month: you {formatCurrency(preview.employeeContribution)} · employer {formatCurrency(preview.employerEPFContribution)} to EPF + {formatCurrency(preview.employerEPSContribution)} to pension
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </>
               )}
 
@@ -3055,16 +3112,19 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                       setIssuerDropdownOpen(true);
                                       // The field and the stored issuer can't be allowed to
                                       // disagree — typing over a pick unmakes it.
-                                      if (selectedIssuer) {
-                                        setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, issuer: undefined } as CardDetails });
+                                      if (selectedIssuer || selectedIssuerName) {
+                                        setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, issuer: undefined, issuerName: undefined } as CardDetails });
                                       }
                                     }}
                                     onFocus={() => setIssuerDropdownOpen(true)}
                                     onBlur={() => setIssuerDropdownOpen(false)}
                                     onKeyDown={e => {
-                                      if (e.key === 'Enter' && issuerDropdownOpen && issuerSuggestions.length > 0) {
+                                      if (e.key === 'Enter' && issuerDropdownOpen && issuerSuggestions.length > 0 && !customIssuerFirst) {
                                         e.preventDefault();
                                         chooseIssuer(issuerSuggestions[0]);
+                                      } else if (e.key === 'Enter' && issuerDropdownOpen && offerCustomIssuer) {
+                                        e.preventDefault();
+                                        chooseIssuerName(customIssuerName);
                                       } else if (e.key === 'Escape') {
                                         setIssuerDropdownOpen(false);
                                       }
@@ -3083,7 +3143,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                       onMouseDown={e => e.preventDefault()}
                                       onClick={() => {
                                         setIssuerQuery('');
-                                        setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, issuer: undefined } as CardDetails });
+                                        setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, issuer: undefined, issuerName: undefined } as CardDetails });
                                         // And REOPEN it, focusing the input as we do.
                                         //
                                         // Both halves are needed. The mousedown above preventDefaults
@@ -3121,12 +3181,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                     borderRadius: '0.625rem', zIndex: 200,
                                     maxHeight: '13rem', overflowY: 'auto',
                                     boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+                                    display: 'flex', flexDirection: 'column',
                                   }}>
-                                    {issuerSuggestions.length === 0 ? (
+                                    {issuerSuggestions.length === 0 && !offerCustomIssuer && (
                                       <div style={{ padding: '0.7rem 0.85rem', fontSize: '0.78rem', color: 'rgba(255,255,255,0.45)' }}>
                                         No bank matches “{issuerQuery.trim()}”.
                                       </div>
-                                    ) : issuerSuggestions.map((bank, idx) => (
+                                    )}
+                                    {issuerSuggestions.map((bank, idx) => (
                                       <div
                                         key={bank}
                                         // Selecting has to survive the input's blur, which fires first.
@@ -3138,7 +3200,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                           justifyContent: 'space-between',
                                           gap: '0.75rem',
                                           padding: '0.5rem 0.75rem',
-                                          borderBottom: idx < issuerSuggestions.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                                          borderBottom: idx < issuerSuggestions.length - 1 || (offerCustomIssuer && !customIssuerFirst) ? '1px solid rgba(255,255,255,0.06)' : 'none',
                                           cursor: 'pointer',
                                         }}
                                       >
@@ -3148,25 +3210,54 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                         </span>
                                       </div>
                                     ))}
+                                    {offerCustomIssuer && (
+                                      <div
+                                        onMouseDown={e => e.preventDefault()}
+                                        onClick={() => chooseIssuerName(customIssuerName)}
+                                        style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'space-between',
+                                          gap: '0.75rem',
+                                          padding: '0.5rem 0.75rem',
+                                          cursor: 'pointer',
+                                          order: customIssuerFirst ? -1 : 1,
+                                          flexShrink: 0,
+                                          borderBottom: customIssuerFirst && issuerSuggestions.length > 0 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                                        }}
+                                      >
+                                        <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                                          <span style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.9)' }}>Use “{customIssuerName}”</span>
+                                          <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.45)' }}>No logo yet — the name is printed on the card</span>
+                                        </span>
+                                        <span style={{ ...issuerPlate(), width: '92px', height: '30px' }}>
+                                          <CardIssuerMark mark={{ name: customIssuerName }} fit />
+                                        </span>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                               </div>
                               <span className="text-xs text-muted" style={{ opacity: 0.65, marginTop: '0.35rem' }}>
                                 {selectedIssuer
                                   ? 'Set explicitly.'
-                                  : detectedIssuer
-                                    ? 'Detected from the card name. Search to override.'
-                                    : "Not set — the card's name doesn't say which bank issued it."}
+                                  : selectedIssuerName
+                                    ? 'Set explicitly. No logo for this bank yet, so its name is printed on the card.'
+                                    : detectedIssuer
+                                      ? 'Detected from the card name. Search to override.'
+                                      : effectiveIssuerMark && formLinkedBankName
+                                        ? `From the linked bank account, ${formLinkedBankName}. Search to override.`
+                                        : "Not set — the card's name doesn't say which bank issued it. Type the bank's name to use it even if it isn't listed."}
                               </span>
                             </>
                           ) : (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                              {effectiveIssuer ? (
+                              {effectiveIssuerMark ? (
                                 <div
-                                  title={brandLabel(effectiveIssuer)}
+                                  title={issuerMarkLabel(effectiveIssuerMark)}
                                   style={{ ...issuerPlate(effectiveIssuer), width: '92px', height: '32px' }}
                                 >
-                                  <CardBrandLogo brand={effectiveIssuer} fit />
+                                  <CardIssuerMark mark={effectiveIssuerMark} fit />
                                 </div>
                               ) : (
                                 <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>N/A</span>

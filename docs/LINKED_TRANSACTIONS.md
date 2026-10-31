@@ -172,6 +172,12 @@ check would think the whole balance was its own to spend.
   both directions produce an identical star (card = hub), so edit reconstruction
   (`openEditModal`) and the Option-B rebalance below always see `card.amount` as the total.
   Without it, Debit POV would anchor on the bank leg (partial ₹148) and corrupt the rebalance.
+  An EDIT that gives a bank-side payment its first split goes through the same move, in
+  `updateTransaction` via `anchorCcSplitOnCard` (the form's `anchorOnCounterpart` only runs for new
+  logs): the card leg becomes the credit for bank + rewards and takes the split and the reward legs.
+  The same function runs on load (`anchorCcSplitsOnCards`) to repair payments saved before this.
+  A transfer / CC Payment / NCMC counterpart is also always written as the opposite type of the
+  row being saved, so an edit can no longer leave both legs of a payment as debits.
 - **A reward leg is never a parent row, and has no editor of its own.** Two consequences of it
   being purely derived (amount = its source's amount on the anchor, account = that source's account,
   description/category/date propagated down):
@@ -209,6 +215,28 @@ check would think the whole balance was its own to spend.
   in `LEG_CATS`) so deleting a leg of a 2-leg pair (or the card/bank leg of a 3-leg split)
   removes the whole group — never orphans a sibling. Cashback children stay outside
   `LEG_CATS`, so deleting a cashback child still only resets the parent's `rewardEarned`.
+  The other way round, the instant cashback of ANY row in the deleted leg group goes with it
+  (it links to that row and that row links back), so deleting the far leg of a transfer no
+  longer leaves the parent's cashback behind.
+- **Instant cashback lives on the paying (debit) row of a transfer / CC Payment, whichever side it
+  was logged from.** Logged from the Credit side (card or receiving wallet as the main account), the
+  form shows Cashback Earned judged by the "Debit From" account, saves the main row with no cashback,
+  and hands it to `setInstantCashbacks` on the debit counterpart. Opening the credit row reads the
+  cashback off its counterpart, so both sides show the same figures and a save from either never
+  creates a second leg. A Cashback row is never chosen as a group's parent row.
+- **One payment can pay cashback into several wallets.** The paying row holds a list,
+  `instantCashbacks: { accountId, amount, legId }[]`, one Cashback leg per entry (linked both ways),
+  with `rewardEarned` = their sum and `rewardEarnedAccountId` = the first, exactly as
+  `rewardSplits` / `rewardUsed` work. `getInstantCashbacks` reads a legacy single cashback
+  (`rewardEarnedType: 'instant'` and no list) as a one-entry list, and `instantCashbacksOf` recovers
+  its leg id. Every form save ends in `setInstantCashbacks(holder, list)` → `applyInstantCashbacks`,
+  which updates legs matched by id, creates the new ones beside the holder and deletes the dropped
+  ones. Editing one Cashback leg directly changes only its entry; deleting one removes only its entry
+  while others remain (the last one resets the holder as before).
+- **Star topology on a date change:** moving any non-cashback row to another day moves its whole
+  group (`linkedTxGroupOf`: the row, what it links to, what links to it, and the siblings that
+  link to the same parent), so editing the far leg of a pair takes the parent's cashback along.
+  Only transaction ids count — two rows sharing a cashback-cycle or debt id are not a group.
 - **Reward-leg delete is special (asymmetric, by design):** deleting *only a reward leg*
   of a split is handled BEFORE the leg-group cascade and does NOT remove the payment.
   It un-splits by that source: the card credit stays, the **bank leg absorbs** what that source was

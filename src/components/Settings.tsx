@@ -1088,6 +1088,13 @@ export default function Settings() {
           ...(sp.rlg ? { rlg: getTinyId(sp.rlg) } : {}),
         }));
       }
+      if (Array.isArray(min.ibk)) {
+        min.ibk = min.ibk.map((cb: { x?: string; rlg?: string }) => ({
+          ...cb,
+          ...(cb.x ? { x: getTinyId(cb.x) } : {}),
+          ...(cb.rlg ? { rlg: getTinyId(cb.rlg) } : {}),
+        }));
+      }
       if (min.rea) min.rea = getTinyId(min.rea);
       if (min.ri) min.ri = getTinyId(min.ri);
       if (min.lts) min.lts = min.lts.map(getTinyId);
@@ -1220,6 +1227,13 @@ export default function Settings() {
                   ...sp,
                   accountId: sp.accountId ? expandId(sp.accountId) : sp.accountId,
                   legId: sp.legId ? expandId(sp.legId) : sp.legId,
+                }));
+              }
+              if (Array.isArray(t.instantCashbacks)) {
+                t.instantCashbacks = t.instantCashbacks.map((cb: { accountId?: string; legId?: string }) => ({
+                  ...cb,
+                  accountId: cb.accountId ? expandId(cb.accountId) : cb.accountId,
+                  legId: cb.legId ? expandId(cb.legId) : cb.legId,
                 }));
               }
               if (t.rewardEarnedAccountId) t.rewardEarnedAccountId = expandId(t.rewardEarnedAccountId);

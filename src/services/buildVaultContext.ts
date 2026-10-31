@@ -183,7 +183,9 @@ function buildSummary(data: FinanceData): string {
     }
     if (a.type === 'epf') {
       const proj = calculateEPFProjection(a, currentMonth);
-      line += ` (Monthly Credit: ${formatCurrency(proj.totalContribution)}, Accrued Interest FY: ${formatCurrency(proj.accruedInterest)}, 1-Yr Projection: ${formatCurrency(proj.projectedOneYearBalance)})`;
+      line += ` (Monthly Credit: ${formatCurrency(proj.totalContribution)} = you ${formatCurrency(proj.employeeContribution)} + employer ${formatCurrency(proj.employerEPFContribution)}, plus ${formatCurrency(proj.employerEPSContribution)} to pension (EPS), Accrued Interest FY: ${formatCurrency(proj.accruedInterest)}, 1-Yr Projection: ${formatCurrency(proj.projectedOneYearBalance)}`
+        + (proj.pensionBalance > 0 ? `, of the balance ${formatCurrency(proj.pensionBalance)} is the pension (EPS) share, which earns no interest` : '')
+        + ')';
     }
     // An NCMC-enabled card carries a SECOND, separate travel purse on top of its main balance, and the
     // Wealth screen counts both. calculateBalance returns only one at a time (the isTravel flag picks

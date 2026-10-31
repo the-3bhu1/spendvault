@@ -86,11 +86,24 @@ An account is any place money sits or is owed. Built-in types:
   "SIP account", they mean a Mutual Funds account.
 - commodity — gold or silver, valued at a ₹/gram price (AI-estimated or a manual override).
 - epf — Employee Provident Fund; tracks running EPF balance, monthly employer/employee credit breakdown,
-  monthly accrued interest for current FY (credited on March 31st), and 1-year projections. Options
-  include Statutory Wage Ceiling (₹15,000 cap) vs Actual Basic + DA. Requires a "Current Employer"
-  name field.
-  Changing your salary: edit the EPF account (Accounts → pencil) and change "Monthly Basic + DA
-  Salary". There is no separate salary-history screen — the projection is anchored to a balance and a
+  monthly accrued interest for current FY (credited on March 31st), and 1-year projections. Requires a
+  "Current Employer" name field. Contribution Basis has three options:
+  (1) "From my payslip" — type the monthly "Provident Fund" deduction shown on your payslip (e.g.
+  ₹1,800 or ₹2,360). Easiest, and exact whatever rule your employer uses: the app reverses the 12% to
+  get the PF wage, adds the same 12% from the employer, and sends 8.33% of up to ₹15,000 (max ₹1,250)
+  to pension. (2) Statutory Wage Ceiling — 12% of basic capped at ₹15,000 (₹1,800/month for anyone
+  earning ₹15,000+ basic). (3) Actual Basic + DA — 12% of the full basic.
+  "Basic + DA": Basic is the fixed core of your salary on the payslip. DA (Dearness Allowance) is an
+  inflation allowance paid mainly by government and PSU employers — private-sector payslips usually
+  have none, so for most people the figure is just Basic. HRA and special allowance do not count.
+  Under the field, a line shows what the app will credit each month ("you ₹X · employer ₹Y to EPF +
+  ₹Z to pension"), so it can be checked against the passbook.
+  "Pension (EPS) share of this balance": if the Current Balance you enter includes the Pension column
+  of your EPFO passbook, enter that column's total here. It earns no interest, so interest is worked
+  out on the rest, and the balance then grows by the pension credit too. Leave it empty if the balance
+  is only your Employee + Employer share.
+  Changing your salary: edit the EPF account (Accounts → pencil) and change the PF deduction or the
+  basic salary. There is no separate salary-history screen — the projection is anchored to a balance and a
   month rather than replayed from your joining date, so saving re-anchors it to the current month and
   every month from then on uses the new figure. The "Current Balance" field in that editor is
   pre-filled with the balance as projected TODAY, so re-anchoring keeps everything accrued so far;
@@ -131,7 +144,11 @@ Actions (each account is a card on the Accounts tab):
 - Save or change card details: in the account's add/edit form, the "Card Details (Optional)" block —
   "+" to start, pencil to edit, ✓ to save, trash to remove. It holds cardholder name, card number,
   expiry, CVV, network (Visa/Mastercard/RuPay/Amex/Diners) and issuing bank; the bank is a search
-  field, and if left blank it is inferred from the card's name. Stored on-device, behind the app PIN.
+  field, and if left blank it is inferred from the card's name, or for a debit card linked to a bank
+  account, from that bank. The issuing bank only decides which bank logo is printed on the card
+  picture; nothing else depends on it. If your bank isn't in the list (e.g. Canara), type its name
+  and pick "Use '<name>'" — the card then shows the bank's name in letters where the logo would go.
+  Stored on-device, behind the app PIN.
   The CVV is additionally encrypted with a key locked inside this phone, and it is never put in a
   backup — after restoring a backup (or moving to a new phone) CVVs are blank and must be re-typed.
 - Tap to add a card (Android phones with NFC only): in that same block, the NFC button next to "+"
@@ -356,6 +373,14 @@ the "Other" source below covers one-off rewards.
   account (category "Cashback"). Offered on ANY debit from a bank or e-wallet — including transfers,
   card bill payments and NCMC recharges — because it is the payment app (super.money, CRED, …) that
   rebates the payer, whatever the money was for. It needs a rewards/e-wallet account to deposit into.
+  It appears from either side of a transfer or card bill payment: logged as a Debit from the bank,
+  or as a Credit to the card with the bank as "Debit From". Either way the cashback is recorded
+  against the bank's (paying) row, and editing either row shows and changes the same cashback.
+  One payment can earn cashback into SEVERAL wallets (e.g. 308 Cheq Chips and ₹10 of CRED coins):
+  fill the first card, then "+" in the Cashback Earned header adds another, each with its own
+  amount, ₹ | % | PTS toggle and Deposit To; swipe or tap the dots to move between them, and "×"
+  removes the card on screen. Each wallet gets its own "Cashback" row in the ledger, grouped under
+  the payment, and the panel shows the combined total when there is more than one.
   Card cashback is the other kind: paid by the issuer for spending on the card, so it is NOT offered
   on transfers, CC payments, NCMC recharges or fund purchases.
   ITS PERCENTAGE IS OF WHAT THE ACCOUNT ACTUALLY PAID, not of the full price. On a ₹100 purchase
@@ -364,14 +389,22 @@ the "Other" source below covers one-off rewards.
   split panel is that base. Adding or changing a split recomputes the cashback, rather than leaving
   a percentage standing over a figure that has moved beneath it. Card rewards work the same way
   against the amount the card was charged (see Rewards).
+  Each cashback's amount can be typed in ₹, as a %, or — when its Deposit To wallet counts in a unit
+  such as Cheq Chips — in that unit: the toggle reads ₹ | % | PTS and starts on PTS. 308 Chips at
+  10 Chips = ₹1 is saved as ₹30.80, and the wallet shows exactly 308 more Chips.
 - Cashback (delayed): see Rewards — confirming realized cashback posts a "Cashback" credit
   into the chosen account.
 - NCMC Travel Recharge: on an NCMC-enabled debit card, moves money from the card's payments balance
   into its separate travel balance (and travel purchases draw it back down).
 
 # Categories & Budgets
-- Fuel, Fund, Loans, Cashback, Lending & Borrowing and Investments are re-added automatically if
-  missing, so they can reappear after you delete them.
+- Fuel, Fund, Bank Charges, Loans, Cashback, Lending & Borrowing and Investments are re-added
+  automatically if missing, so they can reappear after you delete them.
+"Bank Charges" is a standard spend category (badge-with-minus icon), auto-added just after "Fuel" on upgrade.
+Use it for fees a bank or card takes: SMS alert charges, debit-card annual fees, ATM / non-home-branch
+withdrawal fees, minimum-balance penalties, cheque-book and NEFT/IMPS charges, card late fees and
+GST on any of these. It is a real spend, not stats-excluded, so it counts toward Spends and can carry
+a monthly budget.
 Spending is grouped by category. Add, delete and reorder categories in Settings → Categories (drag a
 row by its handle to reorder; "Other/Misc" always stays last). Set or change a monthly ₹ budget per
 category in the Insights screen (not Settings), which shows actual-vs-budget progress. Deleting a

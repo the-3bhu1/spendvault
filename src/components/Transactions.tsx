@@ -477,8 +477,10 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                        on far more rows than it used to be, now that instant cashback is offered on
                        transfers and bill payments (it is the payment app that pays it, not the
                        card issuer — see the gate in LogTransactionForm). */
-                    const hidesCashbackLeg = counterparts!.some(c => (c.tx.category || '').toLowerCase() === 'cashback');
-                    const cashbackSuffix = hidesCashbackLeg ? ' + cashback' : '';
+                    const cashbackLegCount = counterparts!.filter(c => (c.tx.category || '').toLowerCase() === 'cashback').length;
+                    const hidesCashbackLeg = cashbackLegCount > 0;
+                    const cashbackWord = cashbackLegCount > 1 ? `${cashbackLegCount} cashbacks` : 'cashback';
+                    const cashbackSuffix = hidesCashbackLeg ? ` + ${cashbackWord}` : '';
                     /* Every label here has to survive on ONE line at 0.72rem mono inside a card that
                        is already inset from both screen edges — roughly 30 characters on a narrow
                        phone. So a label that takes a suffix drops its prose form for a list: "Paid
@@ -489,7 +491,7 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                       return cats.includes('cc payment')
                         ? `Funding + ${sourceWord}${cashbackSuffix}`
                         : (hidesCashbackLeg
-                          ? `${sourceWord.charAt(0).toUpperCase()}${sourceWord.slice(1)} + cashback`
+                          ? `${sourceWord.charAt(0).toUpperCase()}${sourceWord.slice(1)}${cashbackSuffix}`
                           : partPaid);
                     }
                     // Investment legs all share one category, so the wording comes from the leg's kind.
@@ -499,21 +501,21 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                     if (invKinds.includes('commodity')) return 'Commodity debited from bank';
                     if (invKinds.length > 0) return 'Investment funding entry';
                     if (cats.includes('transfer')) {
-                      return hidesCashbackLeg ? 'Transfer + cashback' : 'Transfer entry';
+                      return hidesCashbackLeg ? `Transfer${cashbackSuffix}` : 'Transfer entry';
                     }
                     // The grouping below always parents a CC Payment pair on the card's credit leg
                     // (creditParent || pool[0], and the credit leg is always present) — so the hidden
                     // counterpart here is always the funding/debit side, never the card. A reward leg
                     // among them is handled above.
                     if (cats.includes('cc payment')) {
-                      return hidesCashbackLeg ? 'Funding + cashback' : 'Paid from funding account';
+                      return hidesCashbackLeg ? `Funding${cashbackSuffix}` : 'Paid from funding account';
                     }
                     if (cats.includes('ncmc travel recharge')) {
-                      return hidesCashbackLeg ? 'Top-up + cashback' : 'Travel wallet top-up';
+                      return hidesCashbackLeg ? `Top-up${cashbackSuffix}` : 'Travel wallet top-up';
                     }
                     // A plain purchase that earned instant cashback has no other leg to describe,
                     // so the cashback IS the group rather than a footnote on it.
-                    if (hidesCashbackLeg) return 'Instant cashback logged';
+                    if (hidesCashbackLeg) return cashbackLegCount > 1 ? `${cashbackLegCount} instant cashbacks logged` : 'Instant cashback logged';
                     return 'Linked entry';
                   })()}
             </span>
@@ -1348,7 +1350,7 @@ export default function Transactions() {
                                       const isRewardLeg = (o: Transaction) => uncollapsedInGroup.some(p =>
                                         p.id !== o.id && !!rewardSplitOfLeg(p, o)
                                       );
-                                      const eligible = uncollapsedInGroup.filter(other => !isRewardLeg(other));
+                                      const eligible = uncollapsedInGroup.filter(other => !isRewardLeg(other) && other.category !== 'Cashback');
                                       // Never leave the group headless: if every member looks like a
                                       // reward leg, fall back to the whole group rather than render nothing.
                                       const pool = eligible.length ? eligible : uncollapsedInGroup;

@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { matchDescriptions, SuggestionDropdown } from './DescriptionSuggestions';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import type { Account, Transaction, TransactionType, InvestmentKind, RewardSplitLeg } from '../types';
-import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, formatBillingCycleRange, cardEarnsCashback, cardRewardOn, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance, redemptionUnits, isInvestmentSell, investmentHoldingSideType, investmentLegAmount, holdingPositionOn, sellCostBasis, linkedBankOf, isLinkedDebitCard, spendingAccountIdOf } from '../utils';
+import type { Account, Transaction, TransactionType, InvestmentKind, RewardSplitLeg, InstantCashbackLeg } from '../types';
+import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, formatBillingCycleRange, cardEarnsCashback, cardRewardOn, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance, redemptionUnits, isInvestmentSell, investmentHoldingSideType, investmentLegAmount, holdingPositionOn, sellCostBasis, linkedBankOf, isLinkedDebitCard, spendingAccountIdOf, instantCashbacksOf, withInstantCashbacks } from '../utils';
 import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X, Plus, Ticket, RotateCcw } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
@@ -86,6 +86,40 @@ interface SplitDraft {
    that those digits were Chips. */
 const blankSplit = (): SplitDraft => ({ accountId: '', amount: 0, input: '', unit: 'rupee', pointsInput: '' });
 
+type CashbackEntryMode = 'rupees' | 'percent' | 'units';
+
+interface CashbackDraft {
+  accountId: string;
+  amount: number;
+  legId?: string;
+  entry: CashbackEntryMode;
+  rupeesInput: string;
+  percentInput: string;
+  unitsInput: string;
+}
+
+const blankCashback = (): CashbackDraft => ({
+  accountId: '', amount: 0, entry: 'rupees', rupeesInput: '', percentInput: '', unitsInput: '',
+});
+
+const cashbackDraftFor = (accountId: string, amount: number, acc: Account | undefined, legId?: string): CashbackDraft => {
+  const inUnits = isUnitDenominated(acc);
+  return {
+    accountId,
+    amount,
+    legId,
+    entry: inUnits ? 'units' : 'rupees',
+    rupeesInput: amount > 0 ? String(amount) : '',
+    percentInput: '',
+    unitsInput: inUnits && amount > 0 ? String(rupeesToRewardPoints(amount, acc)) : '',
+  };
+};
+
+const cashbackFromPercent = (percentInput: string, base: number) => {
+  const pct = parseFloat(percentInput);
+  return !isNaN(pct) && base > 0 ? Math.round((base * pct) / 100 * 100) / 100 : 0;
+};
+
 /** How the stored anchor reads as carousel cards. Leg ids are recovered for a legacy row that never
  *  recorded them, by looking for the linked leg sitting on each source's account — with ids in hand
  *  the save reuses those legs rather than deleting and rebuilding them. */
@@ -166,7 +200,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   sms,
   onSuccess
 }) => {
-  const { data, addTransaction, updateTransaction, setRewardLegExclusion, updateTags, updateEventTags, updateRecurringBill, removeFromSmsQueue, removeSmsByMatch } = useFinance();
+  const { data, addTransaction, updateTransaction, setRewardLegExclusion, setInstantCashbacks, updateTags, updateEventTags, updateRecurringBill, removeFromSmsQueue, removeSmsByMatch } = useFinance();
 
   const [newTx, setNewTx] = useState<Partial<Transaction>>(blankTx);
   const [inputStrings, setInputStrings] = useState(() => buildInputStrings(blankTx()));
@@ -175,9 +209,10 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   const [paymentSourceAccountId, setPaymentSourceAccountId] = useState('');
   const [ccPaymentCycleTarget, setCcPaymentCycleTarget] = useState<'current_cycle' | 'previous_statement'>('previous_statement');
   const [selectedCashbackLevelId, setSelectedCashbackLevelId] = useState('');
-  // Instant-cashback input as a percentage of the debited amount, instead of a fixed ₹ value.
-  const [cashbackPercentMode, setCashbackPercentMode] = useState(false);
-  const [cashbackPercentStr, setCashbackPercentStr] = useState('');
+  const [cashbacks, setCashbacks] = useState<CashbackDraft[]>([blankCashback()]);
+  const [activeCashback, setActiveCashback] = useState(0);
+  const cashbackScrollRef = useRef<HTMLDivElement>(null);
+  const cashbackScrollTargetRef = useRef<number | null>(null);
   const [showRewardSplit, setShowRewardSplit] = useState(false);
   /* The split's sources, one per carousel card, in the order they were added. This is the panel's
      source of truth; `newTx.rewardUsed` / `rewardUsedAccountId` are written from it at save time by
@@ -228,11 +263,36 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   // (percent × the debited amount) — see primaryDebit. Adding a split therefore re-computes it,
   // which is the whole point: the base moved, so the rupee figure has to move with it.
   useEffect(() => {
-    if (!cashbackPercentMode) return;
-    const pct = parseFloat(cashbackPercentStr);
-    const computed = (!isNaN(pct) && primaryDebit > 0) ? Math.round((primaryDebit * pct) / 100 * 100) / 100 : 0;
-    setNewTx(prev => prev.rewardEarned === computed ? prev : { ...prev, rewardEarned: computed, rewardEarnedType: 'instant' });
-  }, [cashbackPercentMode, cashbackPercentStr, primaryDebit]);
+    setCashbacks(prev => {
+      let changed = false;
+      const next = prev.map(c => {
+        if (c.entry !== 'percent') return c;
+        const amount = cashbackFromPercent(c.percentInput, primaryDebit);
+        if (amount === c.amount) return c;
+        changed = true;
+        return { ...c, amount };
+      });
+      return changed ? next : prev;
+    });
+  }, [primaryDebit]);
+
+  useEffect(() => {
+    if (activeCashback > cashbacks.length - 1) setActiveCashback(Math.max(0, cashbacks.length - 1));
+  }, [cashbacks.length, activeCashback]);
+
+  useEffect(() => {
+    const el = cashbackScrollRef.current;
+    if (!el) return;
+    const target = activeCashback * el.clientWidth;
+    if (Math.abs(el.scrollLeft - target) < 4) {
+      cashbackScrollTargetRef.current = null;
+      return;
+    }
+    cashbackScrollTargetRef.current = target;
+    el.scrollTo({ left: target, behavior: 'smooth' });
+    const t = window.setTimeout(() => { cashbackScrollTargetRef.current = null; }, 700);
+    return () => window.clearTimeout(t);
+  }, [activeCashback, cashbacks.length]);
 
   const seedFromExisting = (tx: Transaction) => {
     setErrors({});
@@ -307,13 +367,20 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
 
     const isRewardChild = linkedTxs.some(p => !!rewardSplitOfLeg(p, tx));
     let paySrc = '';
+    let cashbackHolder: Transaction = tx;
     if ((isSplitBankLeg || isSplitRewardLeg) && rewardSplitAnchor) {
       paySrc = rewardSplitAnchor.accountId; // the card being paid
     } else if (!isRewardChild && !isCashbackChild) {
       const counterpartTx = linkedTxs.find(t => t.category !== 'Cashback' && !rewardSplitOfLeg(tx, t));
       if (counterpartTx) paySrc = spendingAccountIdOf(counterpartTx);
+      const isPairCategory = ['transfer', 'cc payment'].includes((tx.category || '').toLowerCase());
+      if (tx.type === 'credit' && isPairCategory && counterpartTx) cashbackHolder = counterpartTx;
     }
     setPaymentSourceAccountId(paySrc);
+    const seededCashbacks = instantCashbacksOf(cashbackHolder, data.transactions)
+      .map(c => cashbackDraftFor(c.accountId, c.amount, data.accounts.find(a => a.id === c.accountId), c.legId));
+    setCashbacks(seededCashbacks.length > 0 ? seededCashbacks : [blankCashback()]);
+    setActiveCashback(0);
 
     // Billing-cycle target ("Apply Payment To"): the cycle lives on the card leg, so for the bank/reward
     // child we read it off the anchor (and use the card's statement day), not the child's own record.
@@ -330,8 +397,6 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       setCcPaymentCycleTarget('previous_statement');
     }
     setSelectedCashbackLevelId(tx.cashbackLevelId || '');
-    setCashbackPercentMode(false);
-    setCashbackPercentStr('');
     setShowRewardSplit(isSplitBankLeg || getRewardSplits(sanitizedTx).length > 0);
     setNewTx(sanitizedTx);
     syncInputStrings(sanitizedTx);
@@ -716,11 +781,17 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         && newTx.counterpartAmount !== undefined && !((Number(newTx.counterpartAmount) || 0) > 0)) {
       newErrors.counterpartAmount = 'Enter the amount the other account moved';
     }
-    if (newTx.rewardEarnedType === 'instant' && (Number(newTx.rewardEarned) || 0) > 0 && !newTx.rewardEarnedAccountId) {
-      newErrors.rewardEarnedAccountId = 'Deposit account is required for instant cashback';
-    }
-    if (newTx.rewardEarnedAccountId && (Number(newTx.rewardEarned) || 0) <= 0) {
-      newErrors.rewardEarned = 'Cashback amount is required when deposit account is selected';
+    if (cashbackPanel.instant) {
+      cashbacks.forEach((c, i) => {
+        if (c.amount > 0 && !c.accountId) {
+          newErrors[`cashbackAccount_${i}`] = 'Deposit account is required for instant cashback';
+        }
+        if (c.accountId && !(c.amount > 0)) {
+          newErrors[`cashbackAmount_${i}`] = 'Cashback amount is required when deposit account is selected';
+        }
+      });
+      const firstBadCashback = cashbacks.findIndex((_, i) => newErrors[`cashbackAccount_${i}`] || newErrors[`cashbackAmount_${i}`]);
+      if (firstBadCashback >= 0) setActiveCashback(firstBadCashback);
     }
     /* Every card in the split carousel, checked on its own terms — each source has its own balance,
        its own unit and its own pair of error slots (`rewardUsed_i` / `rewardSource_i`), so a
@@ -862,7 +933,18 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     // Linked counterpart (child leg) creation. Edit/delete sync behavior is documented in
     // docs/LINKED_TRANSACTIONS.md — keep that matrix accurate when changing this block.
     const isTransfer = newTx.category?.toLowerCase() === 'transfer';
-    const hidesPassiveToggleFinal = ['transfer', 'cc payment', 'ncmc travel recharge', 'lending & borrowing'].includes((newTx.category || '').toLowerCase());
+    const cashbackOnCounterpart = newTx.type === 'credit' && (isTransfer || isCCPayment) && !!paymentSourceAccountId;
+    const existingSelf = editId ? data.transactions.find(t => t.id === editId) : undefined;
+    let cashbackHolderId = cashbackOnCounterpart
+      ? currentLinkedIds.find(id => {
+        const lt = data.transactions.find(t => t.id === id);
+        return !!lt && lt.id !== mainTxId
+          && ['transfer', 'cc payment'].includes((lt.category || '').toLowerCase())
+          && !rewardSplitOfLeg(existingSelf, lt)
+          && !(existingSelf && rewardSplitOfLeg(lt, existingSelf));
+      })
+      : undefined;
+    const hidesPassiveToggleFinal =['transfer', 'cc payment', 'ncmc travel recharge', 'lending & borrowing'].includes((newTx.category || '').toLowerCase());
     const investmentKind = activeInvestmentKind;
     const isMf = investmentKind === 'mutual_funds';
     const isStocks = investmentKind === 'stocks';
@@ -1047,6 +1129,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     } else if ((isTransfer || isCCPayment) && paymentSourceAccountId && !hasTransferOrCCLeg) {
       const bankCounterpartId = generateId();
       currentLinkedIds.push(bankCounterpartId);
+      if (cashbackOnCounterpart) cashbackHolderId = bankCounterpartId;
       const destAccount = data.accounts.find(a => a.id === paymentSourceAccountId);
       const counterpartType = newTx.type === 'credit' ? 'debit' : 'credit';
 
@@ -1176,27 +1259,11 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         return { legId: legId as string, excluded: take };
       });
 
-    // On edit, updateTransaction syncs an EXISTING linked cashback leg but won't create one.
-    // So create the leg here when instant cashback is configured but no cashback leg exists yet
-    // (covers both new transactions and edits that add cashback for the first time).
-    const hasExistingCashbackLeg = editId
-      ? data.transactions.some(t => currentLinkedIds.includes(t.id) && t.category === 'Cashback')
-      : false;
-    if (newTx.rewardEarnedType === 'instant' && (newTx.rewardEarned || 0) > 0 && newTx.rewardEarnedAccountId && !hasExistingCashbackLeg) {
-      const instantCbId = generateId();
-      currentLinkedIds.push(instantCbId);
-      addTransaction({
-        id: instantCbId,
-        date: newTx.date as string,
-        description: `Instant Cashback: ${newTx.description}`,
-        accountId: newTx.rewardEarnedAccountId,
-        type: 'credit',
-        amount: Number(newTx.rewardEarned),
-        category: 'Cashback',
-        isRecurring: false,
-        linkedTransactionIds: [mainTxId]
-      });
-    }
+    const instantCashbackList: InstantCashbackLeg[] = cashbackPanel.instant
+      ? cashbacks
+        .filter(c => !!c.accountId && c.amount > 0)
+        .map(c => ({ accountId: c.accountId, amount: c.amount, legId: c.legId }))
+      : [];
 
     if (account?.isNcmcEnabled && newTx.type === 'credit' && newTx.isTravelTransaction && !editId && !paymentSourceAccountId) {
       const counterpartId = generateId();
@@ -1247,6 +1314,19 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       }
     }
 
+    let rewardEarnedFields: Partial<Transaction>;
+    if (cashbackOnCounterpart) {
+      rewardEarnedFields = { rewardEarned: 0, rewardEarnedType: 'none', rewardEarnedAccountId: '' };
+    } else if (cashbackPanel.instant) {
+      rewardEarnedFields = withInstantCashbacks({} as Partial<Transaction>, instantCashbackList);
+    } else {
+      rewardEarnedFields = {
+        rewardEarned: finalRewardEarned,
+        rewardEarnedType: newTx.rewardEarnedType,
+        rewardEarnedAccountId: newTx.rewardEarnedAccountId,
+      };
+    }
+
     const finalTx: Transaction = {
       id: mainTxId,
       date: newTx.date as string,
@@ -1271,9 +1351,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       // as-is since the account picker already clears it when the new account isn't NCMC-enabled;
       // nothing does that for this one, so a row moved to a rupee account would keep a stale true.
       isRewardTransaction: (newTx.isRewardTransaction && isPointsDenominated(account)) || undefined,
-      rewardEarned: finalRewardEarned,
-      rewardEarnedType: newTx.rewardEarnedType,
-      rewardEarnedAccountId: newTx.rewardEarnedAccountId,
+      ...rewardEarnedFields,
       // Debit POV split: the anchor (the redemption list) lives on the card counterpart, not this
       // bank main tx, which stays a plain funding child.
       ...withRewardSplits({} as Partial<Transaction>, anchorOnCounterpart ? [] : anchorSplits),
@@ -1300,6 +1378,9 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     } else {
       addTransaction(finalTx);
     }
+
+    const cashbackHolder = cashbackOnCounterpart ? cashbackHolderId : mainTxId;
+    if (cashbackHolder) setInstantCashbacks(cashbackHolder, instantCashbackList);
 
     /* Hand the reward leg its share of the exclusion. Done as a separate patch rather than inline
        at leg creation because the same call has to serve both paths: on an edit the leg already
@@ -1365,8 +1446,242 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
   const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
   // Mirrors the "Deposit To" picker's own options, so the instant-cashback block is never offered
   // with an empty destination list.
+  const isCashbackDepositAccount = (a: Account) => a.type === 'rewards' || a.type === 'e_wallet';
   const hasCashbackDepositAccount = data.accounts.some(a =>
-    (!a.archived || a.id === newTx.rewardEarnedAccountId) && (a.type === 'rewards' || a.type === 'e_wallet')
+    (!a.archived || cashbacks.some(c => c.accountId === a.id)) && isCashbackDepositAccount(a)
+  );
+
+  const cashbackPanel = (() => {
+    const activeAcc = data.accounts.find(a => a.id === newTx.accountId);
+    const isNcmcRecharge = newTx.category?.toLowerCase() === 'ncmc travel recharge';
+    const isMf = activeInvestmentKind === 'mutual_funds';
+    const isCreditSideOfPair = newTx.type === 'credit' && (isTransfer || isCCPayment) && !!paymentSourceAccountId;
+    const payerAcc = isCreditSideOfPair ? data.accounts.find(a => a.id === paymentSourceAccountId) : activeAcc;
+    // A card that does not pay cashback has no business showing a Cashback Earned panel, let
+    // alone a mode picker whose only real option reads "Default (0%)". The switch is off on the
+    // account, so this block is not a thing the user can fill in — it is a thing they have to
+    // scroll past on every spend.
+    const isCard = !isCreditSideOfPair && cardEarnsCashback(activeAcc);
+    const showInstantUI = payerAcc?.type === 'bank_account' || payerAcc?.type === 'e_wallet';
+    /* The category exclusions belong to ISSUER cashback only. A bank pays card cashback for
+       spending on the card, never for moving money, so a transfer / bill payment / travel
+       recharge / fund purchase earns nothing there — hence the block stays hidden for cards.
+       INSTANT cashback is a different payer: the app that pushed the money (super.money,
+       CRED, ...) rebates the payer whatever the money was for, and a discounted gift-card
+       load is a transfer that very much does earn. Gating that on the category hid a real
+       rebate behind a rule written for the other kind. */
+    const hidden = (!showInstantUI && (isTransfer || isCCPayment || isNcmcRecharge || isMf))
+      // Travel spends draw down an NCMC purse that was already loaded; nothing pays cashback
+      // on the second hop. The recharge that funded it is a separate row and can still earn.
+      || !!newTx.isTravelTransaction
+      || (!isCard && !showInstantUI)
+      // Cashback follows money going OUT. A credit is the receiving side of some other row.
+      || (newTx.type !== 'debit' && !isCreditSideOfPair)
+      // Instant cashback posts a real credit leg, so it needs somewhere to post it.
+      || (showInstantUI && !hasCashbackDepositAccount);
+    return { visible: !hidden, isCard, instant: !hidden && showInstantUI, activeAcc };
+  })();
+
+  const cashbackAccountOf = (c: CashbackDraft) => data.accounts.find(a => a.id === c.accountId);
+  const cashbackDepositOptionsFor = (index: number) => [...data.accounts]
+    .sort(sortByAccountType)
+    .filter(a => isCashbackDepositAccount(a)
+      && (!a.archived || a.id === cashbacks[index]?.accountId)
+      && !cashbacks.some((o, j) => j !== index && o.accountId === a.id));
+  const clearCashbackErrors = () => setErrors(prev => {
+    const next = { ...prev };
+    Object.keys(next).forEach(k => {
+      if (k.startsWith('cashbackAccount_') || k.startsWith('cashbackAmount_')) delete next[k];
+    });
+    return next;
+  });
+  const patchCashback = (index: number, patch: Partial<CashbackDraft>) => {
+    setCashbacks(prev => prev.map((c, j) => (j === index ? { ...c, ...patch } : c)));
+    if (errors[`cashbackAccount_${index}`] || errors[`cashbackAmount_${index}`]) {
+      setErrors(prev => ({ ...prev, [`cashbackAccount_${index}`]: '', [`cashbackAmount_${index}`]: '' }));
+    }
+  };
+  const lastCashback = cashbacks[cashbacks.length - 1];
+  const canAddCashback = activeCashback === cashbacks.length - 1
+    && !!lastCashback?.accountId
+    && (lastCashback?.amount || 0) > 0
+    && cashbackDepositOptionsFor(cashbacks.length).length > 0;
+  const addCashback = () => {
+    setCashbacks(prev => [...prev, blankCashback()]);
+    setActiveCashback(cashbacks.length);
+    clearCashbackErrors();
+  };
+  const removeCashback = (index: number) => {
+    const next = cashbacks.filter((_, j) => j !== index);
+    setCashbacks(next.length > 0 ? next : [blankCashback()]);
+    setActiveCashback(Math.max(0, Math.min(index, next.length - 1)));
+    clearCashbackErrors();
+  };
+  const setCashbackEntryMode = (index: number, mode: CashbackEntryMode) => {
+    const c = cashbacks[index];
+    if (!c || c.entry === mode) return;
+    if (mode === 'percent') {
+      patchCashback(index, {
+        entry: mode,
+        percentInput: primaryDebit > 0 && c.amount > 0 ? String(Math.round((c.amount / primaryDebit) * 100 * 100) / 100) : '',
+      });
+    } else if (mode === 'units') {
+      patchCashback(index, { entry: mode, unitsInput: c.amount > 0 ? String(rupeesToRewardPoints(c.amount, cashbackAccountOf(c))) : '' });
+    } else {
+      patchCashback(index, { entry: mode, rupeesInput: c.amount > 0 ? String(c.amount) : '' });
+    }
+  };
+  const typeCashback = (index: number, val: string) => {
+    if (val !== '' && !/^\d*\.?\d*$/.test(val)) return;
+    const c = cashbacks[index];
+    const num = parseFloat(val);
+    if (c.entry === 'percent') {
+      patchCashback(index, { percentInput: val, amount: cashbackFromPercent(val, primaryDebit) });
+    } else if (c.entry === 'units') {
+      patchCashback(index, { unitsInput: val, amount: isNaN(num) ? 0 : rewardPointsToRupees(num, cashbackAccountOf(c)) });
+    } else {
+      patchCashback(index, { rupeesInput: val, amount: isNaN(num) ? 0 : num });
+    }
+  };
+  const chooseCashbackDeposit = (index: number, accountId: string) => {
+    const c = cashbacks[index];
+    const acc = data.accounts.find(a => a.id === accountId);
+    if (c.entry === 'percent') {
+      patchCashback(index, { accountId });
+    } else if (isUnitDenominated(acc)) {
+      patchCashback(index, { accountId, entry: 'units', unitsInput: c.amount > 0 ? String(rupeesToRewardPoints(c.amount, acc)) : '' });
+    } else {
+      patchCashback(index, { accountId, entry: 'rupees', rupeesInput: c.amount > 0 ? String(c.amount) : '' });
+    }
+  };
+  const cashbackTotal = Math.round(cashbacks.reduce((sum, c) => sum + (c.amount || 0), 0) * 100) / 100;
+  const cashbackRateOf = (amount: number) => (primaryDebit > 0 ? Math.round((amount / primaryDebit) * 100 * 100) / 100 : 0);
+
+  const renderInstantCashbacks = () => (
+    <div>
+      <div
+        ref={cashbackScrollRef}
+        className="split-carousel no-scrollbar"
+        style={{ width: '100%', maxWidth: '100%', overflowX: cashbacks.length > 1 ? 'auto' : 'hidden' }}
+        onScroll={e => {
+          const el = e.currentTarget;
+          const target = cashbackScrollTargetRef.current;
+          if (target !== null) {
+            if (Math.abs(el.scrollLeft - target) < 4) cashbackScrollTargetRef.current = null;
+            return;
+          }
+          const page = Math.round(el.scrollLeft / Math.max(1, el.clientWidth));
+          if (page !== activeCashback && page >= 0 && page < cashbacks.length) setActiveCashback(page);
+        }}
+      >
+        {cashbacks.map((c, i) => {
+          const acc = cashbackAccountOf(c);
+          const inUnits = isUnitDenominated(acc);
+          const modes: CashbackEntryMode[] = inUnits ? ['rupees', 'percent', 'units'] : ['rupees', 'percent'];
+          const entry = c.entry === 'units' && !inUnits ? 'rupees' : c.entry;
+          const amountError = errors[`cashbackAmount_${i}`];
+          let inputValue = c.rupeesInput;
+          let marker = '₹';
+          let placeholder = '0.00';
+          let hint = `= ${cashbackRateOf(c.amount)}%`;
+          if (entry === 'percent') {
+            inputValue = c.percentInput;
+            marker = '%';
+            placeholder = '1.6';
+            hint = `= ${formatCurrency(c.amount)}`;
+          } else if (entry === 'units') {
+            inputValue = c.unitsInput;
+            marker = 'PTS';
+            placeholder = `0 ${acc?.rewardUnit || 'Points'}`;
+            hint = `= ${formatCurrency(c.amount)} · ${cashbackRateOf(c.amount)}%`;
+          }
+          return (
+            <div key={i} className="split-card flex-col gap-3" style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
+              <div className="input-group flex-col gap-1" style={{ marginBottom: 0 }}>
+                <div className="flex justify-between align-center" style={{ minHeight: '20px', marginBottom: '0.35rem' }}>
+                  <label style={{ marginBottom: 0 }}>Amount</label>
+                  <div className="flex" style={{ border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
+                    {modes.map(mode => (
+                      <button
+                        key={mode}
+                        type="button"
+                        className="text-mono text-xs font-bold"
+                        style={{
+                          padding: '0.25rem 0.7rem',
+                          minHeight: 'auto',
+                          border: 'none',
+                          cursor: 'pointer',
+                          background: mode === entry ? 'var(--accent)' : 'transparent',
+                          color: mode === entry ? '#ffffff' : 'var(--text-secondary)'
+                        }}
+                        onClick={() => setCashbackEntryMode(i, mode)}
+                      >
+                        {mode === 'percent' ? '%' : mode === 'units' ? 'PTS' : '₹'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className={`input-field ${amountError ? 'border-danger' : ''}`}
+                    value={inputValue}
+                    onChange={e => typeCashback(i, e.target.value)}
+                    placeholder={placeholder}
+                    style={{ width: '100%', paddingRight: marker === 'PTS' ? '2.75rem' : '1.75rem' }}
+                  />
+                  <span className="text-muted text-mono font-bold" style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
+                    {marker}
+                  </span>
+                </div>
+                <span className="text-xs text-muted text-mono" style={{ opacity: 0.8 }}>{hint}</span>
+                {amountError && <span className="text-xs text-danger" style={{ marginTop: '0.1rem' }}>{amountError}</span>}
+              </div>
+              <CustomPicker
+                label={cashbacks.length > 1 ? `Deposit To ${i + 1}` : 'Deposit To'}
+                value={c.accountId}
+                placeholder="Select Account"
+                options={[
+                  { id: '', name: 'None (No Deposit Account)' },
+                  ...cashbackDepositOptionsFor(i).map(a => ({
+                    id: a.id,
+                    name: a.archived ? `${a.name} (deleted)` : a.name,
+                    subtext: a.type.replace('_', ' '),
+                    group: getAccountGroupLabel(a.type, a.archived)
+                  }))
+                ]}
+                onChange={val => chooseCashbackDeposit(i, val)}
+                iconGetter={id => getAccountIcon(id)}
+                error={errors[`cashbackAccount_${i}`]}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      {cashbacks.length > 1 && (
+        <div className="split-dots">
+          {cashbacks.map((c, i) => (
+            <button
+              key={i}
+              type="button"
+              aria-label={`Cashback ${i + 1}${c.accountId ? `: ${cashbackAccountOf(c)?.name || ''}` : ''}`}
+              aria-current={i === activeCashback}
+              className={`split-dot${i === activeCashback ? ' split-dot--active' : ''}${(errors[`cashbackAmount_${i}`] || errors[`cashbackAccount_${i}`]) ? ' split-dot--error' : ''}`}
+              onClick={() => setActiveCashback(i)}
+            />
+          ))}
+        </div>
+      )}
+
+      {cashbacks.filter(c => !!c.accountId && c.amount > 0).length > 1 && (
+        <div className="text-xs text-muted" style={{ opacity: 0.7, marginTop: '0.5rem' }}>
+          Total cashback: <strong>{formatCurrency(cashbackTotal)}</strong>
+          {` · ${cashbackRateOf(cashbackTotal)}% into ${cashbacks.filter(c => !!c.accountId && c.amount > 0).length} wallets`}
+        </div>
+      )}
+    </div>
   );
   /* Which accounts can fund a split.
      Three kinds, and all three are offered unconditionally:
@@ -2425,87 +2740,48 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         )}
 
         {(() => {
-          const activeAcc = data.accounts.find(a => a.id === newTx.accountId);
-          // A card that does not pay cashback has no business showing a Cashback Earned panel, let
-          // alone a mode picker whose only real option reads "Default (0%)". The switch is off on the
-          // account, so this block is not a thing the user can fill in — it is a thing they have to
-          // scroll past on every spend.
-          const isCard = cardEarnsCashback(activeAcc);
-          const isBank = activeAcc?.type === 'bank_account';
-          const isEWallet = activeAcc?.type === 'e_wallet';
-          const showInstantUI = isBank || isEWallet;
-
-          const isTransfer = newTx.category?.toLowerCase() === 'transfer';
-          const isCCPayment = newTx.category?.toLowerCase() === 'cc payment';
-          const isNcmcRecharge = newTx.category?.toLowerCase() === 'ncmc travel recharge';
-          const isMf = activeInvestmentKind === 'mutual_funds';
-
-          /* The category exclusions belong to ISSUER cashback only. A bank pays card cashback for
-             spending on the card, never for moving money, so a transfer / bill payment / travel
-             recharge / fund purchase earns nothing there — hence the block stays hidden for cards.
-             INSTANT cashback is a different payer: the app that pushed the money (super.money,
-             CRED, ...) rebates the payer whatever the money was for, and a discounted gift-card
-             load is a transfer that very much does earn. Gating that on the category hid a real
-             rebate behind a rule written for the other kind. */
-          if (!showInstantUI && (isTransfer || isCCPayment || isNcmcRecharge || isMf)) return null;
-          // Travel spends draw down an NCMC purse that was already loaded; nothing pays cashback
-          // on the second hop. The recharge that funded it is a separate row and can still earn.
-          if (newTx.isTravelTransaction) return null;
-
-          if (!isCard && !showInstantUI) return null;
-          // Cashback follows money going OUT. A credit is the receiving side of some other row.
-          if (newTx.type !== 'debit') return null;
-          // Instant cashback posts a real credit leg, so it needs somewhere to post it.
-          if (showInstantUI && !hasCashbackDepositAccount) return null;
+          if (!cashbackPanel.visible) return null;
+          const { isCard, activeAcc } = cashbackPanel;
+          const showInstantUI = cashbackPanel.instant;
 
           return (
             <div className="flex-col gap-3" style={{ marginBottom: '1rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}>
               <div className="flex justify-between align-center">
                 <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>Cashback Earned</span>
                 {showInstantUI && (
-                  <div className="flex align-center" style={{ gap: '1rem' }}>
-                    <div className="flex" style={{ border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
-                      {(['amount', 'percent'] as const).map(mode => {
-                        const active = (mode === 'percent') === cashbackPercentMode;
-                        return (
-                          <button
-                            key={mode}
-                            type="button"
-                            className="text-mono text-xs font-bold"
-                            style={{
-                              padding: '0.25rem 0.7rem',
-                              minHeight: 'auto',
-                              border: 'none',
-                              cursor: 'pointer',
-                              background: active ? 'var(--accent)' : 'transparent',
-                              color: active ? '#ffffff' : 'var(--text-secondary)'
-                            }}
-                            onClick={() => {
-                              const toPercent = mode === 'percent';
-                              if (toPercent === cashbackPercentMode) return;
-                              const earned = Number(newTx.rewardEarned) || 0;
-                              if (toPercent) {
-                                // Back-compute the percent from the current ₹ value so the switch is
-                                // lossless. Against primaryDebit, so flipping modes cannot change the
-                                // rate the row is describing.
-                                setCashbackPercentStr(primaryDebit > 0 && earned > 0 ? String(Math.round((earned / primaryDebit) * 100 * 100) / 100) : '');
-                              } else {
-                                // Reflect the computed ₹ value into the amount input.
-                                setInputStrings(prev => ({ ...prev, rewardEarned: earned === 0 ? '' : String(earned) }));
-                              }
-                              setCashbackPercentMode(toPercent);
-                            }}
-                          >
-                            {mode === 'percent' ? '%' : '₹'}
-                          </button>
-                        );
-                      })}
-                    </div>
+                  <div className="flex align-center" style={{ gap: '0.6rem' }}>
+                    {canAddCashback && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary flex-center"
+                        title="Add cashback into another wallet"
+                        aria-label="Add cashback into another wallet"
+                        style={{ width: SPLIT_CONTROL_HEIGHT, height: SPLIT_CONTROL_HEIGHT, padding: 0, minHeight: 'auto', boxSizing: 'border-box', boxShadow: '2px 2px 0 #000' }}
+                        onClick={addCashback}
+                      >
+                        <Plus size={14} strokeWidth={3} />
+                      </button>
+                    )}
+                    {cashbacks.length > 1 && (
+                      <button
+                        type="button"
+                        className="btn btn-danger flex-center"
+                        title="Remove this cashback"
+                        aria-label="Remove this cashback"
+                        style={{ width: SPLIT_CONTROL_HEIGHT, height: SPLIT_CONTROL_HEIGHT, padding: 0, minHeight: 'auto', boxSizing: 'border-box', boxShadow: '2px 2px 0 #000' }}
+                        onClick={() => removeCashback(activeCashback)}
+                      >
+                        <X size={14} strokeWidth={3} />
+                      </button>
+                    )}
                     <span className="text-mono text-xs text-success font-bold" style={{ display: 'flex', alignItems: 'center' }}>⚡ INSTANT</span>
                   </div>
                 )}
               </div>
 
+              {showInstantUI && renderInstantCashbacks()}
+
+              {isCard && (
               <div className="grid grid-cols-2 gap-4">
                 {isCard ? (
                   <div className="col-span-2">
@@ -2541,105 +2817,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                       iconGetter={() => '✨'}
                     />
                   </div>
-                ) : cashbackPercentMode ? (
-                  <div className="flex-col gap-1">
-                    <div style={{ position: 'relative' }}>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        className={`input-field ${errors.rewardEarned ? 'border-danger' : ''}`}
-                        value={cashbackPercentStr}
-                        onChange={e => {
-                          const val = e.target.value;
-                          if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                            setCashbackPercentStr(val);
-                            if (errors.rewardEarned) setErrors(prev => ({ ...prev, rewardEarned: '' }));
-                          }
-                        }}
-                        placeholder="1.6"
-                        style={{ width: '100%', paddingRight: '1.75rem' }}
-                      />
-                      <span className="text-muted text-mono font-bold" style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>%</span>
-                    </div>
-                    <span className="text-xs text-muted text-mono" style={{ opacity: 0.8 }}>
-                      = {formatCurrency(Number(newTx.rewardEarned) || 0)}
-                    </span>
-                    {errors.rewardEarned && <span className="text-xs text-danger" style={{ marginTop: '0.1rem' }}>{errors.rewardEarned}</span>}
-                  </div>
-                ) : (
-                  <div className="flex-col gap-1">
-                    {/* The unit marker sits in the same spot in both modes — it tells you which unit
-                        you are typing in, so it has to be findable at a glance when you flip the
-                        toggle. Hence ₹ trailing here rather than leading, mirroring the % opposite. */}
-                    <div style={{ position: 'relative' }}>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        className={`input-field ${errors.rewardEarned ? 'border-danger' : ''}`}
-                        value={inputStrings.rewardEarned}
-                        onChange={e => {
-                          const val = e.target.value;
-                          if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                            setInputStrings(prev => ({ ...prev, rewardEarned: val }));
-                            const numVal = parseFloat(val);
-                            setNewTx({
-                              ...newTx,
-                              rewardEarned: isNaN(numVal) ? 0 : numVal,
-                              rewardEarnedType: 'instant'
-                            });
-                            if (errors.rewardEarned && !isNaN(numVal) && numVal > 0) {
-                              setErrors(prev => ({ ...prev, rewardEarned: '' }));
-                            }
-                          }
-                        }}
-                        placeholder="0.00"
-                        style={{ width: '100%', paddingRight: '1.75rem' }}
-                      />
-                      <span className="text-muted text-mono font-bold" style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>₹</span>
-                    </div>
-                    {/* Mirror of the percent mode's "= ₹x" line: whichever unit you type, the other is
-                        shown underneath. Rendered unconditionally, exactly as that one is — it reads
-                        "= ₹0" with nothing filled in, so this must read "= 0%" rather than vanish, or
-                        the panel gains and loses a row as you flip between the two modes. With no
-                        amount yet there is nothing to take a percentage of, hence the 0 fallback
-                        instead of a division by zero. */}
-                    <span className="text-xs text-muted text-mono" style={{ opacity: 0.8 }}>
-                      = {primaryDebit > 0
-                        ? Math.round(((Number(newTx.rewardEarned) || 0) / primaryDebit) * 100 * 100) / 100
-                        : 0}%
-                    </span>
-                    {errors.rewardEarned && <span className="text-xs text-danger" style={{ marginTop: '0.1rem' }}>{errors.rewardEarned}</span>}
-                  </div>
-                )}
+                ) : null}
 
-                {showInstantUI && (
-                  <CustomPicker
-                    label="Deposit To"
-                    value={newTx.rewardEarnedAccountId || ''}
-                    placeholder="Select Account"
-                    options={[
-                      { id: '', name: 'None (No Deposit Account)' },
-                      ...[...data.accounts].sort(sortByAccountType).filter(a => (!a.archived || a.id === newTx.rewardEarnedAccountId) && (a.type === 'rewards' || a.type === 'e_wallet')).map(acc => ({
-                        id: acc.id,
-                        name: acc.archived ? `${acc.name} (deleted)` : acc.name,
-                        subtext: acc.type.replace('_', ' '),
-                        group: getAccountGroupLabel(acc.type, acc.archived)
-                      }))
-                    ]}
-                    onChange={val => {
-                      setNewTx({
-                        ...newTx,
-                        rewardEarnedAccountId: val,
-                        rewardEarnedType: val ? 'instant' : 'none',
-                        ...(!val && (Number(newTx.rewardEarned) || 0) <= 0 ? { rewardEarned: 0 } : {})
-                      });
-                      if (errors.rewardEarnedAccountId) setErrors(prev => ({ ...prev, rewardEarnedAccountId: '' }));
-                      if (errors.rewardEarned) setErrors(prev => ({ ...prev, rewardEarned: '' }));
-                    }}
-                    iconGetter={id => getAccountIcon(id)}
-                    error={errors.rewardEarnedAccountId}
-                  />
-                )}
                 {/* hideLabel zeroes the picker's bottom margin, leaving the 1rem grid gap; pull the note up under it. */}
                 {isCard && (
                   <div className="col-span-2 flex align-center text-xs text-muted" style={{ opacity: 0.7, marginTop: '-0.5rem' }}>
@@ -2647,6 +2826,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
                   </div>
                 )}
               </div>
+              )}
             </div>
           );
         })()}
@@ -2971,7 +3151,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
             wait for either account to actually be picked. Only the month printed beside each option
             does, and ccCycleOptions leaves it off until a card is there to date it. */}
         {isCCPayment && (
-            <div style={{ marginTop: '1rem' }}>
+            <div>
               <CustomPicker
                 label="Apply Payment To"
                 value={ccPaymentCycleTarget}

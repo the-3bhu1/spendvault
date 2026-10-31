@@ -100,7 +100,8 @@ export function calculateEPFProjection(
   const activeFyStartStr = `${currentFyStartYear}-04-01`;
 
   const joiningDateStr = account.joiningDate || activeFyStartStr;
-  let baseDateStr = account.baseBalanceDate || `${targetMonthKey}-01`;
+  const anchorDateStr = account.baseBalanceDate || `${targetMonthKey}-01`;
+  let baseDateStr = anchorDateStr;
 
   // Check if there is a manual balance correction prior to or at targetMonthKey
   const adjustments = [...(account.epfBalanceAdjustments || [])].sort((a, b) => (a.date > b.date ? 1 : -1));
@@ -114,45 +115,91 @@ export function calculateEPFProjection(
   }
 
   const baseMonthKey = baseDateStr.slice(0, 7);
+  const anchorMonthKey = anchorDateStr.slice(0, 7);
 
   let runningBalance = baseBalance;
   let accruedInterestInCurrentFY = 0;
 
   const revisions = account.salaryRevisions || [];
   const overrides = account.interestRateOverrides || globalInterestRates;
+  const basis = account.epfContributionBasis || 'statutory_ceiling';
+  const isStatutoryCap = basis === 'statutory_ceiling';
+  const isPayslip = basis === 'payslip';
 
   let lastEmployeeContribution = 0;
   let lastEmployerEPFContribution = 0;
   let lastEmployerEPSContribution = 0;
   let lastTotalContribution = 0;
   let lastEffectiveSalary = { basic: 0, da: 0, effectiveDate: '' };
+  let lastPayslipEmployee = 0;
+
+  const contributionsFor = (revision: EPFSalaryRevision | null) => {
+    const empPct = revision?.employeeContributionPct ?? 12;
+    const emprPct = revision?.employerContributionPct ?? 12;
+    let basic: number;
+    let da: number;
+    let wage: number;
+    let epfEligibleWage: number;
+    let employee: number;
+
+    if (isPayslip) {
+      employee = Math.round(revision ? (revision.employeeContribution || 0) : lastPayslipEmployee);
+      wage = empPct > 0 ? employee / (empPct / 100) : 0;
+      epfEligibleWage = wage;
+      basic = Math.round(wage);
+      da = 0;
+    } else {
+      basic = revision ? revision.basicSalary : lastEffectiveSalary.basic;
+      da = revision ? (revision.dearnessAllowance || 0) : lastEffectiveSalary.da;
+      wage = basic + da;
+      const epfWageCeiling = 15000;
+      epfEligibleWage = (isStatutoryCap && wage > epfWageCeiling) ? epfWageCeiling : wage;
+      employee = Math.round(epfEligibleWage * (empPct / 100));
+    }
+
+    const employerTotal = Math.round(epfEligibleWage * (emprPct / 100));
+
+    let eps = 0;
+    if (!account.isEpsDisabled && wage > 0) {
+      const epsWageCeiling = account.epsWageCeiling || 15000;
+      eps = Math.min(1250, Math.round(Math.min(wage, epsWageCeiling) * (8.33 / 100)));
+    }
+    return { basic, da, employee, employerEpf: Math.max(0, employerTotal - eps), eps };
+  };
+  const contributionsForMonth = (monthKey: string) => contributionsFor(getEffectiveEPFSalary(revisions, monthKey));
 
   // Calculate current active month contribution metrics
   const activeMonthRevision = getEffectiveEPFSalary(revisions, targetMonthKey) || getEffectiveEPFSalary(revisions, joiningDateStr);
   if (activeMonthRevision) {
-    const basic = activeMonthRevision.basicSalary;
-    const da = activeMonthRevision.dearnessAllowance || 0;
-    const empPct = activeMonthRevision.employeeContributionPct ?? 12;
-    const emprPct = activeMonthRevision.employerContributionPct ?? 12;
-    const wage = basic + da;
-    lastEffectiveSalary = { basic, da, effectiveDate: activeMonthRevision.effectiveDate };
-
-    const epfWageCeiling = 15000;
-    const isStatutoryCap = (account.epfContributionBasis || 'statutory_ceiling') === 'statutory_ceiling';
-    const epfEligibleWage = (isStatutoryCap && wage > epfWageCeiling) ? epfWageCeiling : wage;
-
-    lastEmployeeContribution = Math.round(epfEligibleWage * (empPct / 100));
-    const totalEmployerContribution = Math.round(epfEligibleWage * (emprPct / 100));
-
-    let epsContribution = 0;
-    if (!account.isEpsDisabled && wage > 0) {
-      const epsWageCeiling = account.epsWageCeiling || 15000;
-      epsContribution = Math.min(1250, Math.round(Math.min(wage, epsWageCeiling) * (8.33 / 100)));
-    }
-    lastEmployerEPSContribution = epsContribution;
-    lastEmployerEPFContribution = Math.max(0, totalEmployerContribution - epsContribution);
-    lastTotalContribution = lastEmployeeContribution + lastEmployerEPFContribution;
+    const c = contributionsFor(activeMonthRevision);
+    lastEffectiveSalary = { basic: c.basic, da: c.da, effectiveDate: activeMonthRevision.effectiveDate };
+    lastPayslipEmployee = c.employee;
+    lastEmployeeContribution = c.employee;
+    lastEmployerEPSContribution = c.eps;
+    lastEmployerEPFContribution = c.employerEpf;
+    lastTotalContribution = c.employee + c.employerEpf;
   }
+
+  const tracksPension = !account.isEpsDisabled && (account.basePensionBalance || 0) > 0;
+  const epsBetween = (fromMonthKey: string, toMonthKey: string) => {
+    let sum = 0;
+    let iter = addMonths(parseISO(`${fromMonthKey}-01`), 1);
+    const end = parseISO(`${toMonthKey}-01`);
+    while (!isAfter(iter, end)) {
+      sum += contributionsForMonth(format(iter, 'yyyy-MM')).eps;
+      iter = addMonths(iter, 1);
+    }
+    return sum;
+  };
+  let pensionAtBase = 0;
+  if (tracksPension) {
+    const anchorPension = account.basePensionBalance || 0;
+    pensionAtBase = baseMonthKey >= anchorMonthKey
+      ? anchorPension + epsBetween(anchorMonthKey, baseMonthKey)
+      : anchorPension - epsBetween(baseMonthKey, anchorMonthKey);
+    pensionAtBase = Math.min(Math.max(0, pensionAtBase), Math.max(0, baseBalance));
+  }
+  let runningPension = pensionAtBase;
 
   // Monthly progression: if base date is in the past, add monthly contributions
   let currentMonthDate = parseISO(`${baseMonthKey}-01`);
@@ -161,73 +208,28 @@ export function calculateEPFProjection(
   if (isAfter(targetMonthDate, currentMonthDate)) {
     currentMonthDate = addMonths(currentMonthDate, 1);
     while (!isAfter(currentMonthDate, targetMonthDate)) {
-      const monthKey = format(currentMonthDate, 'yyyy-MM');
-      const activeRevision = getEffectiveEPFSalary(revisions, monthKey);
-      const basic = activeRevision ? activeRevision.basicSalary : lastEffectiveSalary.basic;
-      const da = activeRevision ? (activeRevision.dearnessAllowance || 0) : lastEffectiveSalary.da;
-      const empPct = activeRevision?.employeeContributionPct ?? 12;
-      const emprPct = activeRevision?.employerContributionPct ?? 12;
-      const wage = basic + da;
-
-      const epfWageCeiling = 15000;
-      const isStatutoryCap = (account.epfContributionBasis || 'statutory_ceiling') === 'statutory_ceiling';
-      const epfEligibleWage = (isStatutoryCap && wage > epfWageCeiling) ? epfWageCeiling : wage;
-
-      const empContrib = Math.round(epfEligibleWage * (empPct / 100));
-      const totalEmprContrib = Math.round(epfEligibleWage * (emprPct / 100));
-
-      let epsContrib = 0;
-      if (!account.isEpsDisabled && wage > 0) {
-        const epsWageCeiling = account.epsWageCeiling || 15000;
-        epsContrib = Math.min(1250, Math.round(Math.min(wage, epsWageCeiling) * (8.33 / 100)));
-      }
-
-      const emprEpfContrib = Math.max(0, totalEmprContrib - epsContrib);
-      runningBalance += (empContrib + emprEpfContrib);
+      const c = contributionsForMonth(format(currentMonthDate, 'yyyy-MM'));
+      const pensionCredit = tracksPension ? c.eps : 0;
+      runningBalance += c.employee + c.employerEpf + pensionCredit;
+      runningPension += pensionCredit;
       currentMonthDate = addMonths(currentMonthDate, 1);
     }
   }
 
   // Accrue Current FY interest following official EPFO rules:
   // Interest accrues ONLY on the EPF Account (Employee Share + Employer EPF Share). EPS (Pension) does NOT earn interest.
-  // 1. Employee Share (12% capped) = ₹1,800/mo
-  // 2. Employer EPF Share (3.67%) = ₹550/mo
-  // Total Monthly EPF Credit earning interest = ₹2,350/mo.
-
-  // EPF interest-bearing portion at base balance = (28,316 + 8,652) = ₹36,968 of ₹56,038
-  // If base balance is ₹56,038 (which includes EPS ₹19,070), the EPF interest-bearing balance is ₹36,968.
-  const epfInterestBearingRatio = (28316 + 8652) / 56038; // ~0.659695
-  const baseEpfBalance = account.baseBalance ? Math.round(account.baseBalance * epfInterestBearingRatio) : 36968;
+  const baseEpfBalance = Math.max(0, baseBalance - pensionAtBase);
 
   let fyIterDate = parseISO(activeFyStartStr);
   let fyRunningEpfBalance = baseEpfBalance;
-  
-  // If base balance date is later than FY start (e.g. July 2026), backtrack opening EPF balance to April 1st by deducting intermediate EPF credits (₹2,350/mo)
+
+  // If base balance date is later than FY start, backtrack opening EPF balance to April 1st by deducting intermediate EPF credits
   if (baseDateStr > activeFyStartStr) {
     let backIter = parseISO(activeFyStartStr);
     let totalEpfDeductions = 0;
     while (format(backIter, 'yyyy-MM') < baseMonthKey) {
-      const monthKey = format(backIter, 'yyyy-MM');
-      const activeRevision = getEffectiveEPFSalary(revisions, monthKey);
-      const basic = activeRevision ? activeRevision.basicSalary : lastEffectiveSalary.basic;
-      const da = activeRevision ? (activeRevision.dearnessAllowance || 0) : lastEffectiveSalary.da;
-      const empPct = activeRevision?.employeeContributionPct ?? 12;
-      const emprPct = activeRevision?.employerContributionPct ?? 12;
-      const wage = basic + da;
-
-      const epfWageCeiling = 15000;
-      const isStatutoryCap = (account.epfContributionBasis || 'statutory_ceiling') === 'statutory_ceiling';
-      const epfEligibleWage = (isStatutoryCap && wage > epfWageCeiling) ? epfWageCeiling : wage;
-
-      const empContrib = Math.round(epfEligibleWage * (empPct / 100));
-      const totalEmprContrib = Math.round(epfEligibleWage * (emprPct / 100));
-      let epsContrib = 0;
-      if (!account.isEpsDisabled && wage > 0) {
-        const epsWageCeiling = account.epsWageCeiling || 15000;
-        epsContrib = Math.min(1250, Math.round(Math.min(wage, epsWageCeiling) * (8.33 / 100)));
-      }
-      const emprEpfContrib = Math.max(0, totalEmprContrib - epsContrib);
-      totalEpfDeductions += (empContrib + emprEpfContrib); // ₹2,350/mo
+      const c = contributionsForMonth(format(backIter, 'yyyy-MM'));
+      totalEpfDeductions += c.employee + c.employerEpf;
       backIter = addMonths(backIter, 1);
     }
     fyRunningEpfBalance = Math.max(0, baseEpfBalance - totalEpfDeductions);
@@ -242,126 +244,46 @@ export function calculateEPFProjection(
     const monthlyAccruedInterest = (fyRunningEpfBalance * (annualInterestRate / 100)) / 12;
     accruedInterestInCurrentFY += monthlyAccruedInterest;
 
-    // 2. Add monthly EPF credit (₹2,350) for next month's opening EPF balance
-    const activeRevision = getEffectiveEPFSalary(revisions, monthKey);
-    const basic = activeRevision ? activeRevision.basicSalary : lastEffectiveSalary.basic;
-    const da = activeRevision ? (activeRevision.dearnessAllowance || 0) : lastEffectiveSalary.da;
-    const empPct = activeRevision?.employeeContributionPct ?? 12;
-    const emprPct = activeRevision?.employerContributionPct ?? 12;
-    const wage = basic + da;
-
-    const epfWageCeiling = 15000;
-    const isStatutoryCap = (account.epfContributionBasis || 'statutory_ceiling') === 'statutory_ceiling';
-    const epfEligibleWage = (isStatutoryCap && wage > epfWageCeiling) ? epfWageCeiling : wage;
-
-    const empContrib = Math.round(epfEligibleWage * (empPct / 100));
-    const totalEmprContrib = Math.round(epfEligibleWage * (emprPct / 100));
-
-    let epsContrib = 0;
-    if (!account.isEpsDisabled && wage > 0) {
-      const epsWageCeiling = account.epsWageCeiling || 15000;
-      epsContrib = Math.min(1250, Math.round(Math.min(wage, epsWageCeiling) * (8.33 / 100)));
-    }
-
-    const emprEpfContrib = Math.max(0, totalEmprContrib - epsContrib);
-    fyRunningEpfBalance += (empContrib + emprEpfContrib); // Adds ₹2,350/mo
+    // 2. Add monthly EPF credit for next month's opening EPF balance
+    const c = contributionsForMonth(monthKey);
+    fyRunningEpfBalance += c.employee + c.employerEpf;
     fyIterDate = addMonths(fyIterDate, 1);
   }
 
+  const projectForward = (untilDate: Date, startAccruedInterest: number) => {
+    let projected = runningBalance;
+    let projectedPension = runningPension;
+    let accrued = startAccruedInterest;
+    let iter = addMonths(parseISO(`${targetMonthKey}-01`), 1);
+    while (!isAfter(iter, untilDate)) {
+      const monthKey = format(iter, 'yyyy-MM');
+      const annualInterestRate = getEPFInterestRate(getFinancialYearForDate(monthKey), overrides);
+      const c = contributionsForMonth(monthKey);
+      const pensionCredit = tracksPension ? c.eps : 0;
+      projected += c.employee + c.employerEpf + pensionCredit;
+      projectedPension += pensionCredit;
+
+      accrued += ((projected - projectedPension) * (annualInterestRate / 100)) / 12;
+
+      if ((iter.getMonth() + 1) === 3) {
+        projected += Math.round(accrued);
+        accrued = 0;
+      }
+      iter = addMonths(iter, 1);
+    }
+    return projected;
+  };
+
   // Calculate Projected Dec (EOY) Balance and 1-Year Projected Balance from targetMonthKey
-  const currentTargetYear = targetDateObj.getFullYear();
-  const decTargetMonthKey = `${currentTargetYear}-12`;
-  let projectedDecBalance = runningBalance;
-  let decIterDate = parseISO(`${targetMonthKey}-01`);
-  const decTargetDateObj = parseISO(`${decTargetMonthKey}-01`);
-  let decTempAccruedInterest = accruedInterestInCurrentFY;
-
-  if (isAfter(decTargetDateObj, decIterDate)) {
-    decIterDate = addMonths(decIterDate, 1);
-    while (!isAfter(decIterDate, decTargetDateObj)) {
-      const monthKey = format(decIterDate, 'yyyy-MM');
-      const fy = getFinancialYearForDate(monthKey);
-      const annualInterestRate = getEPFInterestRate(fy, overrides);
-
-      const activeRevision = getEffectiveEPFSalary(revisions, monthKey);
-      const basic = activeRevision ? activeRevision.basicSalary : lastEffectiveSalary.basic;
-      const da = activeRevision ? (activeRevision.dearnessAllowance || 0) : lastEffectiveSalary.da;
-      const empPct = activeRevision?.employeeContributionPct ?? 12;
-      const emprPct = activeRevision?.employerContributionPct ?? 12;
-      const wage = basic + da;
-
-      const epfWageCeiling = 15000;
-      const isStatutoryCap = (account.epfContributionBasis || 'statutory_ceiling') === 'statutory_ceiling';
-      const epfEligibleWage = (isStatutoryCap && wage > epfWageCeiling) ? epfWageCeiling : wage;
-
-      const empContrib = Math.round(epfEligibleWage * (empPct / 100));
-      const totalEmprContrib = Math.round(epfEligibleWage * (emprPct / 100));
-      let epsContrib = 0;
-      if (!account.isEpsDisabled && wage > 0) {
-        const epsWageCeiling = account.epsWageCeiling || 15000;
-        epsContrib = Math.min(1250, Math.round(Math.min(wage, epsWageCeiling) * (8.33 / 100)));
-      }
-      const emprEpfContrib = Math.max(0, totalEmprContrib - epsContrib);
-
-      projectedDecBalance += (empContrib + emprEpfContrib);
-
-      const monthlyInterest = (projectedDecBalance * (annualInterestRate / 100)) / 12;
-      decTempAccruedInterest += monthlyInterest;
-
-      if ((decIterDate.getMonth() + 1) === 3) {
-        projectedDecBalance += Math.round(decTempAccruedInterest);
-        decTempAccruedInterest = 0;
-      }
-
-      decIterDate = addMonths(decIterDate, 1);
-    }
-  }
-
-  let projectedOneYearBalance = runningBalance;
-  let futureMonthDate = addMonths(parseISO(`${targetMonthKey}-01`), 1);
-  const oneYearTargetDate = addMonths(parseISO(`${targetMonthKey}-01`), 12);
-  let tempAccruedInterest = accruedInterestInCurrentFY;
-
-  while (!isAfter(futureMonthDate, oneYearTargetDate)) {
-    const monthKey = format(futureMonthDate, 'yyyy-MM');
-    const fy = getFinancialYearForDate(monthKey);
-    const annualInterestRate = getEPFInterestRate(fy, overrides);
-
-    const activeRevision = getEffectiveEPFSalary(revisions, monthKey);
-    const basic = activeRevision ? activeRevision.basicSalary : lastEffectiveSalary.basic;
-    const da = activeRevision ? (activeRevision.dearnessAllowance || 0) : lastEffectiveSalary.da;
-    const empPct = activeRevision?.employeeContributionPct ?? 12;
-    const emprPct = activeRevision?.employerContributionPct ?? 12;
-    const wage = basic + da;
-
-    const epfWageCeiling = 15000;
-    const isStatutoryCap = (account.epfContributionBasis || 'statutory_ceiling') === 'statutory_ceiling';
-    const epfEligibleWage = (isStatutoryCap && wage > epfWageCeiling) ? epfWageCeiling : wage;
-
-    const empContrib = Math.round(epfEligibleWage * (empPct / 100));
-    const totalEmprContrib = Math.round(epfEligibleWage * (emprPct / 100));
-    let epsContrib = 0;
-    if (!account.isEpsDisabled && wage > 0) {
-      const epsWageCeiling = account.epsWageCeiling || 15000;
-      epsContrib = Math.min(1250, Math.round(Math.min(wage, epsWageCeiling) * (8.33 / 100)));
-    }
-    const emprEpfContrib = Math.max(0, totalEmprContrib - epsContrib);
-
-    projectedOneYearBalance += (empContrib + emprEpfContrib);
-
-    const monthlyInterest = (projectedOneYearBalance * (annualInterestRate / 100)) / 12;
-    tempAccruedInterest += monthlyInterest;
-
-    if ((futureMonthDate.getMonth() + 1) === 3) {
-      projectedOneYearBalance += Math.round(tempAccruedInterest);
-      tempAccruedInterest = 0;
-    }
-
-    futureMonthDate = addMonths(futureMonthDate, 1);
-  }
+  const decTargetDateObj = parseISO(`${targetDateObj.getFullYear()}-12-01`);
+  const projectedDecBalance = isAfter(decTargetDateObj, targetDateObj)
+    ? projectForward(decTargetDateObj, accruedInterestInCurrentFY)
+    : runningBalance;
+  const projectedOneYearBalance = projectForward(addMonths(targetDateObj, 12), accruedInterestInCurrentFY);
 
   return {
     balance: Math.round(runningBalance),
+    pensionBalance: Math.round(runningPension),
     employeeContribution: lastEmployeeContribution,
     employerEPFContribution: lastEmployerEPFContribution,
     employerEPSContribution: lastEmployerEPSContribution,

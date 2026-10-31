@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react';
-import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitEvent, RecurringBill, Debt, DebtTransaction } from './types';
+import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitEvent, RecurringBill, Debt, DebtTransaction, InstantCashbackLeg } from './types';
 import { BUILT_IN_ACCOUNT_TYPES, isOffsetTypeAlias } from './types';
 import { classifySmsIsTransaction } from './services/GeminiService';
 import { clearChatHistory } from './services/ChatHistoryService';
@@ -10,6 +10,8 @@ import {
   rewardSplitIndexOfLeg, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits,
   insertIntoDay, linkedGroupOf, linkedIdsOf, sortDayByOrder, syncSplitLedgerPassive,
   investmentHoldingSideType, investmentLegAmount, routeCardSpend, routeCardSpends,
+  anchorCcSplitOnCard, anchorCcSplitsOnCards, linkedTxGroupOf, applyInstantCashbacks,
+  withInstantCashbacks, instantCashbacksOf,
 } from './utils';
 import { resolveRewardLegPlan } from './services/RewardLegService';
 
@@ -95,6 +97,7 @@ interface FinanceContextType {
   updateTransaction: (transaction: Transaction) => void;
   reorderTransactions: (...txs: Transaction[]) => void;
   setRewardLegExclusion: (legId: string, excludedAmount: number | undefined) => void;
+  setInstantCashbacks: (holderId: string, cashbacks: InstantCashbackLeg[]) => void;
   deleteTransaction: (id: string) => void;
   updateCashbackStatement: (statement: CashbackStatement) => void;
   updateCategories: (categories: string[]) => void;
@@ -162,7 +165,7 @@ function normalizeTransactionOrders(transactions: Transaction[]): Transaction[] 
   });
   return changed ? result : transactions;
 }
-const DEFAULT_CATEGORIES = ['Food', 'Shopping', 'Income', 'Salary', 'Rent', 'Fund', 'Fuel', 'Travel', 'Bills', 'Entertainment', 'CC Payment', 'Loans', 'Lending & Borrowing', 'NCMC Travel Recharge', 'Cashback', 'Investments', 'Other/Miscellaneous'];
+const DEFAULT_CATEGORIES = ['Food', 'Shopping', 'Income', 'Salary', 'Rent', 'Fund', 'Fuel', 'Bank Charges', 'Travel', 'Bills', 'Entertainment', 'CC Payment', 'Loans', 'Lending & Borrowing', 'NCMC Travel Recharge', 'Cashback', 'Investments', 'Other/Miscellaneous'];
 const DEFAULT_CUSTOM_ACCOUNT_TYPES: string[] = [];
 const DEFAULT_TAGS: string[] = [];
 
@@ -572,6 +575,14 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
               parsed.categories.splice(fuelIdx, 0, 'Fund');
             } else {
               parsed.categories.push('Fund');
+            }
+          }
+          if (!parsed.categories.includes('Bank Charges')) {
+            const fuelIdx = parsed.categories.indexOf('Fuel');
+            if (fuelIdx !== -1) {
+              parsed.categories.splice(fuelIdx + 1, 0, 'Bank Charges');
+            } else {
+              parsed.categories.push('Bank Charges');
             }
           }
           if (!parsed.categories.includes('Loans')) {
@@ -1046,6 +1057,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           delete cleaned.appliedBillingCycleYearMonth;
           return cleaned;
         });
+
+        parsed.transactions = anchorCcSplitsOnCards(parsed.transactions || []);
 
         parsed.transactions = normalizeTransactionOrders(parsed.transactions || []);
         return parsed;
@@ -1525,6 +1538,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       const isCashback = updatedTransaction.category === 'Cashback';
 
       if (allLinkedIds.length > 0 && !isCashback && !isRewardSplitChildEdit && !isRewardSplitBankEdit) {
+        const cashbackEntries = instantCashbacksOf(updatedTransaction, updatedTxs);
         updatedTxs = updatedTxs.map(t => {
           if (allLinkedIds.includes(t.id)) {
             // Propagate date ALWAYS
@@ -1532,12 +1546,18 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
             
             // Check if this linked transaction is a Cashback counterpart
             if (t.category === 'Cashback') {
-              updated.amount = Number(updatedTransaction.rewardEarned) || 0;
-              updated.description = `Instant Cashback: ${updatedTransaction.description}`;
-              if (updatedTransaction.rewardEarnedAccountId) {
-                updated.accountId = updatedTransaction.rewardEarnedAccountId;
+              const entry = cashbackEntries.find(c => c.legId === t.id);
+              if (entry) {
+                updated.amount = entry.amount;
+                updated.accountId = entry.accountId;
+              } else if (cashbackEntries.length === 0) {
+                updated.amount = Number(updatedTransaction.rewardEarned) || 0;
+                if (updatedTransaction.rewardEarnedAccountId) {
+                  updated.accountId = updatedTransaction.rewardEarnedAccountId;
+                }
               }
-            } 
+              updated.description = `Instant Cashback: ${updatedTransaction.description}`;
+            }
             // Check if this linked transaction is a Reward Split counterpart. The patch carries the
             // account too, so a leg whose source was switched moves with it instead of being left
             // behind to be mistaken for a transfer counterpart.
@@ -1585,6 +1605,9 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
                 updated.counterpartAmount = updated.amount !== updatedTransaction.amount
                   ? updatedTransaction.amount
                   : undefined;
+              }
+              if (!invKind && ownsCounterpartLeg(updatedTransaction.category) && !rewardSplitOfLeg(updatedTransaction, t)) {
+                updated.type = updatedTransaction.type === 'credit' ? 'debit' : 'credit';
               }
 
               if (isNcmcRecharge) {
@@ -1635,6 +1658,12 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         updatedTxs = updatedTxs.map(t => {
           const tLinkedIds = t.linkedTransactionIds || (t.linkedTransactionId ? [t.linkedTransactionId] : []);
           if (t.id !== updatedTransaction.id && tLinkedIds.includes(updatedTransaction.id)) {
+            const entries = instantCashbacksOf(t, prev.transactions);
+            if (entries.some(c => c.legId === updatedTransaction.id)) {
+              return withInstantCashbacks(t, entries.map(c => (c.legId === updatedTransaction.id
+                ? { ...c, amount: updatedTransaction.amount, accountId: updatedTransaction.accountId || c.accountId }
+                : c)));
+            }
             return {
               ...t,
               rewardEarned: updatedTransaction.amount,
@@ -1742,7 +1771,14 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       }
       
       updatedDebts = restampChangedDebts(prev.debts || [], updatedDebts);
-      
+
+      if (oldTx && oldTx.date !== updatedTransaction.date && !isCashback) {
+        const groupIds = new Set(linkedTxGroupOf(updatedTransaction, updatedTxs).map(t => t.id));
+        updatedTxs = updatedTxs.map(t =>
+          groupIds.has(t.id) && t.date !== updatedTransaction.date ? { ...t, date: updatedTransaction.date } : t
+        );
+      }
+
       // When the edit moved the date to a different day, the old `order` is stale for the new day's
       // group (a tx that was order 0 on its old day would jump to the top of the new day). Re-stamp
       // the moved transaction AND any linked legs that were date-synced along with it (all share the
@@ -1772,6 +1808,8 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           updatedTxs = updatedTxs.map(t => newOrders.has(t.id) ? { ...t, order: newOrders.get(t.id) } : t);
         }
       }
+
+      updatedTxs = anchorCcSplitOnCard(updatedTxs, updatedTransaction.id);
 
       return { ...prev, transactions: routeCardSpends(updatedTxs, prev.accounts), debts: updatedDebts };
     });
@@ -1810,6 +1848,14 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           : t
       )),
     }));
+  };
+
+  const setInstantCashbacks = (holderId: string, cashbacks: InstantCashbackLeg[]) => {
+    const newLegIds = cashbacks.map(() => crypto.randomUUID());
+    setData(prev => {
+      const transactions = applyInstantCashbacks(prev.transactions, holderId, cashbacks, newLegIds);
+      return transactions === prev.transactions ? prev : { ...prev, transactions };
+    });
   };
 
   const deleteTransaction = (id: string) => {
@@ -1902,12 +1948,19 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
       }
 
+      const idsLinkedFromGroup = new Set(
+        prev.transactions.filter(p => legGroup.has(p.id)).flatMap(linkedIdsOf)
+      );
+      const isInstantCashbackOfGroup = (t: Transaction) =>
+        t.category === 'Cashback' && idsLinkedFromGroup.has(t.id) && linkedIdsOf(t).some(pid => legGroup.has(pid));
+
       // Determine which linked transactions should also be deleted
       const linkedTxsToDelete = prev.transactions.filter(t => {
         if (t.id === id) return false;
 
         // 1. Whole leg group (transitive) is deleted together
         if (legGroup.has(t.id)) return true;
+        if (isInstantCashbackOfGroup(t)) return true;
 
         if (!linkedIds.includes(t.id)) return false;
 
@@ -1937,10 +1990,16 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
 
         // If any of the deleted transactions was a cashback counterpart
         const wasCashbackDeleted = prev.transactions.some(del => intersection.includes(del.id) && del.category === 'Cashback');
-        if (wasCashbackDeleted) {
+        const cashbackEntries = instantCashbacksOf(t, prev.transactions);
+        const survivingCashbacks = cashbackEntries.filter(c => !c.legId || !intersection.includes(c.legId));
+        if (wasCashbackDeleted && cashbackEntries.length > 1 && survivingCashbacks.length > 0) {
+          Object.assign(updated, withInstantCashbacks(t, survivingCashbacks));
+          updated.linkedTransactionIds = newLinkedIds;
+        } else if (wasCashbackDeleted) {
           updated.rewardEarned = 0;
           updated.rewardEarnedType = 'delayed';
           updated.rewardEarnedAccountId = '';
+          updated.instantCashbacks = undefined;
         }
 
         // If any of the deleted transactions was a reward-split counterpart, that SOURCE goes with
@@ -2453,6 +2512,7 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       updateTransaction,
       reorderTransactions,
       setRewardLegExclusion,
+      setInstantCashbacks,
       deleteTransaction,
       updateCashbackStatement,
       updateCategories,

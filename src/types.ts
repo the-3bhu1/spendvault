@@ -22,6 +22,8 @@ export const isOffsetTypeAlias = (type: string): boolean =>
 
 export type RoundingRule = 'round' | 'floor' | 'ceil' | 'none';
 
+export type EPFContributionBasis = 'statutory_ceiling' | 'actual_basic' | 'payslip';
+
 export interface EPFSalaryRevision {
   id: string;
   effectiveDate: string; // 'YYYY-MM-DD'
@@ -29,6 +31,7 @@ export interface EPFSalaryRevision {
   dearnessAllowance?: number; // defaults to 0
   employeeContributionPct?: number; // default 12%
   employerContributionPct?: number; // default 12%
+  employeeContribution?: number;
   notes?: string; // e.g. "Annual Increment", "Promotion", "Job Change"
 }
 
@@ -46,6 +49,7 @@ export interface EPFBalanceAdjustment {
 
 export interface EPFProjectionResult {
   balance: number;
+  pensionBalance: number;
   employeeContribution: number;
   employerEPFContribution: number;
   employerEPSContribution: number;
@@ -94,7 +98,10 @@ export interface CardDetails {
    * CSB and Federal, so "Jupiter" alone is unresolvable but "Jupiter CSB" isn't.
    */
   issuer?: BrandKey;
+  issuerName?: string;
 }
+
+export type IssuerMark = { brand: BrandKey } | { name: string };
 
 /**
  * What a card COSTS TO HOLD, as opposed to what it currently owes.
@@ -207,7 +214,8 @@ export interface Account {
   joiningDate?: string;
   baseBalance?: number;
   baseBalanceDate?: string;
-  epfContributionBasis?: 'statutory_ceiling' | 'actual_basic';
+  basePensionBalance?: number;
+  epfContributionBasis?: EPFContributionBasis;
   salaryRevisions?: EPFSalaryRevision[];
   isEpsDisabled?: boolean;
   epsWageCeiling?: number;
@@ -239,6 +247,12 @@ export interface RewardSplitLeg {
   legId?: string;
   /** Exact points deducted for this split (when custom/overridden or explicitly entered). */
   points?: number;
+}
+
+export interface InstantCashbackLeg {
+  accountId: string;
+  amount: number;
+  legId?: string;
 }
 
 export type TransactionType = 'credit' | 'debit';
@@ -279,6 +293,7 @@ export interface Transaction {
   rewardEarned?: number;
   rewardEarnedType?: RewardEarnedType;
   rewardEarnedAccountId?: string;
+  instantCashbacks?: InstantCashbackLeg[];
 
   /** TOTAL rupees redeemed across every reward source on this row. With one source it is that
    *  source's amount, which is what it has always meant; with several it is their sum. */

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { BrandKey } from '../types';
+import type { BrandKey, IssuerMark } from '../types';
 
 /**
  * Brand marks printed on a card: the issuing bank on the front, the co-brand
@@ -483,5 +483,38 @@ export function CardBrandLogo({
     >
       {b.art}
     </svg>
+  );
+}
+
+export function CardIssuerMark({
+  mark,
+  height = 22,
+  fit = false,
+}: {
+  mark: IssuerMark;
+  height?: number;
+  fit?: boolean;
+}) {
+  if ('brand' in mark) return <CardBrandLogo brand={mark.brand} height={height} fit={fit} />;
+  return (
+    <span
+      role="img"
+      aria-label={mark.name}
+      style={{
+        display: 'block',
+        maxWidth: fit ? '100%' : `${height * 8}px`,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        fontFamily: 'var(--font-family)',
+        fontSize: fit ? '0.72rem' : `${Math.round(height * 0.8)}px`,
+        fontWeight: 800,
+        letterSpacing: '0.02em',
+        lineHeight: 1.15,
+        color: 'rgb(var(--card-ink))',
+      }}
+    >
+      {mark.name}
+    </span>
   );
 }

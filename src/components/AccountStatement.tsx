@@ -4,14 +4,14 @@ import { CreditCard, Calendar, ChevronLeft } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import RollingNumber from './RollingNumber';
 import {
-  getBillingCycleForDate, getCardGradients, formatBillingCycleRange, affectsRupeeBalance, resolveCardIssuer,
+  getBillingCycleForDate, getCardGradients, formatBillingCycleRange, affectsRupeeBalance, issuerMarkOf,
   getAppliedBillingCycle, formatCurrency,
 } from '../utils';
 import { useCycleMove } from '../hooks/useCycleMove';
 import { CycleLedgerRow, CycleMoveSheet, CycleMoveToast } from './CycleMove';
 import { CardSurface } from './CardSurface';
 import { CardChip } from './CardChip';
-import { CardBrandLogo } from './CardBrandLogo';
+import { CardIssuerMark } from './CardBrandLogo';
 import type { Account, Transaction } from '../types';
 import { CardNetworkLogo } from './CardNetworkLogo';
 import { useFinance } from '../FinanceContext';
@@ -325,10 +325,10 @@ export default function AccountStatement({ account, transactions, onClose, initi
                       mark used to sit here; it moves to the bottom-right corner so
                       the two views of the same card agree on where things go. */}
                   {(() => {
-                    const issuer = resolveCardIssuer(acc.name, acc.cardDetails);
+                    const issuer = issuerMarkOf(acc, context?.data.accounts ?? []);
                     return issuer ? (
                       <div style={{ position: 'absolute', top: '18px', right: '20px' }}>
-                        <CardBrandLogo brand={issuer} height={17} />
+                        <CardIssuerMark mark={issuer} height={17} />
                       </div>
                     ) : null;
                   })()}

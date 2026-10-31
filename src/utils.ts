@@ -1,5 +1,5 @@
 import { format, parseISO, addMonths, subMonths, addDays, setDate, differenceInCalendarDays } from 'date-fns';
-import type { Account, Transaction, CardNetwork, CashbackStatement, SplitItem, InvestmentKind, RecurringBill, RewardSplitLeg, BrandKey, DebtTransaction } from './types';
+import type { Account, Transaction, CardNetwork, CashbackStatement, SplitItem, InvestmentKind, RecurringBill, RewardSplitLeg, BrandKey, DebtTransaction, IssuerMark, InstantCashbackLeg } from './types';
 
 /**
  * The message carried by a thrown value, if it has one.
@@ -887,6 +887,145 @@ export const withRewardSplits = <T extends Partial<Transaction>>(tx: T, splits: 
   };
 };
 
+export const anchorCcSplitOnCard = (transactions: Transaction[], bankTxId: string): Transaction[] => {
+  const bank = transactions.find(t => t.id === bankTxId);
+  if (!bank || bank.type !== 'debit' || (bank.category || '').toLowerCase() !== 'cc payment') return transactions;
+  const splits = getRewardSplits(bank);
+  if (splits.length === 0) return transactions;
+
+  const linkedIds = bank.linkedTransactionIds || [];
+  const linked = transactions.filter(t => t.id !== bank.id && linkedIds.includes(t.id));
+  const legIds = linked.filter(t => !!rewardSplitOfLeg(bank, t)).map(t => t.id);
+  const card = linked.find(t => (t.category || '').toLowerCase() === 'cc payment' && !legIds.includes(t.id));
+  if (!card) return transactions;
+
+  const total = Math.round((bank.amount + rewardSplitTotal(bank)) * 100) / 100;
+  return transactions.map(t => {
+    if (t.id === bank.id) {
+      return { ...withRewardSplits(t, []), linkedTransactionIds: linkedIds.filter(id => !legIds.includes(id)) };
+    }
+    if (t.id === card.id) {
+      return {
+        ...withRewardSplits(t, splits),
+        type: 'credit' as const,
+        amount: total,
+        counterpartAmount: undefined,
+        description: 'CC Bill Payment',
+        appliedBillingCycleYearMonth: t.appliedBillingCycleYearMonth ?? bank.appliedBillingCycleYearMonth,
+        linkedTransactionIds: [bank.id, ...legIds],
+      };
+    }
+    if (legIds.includes(t.id)) return { ...t, linkedTransactionIds: [card.id] };
+    return t;
+  });
+};
+
+const isLiveCashback = (c: InstantCashbackLeg) => !!c.accountId && (c.amount || 0) > 0;
+
+export const getInstantCashbacks = (tx?: Partial<Transaction>): InstantCashbackLeg[] => {
+  if (!tx) return [];
+  if (tx.instantCashbacks && tx.instantCashbacks.length > 0) return tx.instantCashbacks.filter(isLiveCashback);
+  return tx.rewardEarnedType === 'instant' && tx.rewardEarnedAccountId && (tx.rewardEarned || 0) > 0
+    ? [{ accountId: tx.rewardEarnedAccountId, amount: tx.rewardEarned as number }]
+    : [];
+};
+
+export const withInstantCashbacks = <T extends Partial<Transaction>>(tx: T, cashbacks: InstantCashbackLeg[]): T => {
+  const live = cashbacks.filter(isLiveCashback);
+  if (live.length === 0) {
+    return { ...tx, rewardEarned: 0, rewardEarnedType: 'none', rewardEarnedAccountId: '', instantCashbacks: undefined };
+  }
+  return {
+    ...tx,
+    rewardEarned: Math.round(live.reduce((sum, c) => sum + c.amount, 0) * 100) / 100,
+    rewardEarnedType: 'instant',
+    rewardEarnedAccountId: live[0].accountId,
+    instantCashbacks: live,
+  };
+};
+
+export const instantCashbackLegsOf = (holder: Transaction, transactions: Transaction[]): Transaction[] =>
+  transactions.filter(t =>
+    t.category === 'Cashback' && linkedIdsOf(holder).includes(t.id) && linkedIdsOf(t).includes(holder.id)
+  );
+
+const claimCashbackLegs = (entries: InstantCashbackLeg[], legs: Transaction[]): InstantCashbackLeg[] => {
+  const taken = new Set<string>();
+  const byId = entries.map(c => {
+    if (c.legId && legs.some(l => l.id === c.legId) && !taken.has(c.legId)) {
+      taken.add(c.legId);
+      return c;
+    }
+    return { ...c, legId: undefined };
+  });
+  return byId.map(c => {
+    if (c.legId) return c;
+    const leg = legs.find(l => !taken.has(l.id) && l.accountId === c.accountId) ?? legs.find(l => !taken.has(l.id));
+    if (!leg) return c;
+    taken.add(leg.id);
+    return { ...c, legId: leg.id };
+  });
+};
+
+export const instantCashbacksOf = (holder: Transaction, transactions: Transaction[]): InstantCashbackLeg[] =>
+  claimCashbackLegs(getInstantCashbacks(holder), instantCashbackLegsOf(holder, transactions));
+
+export const applyInstantCashbacks = (
+  transactions: Transaction[],
+  holderId: string,
+  cashbacks: InstantCashbackLeg[],
+  newLegIds: string[],
+): Transaction[] => {
+  const holder = transactions.find(t => t.id === holderId);
+  if (!holder) return transactions;
+  const legs = instantCashbackLegsOf(holder, transactions);
+  const live = cashbacks.filter(isLiveCashback);
+  if (live.length === 0 && legs.length === 0 && getInstantCashbacks(holder).length === 0) return transactions;
+
+  let fresh = 0;
+  const entries = claimCashbackLegs(live, legs)
+    .map(c => (c.legId ? c : { ...c, legId: newLegIds[fresh++] }))
+    .filter((c): c is InstantCashbackLeg & { legId: string } => !!c.legId);
+  const keptIds = new Set(entries.map(c => c.legId));
+  const droppedIds = legs.filter(l => !keptIds.has(l.id)).map(l => l.id);
+  const created = entries.filter(c => !legs.some(l => l.id === c.legId));
+  const description = `Instant Cashback: ${holder.description}`;
+  const resetsReward = live.length > 0 || holder.rewardEarnedType === 'instant';
+
+  let next = transactions
+    .filter(t => !droppedIds.includes(t.id))
+    .map(t => {
+      if (t.id === holderId) {
+        const links = linkedIdsOf(t).filter(id => !droppedIds.includes(id));
+        return {
+          ...(resetsReward ? withInstantCashbacks(t, entries) : t),
+          linkedTransactionIds: [...links, ...created.map(c => c.legId).filter(id => !links.includes(id))],
+        };
+      }
+      const entry = entries.find(c => c.legId === t.id);
+      return entry ? { ...t, amount: entry.amount, accountId: entry.accountId, date: holder.date, description } : t;
+    });
+  for (const c of created) {
+    next = insertIntoDay(next, {
+      id: c.legId,
+      date: holder.date,
+      description,
+      accountId: c.accountId,
+      type: 'credit',
+      amount: c.amount,
+      category: 'Cashback',
+      isRecurring: false,
+      linkedTransactionIds: [holderId],
+    });
+  }
+  return next;
+};
+
+export const anchorCcSplitsOnCards = (transactions: Transaction[]): Transaction[] =>
+  transactions
+    .filter(t => t.type === 'debit' && (t.category || '').toLowerCase() === 'cc payment' && getRewardSplits(t).length > 0)
+    .reduce((txs, t) => anchorCcSplitOnCard(txs, t.id), transactions);
+
 // Does this transaction move the account's own RUPEE balance? An account can carry up to three
 // separate balances — its money, an NCMC travel purse, and a reward-points wallet — and a leg belongs
 // to exactly one. A redemption leg in particular is NOT a rupee charge: it draws on points, which is
@@ -1210,21 +1349,40 @@ const SINGLE_ISSUER_PRODUCT: ReadonlyArray<readonly [string, BrandKey]> = [
  */
 export const resolveCardIssuer = (
   cardName?: string,
-  cardDetails?: { issuer?: BrandKey }
+  cardDetails?: { issuer?: BrandKey; issuerName?: string },
+  linkedBankName?: string
 ): BrandKey | undefined => {
   if (cardDetails?.issuer) return cardDetails.issuer;
+  if (cardDetails?.issuerName?.trim()) return undefined;
 
   const name = (cardName || '').toLowerCase();
-  if (!name) return undefined;
-
   for (const [needle, brand] of BANK_IN_NAME) {
     if (name.includes(needle)) return brand;
   }
   for (const [needle, brand] of SINGLE_ISSUER_PRODUCT) {
     if (name.includes(needle)) return brand;
   }
+
+  const bankName = (linkedBankName || '').toLowerCase();
+  for (const [needle, brand] of BANK_IN_NAME) {
+    if (bankName.includes(needle)) return brand;
+  }
   return undefined;
 };
+
+export const resolveIssuerMark = (
+  cardName?: string,
+  cardDetails?: { issuer?: BrandKey; issuerName?: string },
+  linkedBankName?: string
+): IssuerMark | undefined => {
+  const brand = resolveCardIssuer(cardName, cardDetails, linkedBankName);
+  if (brand) return { brand };
+  const name = cardDetails?.issuerName?.trim() || linkedBankName?.trim();
+  return name ? { name } : undefined;
+};
+
+export const issuerMarkOf = (account: Account, accounts: Account[]): IssuerMark | undefined =>
+  resolveIssuerMark(account.name, account.cardDetails, linkedBankOf(account, accounts)?.name);
 
 const defineSkin = (front: string, back: string, material: CardMaterial = {}): CardSkin => ({
   front,
@@ -1626,6 +1784,16 @@ export function linkedGroupOf(tx: Transaction, pool: Transaction[]): Transaction
     linkedIds.includes(o.id) ||
     linkedIdsOf(o).includes(tx.id) ||
     linkedIds.some(pid => linkedIdsOf(o).includes(pid))
+  );
+}
+
+export function linkedTxGroupOf(tx: Transaction, pool: Transaction[]): Transaction[] {
+  const parentIds = linkedIdsOf(tx).filter(id => pool.some(o => o.id === id));
+  return pool.filter(o =>
+    o.id === tx.id ||
+    parentIds.includes(o.id) ||
+    linkedIdsOf(o).includes(tx.id) ||
+    parentIds.some(pid => linkedIdsOf(o).includes(pid))
   );
 }
 

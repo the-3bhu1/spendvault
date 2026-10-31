@@ -28,7 +28,7 @@ export const KEY_MAP: Record<string, string> = {
   // 'x' (accountId) and 'a' (amount) codes, and 'rlg' names the leg it debits. `rewardUsed` and
   // `rewardUsedAccountId` above are still written beside it (the total, and the first source), so a
   // backup restored into an older build keeps a working single-source split.
-  rewardSplits: 'rs', legId: 'rlg',
+  rewardSplits: 'rs', legId: 'rlg', instantCashbacks: 'ibk',
   rewardEarned: 're', rewardEarnedType: 'ret', rewardEarnedAccountId: 'rea',
   order: 'or', linkedTransactionId: 'lt', linkedTransactionIds: 'lts',
   cashbackLevelId: 'cl', linkedTxId: 'lx',
@@ -49,7 +49,7 @@ export const KEY_MAP: Record<string, string> = {
   cashbackCreditCycle: 'cc', travelOpeningBalances: 'tob', statementRounding: 'sr', statementAdjustments: 'sa',
   isCashbackEnabled: 'ice',
   cardDetails: 'D', cardholderName: 'ch', cardNumber: 'cn', rate: 'rt',
-  expiryMonth: 'em', expiryYear: 'ey', cvv: 'cv', network: 'nt', issuer: 'isr',
+  expiryMonth: 'em', expiryYear: 'ey', cvv: 'cv', network: 'nt', issuer: 'isr', issuerName: 'isn',
   // What a card costs to hold, and the date the membership year is measured from. 'af' is the
   // annual fee — mind that 'sa'/'saa' are already taken and unrelated.
   cardFees: 'CF', joiningFee: 'jf', annualFee: 'af', firstYearFree: 'fyf', waiverSpend: 'wvs',
@@ -89,10 +89,11 @@ export const KEY_MAP: Record<string, string> = {
   // Stocks / Mutual Funds / Commodity / EPF investment fields
   numberOfShares: 'ns', marketSymbol: 'ms', investedValue: 'iv', commodityMetal: 'cm',
   manualPricePerGram: 'mpg', avgNav: 'an', epfContributionBasis: 'ecb',
-  joiningDate: 'jd', baseBalance: 'bb', baseBalanceDate: 'bbd',
+  joiningDate: 'jd', baseBalance: 'bb', baseBalanceDate: 'bbd', basePensionBalance: 'bpn',
   salaryRevisions: 'srv', isEpsDisabled: 'ied', epsWageCeiling: 'ewc',
   interestRateOverrides: 'iro', epfBalanceAdjustments: 'eba',
   basicSalary: 'bs', dearnessAllowance: 'da', employeeContributionPct: 'ecp', employerContributionPct: 'ercp',
+  employeeContribution: 'eco',
   effectiveDate: 'efd',
   // EPF sub-object fields that were left unmapped when EPF shipped, so they went into backups at full
   // length. Adding them is backward-compatible: an older backup carries the long names, which pass

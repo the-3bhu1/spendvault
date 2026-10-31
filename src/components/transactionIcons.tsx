@@ -5,12 +5,13 @@ import {
   Train, ShoppingBag, Utensils, Car, Zap, HeartPulse, Film, BadgeIndianRupee, Banknote,
   CreditCard, ArrowRightLeft, Home, Handshake, Gift, ChartNoAxesCombined, ChartCandlestick,
   Gem, HandCoins, MoreHorizontal, Coins, Landmark, WalletCards, WalletMinimal, BarChart3,
-  TrendingUp, Medal, Wallet, ShieldUser, ChartLine, ArchiveX, Fuel, PiggyBank, Scale
+  TrendingUp, Medal, Wallet, ShieldUser, ChartLine, ArchiveX, Fuel, PiggyBank, Scale, BadgeMinus
 } from 'lucide-react';
 
 export const getCategoryIcon = (category: string, size = 17) => {
   const cat = category.toLowerCase();
   if (cat.includes('ncmc')) return <Train size={size} />;
+  if (cat.includes('bank charge')) return <BadgeMinus size={size} />;
   if (cat.includes('shop')) return <ShoppingBag size={size} />;
   if (cat.includes('food') || cat.includes('eat') || cat.includes('dine')) return <Utensils size={size} />;
   if (cat.includes('fuel')) return <Fuel size={size} />;
