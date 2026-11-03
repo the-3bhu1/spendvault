@@ -8,6 +8,21 @@ export const DEFAULT_EPF_INTEREST_RATES: EPFInterestRateConfig[] = [
   { financialYear: 'FY 2025-26', annualRate: 8.25 },
 ];
 
+export const EPF_WAGE_CEILING_OLD = 15000;
+export const EPF_WAGE_CEILING = 25000;
+export const EPF_WAGE_CEILING_EFFECTIVE_DATE = '2026-09-17';
+
+export function statutoryWageCeilingFor(monthKey: string): number {
+  const changeMonth = EPF_WAGE_CEILING_EFFECTIVE_DATE.slice(0, 7);
+  if (monthKey < changeMonth) return EPF_WAGE_CEILING_OLD;
+  if (monthKey > changeMonth) return EPF_WAGE_CEILING;
+  const changeDay = Number(EPF_WAGE_CEILING_EFFECTIVE_DATE.slice(8, 10));
+  const [y, m] = changeMonth.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const oldDays = changeDay - 1;
+  return Math.round((EPF_WAGE_CEILING_OLD * oldDays + EPF_WAGE_CEILING * (daysInMonth - oldDays)) / daysInMonth);
+}
+
 /**
  * Helper to determine Financial Year string (e.g. 'FY 2025-26') for a date string 'YYYY-MM-DD' or 'YYYY-MM'.
  * In India, FY runs from April 1 to March 31.
@@ -133,7 +148,8 @@ export function calculateEPFProjection(
   let lastEffectiveSalary = { basic: 0, da: 0, effectiveDate: '' };
   let lastPayslipEmployee = 0;
 
-  const contributionsFor = (revision: EPFSalaryRevision | null) => {
+  const contributionsFor = (revision: EPFSalaryRevision | null, monthKey: string) => {
+    const statutoryCeiling = statutoryWageCeilingFor(monthKey);
     const empPct = revision?.employeeContributionPct ?? 12;
     const emprPct = revision?.employerContributionPct ?? 12;
     let basic: number;
@@ -152,8 +168,7 @@ export function calculateEPFProjection(
       basic = revision ? revision.basicSalary : lastEffectiveSalary.basic;
       da = revision ? (revision.dearnessAllowance || 0) : lastEffectiveSalary.da;
       wage = basic + da;
-      const epfWageCeiling = 15000;
-      epfEligibleWage = (isStatutoryCap && wage > epfWageCeiling) ? epfWageCeiling : wage;
+      epfEligibleWage = (isStatutoryCap && wage > statutoryCeiling) ? statutoryCeiling : wage;
       employee = Math.round(epfEligibleWage * (empPct / 100));
     }
 
@@ -161,17 +176,17 @@ export function calculateEPFProjection(
 
     let eps = 0;
     if (!account.isEpsDisabled && wage > 0) {
-      const epsWageCeiling = account.epsWageCeiling || 15000;
-      eps = Math.min(1250, Math.round(Math.min(wage, epsWageCeiling) * (8.33 / 100)));
+      const epsWageCeiling = account.epsWageCeiling || statutoryCeiling;
+      eps = Math.round(Math.min(wage, epsWageCeiling) * (8.33 / 100));
     }
     return { basic, da, employee, employerEpf: Math.max(0, employerTotal - eps), eps };
   };
-  const contributionsForMonth = (monthKey: string) => contributionsFor(getEffectiveEPFSalary(revisions, monthKey));
+  const contributionsForMonth = (monthKey: string) => contributionsFor(getEffectiveEPFSalary(revisions, monthKey), monthKey);
 
   // Calculate current active month contribution metrics
   const activeMonthRevision = getEffectiveEPFSalary(revisions, targetMonthKey) || getEffectiveEPFSalary(revisions, joiningDateStr);
   if (activeMonthRevision) {
-    const c = contributionsFor(activeMonthRevision);
+    const c = contributionsFor(activeMonthRevision, targetMonthKey);
     lastEffectiveSalary = { basic: c.basic, da: c.da, effectiveDate: activeMonthRevision.effectiveDate };
     lastPayslipEmployee = c.employee;
     lastEmployeeContribution = c.employee;

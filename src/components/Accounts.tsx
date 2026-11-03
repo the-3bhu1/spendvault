@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { Fragment, useState, useRef, useEffect, useMemo } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown, CalendarDays, Nfc } from 'lucide-react';
@@ -308,7 +308,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
   // Banks a card can be attributed to. Co-brand keys (swiggy, jupiter, ...) and
   // 'axismark' are deliberately absent — those aren't issuers.
-  const ISSUER_OPTIONS: BrandKey[] = ['hdfc', 'axis', 'icici', 'sbi', 'csb', 'federal', 'idfc', 'indusind', 'tide'];
+  const ISSUER_OPTIONS: BrandKey[] = [
+    'hdfc', 'axis', 'icici', 'sbi', 'csb', 'federal', 'idfc', 'indusind', 'tide',
+    'kotak', 'amex', 'bob', 'rbl', 'yes', 'au', 'hsbc', 'scb', 'pnb', 'canara', 'ubi', 'boi', 'indianbank', 'idbi',
+  ];
   // What people call a bank when it isn't what the mark says. Searching by the
   // name in your head has to work, or the list may as well not be searchable.
   const ISSUER_ALIASES: Partial<Record<BrandKey, string[]>> = {
@@ -316,6 +319,16 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     idfc: ['idfc first'],
     csb: ['catholic syrian bank'],
     indusind: ['indus ind'],
+    kotak: ['kotak bank', 'kmbl'],
+    bob: ['bobcard', 'bob financial', 'vijaya bank', 'dena bank'],
+    rbl: ['ratnakar bank'],
+    au: ['au bank', 'au small finance', 'au sfb'],
+    hsbc: ['hsbc bank'],
+    scb: ['stanchart', 'standard chartered bank', 'sc bank'],
+    pnb: ['punjab national bank', 'oriental bank of commerce', 'united bank of india'],
+    canara: ['syndicate bank'],
+    ubi: ['union bank', 'andhra bank', 'corporation bank'],
+    indianbank: ['allahabad bank'],
   };
   const selectedIssuer = newAccount.cardDetails?.issuer;
   const selectedIssuerName = newAccount.cardDetails?.issuerName?.trim();
@@ -491,7 +504,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     if (!newAccount.cardDetails) {
       setNewAccount(prev => ({ ...prev, cardDetails: {} }));
       setExpiryInput('');
-      setIssuerQuery('');
+      setIssuerQuery(issuerSeedLabel);
       setIssuerDropdownOpen(false);
     }
     setIsEditingCardDetails(true);
@@ -1456,14 +1469,27 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         )}
 
                         {acc.type === 'bank_account' && (
-                          <div className="flex justify-between align-center gap-4" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                            <div className="flex-col gap-1" style={{ minWidth: 0 }}>
+                          <div className="flex justify-between align-center gap-4" style={{ flexWrap: 'nowrap', padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                            <div className="flex-col gap-1" style={{ minWidth: 0, flex: '1 1 0%' }}>
                               <span className="text-mono text-muted text-xs">DEBIT {linkedCards.length === 1 ? 'CARD' : 'CARDS'}</span>
-                              <span className="text-xs truncate" style={{ color: linkedCards.length > 0 ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                                {linkedCards.length > 0
-                                  ? linkedCards.map(c => `${getAccountIcon(c)} ${c.name}`).join(' · ')
-                                  : 'None linked'}
-                              </span>
+                              {linkedCards.length > 0 ? (
+                                <span className="text-xs flex align-center" style={{ minWidth: 0, gap: '0.35rem', color: 'var(--text-primary)' }} title={linkedCards.map(c => c.name).join(', ')}>
+                                  <span className="truncate" style={{ minWidth: 0 }}>
+                                    {linkedCards.slice(0, 2).map((c, i) => (
+                                      <Fragment key={c.id}>
+                                        {i > 0 && ' · '}
+                                        <span style={{ display: 'inline-block', lineHeight: 1, position: 'relative', top: '-0.15em' }}>{getAccountIcon(c)}</span>
+                                        {' '}{c.name}
+                                      </Fragment>
+                                    ))}
+                                  </span>
+                                  {linkedCards.length > 2 && (
+                                    <span className="text-muted" style={{ flexShrink: 0 }}>+ {linkedCards.length - 2} more</span>
+                                  )}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted">None linked</span>
+                              )}
                             </div>
                             <button
                               className="btn btn-secondary flex align-center gap-2"
@@ -2198,7 +2224,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       value={newAccount.epfContributionBasis || 'statutory_ceiling'}
                       options={[
                         { id: 'payslip', name: 'From my payslip', subtext: 'Enter the monthly PF deduction shown on your payslip' },
-                        { id: 'statutory_ceiling', name: 'Statutory Wage Ceiling', subtext: '12% Capped at ₹15,000 Basic (Default EPFO Rule)' },
+                        { id: 'statutory_ceiling', name: 'Statutory Wage Ceiling', subtext: '12% capped at ₹25,000 · Effective 17 September 2026' },
                         { id: 'actual_basic', name: 'Actual Basic + DA', subtext: '12% Calculated on Full Actual Basic Salary' }
                       ]}
                       onChange={val => setNewAccount({ ...newAccount, epfContributionBasis: val as EPFContributionBasis })}
@@ -2850,7 +2876,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               setNewAccount({ ...newAccount, cardDetails: {} });
                               setIsEditingCardDetails(true);
                               setExpiryInput('');
-                              setIssuerQuery('');
+                              setIssuerQuery(issuerSeedLabel);
                               setIssuerDropdownOpen(false);
                               setTimeout(() => {
                                 cardDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });

@@ -80,6 +80,8 @@ export type CardNetwork = 'visa' | 'mastercard' | 'rupay' | 'amex' | 'diners';
 export type BrandKey =
   | 'hdfc' | 'axis' | 'csb' | 'tide'          // issuers, cards held
   | 'federal' | 'icici' | 'idfc' | 'indusind' | 'sbi'  // issuers, ready but unused
+  | 'kotak' | 'amex' | 'bob' | 'rbl' | 'yes' | 'au' | 'hsbc' | 'scb'
+  | 'pnb' | 'canara' | 'ubi' | 'boi' | 'indianbank' | 'idbi'
   | 'swiggy' | 'supermoney' | 'jupiter'       // co-brands
   | 'axismark';                               // symbol only, for watermarks
 

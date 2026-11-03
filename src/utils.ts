@@ -1310,7 +1310,7 @@ type CardMaterial = Partial<Pick<CardSkin, 'texture' | 'geometry' | 'sheen' | 'i
 
 /** Bank names as they appear inside a card's name. Longest first — 'indusind'
  *  must be tested before any shorter substring of it could match. */
-const BANK_IN_NAME: ReadonlyArray<readonly [string, BrandKey]> = [
+const BANK_IN_NAME: ReadonlyArray<readonly [string | RegExp, BrandKey]> = [
   ['indusind', 'indusind'],
   ['federal', 'federal'],
   ['icici', 'icici'],
@@ -1320,7 +1320,33 @@ const BANK_IN_NAME: ReadonlyArray<readonly [string, BrandKey]> = [
   ['csb', 'csb'],
   ['sbi', 'sbi'],
   ['tide', 'tide'],
+  ['kotak', 'kotak'],
+  ['american express', 'amex'],
+  [/\bamex\b/, 'amex'],
+  ['baroda', 'bob'],
+  ['bobcard', 'bob'],
+  ['bob financial', 'bob'],
+  [/\brbl\b/, 'rbl'],
+  ['ratnakar', 'rbl'],
+  [/\byes bank\b/, 'yes'],
+  ['au small finance', 'au'],
+  [/\bau (bank|sfb)\b/, 'au'],
+  ['hsbc', 'hsbc'],
+  ['standard chartered', 'scb'],
+  ['stanchart', 'scb'],
+  [/\bscb\b/, 'scb'],
+  ['punjab national', 'pnb'],
+  [/\bpnb\b/, 'pnb'],
+  ['canara', 'canara'],
+  ['union bank', 'ubi'],
+  [/(?<!union |central )\bbank of india\b/, 'boi'],
+  [/\bboi\b/, 'boi'],
+  [/(?<!south )\bindian bank\b/, 'indianbank'],
+  ['idbi', 'idbi'],
 ];
+
+const nameHas = (name: string, needle: string | RegExp): boolean =>
+  typeof needle === 'string' ? name.includes(needle) : needle.test(name);
 
 /** Products issued by exactly one bank, so the bank is safe to infer when the
  *  name doesn't say it. Anything issued by more than one bank stays out:
@@ -1357,7 +1383,7 @@ export const resolveCardIssuer = (
 
   const name = (cardName || '').toLowerCase();
   for (const [needle, brand] of BANK_IN_NAME) {
-    if (name.includes(needle)) return brand;
+    if (nameHas(name, needle)) return brand;
   }
   for (const [needle, brand] of SINGLE_ISSUER_PRODUCT) {
     if (name.includes(needle)) return brand;
@@ -1365,7 +1391,7 @@ export const resolveCardIssuer = (
 
   const bankName = (linkedBankName || '').toLowerCase();
   for (const [needle, brand] of BANK_IN_NAME) {
-    if (bankName.includes(needle)) return brand;
+    if (nameHas(bankName, needle)) return brand;
   }
   return undefined;
 };

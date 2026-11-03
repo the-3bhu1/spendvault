@@ -63,7 +63,8 @@ Rupees (₹). The app is also packaged for Android/iOS via Capacitor.
   bank. The Transactions account filter for the card shows every spend made via it.
 - On Accounts, a linked card shows "<BANK> BALANCE" (the bank's balance) and "VIA CARD · <month>"
   (net spent through the card this month); the bank's own card lists its linked "DEBIT CARD(S)"
-  ("None linked" if there are none) beside a "+ CARD" button.
+  ("None linked" if there are none) beside a "+ CARD" button. Up to two card names are shown; more
+  are summarised as "+ N more".
 - Two shortcuts open the Add Account form already set to Debit Card, linked to that bank and named
   "<bank> Debit" (editable): saving a NEW bank account asks "Add a debit card for <bank>?" (Add card /
   Not now), and the "+ CARD" button on any bank account's tile does the same at any time — use it for
@@ -90,9 +91,12 @@ An account is any place money sits or is owed. Built-in types:
   "Current Employer" name field. Contribution Basis has three options:
   (1) "From my payslip" — type the monthly "Provident Fund" deduction shown on your payslip (e.g.
   ₹1,800 or ₹2,360). Easiest, and exact whatever rule your employer uses: the app reverses the 12% to
-  get the PF wage, adds the same 12% from the employer, and sends 8.33% of up to ₹15,000 (max ₹1,250)
-  to pension. (2) Statutory Wage Ceiling — 12% of basic capped at ₹15,000 (₹1,800/month for anyone
-  earning ₹15,000+ basic). (3) Actual Basic + DA — 12% of the full basic.
+  get the PF wage, adds the same 12% from the employer, and sends 8.33% of up to ₹25,000 (max ₹2,083)
+  to pension. (2) Statutory Wage Ceiling — 12% of basic capped at ₹25,000 (₹3,000/month for anyone
+  earning ₹25,000+ basic). (3) Actual Basic + DA — 12% of the full basic.
+  The ₹25,000 ceiling took effect on 17 September 2026 (it was ₹15,000 before, with a ₹1,250 pension
+  cap). Months before September 2026 are still worked out on ₹15,000, and September 2026 blends the
+  two by days (1–16 on the old ceiling, 17–30 on the new one).
   "Basic + DA": Basic is the fixed core of your salary on the payslip. DA (Dearness Allowance) is an
   inflation allowance paid mainly by government and PSU employers — private-sector payslips usually
   have none, so for most people the figure is just Basic. HRA and special allowance do not count.
@@ -145,9 +149,16 @@ Actions (each account is a card on the Accounts tab):
   "+" to start, pencil to edit, ✓ to save, trash to remove. It holds cardholder name, card number,
   expiry, CVV, network (Visa/Mastercard/RuPay/Amex/Diners) and issuing bank; the bank is a search
   field, and if left blank it is inferred from the card's name, or for a debit card linked to a bank
-  account, from that bank. The issuing bank only decides which bank logo is printed on the card
-  picture; nothing else depends on it. If your bank isn't in the list (e.g. Canara), type its name
-  and pick "Use '<name>'" — the card then shows the bank's name in letters where the logo would go.
+  account, from that bank; when the bank is inferred the field opens already filled in with it, and
+  searching replaces it. The issuing bank only decides which bank logo is printed on the card
+  picture; nothing else depends on it. Banks with a logo: HDFC, Axis, ICICI, SBI, CSB, Federal,
+  IDFC FIRST, IndusInd, Tide, Kotak Mahindra, American Express, Bank of Baroda, RBL, Yes Bank,
+  AU Small Finance, HSBC, Standard Chartered, PNB, Canara, Union Bank of India, Bank of India,
+  Indian Bank and IDBI. The search also finds a bank by its common or older name — e.g. "Amex",
+  "StanChart", "BOBCARD", or a bank merged into another (Vijaya/Dena → Bank of Baroda, OBC/United →
+  PNB, Syndicate → Canara, Andhra/Corporation → Union Bank, Allahabad → Indian Bank). If your bank
+  isn't in the list (e.g. Saraswat), type its name and pick "Use '<name>'" — the card then shows the
+  bank's name in letters where the logo would go.
   Stored on-device, behind the app PIN.
   The CVV is additionally encrypted with a key locked inside this phone, and it is never put in a
   backup — after restoring a backup (or moving to a new phone) CVVs are blank and must be re-typed.
@@ -812,7 +823,9 @@ and Accounts tabs.
 ## Retirement sub-view
 Total EPF running balance and interest earned this financial year, plus the monthly credit breakdown
 (12% employee + 3.67% employer EPF + 8.33% EPS pension), the 1-year projected balance and projected
-annual growth. Interest accrues monthly and is credited March 31st. Tapping an EPF account row opens
+annual growth. Interest accrues monthly and is credited March 31st, on the EPF part only — the
+pension (EPS) share earns none. When a pension share is entered on the account, the breakdown opens
+with the balance split into "EPF Balance (Earns Interest)" and "Pension (EPS) Balance". Tapping an EPF account row opens
 Wealth's read-only breakdown of it; to change anything, edit the account on the Accounts tab.
 
 # Commodity (gold / silver) prices

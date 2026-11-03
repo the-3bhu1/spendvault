@@ -14,15 +14,15 @@ const epf = (over: Partial<Account>): Account => ({
 describe('EPF projection', () => {
   it('earns interest on the whole balance when no pension share is entered', () => {
     const p = calculateEPFProjection(epf({}), '2026-10');
-    expect(p.balance).toBe(66838 + 2350);
+    expect(p.balance).toBe(66838 + 3917);
     expect(p.pensionBalance).toBe(0);
   });
 
   it('keeps the pension share out of interest and grows it with the balance', () => {
     const withPension = calculateEPFProjection(epf({ basePensionBalance: 22820 }), '2026-10');
     const epfOnly = calculateEPFProjection(epf({ baseBalance: 66838 - 22820 }), '2026-10');
-    expect(withPension.balance).toBe(66838 + 3600);
-    expect(withPension.pensionBalance).toBe(22820 + 1250);
+    expect(withPension.balance).toBe(66838 + 6000);
+    expect(withPension.pensionBalance).toBe(22820 + 2083);
     expect(withPension.accruedInterest).toBe(epfOnly.accruedInterest);
   });
 
@@ -57,7 +57,7 @@ describe('EPF projection', () => {
   it('projects interest on the EPF part only', () => {
     const withPension = calculateEPFProjection(epf({ basePensionBalance: 22820 }), '2026-10');
     const epfOnly = calculateEPFProjection(epf({ baseBalance: 66838 - 22820 }), '2026-10');
-    expect(withPension.projectedOneYearBalance - epfOnly.projectedOneYearBalance).toBe(22820 + 13 * 1250);
+    expect(withPension.projectedOneYearBalance - epfOnly.projectedOneYearBalance).toBe(22820 + 13 * 2083);
   });
 
   it('works from the PF deduction on a payslip', () => {
@@ -66,22 +66,47 @@ describe('EPF projection', () => {
       salaryRevisions: [{ id: 'r1', effectiveDate: '2026-07-01', basicSalary: 0, employeeContribution: 2360 }],
     }), '2026-10');
     expect(p.employeeContribution).toBe(2360);
-    expect(p.employerEPSContribution).toBe(1250);
-    expect(p.employerEPFContribution).toBe(1110);
+    expect(p.employerEPSContribution).toBe(1638);
+    expect(p.employerEPFContribution).toBe(722);
     expect(p.effectiveSalary.basic).toBe(19667);
-    expect(p.balance).toBe(66838 + 2360 + 1110);
+    expect(p.balance).toBe(66838 + 2360 + 722);
   });
 
-  it('matches the ceiling rule when the payslip shows ₹1,800', () => {
+  it('matches the ceiling rule when the payslip follows the ₹25,000 change', () => {
     const payslip = calculateEPFProjection(epf({
       epfContributionBasis: 'payslip',
       basePensionBalance: 22820,
-      salaryRevisions: [{ id: 'r1', effectiveDate: '2026-07-01', basicSalary: 0, employeeContribution: 1800 }],
+      salaryRevisions: [
+        { id: 'r1', effectiveDate: '2026-07-01', basicSalary: 0, employeeContribution: 1800 },
+        { id: 'r2', effectiveDate: '2026-09-01', basicSalary: 0, employeeContribution: 2360 },
+        { id: 'r3', effectiveDate: '2026-10-01', basicSalary: 0, employeeContribution: 3000 },
+      ],
     }), '2027-03');
     const ceiling = calculateEPFProjection(epf({ basePensionBalance: 22820 }), '2027-03');
     expect(payslip.balance).toBe(ceiling.balance);
     expect(payslip.accruedInterest).toBe(ceiling.accruedInterest);
     expect(payslip.projectedOneYearBalance).toBe(ceiling.projectedOneYearBalance);
+  });
+
+  it('caps at ₹15,000 before 17 September 2026', () => {
+    const p = calculateEPFProjection(epf({ baseBalanceDate: '2026-07-01' }), '2026-08');
+    expect(p.employeeContribution).toBe(1800);
+    expect(p.employerEPSContribution).toBe(1250);
+    expect(p.employerEPFContribution).toBe(550);
+  });
+
+  it('caps at ₹25,000 from October 2026', () => {
+    const p = calculateEPFProjection(epf({}), '2026-10');
+    expect(p.employeeContribution).toBe(3000);
+    expect(p.employerEPSContribution).toBe(2083);
+    expect(p.employerEPFContribution).toBe(917);
+  });
+
+  it('blends the two ceilings by days in September 2026', () => {
+    const p = calculateEPFProjection(epf({ baseBalanceDate: '2026-08-01' }), '2026-09');
+    expect(p.employeeContribution).toBe(2360);
+    expect(p.employerEPSContribution).toBe(1638);
+    expect(p.employerEPFContribution).toBe(722);
   });
 
   it('keeps the pension share through a backup', () => {

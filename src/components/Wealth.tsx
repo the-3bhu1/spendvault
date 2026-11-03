@@ -2334,6 +2334,21 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
 
                 return (
                   <div style={{ padding: `0.5rem ${DETAIL_GUTTER} 1.5rem`, boxSizing: 'border-box' }}>
+                    {epfProj.pensionBalance > 0 && (
+                      <>
+                        <StatRow
+                          label="EPF Balance (Earns Interest)"
+                          value={formatFullCurrency(epfProj.balance - epfProj.pensionBalance)}
+                        />
+                        <StatRow
+                          label="Pension (EPS) Balance"
+                          value={formatFullCurrency(epfProj.pensionBalance)}
+                          color="var(--warning)"
+                        />
+
+                        <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.75rem 0' }} />
+                      </>
+                    )}
                     <StatRow
                       label="Monthly Credit"
                       value={formatFullCurrency(monthlyCredit)}
