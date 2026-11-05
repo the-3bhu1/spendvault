@@ -1319,11 +1319,31 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               </div>
                             )}
                           </div>
+                        ) : linkedBank ? (
+                          <div className="flex justify-between gap-4" style={{ padding: '0.85rem 1rem', alignItems: 'flex-end' }}>
+                            <div className="flex-col gap-1" style={{ minWidth: 0 }}>
+                              <span className="text-mono text-muted text-xs">VIA CARD · {format(new Date(), 'MMM').toUpperCase()}</span>
+                              <span className="text-serif" style={{ fontSize: '1.8rem', color: 'var(--text-primary)', lineHeight: '1.2' }}>
+                                {formatCurrency(cardMonthSpend)}
+                              </span>
+                              <span className="text-muted text-xs truncate">From {linkedBank.name}</span>
+                            </div>
+                            {!acc.isNcmcEnabled && acc.cardDetails?.cardNumber && (
+                              <button
+                                className="btn btn-secondary flex align-center gap-2"
+                                style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700, color: 'var(--accent)', flexShrink: 0 }}
+                                onClick={() => setViewingCard(acc)}
+                              >
+                                <CreditCard size={14} />
+                                <span>Card</span>
+                              </button>
+                            )}
+                          </div>
                         ) : (
                           <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem' }}>
                             <div className="flex-col gap-1">
                               <span className="text-mono text-muted text-xs">
-                                {linkedBank ? `${linkedBank.name.toUpperCase()} BALANCE` : acc.isNcmcEnabled ? 'PAYMENTS BALANCE' : acc.type === 'credit_card' ? 'UNBILLED' : 'TOTAL BALANCE'}
+                                {acc.isNcmcEnabled ? 'PAYMENTS BALANCE' : acc.type === 'credit_card' ? 'UNBILLED' : 'TOTAL BALANCE'}
                               </span>
                               <span className="text-serif" style={{
                                 fontSize: '1.8rem',
@@ -1358,14 +1378,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                   <span>Send to Bank</span>
                                 </button>
                               )}
-                              {linkedBank ? (
-                                <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
-                                  <span className="text-mono text-muted text-xs">VIA CARD · {format(new Date(), 'MMM').toUpperCase()}</span>
-                                  <span className="text-serif" style={{ fontSize: '1.4rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
-                                    {formatCurrency(cardMonthSpend)}
-                                  </span>
-                                </div>
-                              ) : prevCycleDue !== null ? (
+                              {prevCycleDue !== null ? (
                                 <div className="flex-col gap-1" style={{ alignItems: 'flex-end', textAlign: 'right' }}>
                                   <span className="text-mono text-muted text-xs">PREV BILL</span>
                                   <span className="text-serif" style={{ fontSize: '1.4rem', color: prevCycleDue > 0 ? 'var(--danger)' : 'var(--success)', marginTop: '0.1rem' }}>
@@ -1455,7 +1468,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           </div>
                         )}
 
-                        {acc.type === 'debit_card' && !acc.isNcmcEnabled && acc.cardDetails?.cardNumber && (
+                        {acc.type === 'debit_card' && !linkedBank && !acc.isNcmcEnabled && acc.cardDetails?.cardNumber && (
                           <div className="flex justify-end align-center gap-4" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)' }}>
                             <button
                               className="btn btn-secondary flex align-center gap-2"
@@ -1474,12 +1487,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               <span className="text-mono text-muted text-xs">DEBIT {linkedCards.length === 1 ? 'CARD' : 'CARDS'}</span>
                               {linkedCards.length > 0 ? (
                                 <span className="text-xs flex align-center" style={{ minWidth: 0, gap: '0.35rem', color: 'var(--text-primary)' }} title={linkedCards.map(c => c.name).join(', ')}>
-                                  <span className="truncate" style={{ minWidth: 0 }}>
+                                  <span className="flex align-center" style={{ minWidth: 0, overflow: 'hidden' }}>
                                     {linkedCards.slice(0, 2).map((c, i) => (
                                       <Fragment key={c.id}>
-                                        {i > 0 && ' · '}
-                                        <span style={{ display: 'inline-block', lineHeight: 1, position: 'relative', top: '-0.15em' }}>{getAccountIcon(c)}</span>
-                                        {' '}{c.name}
+                                        {i > 0 && <span style={{ flexShrink: 0, whiteSpace: 'pre' }}> · </span>}
+                                        <span className="flex align-center" style={{ minWidth: 0, gap: '0.3em' }}>
+                                          <span style={{ flexShrink: 0, lineHeight: 1, display: 'flex', alignItems: 'center' }}>{getAccountIcon(c)}</span>
+                                          <span className="truncate" style={{ minWidth: 0 }}>{c.name}</span>
+                                        </span>
                                       </Fragment>
                                     ))}
                                   </span>
@@ -2909,7 +2924,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
                     {newAccount.cardDetails && (
                       <div className="flex-col gap-3">
-                        <p className="text-xs text-muted" style={{ margin: 0 }}>Stored locally on your device, protected by your app PIN.</p>
+                        <p className="text-xs text-muted" style={{ margin: 0 }}>
+                          {data.user?.pinHash || data.user?.pin
+                            ? 'Stored encrypted on your device, protected by your app PIN.'
+                            : 'Stored encrypted on your device. Anyone who can open this app can see them — set an app PIN in Settings to lock it.'}
+                        </p>
+                        <p className="text-xs" style={{ margin: 0, color: 'var(--warning, #f59e0b)' }}>
+                          The CVV stays on this device only. It is left out of backups and shared files, so after moving to another phone or restoring a backup, type it in again.
+                        </p>
 
                         <div className="flex-col gap-1">
                           <label className="text-xs text-muted font-bold">CARDHOLDER NAME</label>
@@ -2960,7 +2982,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
                         <div className="flex-col gap-1">
                           <div className="flex gap-2">
-                            <div className="flex-col gap-1" style={{ width: '90px' }}>
+                            <div className="flex-col gap-1" style={{ flex: '1 1 0', minWidth: 0 }}>
                               <label className="text-xs text-muted font-bold">EXPIRY</label>
                               {isEditingCardDetails ? (
                                 <input
@@ -2992,7 +3014,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                 </div>
                               )}
                             </div>
-                            <div className="flex-col gap-1" style={{ flex: 1, position: 'relative' }}>
+                            <div className="flex-col gap-1" style={{ flex: '1 1 0', minWidth: 0, position: 'relative' }}>
                               <label className="text-xs text-muted font-bold">CVV</label>
                               {isEditingCardDetails ? (
                                 <div style={{ position: 'relative' }}>

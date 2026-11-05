@@ -61,8 +61,8 @@ Rupees (₹). The app is also packaged for Android/iOS via Capacitor.
   row reads "<bank> · via <card>". Pick the bank itself for UPI/NEFT/net-banking spends. The card's
   cashback rates still apply to spends logged via it, and its delayed cashback is credited into the
   bank. The Transactions account filter for the card shows every spend made via it.
-- On Accounts, a linked card shows "<BANK> BALANCE" (the bank's balance) and "VIA CARD · <month>"
-  (net spent through the card this month); the bank's own card lists its linked "DEBIT CARD(S)"
+- On Accounts, a linked card shows only "VIA CARD · <month>" (net spent through the card this month)
+  with "From <bank>" under it, not the bank's balance; the bank's own card lists its linked "DEBIT CARD(S)"
   ("None linked" if there are none) beside a "+ CARD" button. Up to two card names are shown; more
   are summarised as "+ N more".
 - Two shortcuts open the Add Account form already set to Debit Card, linked to that bank and named
@@ -159,9 +159,10 @@ Actions (each account is a card on the Accounts tab):
   PNB, Syndicate → Canara, Andhra/Corporation → Union Bank, Allahabad → Indian Bank). If your bank
   isn't in the list (e.g. Saraswat), type its name and pick "Use '<name>'" — the card then shows the
   bank's name in letters where the logo would go.
-  Stored on-device, behind the app PIN.
-  The CVV is additionally encrypted with a key locked inside this phone, and it is never put in a
-  backup — after restoring a backup (or moving to a new phone) CVVs are blank and must be re-typed.
+  Stored on-device, encrypted with a key locked inside this phone (name, number, expiry and CVV),
+  and behind the app PIN if one is set — without a PIN, anyone who can open the app can see them.
+  Backups include the name, number and expiry but never the CVV — after restoring a backup (or
+  moving to a new phone) CVVs are blank and must be re-typed.
 - Tap to add a card (Android phones with NFC only): in that same block, the NFC button next to "+"
   (or next to ✓ while editing) shows "Hold your card flat against the back of your phone". Tapping a
   contactless credit/debit card fills in the card NUMBER, EXPIRY and NETWORK, then jumps to the CVV
@@ -928,8 +929,9 @@ can tap "Restore from backup" on the first step to import an existing backup fil
 # Backup, restore & data
 - A backup carries your finances and settings but NOT your Gemini API key or logo.dev token (those
   live in the device keystore/local storage), so re-enter them after restoring on a new device.
-- Backups never contain card CVVs (card numbers and expiry are included). CVVs are encrypted with a
-  key that can't leave the phone, so after a restore, re-enter each card's CVV in its edit form.
+- Backups never contain card CVVs (card numbers and expiry are included). On the phone, card details
+  are encrypted with a key that can't leave it, so after a restore, re-enter each card's CVV in its
+  edit form.
 - Wipe Data also erases your saved Ask Vault conversations, after which the app restarts into
   first-launch setup.
 - Export: Settings → Export Data, with two different outcomes:

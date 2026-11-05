@@ -1090,9 +1090,9 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
     document.documentElement.setAttribute('data-theme', data.theme || 'dark');
   }, [data.theme]);
 
-  // CVVs are encrypted on the way to storage and decrypted once per launch (services/cardSecrets.ts).
-  // sealedCvvs maps each CVV to its ciphertext so an ordinary save stays synchronous; only a new or
-  // changed CVV waits on the cipher, and then only the newest save writes.
+  // Card CVVs and details are encrypted on the way to storage and decrypted once per launch
+  // (services/cardSecrets.ts). sealedCvvs maps each plaintext to its ciphertext so an ordinary save
+  // stays synchronous; only a new or changed one waits on the cipher, and then only the newest save writes.
   const sealedCvvs = useRef(new Map<string, string>());
   const persistSeq = useRef(0);
 
@@ -1108,16 +1108,16 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
       .catch(err => {
         // Never hold every other change hostage to the cipher: save without the unsealed CVVs
         // (they stay in memory for this session) rather than not at all.
-        console.error('[cardSecrets] could not encrypt a CVV; it will not be saved', err);
+        console.error('[cardSecrets] could not encrypt card details; CVVs will not be saved, other details stay unencrypted', err);
       })
       .finally(() => { if (seq === persistSeq.current) write(); });
   }, [data]);
 
   useEffect(() => {
-    const encs = [...new Set(data.accounts.map(a => a.cardDetails?.cvvEnc).filter((e): e is string => !!e))];
+    const encs = [...new Set(data.accounts.flatMap(a => [a.cardDetails?.cvvEnc, a.cardDetails?.detailsEnc]).filter((e): e is string => !!e))];
     if (encs.length === 0) return;
     Promise.all(encs.map(async enc => [enc, await decryptSecret(enc)] as const)).then(pairs => {
-      for (const [enc, cvv] of pairs) if (cvv) sealedCvvs.current.set(cvv, enc);
+      for (const [enc, plain] of pairs) if (plain) sealedCvvs.current.set(plain, enc);
       setData(prev => ({ ...prev, accounts: openAccounts(prev.accounts, new Map(pairs)) }));
     });
     // Once, on launch: everything after that holds CVVs in the clear in memory.

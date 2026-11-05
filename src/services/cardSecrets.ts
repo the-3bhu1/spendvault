@@ -1,12 +1,13 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import type { Account } from '../types';
 
-// Card CVVs never reach storage or a backup in the clear.
+// Card details never reach storage in the clear, and CVVs never reach a backup at all.
 //
-// In memory an account carries `cardDetails.cvv` as before, so every screen reads it unchanged. At
-// the storage boundary (FinanceContext's persist effect) the CVV is swapped for `cvvEnc`, a
-// ciphertext; on launch it is swapped back. Exports drop both (stripCardSecrets), so a backup file
-// or clipboard code never holds a CVV — restoring one means typing CVVs in again.
+// In memory an account carries `cardDetails` in plaintext as before, so every screen reads it
+// unchanged. At the storage boundary (FinanceContext's persist effect) the CVV is swapped for
+// `cvvEnc` and the name, number and expiry for `detailsEnc`; on launch they are swapped back.
+// Exports are built from memory: they keep the name, number and expiry in plaintext but drop the
+// CVV and both ciphertexts (stripCardSecrets) — restoring one means typing CVVs in again.
 //
 // Android: AES-GCM under an Android Keystore key (CardSecretPlugin.kt) that can't leave the device
 // and isn't in Auto Backup. Browser (development): WebCrypto AES-GCM with a non-extractable key kept
@@ -67,8 +68,8 @@ export const encryptSecret = async (plaintext: string): Promise<string> => {
   return WEB + toB64(sealed);
 };
 
-/** null when the ciphertext can't be opened here — another device's key (a restored backup), a
- *  reset Keystore, or the other platform's prefix. That is permanent, so callers drop it. */
+/** null when the ciphertext can't be opened here — another device's key, a reset Keystore, or the
+ *  other platform's prefix. Callers keep the ciphertext untouched rather than dropping it. */
 export const decryptSecret = async (ciphertext: string): Promise<string | null> => {
   try {
     if (ciphertext.startsWith(NATIVE) && onAndroid()) {
@@ -85,44 +86,88 @@ export const decryptSecret = async (ciphertext: string): Promise<string | null> 
 
 // ---- the storage and export boundaries (pure) --------------------------------------------------
 
+const DETAIL_FIELDS = ['cardholderName', 'cardNumber', 'expiryMonth', 'expiryYear'] as const;
+type DetailField = typeof DETAIL_FIELDS[number];
+type CardDetailsOf = NonNullable<Account['cardDetails']>;
+
+const packDetails = (cd: CardDetailsOf): string | null => {
+  const picked: Partial<Pick<CardDetailsOf, DetailField>> = {};
+  for (const f of DETAIL_FIELDS) if (cd[f] !== undefined && cd[f] !== '') (picked as Record<string, unknown>)[f] = cd[f];
+  return Object.keys(picked).length ? JSON.stringify(picked) : null;
+};
+
+const withoutDetails = (cd: CardDetailsOf): CardDetailsOf => {
+  const rest = { ...cd };
+  for (const f of DETAIL_FIELDS) delete rest[f];
+  return rest;
+};
+
 /**
- * Accounts as they go to storage: each plaintext CVV replaced by its ciphertext from `sealed`
- * (plaintext → ciphertext). `missing` lists CVVs with no ciphertext yet — encrypt those, add them
- * to `sealed`, and seal again. An account still holding only `cvvEnc` (not yet opened this launch)
- * keeps it as it is.
+ * Accounts as they go to storage. Each plaintext CVV is replaced by its ciphertext from `sealed`
+ * (plaintext → ciphertext) as `cvvEnc`, and the cardholder name, number and expiry together by
+ * theirs as `detailsEnc`. `missing` lists plaintexts with no ciphertext yet — encrypt those, add
+ * them to `sealed`, and seal again. Meanwhile an unsealed CVV is left out, while unsealed details
+ * stay in the clear rather than be lost. Ciphertexts not yet opened this launch are kept as they are.
  */
 export const sealAccounts = (accounts: Account[], sealed: Map<string, string>): { accounts: Account[]; missing: string[] } => {
   const missing = new Set<string>();
   const out = accounts.map(acc => {
-    const cvv = acc.cardDetails?.cvv;
-    if (!acc.cardDetails || !cvv) return acc;
-    // A stale cvvEnc beside a plaintext CVV is an older value: the plaintext wins.
-    const { cvv: _plain, cvvEnc: _stale, ...rest } = acc.cardDetails;
-    const enc = sealed.get(cvv);
-    if (!enc) missing.add(cvv);
-    return { ...acc, cardDetails: { ...rest, ...(enc ? { cvvEnc: enc } : {}) } };
+    if (!acc.cardDetails) return acc;
+    let cd = acc.cardDetails;
+    const cvv = cd.cvv;
+    const packed = packDetails(cd);
+    if (!cvv && !packed) return acc;
+    if (cvv) {
+      // A stale cvvEnc beside a plaintext CVV is an older value: the plaintext wins.
+      const { cvv: _plain, cvvEnc: _stale, ...rest } = cd;
+      const enc = sealed.get(cvv);
+      if (!enc) missing.add(cvv);
+      cd = { ...rest, ...(enc ? { cvvEnc: enc } : {}) };
+    }
+    if (packed) {
+      const enc = sealed.get(packed);
+      if (enc) {
+        const { detailsEnc: _stale, ...rest } = withoutDetails(cd);
+        cd = { ...rest, detailsEnc: enc };
+      } else {
+        missing.add(packed);
+        const { detailsEnc: _stale, ...rest } = cd;
+        cd = rest;
+      }
+    }
+    return { ...acc, cardDetails: cd };
   });
   return { accounts: out, missing: [...missing] };
 };
 
 /**
- * Accounts as they come out of storage: each `cvvEnc` swapped for the CVV `opened` holds for it
- * (ciphertext → plaintext, or null when unreadable — then the CVV is dropped). A plaintext `cvv` from
+ * Accounts as they come out of storage: each `cvvEnc` and `detailsEnc` swapped for what `opened`
+ * holds for it (ciphertext → plaintext, or null when unreadable — then the ciphertext is kept as it
+ * is, so the device that sealed it can still open it if the data goes back there). Plaintext from
  * before encryption, or from an old backup, is left for the next save to seal.
  */
 export const openAccounts = (accounts: Account[], opened: Map<string, string | null>): Account[] =>
   accounts.map(acc => {
-    const enc = acc.cardDetails?.cvvEnc;
-    if (!acc.cardDetails || !enc || !opened.has(enc)) return acc;
-    const { cvvEnc: _enc, ...rest } = acc.cardDetails;
-    const cvv = opened.get(enc);
-    return { ...acc, cardDetails: { ...rest, ...(cvv ? { cvv } : {}) } };
+    if (!acc.cardDetails) return acc;
+    let cd = acc.cardDetails;
+    const cvv = cd.cvvEnc ? opened.get(cd.cvvEnc) : null;
+    if (cvv) {
+      const { cvvEnc: _enc, ...rest } = cd;
+      cd = { ...rest, cvv };
+    }
+    const details = cd.detailsEnc ? opened.get(cd.detailsEnc) : null;
+    if (details) {
+      const { detailsEnc: _enc, ...rest } = cd;
+      cd = { ...JSON.parse(details), ...rest };
+    }
+    return cd === acc.cardDetails ? acc : { ...acc, cardDetails: cd };
   });
 
-/** Accounts as they go into a backup: no CVV in any form. */
+/** Accounts as they go into a backup: no CVV in any form, and no ciphertext only this device can open. */
 export const stripCardSecrets = (accounts: Account[]): Account[] =>
   accounts.map(acc => {
-    if (!acc.cardDetails || (!('cvv' in acc.cardDetails) && !('cvvEnc' in acc.cardDetails))) return acc;
-    const { cvv: _plain, cvvEnc: _enc, ...rest } = acc.cardDetails;
+    const cd = acc.cardDetails;
+    if (!cd || (!('cvv' in cd) && !('cvvEnc' in cd) && !('detailsEnc' in cd))) return acc;
+    const { cvv: _plain, cvvEnc: _enc, detailsEnc: _details, ...rest } = cd;
     return { ...acc, cardDetails: rest };
   });
