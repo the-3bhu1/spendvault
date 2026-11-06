@@ -38,6 +38,7 @@ services:
       - npm-cache:/root/.npm
       # Gradle downloads hundreds of MB on a cold run; later builds reuse them.
       - gradle-cache:/root/.gradle
+      - apk-android-home:/root/.android
       # Every Gradle state and build directory lives in a volume, not in the checkout. The container's
       # /app/... paths then never mix with a host build's paths in android/.gradle or android/**/build,
       # so switching between this and an Android Studio build can't confuse either — and the build
@@ -62,6 +63,7 @@ volumes:
   apk-node-modules:
   npm-cache:
   gradle-cache:
+  apk-android-home:
   apk-android-dotgradle:
   apk-android-dotkotlin:
   apk-android-build:

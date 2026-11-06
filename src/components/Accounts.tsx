@@ -1,7 +1,7 @@
 import { Fragment, useState, useRef, useEffect, useMemo } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
-import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown, CalendarDays, Nfc } from 'lucide-react';
+import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown, CalendarDays, Nfc, ScanLine } from 'lucide-react';
 import { fetchStockPrice, fetchMFNav, getCachedPrice, fetchPricesForSymbols, isCacheFresh, searchMFByName, searchStockByName, fetchCommodityPriceINR, getCachedCommodityPriceINR, isCommodityCacheFresh, getCommodityVendorFound } from '../services/MarketDataService';
 import type { MFSearchResult, StockSearchResult } from '../services/MarketDataService';
 import { getCommodityVendor } from '../services/GeminiConfig';
@@ -22,6 +22,8 @@ import { ViewCardOverlay } from './ViewCardOverlay';
 import { ScrollToTopButton } from './ScrollToTopButton';
 import { getNfcAvailability, startCardScan, CARD_NFC_ERROR_TEXT } from '../services/CardNfcService';
 import type { ScannedCard } from '../services/CardNfcService';
+import { isCardScanAvailable, scanCardWithCamera, CARD_SCAN_ERROR_TEXT } from '../services/CardScanService';
+import type { CardScanErrorCode } from '../services/CardScanService';
 import { hapticTap } from '../utils/haptics';
 
 
@@ -298,6 +300,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   // Tap-to-add over NFC (Android only — see CardNfcService). 'off' means the phone has NFC but
   // it's switched off in system settings, which only the user can fix.
   const [nfcSupported, setNfcSupported] = useState(false);
+  const [cameraScanSupported, setCameraScanSupported] = useState(false);
   const [nfcState, setNfcState] = useState<null | 'scanning' | 'off'>(null);
   const [nfcError, setNfcError] = useState('');
   const nfcStopRef = useRef<(() => void) | null>(null);
@@ -445,6 +448,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
   useEffect(() => {
     getNfcAvailability().then(a => setNfcSupported(a.supported));
+    isCardScanAvailable().then(setCameraScanSupported);
   }, []);
 
   const releaseNfc = () => {
@@ -499,7 +503,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     }, 150);
   };
 
-  const startNfcScan = async () => {
+  const openCardDetailsForScan = () => {
     stopNfcScan();
     if (!newAccount.cardDetails) {
       setNewAccount(prev => ({ ...prev, cardDetails: {} }));
@@ -511,6 +515,21 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setTimeout(() => {
       cardDetailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 100);
+  };
+
+  const startCameraScan = async () => {
+    openCardDetailsForScan();
+    try {
+      const card = await scanCardWithCamera();
+      if (card) applyScannedCard(card);
+    } catch (e) {
+      const code = (e as { code?: CardScanErrorCode })?.code ?? 'UNAVAILABLE';
+      setNfcError(CARD_SCAN_ERROR_TEXT[code]);
+    }
+  };
+
+  const startNfcScan = async () => {
+    openCardDetailsForScan();
     const session = nfcSessionRef.current;
     try {
       const stop = await startCardScan(applyScannedCard, code => setNfcError(CARD_NFC_ERROR_TEXT[code]));
@@ -542,6 +561,27 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       title="Tap card to fill"
     >
       <Nfc size={14} />
+    </button>
+  );
+
+  const cameraScanButton = (
+    <button
+      className="btn btn-secondary"
+      style={{
+        width: '30px',
+        height: '30px',
+        padding: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'var(--text-muted)',
+        minHeight: 'auto',
+        boxShadow: '2px 2px 0 #000'
+      }}
+      onClick={startCameraScan}
+      title="Scan card with camera"
+    >
+      <ScanLine size={14} />
     </button>
   );
 
@@ -2795,10 +2835,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     className="flex-col gap-3"
                     style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}
                   >
-                    <div className="flex justify-between align-center">
-                      <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>💳 Card Details <span className="text-muted" style={{ fontWeight: 400 }}>(Optional)</span></span>
+                    <div className="flex justify-between align-center" style={{ flexWrap: 'nowrap', gap: '0.75rem' }}>
+                      <span className="text-sm font-bold" style={{ color: 'var(--text-primary)', minWidth: 0 }}>💳 Card Details{!newAccount.cardDetails && <span className="text-muted" style={{ fontWeight: 400 }}> (Optional)</span>}</span>
                       {newAccount.cardDetails ? (
-                        <div className="flex gap-3">
+                        <div className="flex gap-3" style={{ flexShrink: 0 }}>
+                          {cameraScanSupported && isEditingCardDetails && cameraScanButton}
                           {nfcSupported && isEditingCardDetails && nfcTapButton}
                           {isEditingCardDetails ? (
                             <button
@@ -2872,7 +2913,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           </button>
                         </div>
                       ) : (
-                        <div className="flex gap-3">
+                        <div className="flex gap-3" style={{ flexShrink: 0 }}>
+                          {cameraScanSupported && cameraScanButton}
                           {nfcSupported && nfcTapButton}
                           <button
                             className="btn btn-secondary"

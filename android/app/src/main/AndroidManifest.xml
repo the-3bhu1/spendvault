@@ -36,6 +36,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".CardScanActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/AppTheme.NoActionBar" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -61,5 +67,7 @@
          app installable on phones without NFC; the Tap card button just doesn't show there. -->
     <uses-permission android:name="android.permission.NFC" />
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 </manifest>
 

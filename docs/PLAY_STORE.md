@@ -81,7 +81,8 @@ than relying on an exemption.
 - **Shared: No.** Gemini acts as a service the user directs with their own key. If you would rather
   declare it as shared with Google, that is the more conservative choice, and either is defensible.
 - **Not collected:** SMS processed only on the phone, card details (CVVs are encrypted with the
-  device's key), the PIN (hashed, on-device), biometrics (handled by Android), NFC card reads, and
+  device's key), the PIN (hashed, on-device), biometrics (handled by Android), NFC card reads, camera card scans
+  (on-device ML Kit text recognition, no image kept), and
   investment ticker symbols sent to Yahoo Finance or mfapi.in (not linked to a user, no identifiers).
 - No ads, no analytics, no crash-reporting SDK, no account.
 

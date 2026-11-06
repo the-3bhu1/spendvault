@@ -362,7 +362,7 @@ function App() {
         </div>
       </nav>
 
-      <BillAlertBanner onNavigateToBills={() => setActiveTab('bills')} />
+      {!activeTour && <BillAlertBanner onNavigateToBills={() => setActiveTab('bills')} />}
 
       {isHubOpen && (
         <div className="modal-overlay flex-center no-scroll" style={{ zIndex: 3000 }} onClick={() => setIsHubOpen(false)}>

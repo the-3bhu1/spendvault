@@ -93,6 +93,30 @@ class EmvReaderTest {
     }
 
     @Test
+    fun listedAppRefusingSelect_isRefused() {
+        val aid = "A0000000041010"
+        try {
+            card(
+                selectCmd("2PAY.SYS.DDF01".toByteArray()) to ppse(aid) + OK,
+                selectCmd(hex(aid)) to hex("6985"),
+            ).read()
+            fail("expected REFUSED")
+        } catch (e: EmvReader.EmvException) {
+            assertEquals("REFUSED", e.code)
+        }
+    }
+
+    @Test
+    fun unlistedCardRefusingKnownAid_isNotEmv() {
+        try {
+            card(selectCmd(hex("A0000000041010")) to hex("6985")).read()
+            fail("expected NOT_EMV")
+        } catch (e: EmvReader.EmvException) {
+            assertEquals("NOT_EMV", e.code)
+        }
+    }
+
+    @Test
     fun getResponse_isFollowed() {
         val aid = "A0000000031010"
         val pan = withLuhn("411111111111111")

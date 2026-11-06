@@ -19,7 +19,10 @@ import kotlin.random.Random
  * Pure logic: the NFC link is passed in as [transceive], so the whole sequence runs under plain
  * JUnit with canned responses.
  */
-class EmvReader(private val transceive: (ByteArray) -> ByteArray) {
+class EmvReader(
+    private val log: (String) -> Unit = {},
+    private val transceive: (ByteArray) -> ByteArray,
+) {
 
     data class Result(
         val pan: String,
@@ -33,13 +36,25 @@ class EmvReader(private val transceive: (ByteArray) -> ByteArray) {
     class EmvException(val code: String, message: String) : Exception(message)
 
     fun read(): Result {
-        val aids = selectPpse().ifEmpty { KNOWN_AIDS }
+        val listed = selectPpse()
+        val aids = listed.ifEmpty { KNOWN_AIDS }
+        log("AIDs to try: ${aids.joinToString { toHex(it) }}")
+        var refused = false
         for (aid in aids) {
-            val fci = select(aid) ?: continue
+            val fci = select(aid, "SELECT ${toHex(aid)}")
+            if (fci == null) {
+                if (lastStatus == "SW 6985" && listed.isNotEmpty()) refused = true
+                continue
+            }
             val label = Tlv.find(fci, 0x50)?.let { String(it, Charsets.US_ASCII).trim() }?.takeIf { it.isNotEmpty() }
+            log("label=$label")
             val found = readApplication(fci)
+            log("result for ${toHex(aid)}: pan=${if (found.pan != null) "found" else "missing"} expiry=${if (found.expiryMonth != null) "found" else "missing"}")
             val pan = found.pan ?: continue
-            if (!luhnValid(pan)) throw EmvException("READ_FAILED", "Card number failed checksum")
+            if (!luhnValid(pan)) {
+                log("pan failed Luhn, length=${pan.length}")
+                throw EmvException("READ_FAILED", "Card number failed checksum")
+            }
             return Result(
                 pan = pan,
                 expiryMonth = found.expiryMonth,
@@ -48,6 +63,7 @@ class EmvReader(private val transceive: (ByteArray) -> ByteArray) {
                 label = label,
             )
         }
+        if (refused) throw EmvException("REFUSED", "Card refused to open its payment application")
         throw EmvException("NOT_EMV", "No payment application answered")
     }
 
@@ -55,7 +71,7 @@ class EmvReader(private val transceive: (ByteArray) -> ByteArray) {
 
     /** The contactless directory. Lists the card's payment apps, best first. Empty if absent. */
     private fun selectPpse(): List<ByteArray> {
-        val fci = select("2PAY.SYS.DDF01".toByteArray(Charsets.US_ASCII)) ?: return emptyList()
+        val fci = select(PPSE, "SELECT PPSE") ?: return emptyList()
         return Tlv.findAll(fci, 0x61)
             .mapNotNull { entry ->
                 val aid = Tlv.find(entry, 0x4F) ?: return@mapNotNull null
@@ -66,9 +82,8 @@ class EmvReader(private val transceive: (ByteArray) -> ByteArray) {
             .map { it.first }
     }
 
-    private fun select(name: ByteArray): ByteArray? =
-        send(byteArrayOf(0x00, 0xA4.toByte(), 0x04, 0x00, name.size.toByte()) + name + 0x00)
-
+    private fun select(name: ByteArray, step: String): ByteArray? =
+        send(byteArrayOf(0x00, 0xA4.toByte(), 0x04, 0x00, name.size.toByte()) + name + 0x00, step)
     private class Found(var pan: String? = null, var expiryMonth: Int? = null, var expiryYear: Int? = null) {
         fun absorb(data: ByteArray) {
             // Tag 5A (PAN) and 5F24 (expiry) are the clean source. Track-2 equivalent data — 57,
@@ -97,14 +112,17 @@ class EmvReader(private val transceive: (ByteArray) -> ByteArray) {
     private fun readApplication(fci: ByteArray): Found {
         val found = Found()
         val pdol = Tlv.find(fci, 0x9F38)
+        log("PDOL: ${pdol?.let { pdolLayout(it) } ?: "none"}")
         val gpoBody = byteArrayOf(0x83.toByte()) + encodeLength(pdolData(pdol))
-        val gpo = send(byteArrayOf(0x80.toByte(), 0xA8.toByte(), 0x00, 0x00, gpoBody.size.toByte()) + gpoBody + 0x00)
+        val gpo = send(byteArrayOf(0x80.toByte(), 0xA8.toByte(), 0x00, 0x00, gpoBody.size.toByte()) + gpoBody + 0x00, "GPO")
 
         if (gpo != null) {
             // Visa's qVSDC often hands track-2 straight back in the GPO response.
             found.absorb(gpo)
             if (found.done) return found
-            for (entry in aflEntries(gpo)) {
+            val afl = aflEntries(gpo)
+            log("AFL: ${afl.joinToString { "SFI ${it.third} rec ${it.first}-${it.second}" }.ifEmpty { "none" }}")
+            for (entry in afl) {
                 for (rec in entry.first..entry.second) {
                     readRecord(entry.third, rec)?.let { found.absorb(it) }
                     if (found.done) return found
@@ -114,6 +132,7 @@ class EmvReader(private val transceive: (ByteArray) -> ByteArray) {
 
         // A card that refused our GPO (an odd PDOL, a terminal profile it didn't like) will still
         // often answer READ RECORD for the usual files. Cheap to try before giving up.
+        log("fallback record sweep")
         for (sfi in 1..3) {
             for (rec in 1..5) {
                 readRecord(sfi, rec)?.let { found.absorb(it) }
@@ -124,7 +143,21 @@ class EmvReader(private val transceive: (ByteArray) -> ByteArray) {
     }
 
     private fun readRecord(sfi: Int, record: Int): ByteArray? =
-        send(byteArrayOf(0x00, 0xB2.toByte(), record.toByte(), ((sfi shl 3) or 0x04).toByte(), 0x00))
+        send(byteArrayOf(0x00, 0xB2.toByte(), record.toByte(), ((sfi shl 3) or 0x04).toByte(), 0x00), "READ SFI $sfi rec $record")
+
+    private fun pdolLayout(pdol: ByteArray): String {
+        val parts = mutableListOf<String>()
+        var i = 0
+        while (i < pdol.size) {
+            val (tag, tagLen) = Tlv.readTag(pdol, i)
+            i += tagLen
+            if (i >= pdol.size) break
+            val len = pdol[i].toInt() and 0xFF
+            i += 1
+            parts += "${Integer.toHexString(tag).uppercase(Locale.US)}(${len}${if (terminalValue(tag) == null) ",zeroed" else ""})"
+        }
+        return parts.joinToString(" ")
+    }
 
     /** (first record, last record, SFI) for each 4-byte AFL entry. */
     private fun aflEntries(gpo: ByteArray): List<Triple<Int, Int, Int>> {
@@ -174,7 +207,23 @@ class EmvReader(private val transceive: (ByteArray) -> ByteArray) {
      * One APDU round trip. Returns the payload on 9000, null on any other status. Follows the two
      * ISO 7816 "ask me again" statuses so callers never see them.
      */
-    private fun send(apdu: ByteArray): ByteArray? {
+    private fun send(apdu: ByteArray, step: String): ByteArray? {
+        val body = sendRaw(apdu)
+        val sw = lastStatus
+        if (body == null) {
+            log("$step -> $sw")
+        } else {
+            val tags = mutableListOf<String>()
+            Tlv.walk(body) { t, _ -> tags += Integer.toHexString(t).uppercase(Locale.US) }
+            log("$step -> $sw, ${body.size} bytes, tags ${tags.distinct().joinToString(" ")}")
+        }
+        return body
+    }
+
+    private var lastStatus = ""
+
+    private fun sendRaw(apdu: ByteArray): ByteArray? {
+        lastStatus = "no reply"
         var resp = transceive(apdu)
         if (resp.size < 2) return null
         var sw1 = resp[resp.size - 2].toInt() and 0xFF
@@ -193,12 +242,15 @@ class EmvReader(private val transceive: (ByteArray) -> ByteArray) {
             sw1 = resp[resp.size - 2].toInt() and 0xFF
             sw2 = resp[resp.size - 1]
         }
+        lastStatus = "SW " + toHex(byteArrayOf(sw1.toByte(), sw2))
         if (sw1 != 0x90 || sw2 != 0x00.toByte()) return null
         body.write(resp, 0, resp.size - 2)
         return body.toByteArray()
     }
 
     companion object {
+        private val PPSE = "2PAY.SYS.DDF01".toByteArray(Charsets.US_ASCII)
+
         /** Tried in order when the card has no PPSE directory. */
         private val KNOWN_AIDS = listOf(
             "A0000000031010", "A0000000032010", // Visa credit/debit, Visa Electron

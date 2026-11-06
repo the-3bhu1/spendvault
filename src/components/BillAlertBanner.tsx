@@ -33,7 +33,7 @@ export default function BillAlertBanner({ onNavigateToBills }: BillAlertBannerPr
   // Manual bills. No paid check: a recurring bill has no settled state, and paying it rolls
   // nextDueDate forward — which is what drops it out of the 3-day window on its own.
   const manualAlerts = (data.recurringBills || [])
-    .filter(bill => bill.isActive)
+    .filter(bill => bill.isActive && !bill.id.startsWith('demo_'))
     .map(bill => ({ name: bill.name, daysLeft: getDaysLeft(bill.nextDueDate) }))
     .filter(b => b.daysLeft <= URGENCY_DAYS)
     .map(b => ({ ...b, overdue: b.daysLeft < 0 }));
@@ -47,6 +47,7 @@ export default function BillAlertBanner({ onNavigateToBills }: BillAlertBannerPr
   // `daysToDue <= 3` would keep the banner silent for the twenty-odd days a rolled bill spends
   // waiting for the next due date to come round.
   const ccAlerts = getActiveCardDues(data.accounts, data.transactions)
+    .filter(d => !d.account.id.startsWith('demo_'))
     .filter(d => d.daysToDue !== undefined && (d.overdue > 0 || (d.billed > 0 && d.daysToDue <= URGENCY_DAYS)))
     .map(d => ({ name: `${d.account.name} Payment`, daysLeft: d.daysToDue!, overdue: d.overdue > 0 || d.daysToDue! < 0 }));
 

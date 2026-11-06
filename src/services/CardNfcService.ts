@@ -15,7 +15,7 @@ export interface ScannedCard {
   label?: string;       // the chip's own application label, e.g. "VISA DEBIT"
 }
 
-export type CardNfcErrorCode = 'NOT_EMV' | 'TAG_LOST' | 'READ_FAILED';
+export type CardNfcErrorCode = 'NOT_EMV' | 'REFUSED' | 'TAG_LOST' | 'READ_FAILED';
 
 interface CardNfcPlugin {
   isAvailable(): Promise<{ supported: boolean; enabled: boolean }>;
@@ -40,6 +40,7 @@ export const getNfcAvailability = async (): Promise<{ supported: boolean; enable
 
 export const CARD_NFC_ERROR_TEXT: Record<CardNfcErrorCode, string> = {
   NOT_EMV: "That doesn't look like a payment card. Try another card.",
+  REFUSED: "This card doesn't let phones read it, though it still works at shop terminals. Enter its details by hand.",
   TAG_LOST: 'Card moved away too soon. Hold it still against the phone.',
   READ_FAILED: "Couldn't read this card. Try again, or enter the details by hand.",
 };

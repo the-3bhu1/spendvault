@@ -102,7 +102,11 @@ class CardNfcPlugin : Plugin() {
         try {
             iso.connect()
             iso.timeout = 5000
-            val r = EmvReader { apdu -> iso.transceive(apdu) }.read()
+            val debuggable = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            val r = EmvReader(
+                transceive = { apdu -> iso.transceive(apdu) },
+                log = if (debuggable) { msg -> android.util.Log.d("SpendVaultNfc", msg) } else { _ -> },
+            ).read()
             val ret = JSObject()
             ret.put("cardNumber", r.pan)
             r.expiryMonth?.let { ret.put("expiryMonth", it) }

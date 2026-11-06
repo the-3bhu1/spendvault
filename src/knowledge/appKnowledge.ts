@@ -170,8 +170,18 @@ Actions (each account is a card on the Accounts tab):
   (most cards hide it) or the issuing bank — type those yourself. The card is read on the phone;
   nothing is sent anywhere. If NFC is off the panel says to turn it on in the phone's settings; if
   the card is moved away too soon or isn't a payment card, it says so and keeps listening, so just
-  tap again. Cancel stops it. Not available on iPhone (Apple doesn't allow apps to read payment
+  tap again. A few cards (seen on some Mastercard credit cards) refuse to be read by phones even
+  though they still work at shop terminals; the panel then says to enter that card's details by
+  hand — nothing in the app or phone settings changes that. Cancel stops it. Not available on iPhone (Apple doesn't allow apps to read payment
   cards) or on phones without NFC — the button doesn't appear there.
+- Scan to add a card (Android): the scan button (a frame with a line through it) next to the NFC
+  button opens the camera with a card-shaped frame. Fit the side with the card number inside it
+  (on many newer cards that's the back); it fills the NUMBER, EXPIRY and NETWORK and jumps to the
+  CVV box, like tap-to-add. "Flash" at the top right helps in dim light or with raised (embossed)
+  digits; ✕ or Back cancels. The first use asks for camera permission; if it was denied, allow it
+  in the phone's Settings → Apps → SpendVault → Permissions. Text is read on the phone; no photo is
+  kept and nothing is sent anywhere. Works on any Android phone with a camera, including cards that
+  refuse NFC reads.
 - No card field is required and a partial card is fine (e.g. number and name but no CVV), but a field
   that IS filled must be valid: a 16-digit number (15 for Amex), a 3-digit CVV (4 for Amex), and an
   expiry with BOTH month and year, month 01–12. Saving is blocked until a filled field is valid.
