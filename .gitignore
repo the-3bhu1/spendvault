@@ -55,3 +55,6 @@ patch_transactions.cjs
 
 # Exported user data backups — never commit personal financial data
 spendvault_backup_*.json
+
+# Android SDK Platform-Tools (adb) downloaded for debugging a phone
+/platform-tools/
