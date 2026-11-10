@@ -1,4 +1,4 @@
-import { Fragment, useState, useRef, useEffect, useMemo } from 'react';
+import { Fragment, useState, useRef, useEffect, useMemo, type KeyboardEvent, type RefObject } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown, CalendarDays, Nfc, ScanLine } from 'lucide-react';
@@ -12,7 +12,7 @@ import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardFees, CardNetwork, BrandKey, IssuerMark, RoundingRule, EPFContributionBasis, EPFSalaryRevision } from '../types';
 import { notifyLogosUpdated } from '../services/LogoService';
 import { CardBrandLogo, CardIssuerMark, brandLabel, BRAND_INK } from './CardBrandLogo';
-import { resolveCardIssuer, resolveIssuerMark, linkedBankOf, cardMovableTransactions } from '../utils';
+import { resolveCardIssuer, resolveIssuerMark, linkedBankOf, cardMovableTransactions, debitCardMonthSpend } from '../utils';
 import { calculateEPFProjection } from '../utils/epfEngine';
 import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, getLatestBilledCycle, getOrdinalSuffix, affectsRupeeBalance, cardEarnsCashback, isUnitDenominated, rewardUnitBalance, rewardPointsToRupees, rupeesToRewardPoints, rupeeLedgerAmount, rewardPointsAdjustmentFor } from '../utils';
 import { getCardCycleFigures } from '../services/CardDuesService';
@@ -308,6 +308,15 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   // the modal) knows to tear itself straight back down.
   const nfcSessionRef = useRef(0);
   const cvvInputRef = useRef<HTMLInputElement>(null);
+  // Typing a field to its full length moves the cursor on to the next one, so the
+  // number → expiry → CVV run never needs a tap in between. Enter does the same.
+  const cardNumberInputRef = useRef<HTMLInputElement>(null);
+  const expiryInputRef = useRef<HTMLInputElement>(null);
+  const focusOnEnter = (next: RefObject<HTMLInputElement | null>) => (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    next.current?.focus();
+  };
 
   // Banks a card can be attributed to. Co-brand keys (swiggy, jupiter, ...) and
   // 'axismark' are deliberately absent — those aren't issuers.
@@ -1147,9 +1156,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     const todayStr = format(new Date(), 'yyyy-MM-dd');
                     const linkedBank = linkedBankOf(acc, data.accounts);
                     const cardMonthSpend = linkedBank
-                      ? data.transactions
-                        .filter(t => t.paidViaCardId === acc.id && t.date.startsWith(currentMonth) && affectsRupeeBalance(t))
-                        .reduce((sum, t) => t.type === 'debit' ? sum + t.amount : sum - t.amount, 0)
+                      ? debitCardMonthSpend(acc, data.transactions, data.accounts, currentMonth)
                       : 0;
                     const linkedCards = acc.type === 'bank_account'
                       ? data.accounts.filter(c => !c.archived && linkedBankOf(c, data.accounts)?.id === acc.id)
@@ -2983,6 +2990,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               placeholder="e.g. TRIBHUVAN K"
                               value={newAccount.cardDetails.cardholderName || ''}
                               onChange={e => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cardholderName: e.target.value.toUpperCase() } as CardDetails })}
+                              enterKeyHint="next"
+                              onKeyDown={focusOnEnter(cardNumberInputRef)}
                               style={{ textTransform: 'uppercase', height: '48px', fontWeight: 'normal' }}
                             />
                           ) : (
@@ -2997,17 +3006,26 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           {isEditingCardDetails ? (
                             <>
                               <input
+                                ref={cardNumberInputRef}
                                 className={`input-field ${errors.cardNumber ? 'border-danger' : ''}`}
                                 placeholder="1234 5678 9012 3456"
                                 inputMode="numeric"
+                                enterKeyHint="next"
+                                onKeyDown={focusOnEnter(expiryInputRef)}
                                 maxLength={19}
                                 value={newAccount.cardDetails.cardNumber
                                   ? newAccount.cardDetails.cardNumber.replace(/\D/g, '').replace(/(\d{4})/g, '$1 ').trim()
                                   : ''}
                                 onChange={e => {
                                   const digits = e.target.value.replace(/\D/g, '').slice(0, 16);
+                                  const prevLen = (newAccount.cardDetails?.cardNumber || '').replace(/\D/g, '').length;
                                   setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cardNumber: digits } as CardDetails });
                                   if (errors.cardNumber) setErrors(prev => ({ ...prev, cardNumber: '' }));
+                                  // Amex numbers (34/37) are 15 digits; only move on as the last digit goes in,
+                                  // not when the user deletes back to a full number to fix one.
+                                  const network = newAccount.cardDetails?.network;
+                                  const fullLen = network === 'amex' || (!network && /^3[47]/.test(digits)) ? 15 : 16;
+                                  if (digits.length === fullLen && prevLen < fullLen) expiryInputRef.current?.focus();
                                 }}
                                 style={{ fontFamily: "'Overpass Mono', monospace", letterSpacing: '3px', height: '48px', fontWeight: 'normal' }}
                               />
@@ -3028,9 +3046,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               <label className="text-xs text-muted font-bold">EXPIRY</label>
                               {isEditingCardDetails ? (
                                 <input
+                                  ref={expiryInputRef}
                                   className={`input-field ${errors.expiry ? 'border-danger' : ''}`}
                                   placeholder="MM/YY"
                                   inputMode="numeric"
+                                  enterKeyHint="next"
+                                  onKeyDown={focusOnEnter(cvvInputRef)}
                                   maxLength={5}
                                   value={expiryInput}
                                   onChange={e => {
@@ -3045,6 +3066,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                     const mm = digits.length >= 2 ? parseInt(digits.slice(0, 2)) || undefined : undefined;
                                     const yy = digits.length >= 4 ? parseInt(digits.slice(2, 4)) || undefined : undefined;
                                     setNewAccount(prev => ({ ...prev, cardDetails: { ...prev.cardDetails, expiryMonth: mm, expiryYear: yy } as CardDetails }));
+                                    // Stay put on a bad month so the error shows where it can be fixed.
+                                    if (digits.length === 4 && expiryInput.replace(/\D/g, '').length < 4 && mm !== undefined && mm <= 12) {
+                                      cvvInputRef.current?.focus();
+                                    }
                                   }}
                                   style={{ fontFamily: "'Overpass Mono', monospace", letterSpacing: '2px', height: '48px', fontWeight: 'normal' }}
                                 />

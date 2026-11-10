@@ -1172,3 +1172,110 @@ export const RewardsBackdrop: React.FC = () => (
     ))}
   </ReliefSvg>
 );
+
+// ── Debit Cards: the ATM ─────────────────────────────────────────────────────────────────────────
+// The front of a cash machine, and THE HERO IS ITS SCREEN. This hero leads with the money on your
+// debit cards, which is the one figure an ATM exists to show you — so rather than putting a machine
+// beside the balance, the balance is drawn on the machine: the avatar, label and figures sit inside a
+// recessed screen, with the function keys either side of it and the dispenser and card slot below.
+//
+// Why an ATM: the credit drawings are about owing — a tap that runs up a bill, statements, rewards
+// that come back later. A debit card spends money you already have, and cash out of a machine is the
+// plainest picture of that. It is also SYMMETRIC, unlike the My Cards tap it replaced on this screen,
+// so it keeps the COMPOSITION contract in relief.tsx rather than relaxing it.
+//
+// WHERE THINGS SIT, measured in the running app, in viewBox units. The content's box GROWS as the
+// phone narrows — the drawing scales down with the hero's width while the type stays the same size —
+// so the screen is sized for the narrowest phone, not the one in hand:
+//   390 wide: content x 84–316, y 75–318     360 wide: x 78–322, y 70–324     320 wide: x 62–338, y 52–340
+// The label is the widest line and grows with the user's name. The screen's bezel clears the 320 box
+// by 6 units on every side, the keys live in the side columns outside it, and the slots live in the
+// foot below it. Re-measure before moving any of it.
+//
+// THE SLOTS ARE EMPTY. Earlier cuts had a card going into one and notes fanning out of the other,
+// first standing over the screen's lower corners and then cut down to their ends — and either way they
+// over-told it. The machine on its own already says "your money, at a cash machine"; a card and cash
+// on top of that were illustration, and they were the fussiest part of the drawing.
+const DC = 'dcb';
+const DC_SCREEN = { x: 56, y: 44, w: 288, h: 302, r: 12 };
+// The fascia: the machine's whole face, its sides just inside the visible frame so they read as the
+// edges of an object, and its foot run off the bottom so it stands on something.
+const DC_FASCIA = { x: -6, y: 4, w: 412, h: 470, r: 24 };
+// Four function keys a side, spread down the screen's height, each with the tick on the bezel that
+// tells you which line of the screen it answers.
+const DC_KEY = { w: 32, h: 15, gap: 11 };
+const DC_KEY_YS = [104, 160, 216, 272];
+// The foot: dispenser on the left, card slot on the right, both well below the screen's bottom edge.
+const DC_DISP = { x: 34, y: 372, w: 132, h: 11 };
+const DC_SLOT = { x: 262, y: 372, w: 104, h: 9 };
+
+export const DebitCardsBackdrop: React.FC = () => (
+  // The fade starts late and keeps a floor, because the dispenser and the card slot ARE the foot of
+  // this drawing — the default ramp from y 320 would have dimmed them to nothing.
+  <ReliefSvg p={DC} wellRx={150} wellRy={168} fade={{ start: 0.9, floor: 0.35 }}>
+    {/* ── The fascia ── */}
+    <g filter={`url(#${DC}-cast)`}>
+      <path
+        d={plateAt(DC_FASCIA.w, DC_FASCIA.h, DC_FASCIA.x + DC_FASCIA.w / 2, DC_FASCIA.y + DC_FASCIA.h / 2, DC_FASCIA.r)}
+        fill={`url(#${DC}-stone-v)`}
+        style={{ fillOpacity: 'var(--relief-plate-fill)' }}
+        stroke="var(--relief-edge)" strokeWidth="1.3"
+      />
+    </g>
+
+    {/* The header: a recessed sign strip naming the machine. A word, not a figure — the rule this
+        file keeps (see PAYMENT SUCCESSFUL on My Cards). */}
+    <rect x="160" y="13" width="80" height="22" rx="5" fill="var(--relief-lo)" stroke="var(--relief-edge)" strokeWidth="1" opacity="0.85" />
+    <text
+      x={C + 2} y="25" textAnchor="middle" dominantBaseline="middle"
+      fill="var(--relief-line)" opacity="0.9"
+      style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 800, letterSpacing: '4px' }}
+    >
+      ATM
+    </text>
+
+    {/* ── The screen ── A recess: low-tone fill, its shadow on the upper-left inner wall and the light
+        caught on the lower-right one, which is how the eye reads "set into" rather than "stuck on".
+        The hero's own content is what is on it. */}
+    <path d={plateAt(DC_SCREEN.w, DC_SCREEN.h, DC_SCREEN.x + DC_SCREEN.w / 2, DC_SCREEN.y + DC_SCREEN.h / 2, DC_SCREEN.r)}
+      fill="var(--relief-lo)" stroke="var(--relief-shadow)" strokeWidth="2.2" />
+    <path
+      d={`M ${DC_SCREEN.x + DC_SCREEN.w - 2} ${DC_SCREEN.y + DC_SCREEN.r} V ${DC_SCREEN.y + DC_SCREEN.h - DC_SCREEN.r} ` +
+        `A ${DC_SCREEN.r} ${DC_SCREEN.r} 0 0 1 ${DC_SCREEN.x + DC_SCREEN.w - DC_SCREEN.r} ${DC_SCREEN.y + DC_SCREEN.h - 2} H ${DC_SCREEN.x + DC_SCREEN.r}`}
+      fill="none" stroke="var(--relief-edge)" strokeWidth="1.2" opacity="0.75"
+    />
+    {/* Glare across the glass, in the corner the label doesn't reach. */}
+    <path d={`M ${DC_SCREEN.x + DC_SCREEN.w - 68} ${DC_SCREEN.y + 6} L ${DC_SCREEN.x + DC_SCREEN.w - 12} ${DC_SCREEN.y + 6} L ${DC_SCREEN.x + DC_SCREEN.w - 6} ${DC_SCREEN.y + 12} L ${DC_SCREEN.x + DC_SCREEN.w - 6} ${DC_SCREEN.y + 34} Z`}
+      fill="var(--relief-hi)" opacity="0.8" />
+    <line x1={DC_SCREEN.x + DC_SCREEN.w - 60} y1={DC_SCREEN.y + 10} x2={DC_SCREEN.x + DC_SCREEN.w - 8} y2={DC_SCREEN.y + 54}
+      stroke="var(--relief-edge)" strokeWidth="1" opacity="0.35" />
+
+    {/* ── Function keys ── Raised, with the bezel tick each one points at. */}
+    {DC_KEY_YS.flatMap(y => [
+      { x: DC_SCREEN.x - DC_KEY.gap - DC_KEY.w, tick: [DC_SCREEN.x - DC_KEY.gap + 3, DC_SCREEN.x - 3] },
+      { x: DC_SCREEN.x + DC_SCREEN.w + DC_KEY.gap, tick: [DC_SCREEN.x + DC_SCREEN.w + 3, DC_SCREEN.x + DC_SCREEN.w + DC_KEY.gap - 3] },
+    ].map(({ x, tick }) => (
+      <g key={`${x}-${y}`}>
+        <g filter={`url(#${DC}-cast-tight)`}>
+          <rect
+            x={x} y={y - DC_KEY.h / 2} width={DC_KEY.w} height={DC_KEY.h} rx="4"
+            fill={`url(#${DC}-stone-v)`} style={{ fillOpacity: 'var(--relief-plate-fill)' }}
+            stroke="var(--relief-edge)" strokeWidth="0.9"
+          />
+        </g>
+        <line x1={tick[0]} y1={y} x2={tick[1]} y2={y} stroke="var(--relief-line)" strokeWidth="1.4" opacity="0.55" />
+      </g>
+    )))}
+
+    {/* ── The slots ── Recesses: low tone, dark mouth, the light caught on the lower lip. */}
+    <rect x={DC_DISP.x} y={DC_DISP.y} width={DC_DISP.w} height={DC_DISP.h} rx="3"
+      fill="var(--relief-lo)" stroke="var(--relief-shadow)" strokeWidth="1.4" opacity="0.95" />
+    <line x1={DC_DISP.x + 3} y1={DC_DISP.y + DC_DISP.h} x2={DC_DISP.x + DC_DISP.w - 3} y2={DC_DISP.y + DC_DISP.h}
+      stroke="var(--relief-edge)" strokeWidth="1" opacity="0.7" />
+
+    <rect x={DC_SLOT.x} y={DC_SLOT.y} width={DC_SLOT.w} height={DC_SLOT.h} rx="3"
+      fill="var(--relief-lo)" stroke="var(--relief-shadow)" strokeWidth="1.4" opacity="0.95" />
+    <line x1={DC_SLOT.x + 3} y1={DC_SLOT.y + DC_SLOT.h} x2={DC_SLOT.x + DC_SLOT.w - 3} y2={DC_SLOT.y + DC_SLOT.h}
+      stroke="var(--relief-edge)" strokeWidth="1" opacity="0.7" />
+  </ReliefSvg>
+);

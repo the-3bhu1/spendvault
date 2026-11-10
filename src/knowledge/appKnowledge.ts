@@ -147,7 +147,9 @@ Actions (each account is a card on the Accounts tab):
   CVV) to the clipboard AND opens the OS share sheet, so they can be sent to any app.
 - Save or change card details: in the account's add/edit form, the "Card Details (Optional)" block —
   "+" to start, pencil to edit, ✓ to save, trash to remove. It holds cardholder name, card number,
-  expiry, CVV, network (Visa/Mastercard/RuPay/Amex/Diners) and issuing bank; the bank is a search
+  expiry, CVV, network (Visa/Mastercard/RuPay/Amex/Diners) and issuing bank. Typing moves on by
+  itself: the 16th digit of the number (15th for Amex) jumps to the expiry, a full MM/YY jumps to the
+  CVV, and the keyboard's Next key steps from the name onward. The bank is a search
   field, and if left blank it is inferred from the card's name, or for a debit card linked to a bank
   account, from that bank; when the bank is inferred the field opens already filled in with it, and
   searching replaces it. The issuing bank only decides which bank logo is printed on the card
@@ -508,8 +510,9 @@ A card has a statement day and a due day.
     everywhere at once: the statement, the card's outstanding balance, and the bill reminder.
 # Cards (the Dashboard's Cards plaque)
 The home screen shows total outstanding across every live card — billed, unbilled, credit utilisation
-against the cards' limits, and which card's bill lands soonest — then up to three categories:
-1. **My Cards** — one tile per card, painted in that card's own colours, showing what it owes and
+against the cards' limits, and which card's bill lands soonest — then up to four categories. The
+first three, and that hero, are about CREDIT cards only:
+1. **Credit Cards** (called "My Cards" before debit cards got their own row) — one tile per card, painted in that card's own colours, showing what it owes and
    when its bill is due. A card at ₹0 keeps its tile; its statement and due dates are still
    information. Each tile carries ONE date line, and which one says whether there is a bill to pay:
    - "Due 4th · in 2 days" — this card has a BILLED statement outstanding. The date is the payment
@@ -537,11 +540,42 @@ against the cards' limits, and which card's bill lands soonest — then up to th
    to what the card was charged that year. The hero total is the sum of what's listed.
 3. **Rewards** — the cashback vault (see "Cashback / Rewards"). The category row shows a COUNT of
    rewards awaiting credit, not a rupee figure, because cards can pay in different units.
-Tapping a tile in My Cards opens that card's SUMMARY SCREEN — the card as a whole rather than any one
+4. **Debit Cards** — shown once any debit card exists (linked to a bank or standalone, archived ones
+   excluded). The category row shows how many debit cards there are. Inside, the hero (drawn as an
+   ATM screen) leads with the MONEY HELD ON the cards: the balances of the standalone cards added up,
+   captioned "1 card · held on cards" or "Held on 1 of 5 cards" when some are linked; under it "Spent
+   in <month>" across all debit cards and, when any of them earns cashback, the cashback received
+   all-time. With only linked cards (which hold no money) the hero leads with this month's spend.
+   Below the hero each card is a painted TILE like the Credit Cards tiles — three or fewer cards get
+   one wide tile each, four or more pair up two to a row, both lists alike. A STANDALONE card (one
+   that holds its own money, like TIDE) shows its balance — both wallets added together when it has
+   an NCMC travel wallet — over "Valid thru 01/30"; a LINKED card shows what it spent this month,
+   because the money is its bank's, over "Spent in <month>". Within three months of expiry either
+   tile says "Expires in 2 months" / "Expires this month" / "Expired 10/26" instead.
+   A debit card's spend is its purchases (NCMC travel-wallet rides included); top-ups, transfers and
+   NCMC travel recharges are money moving, not spending. A linked card's spend is the purchases on
+   its bank made through it, net of refunds — the same figure as its "VIA CARD" line on Accounts.
+   Tapping one opens its SUMMARY SCREEN, which opens with the CARD ITSELF — its painted front with
+   chip, bank mark, name and network. Tapping that card flips it over right there to show the full
+   number, expiry and CVV (tap any of them to copy it); tap again to turn it back. There is no
+   separate "View card" button on this screen, and sharing card details is done from the card viewer
+   opened elsewhere (Accounts, or a credit card's View card). Below the card: name, network and last
+   four digits; for a standalone card its balance (split into Payments and Travel wallet when it has
+   one), for a linked card this month's spend with the bank's name and balance; a CARD VALIDITY heading —
+   where a credit card shows its membership year — reading "Valid thru 08/29 · 2 yrs 9 mos left",
+   turning amber at three months or less ("expires in 2 months"), red once expired ("Expired 10/26
+   · update card details"), or "expiry not set" when no expiry was saved; "Spent this month" (not
+   repeated for a linked card, whose hero already is that); and, when the card earns cashback, the
+   cashback RECEIVED this month and all-time — the Cashback credits that landed on the card. A
+   debit card that pays cashback straight back onto itself (TIDE does) has no pending rewards, so
+   it doesn't appear under Rewards; its cashback lives here.
+Tapping a tile in Credit Cards opens that card's SUMMARY SCREEN — the card as a whole rather than any one
 month: its name, network and last four digits, its outstanding with the billed/unbilled split, credit
 utilisation and when the bill is due; a "View card" button that opens the rotatable card; what the card
-costs to hold; how far this membership year's spend has got toward a fee waiver, if it has one; and
-what the card has been spent and earned back, this year and all-time.
+costs to hold; for a card that earns in its own unit (Jewels, points, ...), its current balance of
+that unit — "Jewels balance: 3278 jewels", earned minus redeemed, the same figure as the card's row on
+Accounts — directly under the fees; how far this membership year's spend has got toward a fee waiver,
+if it has one; and what the card has been spent and earned back, this year and all-time.
 
 Tapping a cycle in Statements opens that card's STATEMENT SCREEN instead: month pills for its recent
 cycles, the selected cycle's date range labelled "Open cycle" or "Closed statement", that cycle's
@@ -833,8 +867,10 @@ and Accounts tabs.
 
 ## Retirement sub-view
 Total EPF running balance and interest earned this financial year, plus the monthly credit breakdown
-(12% employee + 3.67% employer EPF + 8.33% EPS pension), the 1-year projected balance and projected
-annual growth. Interest accrues monthly and is credited March 31st, on the EPF part only — the
+(12% employee + 3.67% employer EPF + 8.33% EPS pension) — shown as "Monthly Credit" with ONE bar
+under it split into Employee, Employer and Pension (amber) parts, each with its amount, so it reads
+as the parts of that one monthly figure rather than more on top of it — the 1-year projected balance
+and projected annual growth. Interest accrues monthly and is credited March 31st, on the EPF part only — the
 pension (EPS) share earns none. When a pension share is entered on the account, the breakdown opens
 with the balance split into "EPF Balance (Earns Interest)" and "Pension (EPS) Balance". Tapping an EPF account row opens
 Wealth's read-only breakdown of it; to change anything, edit the account on the Accounts tab.
@@ -981,6 +1017,9 @@ can tap "Restore from backup" on the first step to import an existing backup fil
   still yields favicons or initials, and logos already loaded are cached on-device for offline use.
   In Wealth detail screens, long-pressing the account/asset logo mark opens options to View Logo enlarged,
   set a Custom Logo (by website domain e.g. cheq.one, image URL, or SVG data URL), or reset back to default.
+  The Custom Logo sheet previews the logo as you type (once you pause): "Looking up logo…", then
+  "Logo found — Save to use it" or "No logo found for <domain>" — nothing changes until Save, and
+  Cancel leaves the old logo. A custom logo also replaces the EPF shield and the gold/silver bar.
 - Background Guide (Android): Settings → Background Guide gives per-brand battery-optimization steps so
   SMS auto-log keeps working in the background.
 

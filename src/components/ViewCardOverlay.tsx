@@ -15,9 +15,317 @@ interface ViewCardOverlayProps {
   onClose: () => void;
 }
 
-export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
-  const [isFlipped, setIsFlipped] = useState(false);
+/** A card's skin and issuer mark. The skin's index is its theme seed and has to be stable, so it is
+ *  taken from the id-sorted account list — not from any on-screen order, which moves. */
+function useCardSkin(account: Account) {
   const context = useFinance();
+  const allAccounts = context ? [...context.data.accounts].sort((a, b) => a.id.localeCompare(b.id)) : [];
+  const accountIndex = allAccounts.findIndex(acc => acc.id === account.id);
+  return {
+    gradients: getCardGradients(accountIndex >= 0 ? accountIndex : 0, account.cardDetails?.network, account.name),
+    issuer: issuerMarkOf(account, context?.data.accounts ?? []),
+  };
+}
+
+/**
+ * The FRONT of a card — chip, issuer, name, cardholder, network — and nothing from the back.
+ *
+ * Shared by this overlay and the debit card screen's hero, so the card on that screen is the same
+ * card that turns over here. Only the front travels: the back carries the full number and the CVV,
+ * which belong behind the deliberate tap into this overlay rather than on a screen that is always
+ * one tap from the Cards tab.
+ */
+export function CardFront({ account, style }: { account: Account; style?: React.CSSProperties }) {
+  const { gradients, issuer } = useCardSkin(account);
+  const { cardDetails, name } = account;
+  return (
+    <CardSurface
+      skin={gradients}
+      face="front"
+      style={{
+        border: '1px solid rgba(var(--card-ink), 0.1)',
+        // Two shadows, not one: a tight contact shadow for edge definition
+        // plus a wide ambient one for lift. A single blur reads as a UI card.
+        boxShadow: '0 2px 4px rgba(0,0,0,0.35), 0 24px 48px -12px rgba(0,0,0,0.65)',
+        padding: '24px',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        // Set here rather than inherited: the debit screen's hero centres its text, and a card face
+        // that picked that up set its labels off-centre over the values under them.
+        textAlign: 'left',
+        ...style,
+      }}
+    >
+      {/* Top Section: SIM Chip & issuing bank */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <CardChip width={42} />
+        {issuer && <CardIssuerMark mark={issuer} height={20} />}
+      </div>
+
+      {/* Network logo bottom-right, Names bottom-left */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          {name && (
+            <span style={{
+              fontFamily: 'var(--font-family)',
+              fontSize: '10px',
+              color: 'rgba(var(--card-ink), 0.5)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px'
+            }}>
+              {name}
+            </span>
+          )}
+          <span style={{
+            // Matches the statement hero's card face — see the note there.
+            fontFamily: 'var(--font-family)',
+            fontWeight: 400,
+            fontSize: '14px',
+            color: 'rgba(var(--card-ink), 0.9)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.15em',
+            // Embossed, not drop-shadowed: a highlight on the upper edge and
+            // a shadow under the lower one, as if the letters are raised out
+            // of the plastic under the same top-left light as the sheen.
+            textShadow: '0 -1px 0 rgba(255,255,255,0.14), 0 1px 1px rgba(0,0,0,0.55)',
+          }}>
+            {cardDetails?.cardholderName || 'CARDHOLDER NAME'}
+          </span>
+        </div>
+        <div style={{ overflow: 'visible' }}>
+          {cardDetails?.network && <CardNetworkLogo network={cardDetails.network} size="md" />}
+        </div>
+      </div>
+    </CardSurface>
+  );
+}
+
+// Simple temporary notification
+const showToast = (message: string) => {
+  const toast = document.createElement('div');
+  toast.textContent = message;
+  toast.style.position = 'fixed';
+  toast.style.bottom = '20px';
+  toast.style.left = '50%';
+  toast.style.transform = 'translateX(-50%)';
+  toast.style.background = 'rgba(20, 184, 166, 0.9)';
+  toast.style.color = 'white';
+  toast.style.padding = '8px 16px';
+  toast.style.borderRadius = '20px';
+  toast.style.fontSize = '12px';
+  toast.style.zIndex = '10000';
+  toast.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2000);
+};
+
+const copyToClipboard = async (text: string) => {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Older WebViews / insecure contexts have no async clipboard API.
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+};
+
+const handleCopy = (text: string, e: React.MouseEvent) => {
+  e.stopPropagation();
+  void copyToClipboard(text);
+  showToast('Copied to clipboard');
+};
+
+const formatExpiry = (account: Account) => {
+  const { cardDetails } = account;
+  return cardDetails?.expiryMonth && cardDetails?.expiryYear
+    ? `${String(cardDetails.expiryMonth).padStart(2, '0')}/${String(cardDetails.expiryYear).slice(-2)}`
+    : 'MM/YY';
+};
+
+/**
+ * The card, front and back, turning over where it stands. Tapping the back's number, expiry or CVV
+ * copies it.
+ *
+ * Shared by this overlay and the debit card screen's hero, so a card turns over the same way
+ * wherever it is shown. The box is a size container — every length on the back is set against its
+ * 360px design width, so the contents shrink with the card instead of overflowing it on a narrow
+ * phone — and it takes the card's own aspect ratio, so the caller only decides the width.
+ */
+export function FlippableCard({ account, style, children }: { account: Account; style?: React.CSSProperties; children?: React.ReactNode }) {
+  const [isFlipped, setIsFlipped] = useState(false);
+  const { cardDetails } = account;
+  const { gradients } = useCardSkin(account);
+  const expiryFormatted = formatExpiry(account);
+  const u = (n: number) => `calc(100cqw * ${n} / 360)`;
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsFlipped(!isFlipped);
+  };
+
+  return (
+    <div
+      style={{
+        width: '100%',
+        containerType: 'inline-size',
+        aspectRatio: String(CARD_ASPECT_RATIO),
+        perspective: '1000px',
+        position: 'relative',
+        // The back's labels sit over their values only when left-aligned; see CardFront.
+        textAlign: 'left',
+        ...style,
+      }}
+    >
+      <div 
+        style={{
+          width: '100%',
+          height: '100%',
+          position: 'relative',
+          transition: 'transform 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+          transformStyle: 'preserve-3d',
+          transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
+          cursor: 'pointer'
+        }}
+        onClick={handleCardClick}
+      >
+        {/* Front of Card */}
+        <CardFront
+          account={account}
+          style={{
+            position: 'absolute',
+            width: '100%',
+            height: '100%',
+            backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
+          }}
+        />
+
+        {/* Back of Card */}
+        <CardSurface
+          skin={gradients}
+          face="back"
+          style={{
+            position: 'absolute',
+            width: '100%',
+            height: '100%',
+            backfaceVisibility: 'hidden',
+            WebkitBackfaceVisibility: 'hidden',
+            border: '1px solid rgba(var(--card-ink), 0.1)',
+            // Two shadows, not one: a tight contact shadow for edge definition
+            // plus a wide ambient one for lift. A single blur reads as a UI card.
+            boxShadow: '0 2px 4px rgba(0,0,0,0.35), 0 24px 48px -12px rgba(0,0,0,0.65)',
+            transform: 'rotateY(180deg)',
+            display: 'flex',
+            flexDirection: 'column'
+          }}
+        >
+          {/* Magnetic Stripe */}
+          <div style={{ width: '100%', height: u(45), minHeight: u(45), flexShrink: 0, background: '#111', marginTop: u(15) }} />
+
+          {/* Back Details Container */}
+          <div style={{ padding: `${u(16)} ${u(24)} ${u(24)} ${u(24)}`, display: 'flex', flexDirection: 'column', gap: u(12), flex: 1 }}>
+          
+            {/* Hologram & CVV Row */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              {/* Hologram Area */}
+              <div style={{ 
+                width: u(45), 
+                height: u(35), 
+                borderRadius: u(6),
+                background: 'linear-gradient(135deg, #a8caba 0%, #5d4157 25%, #a8caba 50%, #5d4157 75%, #a8caba 100%)',
+                backgroundSize: '200% 200%',
+                animation: 'hologramShine 3s infinite linear',
+                boxShadow: 'inset 0 0 5px rgba(255,255,255,0.5), 0 1px 3px rgba(0,0,0,0.4)',
+                position: 'relative',
+                overflow: 'hidden'
+              }}>
+                {/* Subtle pattern overlay for hologram */}
+                <div style={{ 
+                  position: 'absolute', 
+                  top: 0, left: 0, right: 0, bottom: 0, 
+                  backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.4) 1px, transparent 1px)',
+                  backgroundSize: '4px 4px',
+                  opacity: 0.5
+                }} />
+              </div>
+
+              {/* CVV Box */}
+              <div 
+                style={{ display: 'flex', alignItems: 'center', gap: u(8), cursor: 'copy', width: 'fit-content' }}
+                onClick={(e) => handleCopy(cardDetails?.cvv || '', e)}
+              >
+                <span style={{ fontSize: u(10), color: 'rgba(var(--card-ink), 0.6)', textTransform: 'uppercase', fontWeight: 600 }}>CVV</span>
+                <div style={{ 
+                  background: 'white', 
+                  height: u(30), 
+                  padding: `0 ${u(12)}`, 
+                  borderRadius: u(4),
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  fontFamily: '"Courier New", Courier, monospace',
+                  fontSize: u(14),
+                  fontWeight: 700,
+                  color: '#111',
+                  letterSpacing: u(2),
+                  boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)'
+                }}>
+                  {cardDetails?.cvv || '•••'}
+                </div>
+              </div>
+            </div>
+
+            {/* Full Number & Expiry, with the co-brand mark filling the empty
+                block to their right — the one genuinely free region on the back. */}
+            <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: u(12) }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: u(10) }}>
+              <div 
+                style={{ display: 'flex', flexDirection: 'column', gap: u(2), cursor: 'copy', width: 'fit-content' }}
+                onClick={(e) => handleCopy(cardDetails?.cardNumber || '', e)}
+              >
+                <span style={{ fontSize: u(9), color: 'rgba(var(--card-ink), 0.5)', textTransform: 'uppercase', fontWeight: 600 }}>Card Number</span>
+                <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: u(15), color: 'rgb(var(--card-ink))', fontWeight: 700, letterSpacing: u(2), textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+                  {cardDetails?.cardNumber?.match(/.{1,4}/g)?.join(' ') || '•••• •••• •••• ••••'}
+                </span>
+              </div>
+            
+              <div 
+                style={{ display: 'flex', flexDirection: 'column', gap: u(2), cursor: 'copy', width: 'fit-content' }}
+                onClick={(e) => handleCopy(expiryFormatted, e)}
+              >
+                <span style={{ fontSize: u(9), color: 'rgba(var(--card-ink), 0.5)', textTransform: 'uppercase', fontWeight: 600 }}>Expiry Date</span>
+                <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: u(14), color: 'rgb(var(--card-ink))', fontWeight: 700, letterSpacing: u(1), textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+                  {expiryFormatted}
+                </span>
+              </div>
+            </div>
+
+              {cardDetails && gradients.coBrand && (
+                <CardBrandLogo brand={gradients.coBrand} height={20} />
+              )}
+            </div>
+          </div>
+        </CardSurface>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
   // Guards against a double-tap / synthetic touch+click firing the share sheet twice.
   const sharingRef = useRef(false);
 
@@ -26,69 +334,8 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
     onClose();
   };
 
-  const handleCardClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setIsFlipped(!isFlipped);
-  };
-
-  const { cardDetails, name, id } = account;
-  
-  // Find index in sorted accounts list to guarantee uniqueness
-  const allAccounts = context ? [...context.data.accounts].sort((a, b) => a.id.localeCompare(b.id)) : [];
-  const accountIndex = allAccounts.findIndex(acc => acc.id === id);
-  const gradients = getCardGradients(accountIndex >= 0 ? accountIndex : 0, cardDetails?.network, name);
-  const issuer = issuerMarkOf(account, context?.data.accounts ?? []);
-
-  const expiryFormatted = cardDetails?.expiryMonth && cardDetails?.expiryYear
-    ? `${String(cardDetails.expiryMonth).padStart(2, '0')}/${String(cardDetails.expiryYear).slice(-2)}`
-    : 'MM/YY';
-
-  // Simple temporary notification
-  const showToast = (message: string) => {
-    const toast = document.createElement('div');
-    toast.textContent = message;
-    toast.style.position = 'fixed';
-    toast.style.bottom = '20px';
-    toast.style.left = '50%';
-    toast.style.transform = 'translateX(-50%)';
-    toast.style.background = 'rgba(20, 184, 166, 0.9)';
-    toast.style.color = 'white';
-    toast.style.padding = '8px 16px';
-    toast.style.borderRadius = '20px';
-    toast.style.fontSize = '12px';
-    toast.style.zIndex = '10000';
-    toast.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 2000);
-  };
-
-  const copyToClipboard = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      // Older WebViews / insecure contexts have no async clipboard API.
-      try {
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        const ok = document.execCommand('copy');
-        ta.remove();
-        return ok;
-      } catch {
-        return false;
-      }
-    }
-  };
-
-  const handleCopy = (text: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    void copyToClipboard(text);
-    showToast('Copied to clipboard');
-  };
+  const { cardDetails, name } = account;
+  const expiryFormatted = formatExpiry(account);
 
   // Copies the details AND opens the OS share sheet. On native the Web Share API is unavailable in
   // the Capacitor WebView, so we go through the Share plugin — same flow as the split image share.
@@ -131,10 +378,6 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
     }
   };
 
-  // The card is a size container and every length on its back is expressed against its 360px design
-  // width, so the contents shrink with the card instead of overflowing it on a narrow phone.
-  const u = (n: number) => `calc(100cqw * ${n} / 360)`;
-
   return (
     <div 
       className="view-card-overlay"
@@ -157,203 +400,12 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
       }}
       onClick={handleBackdropClick}
     >
-      <div
-        style={{
-          width: '100%',
-          // Also capped by the viewport height (minus helper text, buttons and padding) so a short or
-          // landscape screen still shows the whole card.
-          maxWidth: `min(360px, calc((100dvh - 260px) * ${CARD_ASPECT_RATIO}))`,
-          containerType: 'inline-size',
-          // Height follows the card ratio instead of a fixed 230px, which was
-          // only correct at exactly 360px wide — on a narrower phone the card
-          // was stretching.
-          aspectRatio: String(CARD_ASPECT_RATIO),
-          perspective: '1000px',
-          position: 'relative'
-        }}
+      <FlippableCard
+        account={account}
+        // Also capped by the viewport height (minus helper text, buttons and padding) so a short or
+        // landscape screen still shows the whole card.
+        style={{ maxWidth: `min(360px, calc((100dvh - 260px) * ${CARD_ASPECT_RATIO}))` }}
       >
-        <div 
-          style={{
-            width: '100%',
-            height: '100%',
-            position: 'relative',
-            transition: 'transform 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-            transformStyle: 'preserve-3d',
-            transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
-            cursor: 'pointer'
-          }}
-          onClick={handleCardClick}
-        >
-          {/* Front of Card */}
-          <CardSurface
-            skin={gradients}
-            face="front"
-            style={{
-              position: 'absolute',
-              width: '100%',
-              height: '100%',
-              backfaceVisibility: 'hidden',
-              WebkitBackfaceVisibility: 'hidden',
-              border: '1px solid rgba(var(--card-ink), 0.1)',
-              // Two shadows, not one: a tight contact shadow for edge definition
-              // plus a wide ambient one for lift. A single blur reads as a UI card.
-              boxShadow: '0 2px 4px rgba(0,0,0,0.35), 0 24px 48px -12px rgba(0,0,0,0.65)',
-              padding: '24px',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between'
-            }}
-          >
-            {/* Top Section: SIM Chip & issuing bank */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <CardChip width={42} />
-              {issuer && <CardIssuerMark mark={issuer} height={20} />}
-            </div>
-
-            {/* Network logo bottom-right, Names bottom-left */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 'auto' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                {name && (
-                  <span style={{ 
-                    fontFamily: 'var(--font-family)', 
-                    fontSize: '10px', 
-                    color: 'rgba(var(--card-ink), 0.5)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}>
-                    {name}
-                  </span>
-                )}
-                <span style={{ 
-                  // Matches the statement hero's card face — see the note there.
-                  fontFamily: 'var(--font-family)', 
-                  fontWeight: 400,
-                  fontSize: '14px', 
-                  color: 'rgba(var(--card-ink), 0.9)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.15em',
-                  // Embossed, not drop-shadowed: a highlight on the upper edge and
-                  // a shadow under the lower one, as if the letters are raised out
-                  // of the plastic under the same top-left light as the sheen.
-                  textShadow: '0 -1px 0 rgba(255,255,255,0.14), 0 1px 1px rgba(0,0,0,0.55)',
-                }}>
-                  {cardDetails?.cardholderName || 'CARDHOLDER NAME'}
-                </span>
-              </div>
-              <div style={{ overflow: 'visible' }}>
-                {cardDetails?.network && <CardNetworkLogo network={cardDetails.network} size="md" />}
-              </div>
-            </div>
-          </CardSurface>
-
-          {/* Back of Card */}
-          <CardSurface
-            skin={gradients}
-            face="back"
-            style={{
-              position: 'absolute',
-              width: '100%',
-              height: '100%',
-              backfaceVisibility: 'hidden',
-              WebkitBackfaceVisibility: 'hidden',
-              border: '1px solid rgba(var(--card-ink), 0.1)',
-              // Two shadows, not one: a tight contact shadow for edge definition
-              // plus a wide ambient one for lift. A single blur reads as a UI card.
-              boxShadow: '0 2px 4px rgba(0,0,0,0.35), 0 24px 48px -12px rgba(0,0,0,0.65)',
-              transform: 'rotateY(180deg)',
-              display: 'flex',
-              flexDirection: 'column'
-            }}
-          >
-            {/* Magnetic Stripe */}
-            <div style={{ width: '100%', height: u(45), minHeight: u(45), flexShrink: 0, background: '#111', marginTop: u(15) }} />
-
-            {/* Back Details Container */}
-            <div style={{ padding: `${u(16)} ${u(24)} ${u(24)} ${u(24)}`, display: 'flex', flexDirection: 'column', gap: u(12), flex: 1 }}>
-              
-              {/* Hologram & CVV Row */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                {/* Hologram Area */}
-                <div style={{ 
-                  width: u(45), 
-                  height: u(35), 
-                  borderRadius: u(6),
-                  background: 'linear-gradient(135deg, #a8caba 0%, #5d4157 25%, #a8caba 50%, #5d4157 75%, #a8caba 100%)',
-                  backgroundSize: '200% 200%',
-                  animation: 'hologramShine 3s infinite linear',
-                  boxShadow: 'inset 0 0 5px rgba(255,255,255,0.5), 0 1px 3px rgba(0,0,0,0.4)',
-                  position: 'relative',
-                  overflow: 'hidden'
-                }}>
-                  {/* Subtle pattern overlay for hologram */}
-                  <div style={{ 
-                    position: 'absolute', 
-                    top: 0, left: 0, right: 0, bottom: 0, 
-                    backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.4) 1px, transparent 1px)',
-                    backgroundSize: '4px 4px',
-                    opacity: 0.5
-                  }} />
-                </div>
-
-                {/* CVV Box */}
-                <div 
-                  style={{ display: 'flex', alignItems: 'center', gap: u(8), cursor: 'copy', width: 'fit-content' }}
-                  onClick={(e) => handleCopy(cardDetails?.cvv || '', e)}
-                >
-                  <span style={{ fontSize: u(10), color: 'rgba(var(--card-ink), 0.6)', textTransform: 'uppercase', fontWeight: 600 }}>CVV</span>
-                  <div style={{ 
-                    background: 'white', 
-                    height: u(30), 
-                    padding: `0 ${u(12)}`, 
-                    borderRadius: u(4),
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center',
-                    fontFamily: '"Courier New", Courier, monospace',
-                    fontSize: u(14),
-                    fontWeight: 700,
-                    color: '#111',
-                    letterSpacing: u(2),
-                    boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)'
-                  }}>
-                    {cardDetails?.cvv || '•••'}
-                  </div>
-                </div>
-              </div>
-
-              {/* Full Number & Expiry, with the co-brand mark filling the empty
-                  block to their right — the one genuinely free region on the back. */}
-              <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: u(12) }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: u(10) }}>
-                <div 
-                  style={{ display: 'flex', flexDirection: 'column', gap: u(2), cursor: 'copy', width: 'fit-content' }}
-                  onClick={(e) => handleCopy(cardDetails?.cardNumber || '', e)}
-                >
-                  <span style={{ fontSize: u(9), color: 'rgba(var(--card-ink), 0.5)', textTransform: 'uppercase', fontWeight: 600 }}>Card Number</span>
-                  <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: u(15), color: 'rgb(var(--card-ink))', fontWeight: 700, letterSpacing: u(2), textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
-                    {cardDetails?.cardNumber?.match(/.{1,4}/g)?.join(' ') || '•••• •••• •••• ••••'}
-                  </span>
-                </div>
-                
-                <div 
-                  style={{ display: 'flex', flexDirection: 'column', gap: u(2), cursor: 'copy', width: 'fit-content' }}
-                  onClick={(e) => handleCopy(expiryFormatted, e)}
-                >
-                  <span style={{ fontSize: u(9), color: 'rgba(var(--card-ink), 0.5)', textTransform: 'uppercase', fontWeight: 600 }}>Expiry Date</span>
-                  <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: u(14), color: 'rgb(var(--card-ink))', fontWeight: 700, letterSpacing: u(1), textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
-                    {expiryFormatted}
-                  </span>
-                </div>
-              </div>
-
-                {cardDetails && gradients.coBrand && (
-                  <CardBrandLogo brand={gradients.coBrand} height={20} />
-                )}
-              </div>
-            </div>
-          </CardSurface>
-        </div>
-        
         {/* Helper text */}
         <div style={{ 
           position: 'absolute', 
@@ -371,7 +423,7 @@ export function ViewCardOverlay({ account, onClose }: ViewCardOverlayProps) {
         }}>
           Tap card to flip <CornerDownRight size={14} />
         </div>
-      </div>
+      </FlippableCard>
 
       <div style={{ marginTop: '55px', display: 'flex', alignItems: 'center', gap: '16px' }}>
         <button 

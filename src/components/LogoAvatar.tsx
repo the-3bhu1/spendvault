@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Cuboid, Scale, ShieldUser, WalletMinimal } from 'lucide-react';
-import { getCachedLogo, cacheLogoImage, getLogoShape, ensureLogoShape, isDeadLogo } from '../services/LogoService';
+import { getCachedLogo, cacheLogoImage, getLogoShape, ensureLogoShape, isDeadLogo, isGoogleFavicon } from '../services/LogoService';
 
 // Circular avatar for an investment holding. Renders the real brand logo when a URL resolves and
 // loads; otherwise (no URL, or the image 404s / a registry domain is wrong) it falls back to the
@@ -42,7 +42,11 @@ export function getInitials(name: string): string {
     .slice(0, 2);
 }
 
-export function LogoAvatar({ name, logoUrl, size, metal, isEpf, isWallet, accountType }: { name: string; logoUrl: string | null; size: number; metal?: 'gold' | 'silver'; isEpf?: boolean; isWallet?: boolean; accountType?: string }) {
+/** What the avatar ended up painting for `logoUrl`: still fetching, a real logo, or nothing usable
+ *  (every source failed, or there was no URL) — so the type mark / initials are showing instead. */
+export type LogoStatus = 'loading' | 'shown' | 'none';
+
+export function LogoAvatar({ name, logoUrl, size, metal, isEpf, isWallet, accountType, onStatus }: { name: string; logoUrl: string | null; size: number; metal?: 'gold' | 'silver'; isEpf?: boolean; isWallet?: boolean; accountType?: string; onStatus?: (status: LogoStatus) => void }) {
   // Ordered logo sources to try before initials: the resolved logo URL, then (for logo.dev domain
   // URLs) that domain's favicon. `srcIdx` advances on each <img> error; when it runs past the end
   // we render initials. Each remote source is transparently swapped for its cached base64 data:
@@ -87,7 +91,20 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf, isWallet, accoun
   const [, bumpShape] = useState(0);
   const shape = getLogoShape(activeSrc);
 
-  if (isEpf) {
+  const showImg = srcIdx < sources.length;
+
+  // Callers that need to know whether the logo actually landed (the custom-logo sheet's preview).
+  // 'shown' is reported from onLoad below, once the paint is known not to be Google's 404 globe.
+  const onStatusRef = useRef(onStatus);
+  onStatusRef.current = onStatus;
+  useEffect(() => {
+    onStatusRef.current?.(showImg ? 'loading' : 'none');
+  }, [showImg, srcIdx, logoUrl]);
+
+  // EPF and bullion have a mark of their own rather than a brand, but a logo the user set
+  // (customLogoUrl, which is all getAssetLogoUrl returns for them) wins while it loads and paints.
+  // Only once there's no URL, or every source has failed, does the type mark come back.
+  if (isEpf && !showImg) {
     return (
       <div
         style={{
@@ -110,7 +127,7 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf, isWallet, accoun
 
   // Commodities aren't a brand — render a metallic gold/silver bullion bar instead of a logo or
   // initials. The bar is a small inline SVG ingot (lucide has no bullion icon).
-  if (metal) {
+  if (metal && !showImg) {
     const isGold = metal === 'gold';
     const MetalIcon = Cuboid;
     return (
@@ -133,7 +150,6 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf, isWallet, accoun
     );
   }
 
-  const showImg = srcIdx < sources.length;
   const isPhysicalCash = isWallet || accountType === 'cash';
   // Same reasoning as physical cash: an offset ledger is a bookkeeping device, not a brand, so
   // LogoService never resolves a logo for it and initials ("OL") would say nothing. Scale matches
@@ -198,10 +214,19 @@ export function LogoAvatar({ name, logoUrl, size, metal, isEpf, isWallet, accoun
           // The same fetch is the only way to see that a "successful" paint was Google's 404 globe,
           // which then counts as an error: advance past it, but only if this source is still the one
           // showing by the time the answer comes back.
-          onLoad={() => {
+          onLoad={e => {
             const painted = srcIdx;
+            // Google's "no favicon" globe comes back 16×16 however large a size was asked for, and
+            // in a desktop browser the 404 check below can't see it (Google's redirect isn't CORS-
+            // readable, so the fetch throws). Its size gives it away everywhere — and a real 16px
+            // favicon blown up to fill the circle is no better than the fallback mark.
+            if (isGoogleFavicon(remoteSources[painted] || '') && e.currentTarget.naturalWidth <= 16) {
+              setSrcIdx(i => (i === painted ? i + 1 : i));
+              return;
+            }
             void cacheLogoImage(sources[painted]).then(dead => {
               if (dead) setSrcIdx(i => (i === painted ? i + 1 : i));
+              else onStatusRef.current?.('shown');
             });
             if (activeSrc && getLogoShape(activeSrc) === undefined) {
               void ensureLogoShape(activeSrc).then(() => bumpShape(n => n + 1));

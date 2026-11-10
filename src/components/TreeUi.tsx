@@ -192,10 +192,8 @@ export const CategoryHero: React.FC<{
    * Whether the label is possessed by the user. Default true — "Tribhuvan's Statements", which is
    * how every hero in both trees reads.
    *
-   * Set false for a label that already carries a possessive of its own. "My Cards" does, and
-   * "Tribhuvan's My Cards" is not a phrase: the two possessives stack rather than compose. The name
-   * is right on the tree's row, where it sits beside Statements and Rewards and the "my" is doing
-   * real work, so the fix belongs here rather than in the category's name.
+   * Set false for a label that already carries a possessive of its own — a "My Cards" would, and
+   * "Tribhuvan's My Cards" is not a phrase: the two possessives stack rather than compose.
    */
   possessive?: boolean;
   children: ReactNode;

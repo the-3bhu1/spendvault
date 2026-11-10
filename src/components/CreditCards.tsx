@@ -20,7 +20,7 @@
 // it has spent and earned back over a membership year — which is the summary you want when you are
 // not asking about one particular month.
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { CreditCard, FileText, Gift, Check, CheckCheck, AlertTriangle, Clock, Hourglass, Minus, ChevronDown } from 'lucide-react';
+import { CreditCard, WalletCards, FileText, Gift, Check, CheckCheck, AlertTriangle, Clock, Hourglass, Minus, ChevronDown } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
@@ -28,6 +28,7 @@ import type { Account } from '../types';
 import {
   formatCurrency, userPossessive, getOrdinalSuffix, getCardGradients,
   getBillingCycleForDate, formatBillingCycleRange, getAppliedBillingCycle, affectsRupeeBalance,
+  calculateBalance, getCurrentMonthStr, linkedBankOf, debitCardMonthSpend, cardEarnsCashback,
 } from '../utils';
 import { getActiveCardDues, getCardCycleFigures, sumCardDues, cycleStatus, isCycleOverdue, CYCLE_STATUS_LABEL, type CardDues, type CycleStatus } from '../services/CardDuesService';
 import { buildRewardRows, summariseRewards, summariseCardRewards, type PendingRewards } from '../services/RewardsService';
@@ -35,9 +36,9 @@ import { getCardYear, getCardSpendFigures, getCardFeeStanding } from '../service
 import Cashback from './Cashback';
 import { CategoryCard, CategoryHero, HERO_MIN_H, SubviewHeader, SealedMark, FilterPills, SectionHeading } from './TreeUi';
 import { DetailHeroBand, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
-import { CardsBackdrop, MyCardsBackdrop, StatementsBackdrop, RewardsBackdrop } from './CardsBackdrops';
+import { CardsBackdrop, MyCardsBackdrop, StatementsBackdrop, RewardsBackdrop, DebitCardsBackdrop } from './CardsBackdrops';
 import { LogoAvatar } from './LogoAvatar';
-import { ViewCardOverlay } from './ViewCardOverlay';
+import { ViewCardOverlay, FlippableCard } from './ViewCardOverlay';
 import { getCardLogoUrl } from '../services/LogoService';
 import ProfileAvatar from './ProfileAvatar';
 
@@ -46,10 +47,40 @@ import ProfileAvatar from './ProfileAvatar';
 // itself — with the outstanding figure as its lead rather than its subject. The name was already
 // reserved for a fourth category in this file's header note; the category it describes turned out to
 // be this one grown up rather than a new one beside it.
-type CardsCategory = 'mycards' | 'statements' | 'rewards';
+// 'debitcards' sits beside it rather than inside it: everything above the tiles here — outstanding,
+// billed/unbilled, utilisation, the next due date — is about credit, and a debit card has none of it.
+type CardsCategory = 'mycards' | 'statements' | 'rewards' | 'debitcards';
 
-/** What each category is called, on its row, its hero and the detail screen's header. */
-const CATEGORY_LABELS: Record<CardsCategory, string> = { mycards: 'My Cards', statements: 'Statements', rewards: 'Rewards' };
+/** What each category is called, on its row, its hero and the detail screen's header. "Credit Cards"
+ *  rather than "My Cards" since Debit Cards became its neighbour: the two names explain each other. */
+const CATEGORY_LABELS: Record<CardsCategory, string> = { mycards: 'Credit Cards', statements: 'Statements', rewards: 'Rewards', debitcards: 'Debit Cards' };
+
+/** A card's printed expiry and whole months left on it — 0 in the expiry month itself, negative once
+ *  it has passed. Valid THROUGH the printed month, so a card reading 08/29 still works on 31 Aug 2029. */
+const cardExpiry = (account: Account, now: Date = new Date()) => {
+  const mm = account.cardDetails?.expiryMonth;
+  const yy = account.cardDetails?.expiryYear;
+  if (!mm || yy === undefined) return null;
+  const year = yy < 100 ? 2000 + yy : yy;
+  return {
+    printed: `${String(mm).padStart(2, '0')}/${String(yy % 100).padStart(2, '0')}`,
+    monthsLeft: (year - now.getFullYear()) * 12 + (mm - (now.getMonth() + 1)),
+  };
+};
+
+/** The expiry as one line under a debit card's validity heading, and how loud to say it. */
+const validityLine = (account: Account): { text: string; tone: string } => {
+  const exp = cardExpiry(account);
+  if (!exp) return { text: 'Valid thru — · expiry not set', tone: 'var(--text-muted)' };
+  const { printed, monthsLeft } = exp;
+  if (monthsLeft < 0) return { text: `Expired ${printed} · update card details`, tone: 'var(--danger)' };
+  if (monthsLeft === 0) return { text: `Valid thru ${printed} · expires this month`, tone: 'var(--warning)' };
+  if (monthsLeft <= 3) return { text: `Valid thru ${printed} · expires in ${monthsLeft} month${monthsLeft === 1 ? '' : 's'}`, tone: 'var(--warning)' };
+  const yrs = Math.floor(monthsLeft / 12);
+  const mos = monthsLeft % 12;
+  const left = [yrs && `${yrs} yr${yrs === 1 ? '' : 's'}`, mos && `${mos} mo${mos === 1 ? '' : 's'}`].filter(Boolean).join(' ');
+  return { text: `Valid thru ${printed} · ${left} left`, tone: 'var(--text-secondary)' };
+};
 
 /** One closed statement: what a card billed for one cycle that has already been cut. */
 /** A row in the Statements list. Every one is a cycle of one card — closed, or the one still
@@ -339,22 +370,25 @@ const duePhrase = (d: CardDues) => {
  * of them a scroll and a half; the content is anchored the same way — mark at the top, name and
  * figures at the foot — so a wide tile reads as the same tile in a different aperture.
  */
-const CardTile: React.FC<{ d: CardDues; wide: boolean; onOpen: (account: Account) => void }> = ({ d, wide, onOpen }) => {
+/** What one tile says: the card, its figure, and one line under it. Credit and debit tiles are the
+ *  same object with different words on them — see creditTile and the Debit Cards list. */
+interface CardTileData { account: Account; figure: string; line: string }
+
+const CardTile: React.FC<CardTileData & { wide: boolean; onOpen: (account: Account) => void }> = ({ account, figure, line, wide, onOpen }) => {
   const { data } = useFinance();
   // The index is the skin's theme seed and has to be stable, so it is taken from the same id-sorted
-  // list ViewCardOverlay sorts — not from the position in `dues`, which reorders as cards are paid.
+  // list ViewCardOverlay sorts — not from the position in the roster, which reorders as cards are paid.
   const ordered = [...data.accounts].sort((a, b) => a.id.localeCompare(b.id));
-  const idx = ordered.findIndex(a => a.id === d.account.id);
-  const skin = getCardGradients(idx >= 0 ? idx : 0, d.account.cardDetails?.network, d.account.name);
+  const idx = ordered.findIndex(a => a.id === account.id);
+  const skin = getCardGradients(idx >= 0 ? idx : 0, account.cardDetails?.network, account.name);
   const ink = skin.ink === 'dark' ? '#0b0b0c' : '#fff';
   // Held back from full white/black: a figure at the same strength as the name gives the tile two
   // things shouting at once, and the name is what you are looking for.
   const inkSoft = skin.ink === 'dark' ? 'rgba(11,11,12,0.62)' : 'rgba(255,255,255,0.66)';
-  const phrase = duePhrase(d);
 
   return (
     <div
-      onClick={() => onOpen(d.account)}
+      onClick={() => onOpen(account)}
       className="card clickable"
       style={{
         background: skin.front,
@@ -372,44 +406,57 @@ const CardTile: React.FC<{ d: CardDues; wide: boolean; onOpen: (account: Account
         ...(wide ? { minHeight: '148px' } : { aspectRatio: '1 / 1' }),
       }}
     >
-      <LogoAvatar name={d.account.name} logoUrl={getCardLogoUrl(d.account)} size={38} accountType={d.account.type} />
+      <LogoAvatar name={account.name} logoUrl={getCardLogoUrl(account)} size={38} accountType={account.type} />
 
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: '1rem', fontWeight: 700, color: ink, lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {d.account.name}
+          {account.name}
         </div>
         <div className="text-serif" style={{ fontSize: '1.35rem', fontWeight: 700, color: ink, marginTop: '0.45rem', lineHeight: 1 }}>
-          {formatWhole(d.outstanding)}
+          {figure}
         </div>
-        {/* One line, and which line depends on whether there is a bill to answer for. An unbilled
-            card gets its statement day, because that is the next thing that will happen to it; a
-            billed one gets the due date and how long is left, which is the only urgent fact on this
-            screen. The urgency colour from `dueColor` is deliberately NOT used: it is tuned against
-            the app's dark ground and disappears on a saturated skin.
-
-            "Statement", not "Cut". Cut is this codebase's own word (daysToStatementCut, the cycle
-            comments) and it read as a REDUCTION sitting under a rupee figure — "₹123 · Cut 5th"
-            scans as something knocked off the total, not as a date. It was also the only place the
-            app said it: the same statementDay is "Statement Generation Day" in the account form and
-            "STATEMENT CYCLE" on the account row, so the densest label in the app was the one using
-            vocabulary the reader had never been shown. At 13-14 characters it sets on ONE line in
-            the 2-column tile, whose date line measures 121px and wraps at 20 — which is why no
-            relative phrase was added to match the Due line: "Statement 5th · in 3 days" is 25.
-            (The Due line itself already wraps there at "In 29 days"; pre-existing, left alone.) */}
+        {/* No urgency colour on this line, for either kind of card: it is tuned against the app's dark
+            ground and disappears on a saturated skin. The words carry it instead. */}
         <div className="text-mono uppercase" style={{ fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.5px', color: inkSoft, marginTop: '0.35rem' }}>
-          {d.billed > 0 && d.dueDayStr
-            ? `Due ${d.dueDayStr}${phrase ? ` \u00b7 ${phrase}` : ''}`
-            : `Statement ${getOrdinalSuffix(d.account.statementDay || 1)}`}
+          {line}
         </div>
       </div>
     </div>
   );
 };
 
+/** A credit card's tile: what it owes, and one date line.
+ *
+ *  One line, and which line depends on whether there is a bill to answer for. An unbilled
+ *  card gets its statement day, because that is the next thing that will happen to it; a
+ *  billed one gets the due date and how long is left, which is the only urgent fact on this
+ *  screen.
+ *
+ *  "Statement", not "Cut". Cut is this codebase's own word (daysToStatementCut, the cycle
+ *  comments) and it read as a REDUCTION sitting under a rupee figure — "₹123 · Cut 5th"
+ *  scans as something knocked off the total, not as a date. It was also the only place the
+ *  app said it: the same statementDay is "Statement Generation Day" in the account form and
+ *  "STATEMENT CYCLE" on the account row, so the densest label in the app was the one using
+ *  vocabulary the reader had never been shown. At 13-14 characters it sets on ONE line in
+ *  the 2-column tile, whose date line measures 121px and wraps at 20 — which is why no
+ *  relative phrase was added to match the Due line: "Statement 5th · in 3 days" is 25.
+ *  (The Due line itself already wraps there at "In 29 days"; pre-existing, left alone.)
+ */
+const creditTile = (d: CardDues): CardTileData => {
+  const phrase = duePhrase(d);
+  return {
+    account: d.account,
+    figure: formatWhole(d.outstanding),
+    line: d.billed > 0 && d.dueDayStr
+      ? `Due ${d.dueDayStr}${phrase ? ` \u00b7 ${phrase}` : ''}`
+      : `Statement ${getOrdinalSuffix(d.account.statementDay || 1)}`,
+  };
+};
+
 /**
  * The card wall.
  *
- * FOUR OR FEWER go one to a row at full width; more than that pairs them up, and an odd count gives
+ * THREE OR FEWER go one to a row at full width; more than that pairs them up, and an odd count gives
  * the LAST tile the full width so the grid never ends on a half-empty row. The rule is about how
  * much room a small collection deserves rather than about density: three cards in a two-column grid
  * is a screen two-thirds empty with a stub at the bottom, where three full-width tiles fill it.
@@ -417,21 +464,21 @@ const CardTile: React.FC<{ d: CardDues; wide: boolean; onOpen: (account: Account
  * The odd tile is the last one rather than the first because the list is ordered by what is most
  * pressing — promoting the runt to the top would reorder the wall to suit its own geometry.
  */
-const CardTileGrid: React.FC<{ dues: CardDues[]; onOpen: (account: Account) => void }> = ({ dues, onOpen }) => {
-  const oneUp = dues.length <= 4;
+const CardTileGrid: React.FC<{ tiles: CardTileData[]; onOpen: (account: Account) => void }> = ({ tiles, onOpen }) => {
+  const oneUp = tiles.length <= 3;
   return (
     <div style={{
       display: 'grid',
       gridTemplateColumns: oneUp ? '1fr' : 'repeat(2, minmax(0, 1fr))',
       gap: '0.85rem',
     }}>
-      {dues.map((d, i) => {
+      {tiles.map((t, i) => {
         // A card at ₹0 keeps its tile: its cut and due dates are information, and a card that
         // vanished when it was paid off would read as a card that had gone missing.
-        const wide = oneUp || (dues.length % 2 === 1 && i === dues.length - 1);
+        const wide = oneUp || (tiles.length % 2 === 1 && i === tiles.length - 1);
         return (
-          <div key={d.account.id} style={wide && !oneUp ? { gridColumn: '1 / -1' } : undefined}>
-            <CardTile d={d} wide={wide} onOpen={onOpen} />
+          <div key={t.account.id} style={wide && !oneUp ? { gridColumn: '1 / -1' } : undefined}>
+            <CardTile {...t} wide={wide} onOpen={onOpen} />
           </div>
         );
       })}
@@ -561,15 +608,50 @@ export default function CreditCards({ onExit, onViewStatement }: {
   }, [dues, data.transactions]);
 
   const hasCards = dues.length > 0;
+
+  // Every debit card, linked to a bank or standing alone, in the order Accounts lists them — the same
+  // roster rule as `dues`. Each carries the one figure its row leads with: a standalone card holds
+  // money, so its balance (both wallets, when it has a travel wallet); a linked card holds none —
+  // that's its bank's — so what it spent this month.
+  const month = getCurrentMonthStr();
+  const debitCards = useMemo(() => data.accounts
+    .filter(a => a.type === 'debit_card' && !a.archived)
+    .map(account => {
+      const bank = linkedBankOf(account, data.accounts);
+      const monthSpend = debitCardMonthSpend(account, data.transactions, data.accounts, month);
+      const payments = bank ? 0 : calculateBalance(account, data.transactions, month);
+      const travel = !bank && account.isNcmcEnabled ? calculateBalance(account, data.transactions, month, true) : null;
+      return { account, bank, monthSpend, payments, travel, balance: payments + (travel ?? 0) };
+    }), [data.accounts, data.transactions, month]);
+  const hasDebitCards = debitCards.length > 0;
+  const debitMonthSpend = debitCards.reduce((sum, d) => sum + d.monthSpend, 0);
+  const monthName = format(new Date(), 'MMM');
+  // Money the debit cards hold themselves. A linked card holds none — its money is its bank's, and
+  // adding a bank balance here would count it twice with the Accounts tab — so with only linked cards
+  // there is no such figure and the hero leads with spend instead.
+  const holdingCards = debitCards.filter(d => !d.bank);
+  const debitHeld = holdingCards.reduce((sum, d) => sum + d.balance, 0);
+
+  /** Cashback as it ARRIVED on a debit card: credits filed under Cashback against it. That is how a
+   *  card like TIDE pays — straight back onto itself — and it is the figure that can't be wrong
+   *  about a reward that was promised and never came. */
+  const debitCashback = (cardId: string, inMonth: boolean) => data.transactions
+    .filter(t => t.type === 'credit' && (t.paidViaCardId || t.accountId) === cardId
+      && (t.category || '').toLowerCase() === 'cashback' && (!inMonth || t.date.startsWith(month)))
+    .reduce((sum, t) => sum + t.amount, 0);
+  const debitEarning = debitCards.filter(d => cardEarnsCashback(d.account));
+  const debitCashbackAll = debitEarning.reduce((sum, d) => sum + debitCashback(d.account.id, false), 0);
   // Derived rather than synced: archiving the last card while a sub-view is open has to put the user
   // back on the tree, and reading it here does that on the same render instead of through an effect
   // that fires afterwards. (If the card comes back while this tab is still mounted, the sub-view
   // comes back with it — it was never left deliberately.)
-  const activeCategory = hasCards ? category : null;
+  const activeCategory = (category === 'debitcards' ? hasDebitCards : hasCards) ? category : null;
   // Derived, not synced: a card archived or deleted while its statement was open has to put the user
   // back on the sub-view, and reading it here does that on the same render rather than through an
   // effect that fires afterwards.
   const activeCard = selectedCardId ? dues.find(d => d.account.id === selectedCardId) ?? null : null;
+  const activeDebit = selectedCardId ? debitCards.find(d => d.account.id === selectedCardId) ?? null : null;
+  const inCard = !!(activeCard || activeDebit);
   const possessive = userPossessive(data.user?.name);
 
   /* The card whose bill lands first and still has something on it. Nothing to say when every
@@ -647,7 +729,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
     const handleBack = (e: Event) => {
       // Unwinds one level at a time, innermost first: statement → sub-view → tree. The move sheet is
       // a .modal-overlay and closes itself before this fires.
-      if (activeCard) {
+      if (inCard) {
         e.preventDefault();
         setSelectedCardId(null);
       } else if (activeCategory) {
@@ -657,15 +739,15 @@ export default function CreditCards({ onExit, onViewStatement }: {
     };
     window.addEventListener('appBackButton', handleBack);
     return () => window.removeEventListener('appBackButton', handleBack);
-  }, [activeCategory, activeCard]);
+  }, [activeCategory, inCard]);
 
   useEffect(() => {
     const appRoot = document.querySelector('.app-root');
     if (!appRoot) return;
     // Descending starts at the top, and so does the tree; only a category is restored.
-    const top = activeCategory && !activeCard ? scrollRef.current.category : 0;
+    const top = activeCategory && !inCard ? scrollRef.current.category : 0;
     appRoot.scrollTo({ top, behavior: 'auto' });
-  }, [activeCategory, activeCard]);
+  }, [activeCategory, inCard]);
 
   /**
    * The mark on a card's row, in the Dues and Statements lists alike.
@@ -888,7 +970,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
   return (
     <div style={{ background: 'var(--bg-primary)', paddingBottom: '100px' }}>
       {/* ───────────────────────── Level 1: the tree ───────────────────────── */}
-      {!activeCategory && !activeCard && (
+      {!activeCategory && !inCard && (
         <>
           {/* position/overflow for the backdrop, which is absolutely positioned to this box and
               bleeds past the horizontal padding. The height is HERO_MIN_H, shared with every other
@@ -933,11 +1015,11 @@ export default function CreditCards({ onExit, onViewStatement }: {
             </div>
           </div>
 
-          {!hasCards ? (
+          {!hasCards && !hasDebitCards ? (
             <div style={{ padding: '3rem 1.5rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
               <CreditCard size={48} style={{ opacity: 0.5, margin: '0 auto 1rem' }} />
               <div style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.5rem' }}>No cards yet</div>
-              <div style={{ fontSize: '0.9rem' }}>Add a credit card from the Accounts tab to track its dues here</div>
+              <div style={{ fontSize: '0.9rem' }}>Add a credit or debit card from the Accounts tab to see it here</div>
             </div>
           ) : (
             <div className="tour-cards-categories" style={{ padding: '0.5rem 0 0', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
@@ -946,6 +1028,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
                   Retirement rows. The icon glyph is what tells the categories apart; colouring the
                   tiles as well made the two trees look like they came from different apps, and the
                   colours were not carrying meaning that the glyph and the label did not already. */}
+              {hasCards && (
               <CategoryCard
                 icon={<CreditCard size={20} />}
                 label={CATEGORY_LABELS.mycards}
@@ -963,6 +1046,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
                 onClick={() => openCategory('mycards')}
                 tourClass="tour-cards-cat-mycards"
               />
+              )}
 
               {/* Only when there IS history. A chevron into an empty list is a dead end, which is the
                   rule Wealth's tree already follows for a category with nothing in it. */}
@@ -972,7 +1056,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
                   label={CATEGORY_LABELS.statements}
                   subtext="Cycles & history"
                   // The count, not the card count the plan called for: this row is about cycles, and
-                  // how many cards you hold is My Cards' figure rather than this one's.
+                  // how many cards you hold is Credit Cards' figure rather than this one's.
                   value={String(statements.length)}
                   valueNote={
                     <div className="text-mono uppercase" style={{ fontSize: '0.58rem', fontWeight: 700, marginTop: '0.3rem', letterSpacing: '0.5px', color: 'var(--text-secondary)' }}>
@@ -1005,17 +1089,36 @@ export default function CreditCards({ onExit, onViewStatement }: {
                   tourClass="tour-cards-cat-rewards"
                 />
               )}
+
+              {/* Last, below the three credit rows: the hero above them is about credit, and this
+                  is the one row it says nothing about. A count, because a debit card's own figure
+                  is a balance for one kind and a month's spend for the other — no single sum. */}
+              {hasDebitCards && (
+                <CategoryCard
+                  icon={<WalletCards size={20} />}
+                  label={CATEGORY_LABELS.debitcards}
+                  subtext="Spend & card details"
+                  value={String(debitCards.length)}
+                  valueNote={
+                    <div className="text-mono uppercase" style={{ fontSize: '0.58rem', fontWeight: 700, marginTop: '0.3rem', letterSpacing: '0.5px', color: 'var(--text-secondary)' }}>
+                      {debitCards.length === 1 ? 'Card' : 'Cards'}
+                    </div>
+                  }
+                  onClick={() => openCategory('debitcards')}
+                  tourClass="tour-cards-cat-debitcards"
+                />
+              )}
             </div>
           )}
         </>
       )}
 
       {/* ───────────────────────── Level 2: Dues ───────────────────────── */}
-      {activeCategory === 'mycards' && !activeCard && (
+      {activeCategory === 'mycards' && !inCard && (
         <div className="fade-in">
           <SubviewHeader title="Cards" onBack={() => setCategory(null)} hideTitle />
 
-          <CategoryHero backdrop={<MyCardsBackdrop />} label={CATEGORY_LABELS.mycards} userName={data.user?.name} possessive={false}>
+          <CategoryHero backdrop={<MyCardsBackdrop />} label={CATEGORY_LABELS.mycards} userName={data.user?.name}>
             <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
               {formatWhole(hasLimit ? totals.creditLimit : totals.outstanding)}
             </div>
@@ -1051,13 +1154,13 @@ export default function CreditCards({ onExit, onViewStatement }: {
               Losing the pills also gives the hero its bottom band back, which the motif redesign
               needs; it had been a strip of chrome sitting on the drawing. */}
           <div style={{ padding: '0.5rem 1.5rem calc(1.5rem + var(--safe-area-inset-bottom))' }}>
-            <CardTileGrid dues={dues} onOpen={openCard} />
+            <CardTileGrid tiles={dues.map(creditTile)} onOpen={openCard} />
           </div>
         </div>
       )}
 
       {/* ───────────────────────── Level 2: Statements ───────────────────────── */}
-      {activeCategory === 'statements' && !activeCard && (
+      {activeCategory === 'statements' && !inCard && (
         <div className="fade-in">
           <SubviewHeader title={CATEGORY_LABELS.statements} onBack={() => setCategory(null)} hideTitle />
 
@@ -1250,7 +1353,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
           intricate surface in the app (confirm, edit, bulk-confirm, consolidate) and redrawing it to
           match the tree would risk all of that for a header. What it loses is its title, because the
           hero directly above now says where you are. */}
-      {activeCategory === 'rewards' && !activeCard && (
+      {activeCategory === 'rewards' && !inCard && (
         <div className="fade-in">
           <SubviewHeader title={CATEGORY_LABELS.rewards} onBack={() => setCategory(null)} hideTitle />
 
@@ -1311,6 +1414,58 @@ export default function CreditCards({ onExit, onViewStatement }: {
         </div>
       )}
 
+      {/* ───────────────────────── Level 2: Debit Cards ─────────────────────────
+          A roster, like Statements' "All" list: one row per card with the figure that card is about.
+          The hero leads with the money ON the cards — what an ATM screen would show you — and puts
+          this month's spend and cashback under it. Spend led at first, and on the 1st of every month
+          it was a bare ₹0. */}
+      {activeCategory === 'debitcards' && !inCard && (
+        <div className="fade-in">
+          <SubviewHeader title={CATEGORY_LABELS.debitcards} onBack={() => setCategory(null)} hideTitle />
+
+          <CategoryHero backdrop={<DebitCardsBackdrop />} label={CATEGORY_LABELS.debitcards} userName={data.user?.name}>
+            <div className="text-serif" style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
+              {formatWhole(holdingCards.length > 0 ? debitHeld : debitMonthSpend)}
+            </div>
+            <div className="text-mono uppercase" style={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '1.5px', color: 'var(--text-secondary)', marginTop: '0.6rem' }}>
+              {holdingCards.length === 0
+                ? `${debitCards.length} card${debitCards.length === 1 ? '' : 's'} · spent in ${monthName}`
+                : holdingCards.length === debitCards.length
+                  ? `${debitCards.length} card${debitCards.length === 1 ? '' : 's'} · held on cards`
+                  : `Held on ${holdingCards.length} of ${debitCards.length} cards`}
+            </div>
+            {renderFigures(
+              ...(holdingCards.length > 0 ? [{ label: `Spent in ${monthName}`, value: formatWhole(debitMonthSpend) }] : []),
+              ...(debitEarning.length > 0 ? [{ label: 'Cashback', value: formatWhole(debitCashbackAll), tone: 'var(--success)' }] : []),
+            )}
+          </CategoryHero>
+
+          <div style={{ padding: '0.5rem 1.5rem calc(1.5rem + var(--safe-area-inset-bottom))' }}>
+            {/* The same tiles as Credit Cards, so the two rosters read as one wallet. The figure is the
+                one the hero leads with for that kind of card — a standalone card's own balance, a
+                linked card's spend this month (its money is the bank's) — and the line under it is
+                the debit card's one date: when it stops working. It names the expiry outright once
+                it's within three months, the way a credit tile names its due date. */}
+            <CardTileGrid
+              tiles={debitCards.map(d => {
+                const exp = cardExpiry(d.account);
+                const warning = !exp ? null
+                  : exp.monthsLeft < 0 ? `Expired ${exp.printed}`
+                    : exp.monthsLeft === 0 ? 'Expires this month'
+                      : exp.monthsLeft <= 3 ? `Expires in ${exp.monthsLeft} month${exp.monthsLeft === 1 ? '' : 's'}`
+                        : null;
+                return {
+                  account: d.account,
+                  figure: formatWhole(d.bank ? d.monthSpend : d.balance),
+                  line: warning ?? (d.bank ? `Spent in ${monthName}` : exp ? `Valid thru ${exp.printed}` : 'Balance'),
+                };
+              })}
+              onOpen={openCard}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ───────────────────────── Level 3: one card, whole ───────────────────────── */}
       {activeCard && (() => {
         const cardDues = activeCard;
@@ -1325,6 +1480,11 @@ export default function CreditCards({ onExit, onViewStatement }: {
         const fees = getCardFeeStanding(card, year, spend.yearSpend);
         const yearRewards = summariseCardRewards(rewards.rows, data.accounts, card.id, year);
         const lifeRewards = summariseCardRewards(rewards.rows, data.accounts, card.id);
+        // Only a card paying in its own unit has a pot to hold a balance. A rupee card's cashback
+        // lands in an account and is counted there.
+        const rewardBalance = card.isCashbackEnabled && card.rewardType === 'points' && card.rewardUnit
+          ? { amount: calculateBalance(card, data.transactions, getCurrentMonthStr(), false, true, data.cashbackStatements), unit: card.rewardUnit }
+          : null;
 
         const last4 = card.cardDetails?.cardNumber?.replace(/\D/g, '').slice(-4);
         const identity = ['Credit card', card.cardDetails?.network?.toUpperCase(), last4 && `•••• ${last4}`]
@@ -1467,10 +1627,23 @@ export default function CreditCards({ onExit, onViewStatement }: {
                 )}
               </div>
 
+              {/* What's left to redeem — earned minus redeemed, the number you'd act on — so it leads
+                  ahead of spend and earnings. Same call as the Accounts screen's row for this card,
+                  so the two can't disagree. */}
+              {rewardBalance && (
+                <div className="flex" style={{ marginTop: '0.85rem' }}>
+                  <StatCell
+                    label={`${rewardBalance.unit} balance`}
+                    value={`${Math.round(rewardBalance.amount)} ${rewardBalance.unit.toLowerCase()}`}
+                    tone="var(--accent)"
+                  />
+                </div>
+              )}
+
               {/* Spend, then rewards — each a year figure beside its all-time counterpart, and each
                   collapsing to one cell while those two agree. See StatPair. */}
               <StatPair
-                marginTop="0.85rem"
+                marginTop={rewardBalance ? '0.75rem' : '0.85rem'}
                 same={spend.yearSpend === spend.lifetimeSpend}
                 yearLabel="Spent this year" allLabel="Spent all-time" bothLabel="Spent this year & all-time"
                 yearValue={formatWhole(spend.yearSpend)} allValue={formatWhole(spend.lifetimeSpend)}
@@ -1486,6 +1659,97 @@ export default function CreditCards({ onExit, onViewStatement }: {
                 yearValue={leadFigure(yearRewards)} allValue={leadFigure(lifeRewards)}
                 tone="var(--success)"
               />
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ───────────────────────── Level 3: one debit card ─────────────────────────
+          The credit card's screen, minus everything that is about owing: no dues, no statement, no
+          fees, no membership year. What a debit card has in their place is money — its own, for a
+          standalone card, or its bank's, which this screen names but does not claim — and an expiry,
+          which takes the slot the membership year holds on a credit card.
+
+          THE CARD ITSELF IS THE HERO, not a logo in a seal. Most linked cards are barely used — the
+          bank's payments go by UPI — so a screen led by this month's spend was a ₹0 over an empty
+          page. The plastic is the one thing every debit card has, and it looks like the card in your
+          wallet. It turns over where it stands, the same card the viewer flips — opening the viewer
+          first only to tap again was two taps for one card. */}
+      {activeDebit && (() => {
+        const { account: card, bank, monthSpend, payments, travel, balance } = activeDebit;
+        const last4 = card.cardDetails?.cardNumber?.replace(/\D/g, '').slice(-4);
+        const identity = ['Debit card', card.cardDetails?.network?.toUpperCase(), last4 && `•••• ${last4}`]
+          .filter(Boolean).join(' · ');
+        const validity = validityLine(card);
+
+        // Cashback as it arrived (see debitCashback). A card paying in its own unit is counted the way
+        // the credit screen counts one, through the rewards ledger.
+        const inUnit = card.rewardType === 'points' && !!card.rewardUnit;
+        const monthWindow = { start: `${month}-01`, end: `${month}-31` };
+        const cashbackMonth = inUnit
+          ? leadFigure(summariseCardRewards(rewards.rows, data.accounts, card.id, monthWindow))
+          : formatCurrency(debitCashback(card.id, true));
+        const cashbackAll = inUnit
+          ? leadFigure(summariseCardRewards(rewards.rows, data.accounts, card.id))
+          : formatCurrency(debitCashback(card.id, false));
+
+        return (
+          <div className="fade-in" style={{ boxSizing: 'border-box' }}>
+            <SubviewHeader title={CATEGORY_LABELS.debitcards} onBack={() => setSelectedCardId(null)} hideTitle />
+
+            <div style={{ padding: '0 1.5rem 0.5rem', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+              {/* Keyed by card so a different card never opens already turned over. */}
+              <FlippableCard key={card.id} account={card} style={{ maxWidth: '340px' }} />
+              <div className="text-mono uppercase" style={{ fontSize: '0.55rem', letterSpacing: '1px', color: 'var(--text-muted)', marginTop: '0.75rem', marginBottom: '1.25rem' }}>
+                Tap the card to flip it
+              </div>
+
+              <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.35, maxWidth: '90%' }}>
+                {card.name}
+              </div>
+              <div className="text-mono uppercase" style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.4rem', letterSpacing: '1px' }}>
+                {identity}
+              </div>
+
+              <div className="text-serif" style={{ fontSize: '2.6rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '1.25rem', lineHeight: 1 }}>
+                {formatCurrency(bank ? monthSpend : balance)}
+              </div>
+              {bank ? (
+                <div className="text-mono uppercase" style={{ fontSize: '0.62rem', letterSpacing: '0.5px', color: 'var(--text-secondary)', marginTop: '0.75rem' }}>
+                  Spent in {monthName} · linked to {bank.name} · balance {formatWhole(calculateBalance(bank, data.transactions, month))}
+                </div>
+              ) : travel !== null ? (
+                renderFigures(
+                  { label: 'Payments', value: formatCurrency(payments) },
+                  { label: 'Travel wallet', value: formatCurrency(travel) },
+                )
+              ) : null}
+            </div>
+
+            <div style={{ padding: '0 1.5rem calc(1.5rem + var(--safe-area-inset-bottom))' }}>
+              <div style={{ marginTop: '1.75rem' }}>
+                <SectionHeading label="Card validity" count={null} marginBottom="0.4rem" />
+              </div>
+              <div className="text-mono uppercase" style={{ fontSize: '0.6rem', letterSpacing: '1px', color: validity.tone, marginBottom: '0.85rem' }}>
+                {validity.text}
+              </div>
+
+              {/* A linked card's hero already IS this month's spend, so it isn't boxed twice. */}
+              {!bank && (
+                <div className="flex">
+                  <StatCell label="Spent this month" value={formatCurrency(monthSpend)} tone="var(--text-primary)" />
+                </div>
+              )}
+
+              {cardEarnsCashback(card) && (
+                <StatPair
+                  marginTop={bank ? '0' : '0.75rem'}
+                  same={cashbackMonth === cashbackAll}
+                  yearLabel="Cashback this month" allLabel="Cashback all-time" bothLabel="Cashback this month & all-time"
+                  yearValue={cashbackMonth} allValue={cashbackAll}
+                  tone="var(--success)"
+                />
+              )}
             </div>
           </div>
         );

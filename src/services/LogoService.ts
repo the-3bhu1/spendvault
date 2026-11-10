@@ -392,7 +392,7 @@ const deadSources: Set<string> = (() => {
   } catch { return new Set<string>(); }
 })();
 
-function isGoogleFavicon(url: string): boolean {
+export function isGoogleFavicon(url: string): boolean {
   try {
     const u = new URL(url);
     return (u.hostname === 'www.google.com' && u.pathname === '/s2/favicons') || u.hostname.endsWith('.gstatic.com');

@@ -1064,6 +1064,30 @@ export const isLinkedDebitCard = (account: Partial<Account> | null | undefined, 
 export const spendingAccountIdOf = (tx: Pick<Transaction, 'accountId' | 'paidViaCardId'>) =>
   tx.paidViaCardId || tx.accountId;
 
+/** Moving money in or out of a standalone debit card, or between its own two wallets — not spending. */
+const DEBIT_CARD_NON_SPEND = new Set(['transfer', 'cc payment', 'ncmc travel recharge']);
+
+/**
+ * What a debit card spent in one month ('YYYY-MM').
+ *
+ * A LINKED card holds no money: its purchases sit on the bank, tagged paidViaCardId, so the figure is
+ * those, net of refunds — what the Accounts row has always shown as "VIA CARD". A STANDALONE card
+ * (TIDE) is its own account, so it is its own debits, NCMC travel-wallet rides included; top-ups and
+ * recharges between its wallets are the card moving money, and its credits are those top-ups and
+ * cashback rather than refunds, so they are not netted off.
+ */
+export const debitCardMonthSpend = (card: Account, transactions: Transaction[], accounts: Account[], month: string) => {
+  if (linkedBankOf(card, accounts)) {
+    return transactions
+      .filter(t => t.paidViaCardId === card.id && t.date.startsWith(month) && affectsRupeeBalance(t))
+      .reduce((sum, t) => t.type === 'debit' ? sum + t.amount : sum - t.amount, 0);
+  }
+  return transactions
+    .filter(t => t.accountId === card.id && t.type === 'debit' && t.date.startsWith(month) && !t.isRewardTransaction
+      && !DEBIT_CARD_NON_SPEND.has((t.category || '').toLowerCase()))
+    .reduce((sum, t) => sum + t.amount, 0);
+};
+
 export const routeCardSpend = (tx: Transaction, accounts: Account[]): Transaction => {
   if (!affectsRupeeBalance(tx)) return tx;
   const card = accounts.find(a => a.id === tx.accountId);

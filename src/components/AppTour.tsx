@@ -235,7 +235,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
     cards: [
       {
         title: "Cards Tour",
-        description: "Welcome to Cards — everything your credit cards owe, bill and earn, in one place. Open it any time from the Cards plaque on your dashboard.",
+        description: "Welcome to Cards — everything your credit cards owe, bill and earn, and your debit cards beside them, in one place. Open it any time from the Cards plaque on your dashboard.",
         icon: CreditCard
       },
       {
@@ -245,8 +245,8 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
         icon: Sparkles
       },
       {
-        title: "Three Categories",
-        description: "My Cards is one tile per card — tap one for its whole story: dues, fees, how far you are into a spend-based fee waiver, and what it has spent and earned back this year. Statements is every cycle that has already been cut, newest first, with a cycle picker and that cycle's ledger. Rewards is cashback and points waiting to be credited.",
+        title: "Your Card Categories",
+        description: "Credit Cards is one tile per card — tap one for its whole story: dues, fees, how far you are into a spend-based fee waiver, and what it has spent and earned back this year. Statements is every cycle that has already been cut, newest first, with a cycle picker and that cycle's ledger. Rewards is cashback and points waiting to be credited. Debit Cards, when you have any, lists each debit card with its balance or this month's spend, and when it expires.",
         selector: ".tour-cards-categories",
         cardPosition: 'top',
         demoCycle: ".tour-cards-categories .card",

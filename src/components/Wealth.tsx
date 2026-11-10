@@ -9,7 +9,7 @@ import { TrendingUp, RotateCcw, ChevronLeft, ChevronRight, ChevronDown, Landmark
 import ProfileAvatar from './ProfileAvatar';
 import WealthBackdrop from './WealthBackdrop';
 import { PortfolioBackdrop, AssetsBackdrop, RetirementBackdrop } from './WealthCategoryBackdrops';
-import { LogoAvatar } from './LogoAvatar';
+import { LogoAvatar, type LogoStatus } from './LogoAvatar';
 import { DetailHeroBand, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
 import { CategoryCard, CategoryHero, HERO_MIN_H, SubviewHeader, SealedMark, FilterPills, SectionHeading } from './TreeUi';
 import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT, logoFromDomain, notifyLogosUpdated } from '../services/LogoService';
@@ -287,6 +287,14 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
   const [enlargedLogoTarget, setEnlargedLogoTarget] = useState<{ account: Account; logoUrl: string | null } | null>(null);
   const [customLogoTarget, setCustomLogoTarget] = useState<Account | null>(null);
   const [customLogoInput, setCustomLogoInput] = useState('');
+  // The sheet previews what's typed, but only once typing pauses — otherwise every keystroke of
+  // "primesoft.net" fires a lookup for "p", "pr", "pri"… and the avatar flickers through misses.
+  const [customLogoPreview, setCustomLogoPreview] = useState('');
+  const [customLogoStatus, setCustomLogoStatus] = useState<LogoStatus>('none');
+  useEffect(() => {
+    const t = setTimeout(() => setCustomLogoPreview(customLogoInput.trim()), 500);
+    return () => clearTimeout(t);
+  }, [customLogoInput]);
 
   const [prices, setPrices] = useState<Record<string, number>>(() => {
     const cached: Record<string, number> = {};
@@ -2353,19 +2361,42 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
                       label="Monthly Credit"
                       value={formatFullCurrency(monthlyCredit)}
                     />
-                    <StatRow
-                      label="Employee Share (12%)"
-                      value={formatFullCurrency(epfProj.employeeContribution)}
-                    />
-                    <StatRow
-                      label="Employer EPF Share"
-                      value={formatFullCurrency(epfProj.employerEPFContribution)}
-                    />
-                    <StatRow
-                      label="Employer EPS (Pension)"
-                      value={formatFullCurrency(epfProj.employerEPSContribution)}
-                      color="var(--warning)"
-                    />
+                    {/* The shares ARE the monthly credit, not more on top of it — so they're drawn as the
+                      pieces of one bar with a legend underneath, rather than as rows that read like a
+                      sum. PF parts in white/grey, pension in the same amber as the EPS balance above. */}
+                    {(() => {
+                      const parts = [
+                        { label: 'Employee', value: epfProj.employeeContribution, color: 'var(--text-primary)' },
+                        { label: 'Employer', value: epfProj.employerEPFContribution, color: 'var(--text-secondary)' },
+                        { label: 'Pension', value: epfProj.employerEPSContribution, color: 'var(--warning)' },
+                      ].filter(p => p.value > 0);
+                      if (parts.length === 0) return null;
+                      return (
+                        <div style={{ paddingBottom: '0.85rem' }}>
+                          <div style={{ display: 'flex', gap: '3px', height: '6px' }}>
+                            {parts.map(p => (
+                              <div key={p.label} style={{ flex: `${p.value} 1 0`, background: p.color, borderRadius: '999px' }} />
+                            ))}
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${parts.length}, 1fr)`, marginTop: '0.75rem' }}>
+                            {parts.map((p, i) => (
+                              <div key={p.label} style={{
+                                display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: 0,
+                                alignItems: i === 0 ? 'flex-start' : i === parts.length - 1 ? 'flex-end' : 'center'
+                              }}>
+                                <span className="text-mono uppercase" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.68rem', fontWeight: 700, letterSpacing: '1px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                                  <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: p.color, flexShrink: 0 }} />
+                                  {p.label}
+                                </span>
+                                <span style={{ fontSize: '0.9rem', fontWeight: 700, color: p.color === 'var(--warning)' ? p.color : 'var(--text-primary)' }}>
+                                  {formatFullCurrency(p.value)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.75rem 0' }} />
 
@@ -2487,6 +2518,7 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
                   setLogoMenuTarget(null);
                   setCustomLogoTarget(target.account);
                   setCustomLogoInput(target.account.customLogoUrl || '');
+                  setCustomLogoPreview(target.account.customLogoUrl?.trim() || '');
                 }}
               >
                 <Camera size={20} /> Custom Logo
@@ -2594,13 +2626,20 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
                 const defaultUrl = isLiquidAccount(customLogoTarget)
                   ? getLiquidLogoUrl(customLogoTarget)
                   : getAssetLogoUrl(customLogoTarget);
-                const previewUrl = customLogoInput.trim()
-                  ? logoFromDomain(customLogoInput.trim())
-                  : defaultUrl;
+                const typed = customLogoInput.trim();
+                const previewUrl = customLogoPreview ? logoFromDomain(customLogoPreview) : defaultUrl;
+                const settled = typed === customLogoPreview;
+                const status = !typed
+                  ? { text: 'Using default mark', color: 'var(--text-secondary)' }
+                  : !settled || customLogoStatus === 'loading'
+                    ? { text: 'Looking up logo…', color: 'var(--text-secondary)' }
+                    : customLogoStatus === 'shown'
+                      ? { text: 'Logo found — Save to use it', color: 'var(--success)' }
+                      : { text: `No logo found for ${typed}`, color: 'var(--danger)' };
 
                 return (
                   <div
-                    className="flex-row align-center gap-3"
+                    className="flex align-center gap-3"
                     style={{
                       padding: '0.85rem',
                       background: 'var(--bg-hover)',
@@ -2615,13 +2654,14 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
                       accountType={customLogoTarget.type}
                       metal={customLogoTarget.commodityMetal}
                       isEpf={customLogoTarget.type === 'epf'}
+                      onStatus={setCustomLogoStatus}
                     />
                     <div className="flex-col" style={{ minWidth: 0, flex: 1 }}>
                       <span className="text-sm font-bold" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
                         {customLogoTarget.name}
                       </span>
-                      <span className="text-xs text-muted">
-                        {customLogoInput.trim() ? 'Previewing custom mark' : 'Using default mark'}
+                      <span className="text-xs" style={{ color: status.color }}>
+                        {status.text}
                       </span>
                     </div>
                   </div>
