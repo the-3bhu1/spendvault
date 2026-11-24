@@ -72,7 +72,14 @@ export const buildRewardRows = (
     // Only "Delayed" rewards, or legacy expectedCashback that isn't instant.
     const isDelayed = tx.rewardEarnedType === 'delayed' || (!tx.rewardEarnedType && (tx.expectedCashback || 0) > 0);
 
-    if (isDelayed && tx.type === 'debit' && tx.category !== 'Transfer' && tx.category !== 'CC Payment' && tx.category !== 'NCMC Travel Recharge' && !tx.isTravelTransaction) {
+    // A card charge is a merchant purchase to the issuer whatever it is filed under here, so a card
+    // "Transfer" (an AJIO wallet load) can earn and the log form lets it record a rate. The
+    // money-movement categories stay excluded only for accounts that are not cards, where a delayed
+    // reward can only be a leftover from an older build.
+    const isCard = account.type === 'credit_card' || account.type === 'debit_card';
+    const isMoneyMovement = tx.category === 'Transfer' || tx.category === 'CC Payment' || tx.category === 'NCMC Travel Recharge';
+
+    if (isDelayed && tx.type === 'debit' && (isCard || !isMoneyMovement) && !tx.isTravelTransaction) {
       // The expectation is whatever the editor computed and stored — never re-derived here. The log
       // form applies the chosen Cashback Mode's rate (a named level, or the card default) and
       // deliberately computes ZERO when no mode is chosen, so a 0 here means "this spend earns

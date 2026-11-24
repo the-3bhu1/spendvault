@@ -405,8 +405,12 @@ the "Other" source below covers one-off rewards.
   amount, ₹ | % | PTS toggle and Deposit To; swipe or tap the dots to move between them, and "×"
   removes the card on screen. Each wallet gets its own "Cashback" row in the ledger, grouped under
   the payment, and the panel shows the combined total when there is more than one.
-  Card cashback is the other kind: paid by the issuer for spending on the card, so it is NOT offered
-  on transfers, CC payments, NCMC recharges or fund purchases.
+  Card cashback is the other kind: paid by the issuer for spending on the card. It is offered on ANY
+  debit from a cashback-enabled card, including one filed as a Transfer, CC Payment, NCMC recharge
+  or fund purchase, because every card charge is a merchant purchase to the issuer (loading an AJIO
+  wallet with a card is an AJIO purchase to the bank), and whether it earns depends on the issuer's
+  rules for that merchant, not on the category. Its Cashback Mode starts at None, so a charge that
+  earned nothing records nothing; picking a rate files it in the Cashback Vault like any other spend.
   ITS PERCENTAGE IS OF WHAT THE ACCOUNT ACTUALLY PAID, not of the full price. On a ₹100 purchase
   with ₹20 coming from a wallet, the account is debited ₹80, so ₹2 of cashback is 2.5% — the rate
   the payment app really applied — and typing 2.5% gives ₹2. The "Primary Account Debit" line in the

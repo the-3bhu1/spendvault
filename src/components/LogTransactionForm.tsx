@@ -1301,7 +1301,8 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
 
     let finalRewardEarned = Number(newTx.rewardEarned) || 0;
     if (newTx.rewardEarnedType === 'delayed' && !finalRewardEarned) {
-      if ((account?.type === 'credit_card' || account?.type === 'debit_card') && newTx.type === 'debit' && !newTx.isTravelTransaction && finalCategory !== 'Transfer' && finalCategory !== 'CC Payment' && finalCategory !== 'NCMC Travel Recharge') {
+      // Any category: see the note on cashbackPanel for why a card's "Transfer" can still earn.
+      if ((account?.type === 'credit_card' || account?.type === 'debit_card') && newTx.type === 'debit' && !newTx.isTravelTransaction) {
         /* WHAT THE CARD ACTUALLY LENT, not what the purchase cost — see cardRewardOn, which is
          * where the reasoning lives. `newTx.amount` is the form's Amount field and means the FULL
          * price a split is taken out of; mainAccountAmount is the reduced figure this row is saved
@@ -1453,8 +1454,6 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
 
   const cashbackPanel = (() => {
     const activeAcc = data.accounts.find(a => a.id === newTx.accountId);
-    const isNcmcRecharge = newTx.category?.toLowerCase() === 'ncmc travel recharge';
-    const isMf = activeInvestmentKind === 'mutual_funds';
     const isCreditSideOfPair = newTx.type === 'credit' && (isTransfer || isCCPayment) && !!paymentSourceAccountId;
     const payerAcc = isCreditSideOfPair ? data.accounts.find(a => a.id === paymentSourceAccountId) : activeAcc;
     // A card that does not pay cashback has no business showing a Cashback Earned panel, let
@@ -1463,17 +1462,20 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
     // scroll past on every spend.
     const isCard = !isCreditSideOfPair && cardEarnsCashback(activeAcc);
     const showInstantUI = payerAcc?.type === 'bank_account' || payerAcc?.type === 'e_wallet';
-    /* The category exclusions belong to ISSUER cashback only. A bank pays card cashback for
-       spending on the card, never for moving money, so a transfer / bill payment / travel
-       recharge / fund purchase earns nothing there — hence the block stays hidden for cards.
-       INSTANT cashback is a different payer: the app that pushed the money (super.money,
-       CRED, ...) rebates the payer whatever the money was for, and a discounted gift-card
-       load is a transfer that very much does earn. Gating that on the category hid a real
-       rebate behind a rule written for the other kind. */
-    const hidden = (!showInstantUI && (isTransfer || isCCPayment || isNcmcRecharge || isMf))
+    /* NO CATEGORY GATE, for either kind. A card cannot "move money" the way a bank can: every
+       charge on it reaches the issuer as a purchase from a merchant, whatever this app files it
+       under. Loading an AJIO wallet with a card is a "Transfer" here and an AJIO purchase to the
+       issuer, and whether it earns is the issuer's call by merchant type (wallet loads often
+       don't, gift cards often do, NCMC recharges vary by card) — not something the category can
+       answer. Hiding the block on Transfer / CC Payment / NCMC recharge / fund purchases made a
+       real reward impossible to record. Nothing is lost by offering it: the Cashback Mode starts
+       at None, so a charge that earned nothing still records nothing.
+       INSTANT cashback was never gated either: the app that pushed the money (super.money,
+       CRED, ...) rebates the payer whatever the money was for. */
+    const hidden =
       // Travel spends draw down an NCMC purse that was already loaded; nothing pays cashback
       // on the second hop. The recharge that funded it is a separate row and can still earn.
-      || !!newTx.isTravelTransaction
+      !!newTx.isTravelTransaction
       || (!isCard && !showInstantUI)
       // Cashback follows money going OUT. A credit is the receiving side of some other row.
       || (newTx.type !== 'debit' && !isCreditSideOfPair)

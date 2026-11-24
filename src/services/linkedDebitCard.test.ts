@@ -67,6 +67,18 @@ describe('linked debit cards', () => {
     expect(rows.t1.account.id).toBe('card');
   });
 
+  it('files cashback on a card-funded transfer, but not a leftover one on a bank transfer', () => {
+    const credit: Account = { id: 'cc', name: 'Supermoney x AXIS', type: 'credit_card', openingBalances: {}, isCashbackEnabled: true, defaultCashbackRate: 3 };
+    const rows = buildRewardRows([
+      tx({ id: 'load', accountId: 'cc', category: 'Transfer', amount: 1120, rewardEarned: 33.6, rewardEarnedType: 'delayed' }),
+      tx({ id: 'ncmc', accountId: 'prepaid', category: 'NCMC Travel Recharge', rewardEarned: 2, rewardEarnedType: 'delayed' }),
+      tx({ id: 'bankxfer', accountId: 'bank', category: 'Transfer', rewardEarned: 5, rewardEarnedType: 'delayed' }),
+    ], [...accounts, credit]);
+    expect(rows.load?.expected).toBe(33.6);
+    expect(rows.ncmc?.expected).toBe(2);
+    expect(rows.bankxfer).toBeUndefined();
+  });
+
   it('survives a backup round trip', () => {
     const data = { accounts: [card], transactions: [routeCardSpend(tx({}), accounts)] };
     const restored = expandPayload(minifyPayload(data));
