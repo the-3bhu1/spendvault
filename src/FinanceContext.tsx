@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import type { Account, CashbackStatement, FinanceData, Transaction, User, SplitEvent, RecurringBill, Debt, DebtTransaction, InstantCashbackLeg } from './types';
 import { BUILT_IN_ACCOUNT_TYPES, isOffsetTypeAlias } from './types';
 import { classifySmsIsTransaction } from './services/GeminiService';
@@ -14,6 +14,7 @@ import {
   withInstantCashbacks, instantCashbacksOf,
 } from './utils';
 import { resolveRewardLegPlan } from './services/RewardLegService';
+import { brandAssetTargets, ensureBrandAssetsFor } from './services/BrandmarkService';
 
 export interface PendingTransfer {
   fromAccountId: string;
@@ -165,7 +166,9 @@ function normalizeTransactionOrders(transactions: Transaction[]): Transaction[] 
   });
   return changed ? result : transactions;
 }
-const DEFAULT_CATEGORIES = ['Food', 'Shopping', 'Income', 'Salary', 'Rent', 'Fund', 'Fuel', 'Bank Charges', 'Travel', 'Bills', 'Entertainment', 'CC Payment', 'Loans', 'Lending & Borrowing', 'NCMC Travel Recharge', 'Cashback', 'Investments', 'Other/Miscellaneous'];
+const REFUNDS_CATEGORY = 'Refunds';
+const REFUNDS_CATEGORY_ADDED_KEY = 'refunds_category_added_v1';
+const DEFAULT_CATEGORIES = ['Food', 'Shopping', 'Income', 'Salary', 'Rent', 'Fund', 'Fuel', 'Bank Charges', 'Travel', 'Bills', 'Entertainment', 'CC Payment', 'Loans', 'Lending & Borrowing', 'NCMC Travel Recharge', 'Cashback', REFUNDS_CATEGORY, 'Investments', 'Other/Miscellaneous'];
 const DEFAULT_CUSTOM_ACCOUNT_TYPES: string[] = [];
 const DEFAULT_TAGS: string[] = [];
 
@@ -596,6 +599,12 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           }
           if (!parsed.categories.includes(INVESTMENT_CATEGORY)) {
             parsed.categories.push(INVESTMENT_CATEGORY);
+          }
+          if (localStorage.getItem(REFUNDS_CATEGORY_ADDED_KEY) !== '1') {
+            if (!parsed.categories.some((c: string) => c.toLowerCase() === REFUNDS_CATEGORY.toLowerCase())) {
+              parsed.categories.push(REFUNDS_CATEGORY);
+            }
+            localStorage.setItem(REFUNDS_CATEGORY_ADDED_KEY, '1');
           }
 
           // Clean up legacy categories if any remain in categories array
@@ -1089,6 +1098,13 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', data.theme || 'dark');
   }, [data.theme]);
+
+  const brandAssetWork = useMemo(() => brandAssetTargets(data.accounts), [data.accounts]);
+  const brandAssetSignature = brandAssetWork.map(t => `${t.domain}|${t.logo}|${t.wordmarkTheme ?? ''}`).sort().join(',');
+  useEffect(() => {
+    void ensureBrandAssetsFor(brandAssetWork);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brandAssetSignature]);
 
   // Card CVVs and details are encrypted on the way to storage and decrypted once per launch
   // (services/cardSecrets.ts). sealedCvvs maps each plaintext to its ciphertext so an ordinary save

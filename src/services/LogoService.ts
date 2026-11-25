@@ -19,6 +19,8 @@ import { hasGeminiKey } from './GeminiConfig';
 import { resolveCardIssuer } from '../utils';
 import { NSE_STOCK_DOMAINS } from './nseStockDomains';
 import type { BrandKey } from '../types';
+import { getCachedBrandLogo } from './brandAssetCache';
+import { opaqueBounds } from '../utils/opaqueBounds';
 
 const LOGO_DEV_TOKEN_KEY = 'logo_dev_token';
 
@@ -311,7 +313,7 @@ export function getCardCoBrandDomain(account: { name: string; customLogoUrl?: st
  *  would read as a co-brand it is not. */
 export function getCardCoBrandLogoUrl(account: { name: string }): string | null {
   const domain = resolveCardCoBrandDomain(account.name);
-  return domain ? logoFromDomain(domain) : null;
+  return domain ? (getCachedBrandLogo(domain) ?? logoFromDomain(domain)) : null;
 }
 
 // --- Brand heuristic (liquid accounts the registry misses) ----------------------------
@@ -655,18 +657,9 @@ function measure(img: HTMLImageElement): LogoShape | null {
   const at = (x: number, y: number) => (y * w + x) * 4;
 
   // Opaque bounding box.
-  let minX = w, minY = h, maxX = -1, maxY = -1;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (data[at(x, y) + 3] > SHAPE_VISIBLE_ALPHA) {
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-      }
-    }
-  }
-  if (maxX < 0) return null;   // fully transparent image — nothing to measure
+  const bounds = opaqueBounds(data, w, h, SHAPE_VISIBLE_ALPHA);
+  if (!bounds) return null;   // fully transparent image — nothing to measure
+  const { minX, minY, maxX, maxY } = bounds;
 
   const boxW = maxX - minX + 1, boxH = maxY - minY + 1;
 
@@ -868,7 +861,14 @@ export function getLiquidLogoUrl(account: AccountLike): string | null {
  * (Jupiter, not CSB) — that is the mark printed on the plastic and the one on its detail hero.
  */
 export function getCardLogoUrl(account: AccountLike & { cardDetails?: { issuer?: BrandKey } }): string | null {
-  if (account.customLogoUrl?.trim()) return logoFromDomain(account.customLogoUrl.trim());
+  const custom = account.customLogoUrl?.trim();
+  const coBrandDomain = getCardCoBrandDomain(account);
+  const fromBrandApi = coBrandDomain && (!custom || custom.toLowerCase() === coBrandDomain)
+    ? getCachedBrandLogo(coBrandDomain)
+    : null;
+  if (fromBrandApi) return fromBrandApi;
+
+  if (custom) return logoFromDomain(custom);
 
   // The programme before the bank — see CARD_COBRAND_REGISTRY.
   const coBrand = resolveCardCoBrandDomain(account.name);

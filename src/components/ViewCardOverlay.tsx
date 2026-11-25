@@ -10,45 +10,117 @@ import { CardBrandLogo, CardIssuerMark } from './CardBrandLogo';
 import { getCardGradients, issuerMarkOf } from '../utils';
 import { useFinance } from '../FinanceContext';
 import { LogoAvatar, type LogoStatus } from './LogoAvatar';
-import { getCardCoBrandLogoUrl, getCardCoBrandDomain, LOGOS_UPDATED_EVENT } from '../services/LogoService';
-import { ensureBrandmark, getCachedBrandmark } from '../services/BrandmarkService';
+import { cacheLogoImage, getCardCoBrandLogoUrl, getCardCoBrandDomain, LOGOS_UPDATED_EVENT } from '../services/LogoService';
+import { cardWordmarkDomain, cardWordmarkImage, ensureBrandAssets, wordmarkThemeForInk } from '../services/BrandmarkService';
+import { opaqueBounds } from '../utils/opaqueBounds';
 
 /** The co-brand's own logo on the back of a card that has no hand-drawn mark for it — Flipkart,
  *  Amazon, Marriott, IndiGo… — in the spot the super.money and Swiggy marks take. The same logo the
  *  card's tile shows, so the two read as one brand. Gone entirely if the image can't be had: on the
  *  plastic, a monogram would be a mark the real card does not carry. */
+const u = (n: number) => `calc(100cqw * ${n} / 360)`;
+
+const WORDMARK_SQUARE_HEIGHT = 44;
+const WORDMARK_TAPER = 0.3;
+const BESIDE_CARD_NUMBER = { width: 85, height: 60 };
+const BESIDE_EXPIRY = { width: 200, height: 30 };
+
+function wordmarkBox(aspect: number): { width: number; height: number } {
+  const ideal = WORDMARK_SQUARE_HEIGHT * Math.pow(aspect, -WORDMARK_TAPER);
+  const fitIn = (room: { width: number; height: number }) => Math.min(ideal, room.height, room.width / aspect);
+  const height = Math.max(fitIn(BESIDE_CARD_NUMBER), fitIn(BESIDE_EXPIRY));
+  return { width: height * aspect, height };
+}
+
+const INK_SCAN_MAX_SIDE = 200;
+const INK_ALPHA_FLOOR = 8;
+
+type Ink = { naturalWidth: number; naturalHeight: number; x: number; y: number; width: number; height: number };
+
+function measureInk(img: HTMLImageElement): Ink | null {
+  const { naturalWidth, naturalHeight } = img;
+  if (!naturalWidth || !naturalHeight) return null;
+  const whole: Ink = { naturalWidth, naturalHeight, x: 0, y: 0, width: naturalWidth, height: naturalHeight };
+  try {
+    const scale = Math.min(1, INK_SCAN_MAX_SIDE / Math.max(naturalWidth, naturalHeight));
+    const w = Math.max(1, Math.round(naturalWidth * scale));
+    const h = Math.max(1, Math.round(naturalHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return whole;
+    ctx.drawImage(img, 0, 0, w, h);
+    const bounds = opaqueBounds(ctx.getImageData(0, 0, w, h).data, w, h, INK_ALPHA_FLOOR);
+    if (!bounds) return whole;
+    return {
+      naturalWidth,
+      naturalHeight,
+      x: bounds.minX / scale,
+      y: bounds.minY / scale,
+      width: (bounds.maxX - bounds.minX + 1) / scale,
+      height: (bounds.maxY - bounds.minY + 1) / scale,
+    };
+  } catch {
+    return whole;
+  }
+}
+
 function CoBrandBadge({ account, ink }: { account: Account; ink: 'light' | 'dark' }) {
   const url = getCardCoBrandLogoUrl(account);
   const [status, setStatus] = useState<LogoStatus>('loading');
+  const [measured, setMeasured] = useState<{ src: string; ink: Ink | null } | null>(null);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
   /* The FULL wordmark when logo.dev's Brand API has given us one (a secret key in Settings — see
      BrandmarkService), recoloured for the card: light ink means a dark card, which wants logo.dev's
      "dark" version (artwork lightened to sit on a dark background), and the reverse. Asked for once
      and kept; until it lands, and for a brand with none, the round icon below stands in. */
-  const domain = getCardCoBrandDomain(account);
-  const theme = ink === 'dark' ? 'light' : 'dark';
+  const theme = wordmarkThemeForInk(ink);
+  const coBrandDomain = getCardCoBrandDomain(account);
+  const wordmarkDomain = cardWordmarkDomain(account);
   const [, rerender] = useState(0);
   useEffect(() => {
-    if (domain) void ensureBrandmark(domain, theme);
-  }, [domain, theme]);
+    if (wordmarkDomain) void ensureBrandAssets(wordmarkDomain, theme, { logo: wordmarkDomain === coBrandDomain });
+  }, [wordmarkDomain, coBrandDomain, theme]);
   useEffect(() => {
     const onLogos = () => rerender(n => n + 1);
     window.addEventListener(LOGOS_UPDATED_EVENT, onLogos);
     return () => window.removeEventListener(LOGOS_UPDATED_EVENT, onLogos);
   }, []);
-  const wordmark = domain ? getCachedBrandmark(domain, theme) : null;
+  const candidate = cardWordmarkImage(account, theme);
+  const wordmark = candidate && candidate !== failedSrc ? candidate : null;
   if (wordmark) {
+    const inked = measured?.src === wordmark ? measured.ink : null;
+    const box = inked ? wordmarkBox(inked.width / inked.height) : null;
+    const unitsPerPixel = inked && box ? box.width / inked.width : 0;
     return (
-      <img
-        src={wordmark}
-        alt=""
+      <div
         style={{
-          flexShrink: 0,
-          height: 'calc(100cqw * 24 / 360)',
-          maxWidth: 'calc(100cqw * 130 / 360)',
-          objectFit: 'contain',
-          objectPosition: 'right bottom',
+          position: 'relative',
+          overflow: 'hidden',
+          width: box ? u(box.width) : u(1),
+          height: box ? u(box.height) : u(1),
+          visibility: box ? 'visible' : 'hidden',
         }}
-      />
+      >
+        <img
+          src={wordmark}
+          alt=""
+          onLoad={e => {
+            setMeasured({ src: wordmark, ink: measureInk(e.currentTarget) });
+            if (/^https?:/i.test(wordmark)) void cacheLogoImage(wordmark);
+          }}
+          onError={() => setFailedSrc(wordmark)}
+          style={inked ? {
+            position: 'absolute',
+            maxWidth: 'none',
+            left: u(-inked.x * unitsPerPixel),
+            top: u(-inked.y * unitsPerPixel),
+            width: u(inked.naturalWidth * unitsPerPixel),
+            height: u(inked.naturalHeight * unitsPerPixel),
+          } : { position: 'absolute' }}
+        />
+      </div>
     );
   }
   if (!url) return null;
@@ -218,8 +290,6 @@ export function FlippableCard({ account, style, children }: { account: Account; 
   const { cardDetails } = account;
   const { gradients } = useCardSkin(account);
   const expiryFormatted = formatExpiry(account);
-  const u = (n: number) => `calc(100cqw * ${n} / 360)`;
-
   const handleCardClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsFlipped(!isFlipped);
@@ -339,14 +409,14 @@ export function FlippableCard({ account, style, children }: { account: Account; 
 
             {/* Full Number & Expiry, with the co-brand mark filling the empty
                 block to their right — the one genuinely free region on the back. */}
-            <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: u(12) }}>
+            <div style={{ marginTop: 'auto', position: 'relative' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: u(10) }}>
               <div 
                 style={{ display: 'flex', flexDirection: 'column', gap: u(2), cursor: 'copy', width: 'fit-content' }}
                 onClick={(e) => handleCopy(cardDetails?.cardNumber || '', e)}
               >
                 <span style={{ fontSize: u(9), color: 'rgba(var(--card-ink), 0.5)', textTransform: 'uppercase', fontWeight: 600 }}>Card Number</span>
-                <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: u(15), color: 'rgb(var(--card-ink))', fontWeight: 700, letterSpacing: u(2), textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+                <span style={{ fontFamily: '"Courier New", Courier, monospace', fontSize: u(15), color: 'rgb(var(--card-ink))', fontWeight: 700, letterSpacing: u(2), textShadow: '0 1px 2px rgba(0,0,0,0.8)', whiteSpace: 'nowrap' }}>
                   {cardDetails?.cardNumber?.match(/.{1,4}/g)?.join(' ') || '•••• •••• •••• ••••'}
                 </span>
               </div>
@@ -362,9 +432,13 @@ export function FlippableCard({ account, style, children }: { account: Account; 
               </div>
             </div>
 
-              {cardDetails && (gradients.coBrand
-                ? <CardBrandLogo brand={gradients.coBrand} height={20} />
-                : <CoBrandBadge account={account} ink={gradients.ink} />)}
+              {cardDetails && (
+                <div style={{ position: 'absolute', right: 0, bottom: 0, display: 'flex', alignItems: 'flex-end' }}>
+                  {gradients.coBrand
+                    ? <CardBrandLogo brand={gradients.coBrand} height={20} />
+                    : <CoBrandBadge account={account} ink={gradients.ink} />}
+                </div>
+              )}
             </div>
           </div>
         </CardSurface>

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Account } from '../types';
 import { LogoAvatar, type LogoStatus } from './LogoAvatar';
-import { getCardLogoUrl, getCardIssuerLogoUrl, isCoBrandedCard } from '../services/LogoService';
+import { getCardLogoUrl, getCardIssuerLogoUrl, isCoBrandedCard, LOGOS_UPDATED_EVENT } from '../services/LogoService';
 
 /* A credit card's mark, everywhere it is shown — the tiles, the rows, the detail hero.
 
@@ -17,6 +17,13 @@ import { getCardLogoUrl, getCardIssuerLogoUrl, isCoBrandedCard } from '../servic
 export function CardLogoMark({ account, size }: { account: Account; size: number }) {
   const issuerUrl = isCoBrandedCard(account) ? getCardIssuerLogoUrl(account) : null;
   const [issuerStatus, setIssuerStatus] = useState<LogoStatus>('loading');
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    if (!isCoBrandedCard(account)) return;
+    const onLogos = () => rerender(n => n + 1);
+    window.addEventListener(LOGOS_UPDATED_EVENT, onLogos);
+    return () => window.removeEventListener(LOGOS_UPDATED_EVENT, onLogos);
+  }, [account]);
   const stamp = Math.round(size * 0.44);
   return (
     <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>

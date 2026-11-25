@@ -162,6 +162,8 @@ export interface Account {
   /** A CO-BRANDED card's second logo — the issuing bank's — when the one found from the card's name
    *  or saved details is wrong or missing. `customLogoUrl` stays the card's main mark (the brand). */
   customIssuerLogoUrl?: string;
+  customWordmarkUrl?: string;
+  wordmarkOff?: boolean;
 
   // Specific to credit_card
   statementDay?: number;

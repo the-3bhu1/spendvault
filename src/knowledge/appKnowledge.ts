@@ -460,6 +460,10 @@ don't look like spending): Transfer, CC Payment, NCMC Travel Recharge, Investmen
 Lending & Borrowing. Lending & Borrowing is auto-excluded from both Spends and Income everywhere
 (Dashboard, Insights, Ask Vault) because money lent out or borrowed is expected to be returned — it's
 not a real spend or income. The "Cashback" category is a credit (income into a rewards/account), not spend.
+"Refunds" is for money a merchant gives back. It is excluded from both Spends and Income everywhere, so a
+refund never inflates Income; the original purchase still counts in Spends, and a refund on a credit card
+is still netted off that card's statement. Refunds is an ordinary category you can rename, reorder or
+delete; it is added once for existing users and not re-added after deletion.
 
 # Credit cards & billing cycles
 A card has a statement day and a due day.
@@ -1074,13 +1078,25 @@ can tap "Restore from backup" on the first step to import an existing backup fil
   OneCard, Scapia and more; "HDFC Marriott Bonvoy" shows Marriott, "IndiGo IDFC" shows IndiGo. A plain
   bank card ("HDFC Millennia") shows the bank. Viewing the card and turning it over, a co-brand's logo
   sits bottom-right of the back, as the super.money mark does on its card. With a logo.dev SECRET key
-  saved in Settings → Logos → Card Wordmarks, the back shows the brand's FULL wordmark there instead
-  ("Flipkart", not just the "F"), from logo.dev's Brand API, in the light or dark version that suits
-  the card's colour. Each brand is fetched once (3 logo.dev credits; the free plan includes $5 a
-  month) and kept on the device; "Fetch wordmarks now" fetches them for every co-branded card at once
-  and reports how many were found, or that the key was refused / credits ran out. Brands logo.dev has
-  no wordmark for keep the round icon, and super.money, Swiggy and Jupiter keep their built-in
-  wordmarks (never looked up). The secret key is stored in the phone's secure storage, separate from
+  saved in Settings → Logos → Co-brand Logos, co-branded cards take BOTH their round logo and their
+  wordmark from logo.dev's Brand API instead of the publishable token. logo.dev decides which of a
+  brand's images is the logo and which is the wordmark, so for some brands the round logo is the
+  brand's name in text rather than its symbol. The round logo shows everywhere the card is shown,
+  the wordmark on the back in the light or dark version that suits the card's colour. Each brand is fetched once (up to 5 logo.dev credits; the
+  free plan includes $5 a month) and kept on the device. It is fetched automatically when a
+  co-branded card is added (or renamed, or restored from a backup), and for every existing
+  co-branded card when the key is saved, so cards added before the key switch over too. Until a
+  brand's Brand API logo arrives, or if logo.dev has none, the card keeps the token's logo. The
+  section reports how many logos and wordmarks were found, or that the key was refused / credits ran
+  out. There is no manual fetch button. Removing the key keeps logos already fetched. Brands logo.dev
+  has no wordmark for keep the round icon on the back. super.money, Swiggy and Jupiter are never
+  looked up: they keep their built-in wordmarks and the token's round logo, as do plain bank cards,
+  banks, wallets, stocks and funds. With the secret key saved, tapping a co-branded card's logo on its
+  detail screen offers a third tile, "Wordmark", beside Brand and Bank: View Wordmark (on the card's
+  own colours), Custom Wordmark (a domain fetches that brand's wordmark from logo.dev for 3 credits;
+  an image URL is used as it is), Use Round Logo Instead (the back shows the round logo), and Reset
+  to Default Wordmark. The choice is saved on the card and included in backups. Without the key the
+  tile is hidden, unless the card already has a wordmark choice to reset. The secret key is stored in the phone's secure storage, separate from
   the publishable logo.dev token, and is never included in backups. The Settings tile is "Logos"
   (shown when you hold stocks/funds or a co-branded card).
   A co-branded card shows BOTH marks, on its tile and its detail screen: the brand fills the circle and

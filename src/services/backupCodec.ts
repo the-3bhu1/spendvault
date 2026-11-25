@@ -108,6 +108,8 @@ export const KEY_MAP: Record<string, string> = {
   // Custom logo override for accounts/assets
   customLogoUrl: 'clu',
   customIssuerLogoUrl: 'cilu', // a co-branded card's bank logo override
+  customWordmarkUrl: 'cwmu',
+  wordmarkOff: 'wmof',
 };
 
 const REVERSE_MAP: Record<string, string> = Object.fromEntries(

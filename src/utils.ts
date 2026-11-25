@@ -124,6 +124,7 @@ export const getInvestmentKind = (
 // Single source of truth so every stats surface (Dashboard, Insights, Transactions) stays in sync.
 export const STATS_EXCLUDED_CATEGORIES = new Set([
   'transfer', 'cc payment', 'ncmc travel recharge', 'investments', 'investment', 'mutual funds', 'sip', 'stocks', 'commodity', 'lending & borrowing',
+  'refunds',
   // A credit card's unbilled spends from before it was tracked (see CardStartService): real money
   // owed, but not a purchase anyone can put a category on — and much of it may be last month's.
   'opening balance',

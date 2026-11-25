@@ -38,7 +38,8 @@ import { CategoryCard, CategoryHero, HERO_MIN_H, SubviewHeader, SealedMark, Filt
 import { DetailHeroBand, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
 import { CardsBackdrop, MyCardsBackdrop, StatementsBackdrop, RewardsBackdrop, DebitCardsBackdrop } from './CardsBackdrops';
 import { ViewCardOverlay, FlippableCard } from './ViewCardOverlay';
-import { getCardLogoUrl, getCardIssuerLogoUrl, isCoBrandedCard, notifyLogosUpdated } from '../services/LogoService';
+import { getCardLogoUrl, getCardIssuerLogoUrl, getCardCoBrandDomain, getCardCoBrandLogoUrl, isCoBrandedCard, notifyLogosUpdated } from '../services/LogoService';
+import { cardWordmarkImage, hasLogoDevSecret, wordmarkThemeForInk } from '../services/BrandmarkService';
 import { CardLogoMark } from './CardLogoMark';
 import { LogoTapTarget, LogoActionSheet, LogoViewer, CustomLogoModal, type LogoSlot } from './LogoActions';
 import { brandLabel } from './CardBrandLogo';
@@ -503,6 +504,10 @@ export default function CreditCards({ onExit, onViewStatement }: {
   const [logoSheetSlotKey, setLogoSheetSlotKey] = useState<string | undefined>(undefined);
   const [viewingLogo, setViewingLogo] = useState<LogoSlot | null>(null);
   const [editingLogo, setEditingLogo] = useState<{ cardId: string; slot: LogoSlot } | null>(null);
+  const [hasBrandApiKey, setHasBrandApiKey] = useState(false);
+  useEffect(() => {
+    if (logoSheetCardId) void hasLogoDevSecret().then(setHasBrandApiKey);
+  }, [logoSheetCardId]);
   const [statementsFilter, setStatementsFilter] = useState<string>('all');
   // Level 3: which card's statement is open, and which of its cycles. The card is held by ID rather
   // than as an object so the screen reads today's figures — an Account captured on open would keep
@@ -1824,7 +1829,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
             .join(' ')
             .trim();
           main.title = brandTitle || card.name;
-          return [main, {
+          const issuer: LogoSlot = {
             key: 'issuer',
             title: bankName || 'Issuing bank',
             role: 'Bank',
@@ -1832,12 +1837,38 @@ export default function CreditCards({ onExit, onViewStatement }: {
             defaultUrl: getCardIssuerLogoUrl({ ...card, customIssuerLogoUrl: undefined }),
             custom: card.customIssuerLogoUrl?.trim() || undefined,
             accountType: card.type,
-          }];
+          };
+          const index = [...data.accounts].sort((a, b) => a.id.localeCompare(b.id)).findIndex(a => a.id === card.id);
+          const skin = getCardGradients(Math.max(0, index), card.cardDetails?.network, card.name);
+          const hasWordmarkChoice = !!card.customWordmarkUrl?.trim() || !!card.wordmarkOff;
+          if (skin.coBrand || !getCardCoBrandDomain(card) || (!hasBrandApiKey && !hasWordmarkChoice)) return [main, issuer];
+          const theme = wordmarkThemeForInk(skin.ink);
+          const wordmark: LogoSlot = {
+            key: 'wordmark',
+            title: main.title,
+            role: 'Wordmark',
+            url: cardWordmarkImage(card, theme),
+            defaultUrl: cardWordmarkImage({ ...card, customWordmarkUrl: undefined, wordmarkOff: undefined }, theme),
+            custom: card.customWordmarkUrl?.trim() || undefined,
+            accountType: card.type,
+            wordmark: { backdrop: skin.back, off: !!card.wordmarkOff, roundUrl: getCardCoBrandLogoUrl(card) },
+          };
+          return [main, issuer, wordmark];
         };
         const saveLogo = (cardId: string, slotKey: string, value: string | undefined) => {
           const card = data.accounts.find(a => a.id === cardId);
           if (!card) return;
-          updateAccount(slotKey === 'issuer' ? { ...card, customIssuerLogoUrl: value } : { ...card, customLogoUrl: value });
+          updateAccount(
+            slotKey === 'issuer' ? { ...card, customIssuerLogoUrl: value }
+              : slotKey === 'wordmark' ? { ...card, customWordmarkUrl: value, wordmarkOff: undefined }
+                : { ...card, customLogoUrl: value },
+          );
+          notifyLogosUpdated();
+        };
+        const showRoundLogoOnBack = (cardId: string) => {
+          const card = data.accounts.find(a => a.id === cardId);
+          if (!card) return;
+          updateAccount({ ...card, customWordmarkUrl: undefined, wordmarkOff: true });
           notifyLogosUpdated();
         };
         const sheetCard = logoSheetCardId ? data.accounts.find(a => a.id === logoSheetCardId) : undefined;
@@ -1854,15 +1885,16 @@ export default function CreditCards({ onExit, onViewStatement }: {
                 onView={slot => { setLogoSheetSlotKey(slot.key); setViewingLogo(slot); }}
                 onCustom={slot => { setLogoSheetSlotKey(slot.key); setEditingLogo({ cardId: sheetCard.id, slot }); }}
                 onReset={slot => { saveLogo(sheetCard.id, slot.key, undefined); setLogoSheetCardId(null); setLogoSheetSlotKey(undefined); }}
+                onRoundLogo={() => { showRoundLogoOnBack(sheetCard.id); setLogoSheetCardId(null); setLogoSheetSlotKey(undefined); }}
               />
             )}
             {viewingLogo && (
-              <LogoViewer name={viewingLogo.title} url={viewingLogo.url} accountType={viewingLogo.accountType} onClose={() => setViewingLogo(null)} />
+              <LogoViewer name={viewingLogo.title} url={viewingLogo.url} accountType={viewingLogo.accountType} wordmark={viewingLogo.wordmark} onClose={() => setViewingLogo(null)} />
             )}
             {editingLogo && (
               <CustomLogoModal
                 slot={editingLogo.slot}
-                heading={editingLogo.slot.key === 'issuer' ? 'Bank Logo' : undefined}
+                heading={editingLogo.slot.key === 'issuer' ? 'Bank Logo' : editingLogo.slot.key === 'wordmark' ? 'Custom Wordmark' : undefined}
                 onClose={() => setEditingLogo(null)}
                 onSave={value => {
                   saveLogo(editingLogo.cardId, editingLogo.slot.key, value);
