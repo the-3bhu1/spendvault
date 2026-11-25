@@ -5,14 +5,9 @@
 		}
 	],
 	"settings": {
-		"java.configuration.updateBuildConfiguration": "automatic",
-		// Must live HERE, not in .vscode/settings.json: with this workspace file open the IDE ignores
-		// machine-scoped settings from the folder's settings file.
-		// The Java extension (1.58+) runs on its bundled JRE 25, and so does the Gradle Build Server;
-		// Gradle 8.13 cannot run on Java 25 ("Type T not present" on :app:outgoingVariants). Build
-		// server off = Buildship import, which runs Gradle on `java.import.gradle.java.home`: point
-		// that at a local JDK 21 in your USER settings (it is a per-machine path). Re-enable the
-		// build server once the wrapper is on Gradle 9.1+.
-		"java.gradle.buildServer.enabled": "off"
+		"java.configuration.updateBuildConfiguration": "automatic"
+		// The Gradle Build Server is back on its default. It runs Gradle on the Java extension's bundled
+		// JRE 25, which Gradle 8.13 could not run on ("Type T not present" on :app:outgoingVariants); the
+		// wrapper is now Gradle 9.5.1, which supports Java 25, so no JDK path is needed per machine.
 	}
 }

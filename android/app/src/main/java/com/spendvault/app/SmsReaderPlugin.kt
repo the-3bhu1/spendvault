@@ -239,7 +239,7 @@ class SmsReaderPlugin : Plugin() {
         }
 
         private fun formatIndianCurrency(amount: Double): String {
-            val formatter = java.text.NumberFormat.getCurrencyInstance(java.util.Locale("en", "IN"))
+            val formatter = java.text.NumberFormat.getCurrencyInstance(java.util.Locale.forLanguageTag("en-IN"))
             var result = formatter.format(amount)
             if (result.startsWith("Rs.")) {
                 result = result.replace("Rs.", "₹")

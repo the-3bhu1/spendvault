@@ -10,7 +10,8 @@
 FROM eclipse-temurin:21-jdk-jammy
 
 # Kept in step with the project: android/variables.gradle pins compileSdk/targetSdk 36, the Gradle
-# wrapper pins 8.13, and ./Dockerfile uses Node 22. Bump these together with those.
+# wrapper pins 9.5.1 (the newest AGP 8.13.x accepts), and ./Dockerfile uses Node 22. Bump these
+# together with those.
 ARG NODE_MAJOR=22
 ARG ANDROID_PLATFORM=36
 ARG BUILD_TOOLS=36.0.0
