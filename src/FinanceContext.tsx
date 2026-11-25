@@ -11,7 +11,7 @@ import {
   insertIntoDay, linkedGroupOf, linkedIdsOf, sortDayByOrder, syncSplitLedgerPassive,
   investmentHoldingSideType, investmentLegAmount, routeCardSpend, routeCardSpends,
   anchorCcSplitOnCard, anchorCcSplitsOnCards, linkedTxGroupOf, applyInstantCashbacks,
-  withInstantCashbacks, instantCashbacksOf,
+  withInstantCashbacks, instantCashbacksOf, isStatsExcludedCategory,
 } from './utils';
 import { resolveRewardLegPlan } from './services/RewardLegService';
 import { brandAssetTargets, ensureBrandAssetsFor } from './services/BrandmarkService';
@@ -677,10 +677,11 @@ export const FinanceProvider: React.FC<{ children: ReactNode }> = ({ children })
           if (t.rewardEarnedType === undefined) {
             t.rewardEarnedType = (t.rewardEarned > 0 || t.expectedCashback > 0) ? 'delayed' : 'none';
           }
-          // Migration: Lending & Borrowing is now always stats-excluded via its category
-          // (STATS_EXCLUDED_CATEGORIES), so the per-transaction passive flag is meaningless for it.
-          // Clear any stale excludeFromStats/excludedAmount so no orphan "passive" icon lingers in the ledger.
-          if ((t.category || '').toLowerCase() === 'lending & borrowing' && (t.excludeFromStats || t.excludedAmount !== undefined)) {
+          // Migration: a stats-excluded category (Lending & Borrowing, Refunds, Investments, …) is out of
+          // Spends/Income via STATS_EXCLUDED_CATEGORIES, so the per-transaction passive flag is meaningless
+          // for it — the form hides the toggle. Clear any stale excludeFromStats/excludedAmount so no orphan
+          // "passive" icon lingers in the ledger and the row is not dropped from the transaction count.
+          if (isStatsExcludedCategory(t.category || '') && (t.excludeFromStats || t.excludedAmount !== undefined)) {
             t.excludeFromStats = false;
             t.excludedAmount = undefined;
           }

@@ -224,7 +224,9 @@ Actions (Transactions tab):
     and resets when Investments is deselected, and it only constrains investment rows — filtering by
     type alongside other categories leaves those other categories' transactions untouched.
 - Exclude from stats: this control appears in the editor only after you enable Settings → Smart
-  Features → Passive Logs. You can exclude a transaction fully, or a partial amount; Dashboard and
+  Features → Passive Logs, and never on a category that is already out of Spends and Income
+  (Transfer, CC Payment, NCMC Travel Recharge, Lending & Borrowing, Refunds, Investments) — there
+  is nothing left for it to exclude. You can exclude a transaction fully, or a partial amount; Dashboard and
   Insights then skip that amount. The two boxes (Excluded Amount / Active Share) add up to the FULL
   price of the entry, rewards included. On a reward split the exclusion is stored across every leg —
   a ₹448 purchase paid with ₹86 of rewards can exclude the whole ₹448, which excludes ₹362 on the

@@ -3,7 +3,7 @@ import { matchDescriptions, SuggestionDropdown } from './DescriptionSuggestions'
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import type { Account, Transaction, TransactionType, InvestmentKind, RewardSplitLeg, InstantCashbackLeg } from '../types';
-import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, formatBillingCycleRange, cardEarnsCashback, cardRewardOn, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance, redemptionUnits, isInvestmentSell, investmentHoldingSideType, investmentLegAmount, holdingPositionOn, sellCostBasis, linkedBankOf, isLinkedDebitCard, spendingAccountIdOf, instantCashbacksOf, withInstantCashbacks } from '../utils';
+import { generateId, formatCurrency, getBillingCycleForDate, calculateBalance, getCurrentMonthStr, isInvestmentCategory, INVESTMENT_CATEGORY, INVESTMENT_KIND_OPTIONS, investmentKindLabel, investmentAccountTypeFor, getInvestmentKind, isPointsDenominated, rewardPointsToRupees, rupeesToRewardPoints, advanceBillCycle, formatBillingCycleRange, cardEarnsCashback, cardRewardOn, EXTERNAL_REWARD_SOURCE_ID, isExternalRewardSource, getRewardSplits, rewardSplitOfLeg, rewardSplitTotal, withRewardSplits, isUnitDenominated, rewardUnitBalance, formatRewardBalance, redemptionUnits, isInvestmentSell, investmentHoldingSideType, investmentLegAmount, holdingPositionOn, sellCostBasis, linkedBankOf, isLinkedDebitCard, spendingAccountIdOf, instantCashbacksOf, withInstantCashbacks, isStatsExcludedCategory } from '../utils';
 import { Wallet, Calendar, Activity, Sparkles, Hash, BanknoteArrowUp, BanknoteArrowDown, X, Plus, Ticket, RotateCcw } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
@@ -696,7 +696,9 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       setCcPaymentCycleTarget('previous_statement');
     }
 
-    const hidesPassiveToggle = ['transfer', 'cc payment', 'ncmc travel recharge', 'lending & borrowing'].includes(nextCategory.toLowerCase());
+    // A category already out of Spends/Income (transfers, refunds, investments, …) has nothing left for
+    // a Passive Log to carve, so the toggle is hidden for it and any stale flag is dropped.
+    const hidesPassiveToggle = isStatsExcludedCategory(nextCategory);
     // Funds and stocks quote an invested amount with AMC/brokerage on top; a commodity buy is a
     // single gross amount, so it gets no allotted/charges pair.
     const splitsCharges = nextKind === 'mutual_funds' || nextKind === 'stocks';
@@ -951,7 +953,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
           && !(existingSelf && rewardSplitOfLeg(lt, existingSelf));
       })
       : undefined;
-    const hidesPassiveToggleFinal =['transfer', 'cc payment', 'ncmc travel recharge', 'lending & borrowing'].includes((newTx.category || '').toLowerCase());
+    const hidesPassiveToggleFinal = isStatsExcludedCategory(newTx.category || '');
     const investmentKind = activeInvestmentKind;
     const isMf = investmentKind === 'mutual_funds';
     const isStocks = investmentKind === 'stocks';
@@ -3272,7 +3274,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
 
 
 
-        {data.user?.enablePassiveTransactions && newTx.category?.toLowerCase() !== 'transfer' && newTx.category?.toLowerCase() !== 'cc payment' && newTx.category?.toLowerCase() !== 'ncmc travel recharge' && newTx.category?.toLowerCase() !== 'lending & borrowing' && (
+        {data.user?.enablePassiveTransactions && !isStatsExcludedCategory(newTx.category || '') && (
           <div ref={passiveLogRef} className="flex-col gap-3" style={{ marginBottom: '1rem', padding: '1rem', background: 'var(--bg-hover)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
             <div className="flex justify-between align-center">
               <div className="flex-col">
