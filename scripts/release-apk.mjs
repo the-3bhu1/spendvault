@@ -105,6 +105,21 @@ function javaInfo() {
   return { home, from, major: r.ok ? major : null, keytool: bin('keytool') };
 }
 
+/* The Node the local route runs `npx cap sync` on: the one running this script, since both come
+   off the same PATH. The minimum is read from the Capacitor CLI's own `engines` field rather than
+   written here, so a Capacitor upgrade moves it too. Without this check the doctor said READY and
+   the build died after the web bundle with "The Capacitor CLI requires NodeJS >=22.0.0". The Docker
+   route brings its own Node (Dockerfile.android), so this only gates the local route. */
+function nodeInfo() {
+  const have = Number(process.versions.node.split('.')[0]);
+  let need = null;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'node_modules', '@capacitor', 'cli', 'package.json'), 'utf8'));
+    need = Number(/>=\s*(\d+)/.exec(pkg.engines?.node || '')?.[1]) || null;
+  } catch { /* node_modules not installed yet — buildLocal runs npm ci, so nothing to check against */ }
+  return { have, need, ok: need === null || have >= need };
+}
+
 function androidSdk() {
   const lp = path.join(ROOT, 'android', 'local.properties');
   const fromFile = fs.existsSync(lp) && readProps(lp)['sdk.dir'];
@@ -156,13 +171,14 @@ function gitState() {
 
 function survey() {
   const java = javaInfo();
+  const node = nodeInfo();
   const sdk = androidSdk();
   const docker = dockerState();
   const signing = signingState();
   const git = gitState();
-  const localReady = java.major === REQUIRED_JAVA && !!sdk && signing.ok;
+  const localReady = java.major === REQUIRED_JAVA && node.ok && !!sdk && signing.ok;
   const dockerReady = docker === 'running' && signing.kind === 'machine' && signing.ok && signing.dockerUsable;
-  return { java, sdk, docker, signing, git, localReady, dockerReady };
+  return { java, node, sdk, docker, signing, git, localReady, dockerReady };
 }
 
 // ---- doctor ------------------------------------------------------------------------------------
@@ -184,6 +200,8 @@ function doctor() {
 
   say('\nLocal toolchain (Android Studio route)');
   say(`  ${mark(s.java.major === REQUIRED_JAVA)} JDK ${s.java.major ?? 'not found'} (needs ${REQUIRED_JAVA}) — from ${s.java.from}${s.java.home ? `: ${s.java.home}` : ''}`);
+  say(`  ${mark(s.node.ok)} Node ${s.node.have}${s.node.need ? ` (Capacitor CLI needs ${s.node.need}+)` : ' (Capacitor CLI not installed yet — not checked)'} — ${process.execPath}`);
+  if (!s.node.ok) say(`       Put Node ${s.node.need}+ first on PATH (e.g. nvm use ${s.node.need}), then re-run.`);
   say(`  ${mark(!!s.sdk)} Android SDK ${s.sdk ? `${s.sdk.dir} (${s.sdk.from})` : 'not found'}`);
 
   say('\nDocker route');
