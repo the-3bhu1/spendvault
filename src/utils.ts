@@ -123,7 +123,10 @@ export const getInvestmentKind = (
 // lending & borrowing (money lent out or borrowed isn't a real spend/income — it's expected back).
 // Single source of truth so every stats surface (Dashboard, Insights, Transactions) stays in sync.
 export const STATS_EXCLUDED_CATEGORIES = new Set([
-  'transfer', 'cc payment', 'ncmc travel recharge', 'investments', 'investment', 'mutual funds', 'sip', 'stocks', 'commodity', 'lending & borrowing'
+  'transfer', 'cc payment', 'ncmc travel recharge', 'investments', 'investment', 'mutual funds', 'sip', 'stocks', 'commodity', 'lending & borrowing',
+  // A credit card's unbilled spends from before it was tracked (see CardStartService): real money
+  // owed, but not a purchase anyone can put a category on — and much of it may be last month's.
+  'opening balance',
 ]);
 export const isStatsExcludedCategory = (category: string) =>
   STATS_EXCLUDED_CATEGORIES.has((category || '').toLowerCase());
@@ -142,7 +145,7 @@ export const statsAmount = (tx: Pick<Transaction, 'amount' | 'excludedAmount' | 
 export const isCountableTransaction = (tx: Transaction) => {
   const catLower = (tx.category || '').toLowerCase();
   // Scenario 1, 2, 3: Transfer, CC Payment, Investments, NCMC Travel Recharge
-  if (['transfer', 'cc payment', 'ncmc travel recharge'].includes(catLower) || isInvestmentCategory(catLower)) {
+  if (['transfer', 'cc payment', 'ncmc travel recharge', 'opening balance'].includes(catLower) || isInvestmentCategory(catLower)) {
     return false;
   }
   // Scenario 4: Cashback auto log
@@ -262,63 +265,96 @@ const rowExclusion = (tx: Pick<Transaction, 'amount' | 'excludedAmount' | 'exclu
    the rest is money the friends owe back. With Passive Logs on, linking carves that rest out of the
    row as a Passive Log (excluded = row amount − your share), so Spends counts just your part.
 
+   An item linked to a PART-PAID purchase as a whole (`wholePurchase`) carves the same figure out of
+   the purchase's rows TOGETHER — the anchor first, then each source's leg in the order the sources
+   were added, each taking up to its own amount. That is exactly how the log form stores a passive
+   amount on a split, so reopening the purchase there reads back the one combined figure. Its
+   `ledgerPassive` holds combined figures too (`excludedAmount` across all the rows, `prior` as one
+   "this much of the purchase was passive"), restored with the same spread.
+
    Called with an event's items before and after an edit, it:
-   - puts back the row of an item that was deleted or relinked to another row, to the passive state
-     it had before the split touched it — unless the row has been edited since (it no longer holds
-     what the split wrote), in which case that later hand edit is left standing;
-   - carves the row of an item that is new, relinked, or whose share of yours changed, and of an
+   - puts back the row(s) of an item that was deleted or relinked to another row, to the passive
+     state they had before the split touched them — unless they have been edited since (they no
+     longer hold what the split wrote), in which case that later hand edit is left standing;
+   - carves the row(s) of an item that is new, relinked, or whose share of yours changed, and of an
      item that had not carved yet and was saved again. An item already carved and otherwise untouched
-     (someone marked paid, the event renamed) leaves its row alone, so a later edit made in the
+     (someone marked paid, the event renamed) leaves its rows alone, so a later edit made in the
      ledger is not quietly overwritten.
    Only ordinary spends are carved: system categories are out of Spends already, and the Passive
-   toggle is hidden for them. An item that carved before keeps its row in step even with Passive Logs
-   since switched off, so the row never goes stale against the split. */
+   toggle is hidden for them. An item that carved before keeps its rows in step even with Passive Logs
+   since switched off, so the rows never go stale against the split. */
 export const syncSplitLedgerPassive = (
   transactions: Transaction[],
   oldItems: SplitItem[],
   newItems: SplitItem[],
   passiveEnabled: boolean,
 ): { transactions: Transaction[]; items: SplitItem[] } => {
-  const patches = new Map<string, Pick<Transaction, 'excludeFromStats' | 'excludedAmount'>>();
-  const rowNow = (id: string) => {
-    const tx = transactions.find(t => t.id === id);
-    return tx && { ...tx, ...patches.get(id) };
+  type Passive = Pick<Transaction, 'excludeFromStats' | 'excludedAmount'>;
+  const patches = new Map<string, Passive>();
+  const withPatches = (list: Transaction[]) => list.map(t => (patches.has(t.id) ? { ...t, ...patches.get(t.id) } : t));
+  // The rows an item stands for, as they stand after the patches so far: the one row, or a whole
+  // purchase's anchor and legs.
+  const rowsOf = (item: Pick<SplitItem, 'transactionId' | 'wholePurchase'>): Transaction[] => {
+    const anchor = transactions.find(t => t.id === item.transactionId);
+    if (!anchor) return [];
+    return withPatches(item.wholePurchase ? splitPurchaseRows(anchor, transactions) : [anchor]);
   };
+  const exclusionOf = (rows: Transaction[]) => Math.round(rows.reduce((s, r) => s + rowExclusion(r), 0) * 100) / 100;
+  // One row keeps the old literal behaviour — its own fields, an unset excludedAmount meaning "all of
+  // it". Several rows read and write one combined figure, spread anchor-first.
+  const passiveOf = (rows: Transaction[]): Passive => {
+    if (rows.length === 1) return { excludeFromStats: rows[0].excludeFromStats, excludedAmount: rows[0].excludedAmount };
+    const total = exclusionOf(rows);
+    return rows.some(r => r.excludeFromStats) ? { excludeFromStats: true, excludedAmount: total } : { excludeFromStats: false, excludedAmount: undefined };
+  };
+  const writePassive = (rows: Transaction[], state: Passive) => {
+    if (rows.length === 1) { patches.set(rows[0].id, { ...state }); return; }
+    let rest = state.excludeFromStats ? (state.excludedAmount ?? rows.reduce((s, r) => s + r.amount, 0)) : 0;
+    rows.forEach(r => {
+      const take = Math.round(Math.min(r.amount, Math.max(0, rest)) * 100) / 100;
+      rest = Math.round((rest - take) * 100) / 100;
+      patches.set(r.id, take >= 0.005 ? { excludeFromStats: true, excludedAmount: take } : { excludeFromStats: false, excludedAmount: undefined });
+    });
+  };
+  const sameLink = (a: SplitItem, b: SplitItem | undefined) =>
+    !!b && a.transactionId === b.transactionId && !!a.wholePurchase === !!b.wholePurchase;
   const newById = new Map(newItems.map(i => [i.id, i]));
 
   for (const old of oldItems) {
-    if (!old.ledgerPassive || newById.get(old.id)?.transactionId === old.transactionId) continue;
-    const tx = rowNow(old.transactionId);
-    if (!tx || Math.abs(rowExclusion(tx) - old.ledgerPassive.excludedAmount) >= 0.005) continue;
-    patches.set(tx.id, { ...old.ledgerPassive.prior });
+    if (!old.ledgerPassive || sameLink(old, newById.get(old.id))) continue;
+    const rows = rowsOf(old);
+    if (rows.length === 0 || Math.abs(exclusionOf(rows) - old.ledgerPassive.excludedAmount) >= 0.005) continue;
+    writePassive(rows, old.ledgerPassive.prior);
   }
 
   const oldById = new Map(oldItems.map(i => [i.id, i]));
   const items = newItems.map(item => {
     const { ledgerPassive: _stale, ...bare } = item;
     const old = oldById.get(item.id);
-    const carried = old?.ledgerPassive && old.transactionId === item.transactionId ? old.ledgerPassive : undefined;
+    const carried = old?.ledgerPassive && sameLink(old, item) ? old.ledgerPassive : undefined;
     const share = mySplitShare(item);
-    const resplit = !old || old.transactionId !== item.transactionId
+    const resplit = !old || !sameLink(old, item)
       || Math.abs(mySplitShare(old) - share) >= 0.005
       || (old !== item && !carried);
     if (!resplit) return carried ? { ...bare, ledgerPassive: carried } : bare;
 
-    const tx = rowNow(item.transactionId);
-    if (!tx || tx.type !== 'debit' || isStatsExcludedCategory(tx.category) || !(passiveEnabled || carried)) return bare;
-    const excludedAmount = Math.round(Math.max(0, Math.min(tx.amount, tx.amount - share)) * 100) / 100;
-    // Your share covers the whole row: nothing to carve, and a Passive Log you set by hand stays put.
+    const rows = rowsOf(item);
+    const head = rows[0];
+    if (!head || head.type !== 'debit' || isStatsExcludedCategory(head.category) || !(passiveEnabled || carried)) return bare;
+    const total = rows.reduce((s, r) => s + r.amount, 0);
+    const excludedAmount = Math.round(Math.max(0, Math.min(total, total - share)) * 100) / 100;
+    // Your share covers the whole purchase: nothing to carve, and a Passive Log you set by hand stays put.
     if (excludedAmount < 0.005 && !carried) return bare;
 
-    patches.set(tx.id, excludedAmount >= 0.005
+    const prior = carried?.prior ?? passiveOf(rows);
+    writePassive(rows, excludedAmount >= 0.005
       ? { excludeFromStats: true, excludedAmount }
       : { excludeFromStats: false, excludedAmount: undefined });
-    const prior = carried?.prior ?? { excludeFromStats: tx.excludeFromStats, excludedAmount: tx.excludedAmount };
     return { ...bare, ledgerPassive: { excludedAmount, prior } };
   });
 
   return {
-    transactions: patches.size === 0 ? transactions : transactions.map(t => (patches.has(t.id) ? { ...t, ...patches.get(t.id) } : t)),
+    transactions: patches.size === 0 ? transactions : withPatches(transactions),
     items,
   };
 };
@@ -842,6 +878,48 @@ export const rewardSplitOfLeg = (
   const i = rewardSplitIndexOfLeg(anchor, leg);
   return i >= 0 ? getRewardSplits(anchor)[i] : undefined;
 };
+
+/** The part-paid purchase `tx` is a split leg of, and which of its sources produced it — or null
+ *  when `tx` is not a leg. A leg is a derived row: its amount is one source's share, and its
+ *  account, description and date follow the anchor's. So anything that lets the user pick or edit
+ *  "a transaction" wants the anchor in its place — the ledger opens the anchor on a tap, and the
+ *  transaction picker lists the anchor once, at its full price, instead of both halves.
+ *
+ *  The index comes back with it because a split can be funded from several sources, each with its
+ *  own leg: the log form has to open at the card the tap came from.
+ *
+ *  Matched through rewardSplitOfLeg (leg id first, account for a legacy row) rather than on
+ *  `isRewardTransaction`, which is only set when the source is points-denominated (a rupee wallet
+ *  or a bank account leaves it false). The `p.id !== tx.id` guard is load-bearing: a card redeeming
+ *  its OWN points has leg.accountId === anchor.accountId, so without it the anchor, whose
+ *  linkedTransactionIds point back at the leg, would resolve to itself. */
+export function rewardSplitAnchorOf(
+  tx: Transaction,
+  transactions: Transaction[],
+): { anchor: Transaction; index: number } | null {
+  const linkedIds = tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []);
+  if (!linkedIds.length) return null;
+  const anchor = transactions.find(p =>
+    p.id !== tx.id
+    && linkedIds.includes(p.id)
+    && !!rewardSplitOfLeg(p, tx)
+  );
+  return anchor ? { anchor, index: Math.max(0, rewardSplitIndexOfLeg(anchor, tx)) } : null;
+}
+
+/** Every row of a part-paid purchase, in the order its passive amount is spread over them: the
+ *  anchor, then each source's leg in the order the sources were added (the log form's own order).
+ *  Just `[anchor]` when it is not a split. */
+export function splitPurchaseRows(anchor: Transaction, transactions: Transaction[]): Transaction[] {
+  const linkedIds = anchor.linkedTransactionIds || [];
+  const legs = transactions
+    // A Cashback row is linked to the anchor too, and is never a leg (a legacy split matched by
+    // account alone could otherwise claim the cashback deposited into the same wallet).
+    .filter(t => t.id !== anchor.id && linkedIds.includes(t.id) && t.category !== 'Cashback'
+      && rewardSplitIndexOfLeg(anchor, t) >= 0)
+    .sort((a, b) => rewardSplitIndexOfLeg(anchor, a) - rewardSplitIndexOfLeg(anchor, b));
+  return [anchor, ...legs];
+}
 
 /** The ids of the legs this row's splits generated (external sources contribute none). */
 export const rewardLegIdsOf = (tx?: Partial<Transaction>): string[] =>

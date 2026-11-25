@@ -5,15 +5,15 @@ import type { Account, Transaction } from '../types';
 import { BUILT_IN_ACCOUNT_TYPES } from '../types';
 import { fetchPricesForSymbols, fetchStockHistory, fetchMFNavHistory, sliceHistoryByRange, getLatestFetchedAt, getLatestCommodityFetchedAt, getCacheFetchedAt, fetchCommodityPriceINR, getCachedPrice, getCachedCommodityPriceINR, fetchPrevClosesForSymbols, getCachedPrevPrice, getCachedPrevCommodityPriceINR } from '../services/MarketDataService';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { TrendingUp, RotateCcw, ChevronLeft, ChevronRight, ChevronDown, Landmark, ShieldCheck, Eye, Camera, Trash2, X } from 'lucide-react';
+import { TrendingUp, RotateCcw, ChevronLeft, ChevronRight, ChevronDown, Landmark, ShieldCheck } from 'lucide-react';
 import ProfileAvatar from './ProfileAvatar';
 import WealthBackdrop from './WealthBackdrop';
 import { PortfolioBackdrop, AssetsBackdrop, RetirementBackdrop } from './WealthCategoryBackdrops';
-import { LogoAvatar, type LogoStatus } from './LogoAvatar';
+import { LogoAvatar } from './LogoAvatar';
 import { DetailHeroBand, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
 import { CategoryCard, CategoryHero, HERO_MIN_H, SubviewHeader, SealedMark, FilterPills, SectionHeading } from './TreeUi';
-import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT, logoFromDomain, notifyLogosUpdated } from '../services/LogoService';
-import { useLongPress } from '../hooks/useLongPress';
+import { getAssetLogoUrl, getLiquidLogoUrl, ensureAssetLogo, ensureLiquidLogo, LOGOS_UPDATED_EVENT, notifyLogosUpdated } from '../services/LogoService';
+import { LogoTapTarget, LogoActionSheet, LogoViewer, CustomLogoModal, type LogoSlot } from './LogoActions';
 import { calculateEPFProjection, getEPFInterestRate, getFinancialYearForDate } from '../utils/epfEngine';
 import { calculateBalance, getCurrentMonthStr, formatCurrency, getInvestmentAccountStats, affectsRupeeBalance, isStatsExcludedCategory, statsAmount, errorMessage, userPossessive, rupeesToRewardPoints, isLinkedDebitCard } from '../utils';
 import { getCategoryIcon } from './transactionIcons';
@@ -226,75 +226,15 @@ function currentDayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function InteractiveHeroAvatar({
-  onTrigger,
-  children,
-}: {
-  onTrigger: () => void;
-  children: ReactNode;
-}) {
-  const justLongPressed = useRef(false);
-  const triggerWithCleanup = () => {
-    if (typeof window !== 'undefined' && window.getSelection) {
-      try {
-        window.getSelection()?.removeAllRanges();
-      } catch {
-        // ignore
-      }
-    }
-    onTrigger();
-  };
-
-  const handlers = useLongPress(() => {
-    justLongPressed.current = true;
-    triggerWithCleanup();
-    setTimeout(() => {
-      justLongPressed.current = false;
-    }, 350);
-  });
-
-  return (
-    <div
-      {...handlers}
-      onMouseDown={(e) => {
-        // Prevent browser from initiating drag text selection
-        e.preventDefault();
-        handlers.onMouseDown?.(e);
-      }}
-      onClick={(e) => {
-        if (justLongPressed.current) return;
-        e.stopPropagation();
-        triggerWithCleanup();
-      }}
-      title="Long press or tap for logo options"
-      className="interactive-hero-avatar"
-      style={{
-        userSelect: 'none',
-        WebkitUserSelect: 'none',
-        WebkitTouchCallout: 'none',
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
 export function Wealth({ onExit }: { onExit?: () => void }) {
   const { data, updateAccount } = useFinance();
 
-  // Logo interaction states (long press / tap on hero mark)
-  const [logoMenuTarget, setLogoMenuTarget] = useState<{ account: Account; logoUrl: string | null } | null>(null);
-  const [enlargedLogoTarget, setEnlargedLogoTarget] = useState<{ account: Account; logoUrl: string | null } | null>(null);
-  const [customLogoTarget, setCustomLogoTarget] = useState<Account | null>(null);
-  const [customLogoInput, setCustomLogoInput] = useState('');
-  // The sheet previews what's typed, but only once typing pauses — otherwise every keystroke of
-  // "primesoft.net" fires a lookup for "p", "pr", "pri"… and the avatar flickers through misses.
-  const [customLogoPreview, setCustomLogoPreview] = useState('');
-  const [customLogoStatus, setCustomLogoStatus] = useState<LogoStatus>('none');
-  useEffect(() => {
-    const t = setTimeout(() => setCustomLogoPreview(customLogoInput.trim()), 500);
-    return () => clearTimeout(t);
-  }, [customLogoInput]);
+  // Logo interaction states (long press / tap on hero mark) — the sheet, viewer and editor are the
+  // shared ones in LogoActions, the same the credit card screen uses. Held as the account's ID, so
+  // they always read the account as it is now.
+  const [logoSheetAccountId, setLogoSheetAccountId] = useState<string | null>(null);
+  const [viewingLogo, setViewingLogo] = useState<LogoSlot | null>(null);
+  const [editingLogo, setEditingLogo] = useState<{ accountId: string; slot: LogoSlot } | null>(null);
 
   const [prices, setPrices] = useState<Record<string, number>>(() => {
     const cached: Record<string, number> = {};
@@ -1444,11 +1384,11 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
           replaces the old -28px pull over the back button's row: the panel now covers that row. */}
         <div style={{ padding: '0 1.5rem 0.5rem', marginTop: `-${DETAIL_HERO_LIFT}px`, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
           {renderSealedMark(
-            <InteractiveHeroAvatar
-              onTrigger={() => setLogoMenuTarget({ account, logoUrl: getLiquidLogoUrl(account) })}
+            <LogoTapTarget
+              onTrigger={() => setLogoSheetAccountId(account.id)}
             >
               <LogoAvatar name={account.name} logoUrl={getLiquidLogoUrl(account)} size={DETAIL_HERO_AVATAR} accountType={account.type} />
-            </InteractiveHeroAvatar>
+            </LogoTapTarget>
           )}
 
           <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.35, maxWidth: '90%' }}>
@@ -2145,11 +2085,11 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
               {/* Lifted into the panel above, as on the liquid detail — see renderSealedMark. */}
               <div style={{ padding: `0 1.5rem ${hasPriceChart ? '0.5rem' : '1.5rem'}`, marginTop: `-${DETAIL_HERO_LIFT}px`, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
                 {renderSealedMark(
-                  <InteractiveHeroAvatar
-                    onTrigger={() => setLogoMenuTarget({ account: selectedAsset, logoUrl: getAssetLogoUrl(selectedAsset) })}
+                  <LogoTapTarget
+                    onTrigger={() => setLogoSheetAccountId(selectedAsset.id)}
                   >
                     <LogoAvatar name={selectedAsset.name} logoUrl={getAssetLogoUrl(selectedAsset)} size={DETAIL_HERO_AVATAR} metal={selectedAsset.type === 'commodity' ? (selectedAsset.commodityMetal === 'silver' ? 'silver' : 'gold') : undefined} isEpf={selectedAsset.type === 'epf'} />
-                  </InteractiveHeroAvatar>
+                  </LogoTapTarget>
                 )}
 
                 <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.35, maxWidth: '90%' }}>
@@ -2472,243 +2412,59 @@ export function Wealth({ onExit }: { onExit?: () => void }) {
         );
       })()}
 
-      {/* ── Logo Options Menu (Action Sheet) ─────────────── */}
-      {logoMenuTarget && (
-        <div
-          className="modal-overlay action-sheet-modal"
-          style={{
-            userSelect: 'none',
-            WebkitUserSelect: 'none',
-            WebkitTouchCallout: 'none',
-          }}
-          onClick={() => setLogoMenuTarget(null)}
-        >
-          <div
-            className="modal-content action-sheet-modal"
-            style={{
-              userSelect: 'none',
-              WebkitUserSelect: 'none',
-              WebkitTouchCallout: 'none',
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="modal-header">
-              <h3>Logo</h3>
-              <button onClick={() => setLogoMenuTarget(null)} aria-label="Close">
-                <X />
-              </button>
-            </div>
-            <div className="modal-body flex-col gap-3">
-              <button
-                className="btn btn-secondary w-100 flex-row align-center gap-3"
-                style={{ justifyContent: 'flex-start', padding: '1rem' }}
-                onClick={() => {
-                  const target = logoMenuTarget;
-                  setLogoMenuTarget(null);
-                  setEnlargedLogoTarget(target);
-                }}
-              >
-                <Eye size={20} /> View Logo
-              </button>
-              <button
-                className="btn btn-secondary w-100 flex-row align-center gap-3"
-                style={{ justifyContent: 'flex-start', padding: '1rem' }}
-                onClick={() => {
-                  const target = logoMenuTarget;
-                  setLogoMenuTarget(null);
-                  setCustomLogoTarget(target.account);
-                  setCustomLogoInput(target.account.customLogoUrl || '');
-                  setCustomLogoPreview(target.account.customLogoUrl?.trim() || '');
-                }}
-              >
-                <Camera size={20} /> Custom Logo
-              </button>
-              {logoMenuTarget.account.customLogoUrl && (
-                <button
-                  className="btn btn-secondary w-100 flex-row align-center gap-3 text-danger"
-                  style={{ justifyContent: 'flex-start', padding: '1rem' }}
-                  onClick={() => {
-                    const canonical = data.accounts.find(a => a.id === logoMenuTarget.account.id) || logoMenuTarget.account;
-                    const updated = { ...canonical, customLogoUrl: undefined };
-                    updateAccount(updated);
-                    if (selectedAsset && selectedAsset.id === canonical.id) {
-                      setSelectedAsset(updated);
-                    }
-                    notifyLogosUpdated();
-                    setLogoMenuTarget(null);
-                  }}
-                >
-                  <Trash2 size={20} /> Reset to Default Logo
-                </button>
-              )}
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary w-100" style={{ padding: '1rem' }} onClick={() => setLogoMenuTarget(null)}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Fullscreen Logo Viewing ──────────────────── */}
-      {enlargedLogoTarget && (
-        <div className="modal-overlay" style={{ background: '#000' }} onClick={() => setEnlargedLogoTarget(null)}>
-          <button
-            style={{
-              position: 'absolute',
-              top: 'calc(var(--safe-area-inset-top, 0px) + 1rem)',
-              right: '1rem',
-              background: 'rgba(255,255,255,0.1)',
-              border: 'none',
-              borderRadius: '50%',
-              width: '40px',
-              height: '40px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              zIndex: 100,
-              cursor: 'pointer',
-            }}
-            onClick={() => setEnlargedLogoTarget(null)}
-          >
-            <X size={24} />
-          </button>
-          <div
-            style={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '1.5rem',
-            }}
-          >
-            <div
-              style={{
-                width: 'min(78vw, 320px)',
-                height: 'min(78vw, 320px)',
-                borderRadius: '50%',
-                overflow: 'hidden',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 0 60px rgba(0, 0, 0, 0.9)',
-              }}
-              onClick={e => e.stopPropagation()}
-            >
-              <LogoAvatar
-                name={enlargedLogoTarget.account.name}
-                logoUrl={enlargedLogoTarget.logoUrl}
-                size={320}
-                accountType={enlargedLogoTarget.account.type}
-                metal={enlargedLogoTarget.account.commodityMetal}
-                isEpf={enlargedLogoTarget.account.type === 'epf'}
+      {(() => {
+        // One logo per holding or account — a single-slot sheet. See LogoActions.
+        const slotFor = (account: Account): LogoSlot => {
+          const resolve = (a: Account) => (isLiquidAccount(a) ? getLiquidLogoUrl(a) : getAssetLogoUrl(a));
+          return {
+            key: 'main',
+            title: account.name,
+            url: resolve(account),
+            defaultUrl: resolve({ ...account, customLogoUrl: undefined }),
+            custom: account.customLogoUrl?.trim() || undefined,
+            accountType: account.type,
+            metal: account.type === 'commodity' ? (account.commodityMetal === 'silver' ? 'silver' : 'gold') : undefined,
+            isEpf: account.type === 'epf',
+          };
+        };
+        const saveLogo = (accountId: string, value: string | undefined) => {
+          const canonical = data.accounts.find(a => a.id === accountId);
+          if (!canonical) return;
+          const updated: Account = { ...canonical, customLogoUrl: value };
+          updateAccount(updated);
+          if (selectedAsset && selectedAsset.id === canonical.id) setSelectedAsset(updated);
+          notifyLogosUpdated();
+        };
+        const sheetAccount = logoSheetAccountId ? data.accounts.find(a => a.id === logoSheetAccountId) : undefined;
+        return (
+          <>
+            {/* Kept open, hidden, under the viewer and the editor, so backing out of either returns
+                here — see the same note on the credit card screen. */}
+            {sheetAccount && !viewingLogo && !editingLogo && (
+              <LogoActionSheet
+                slots={[slotFor(sheetAccount)]}
+                onClose={() => setLogoSheetAccountId(null)}
+                onView={slot => setViewingLogo(slot)}
+                onCustom={slot => setEditingLogo({ accountId: sheetAccount.id, slot })}
+                onReset={() => { saveLogo(sheetAccount.id, undefined); setLogoSheetAccountId(null); }}
               />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Custom Logo Edit Modal (SpendVault NeoPOP Modal) ─────────────────────────────── */}
-      {customLogoTarget && (
-        <div className="modal-overlay" onClick={() => setCustomLogoTarget(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Custom Logo</h3>
-              <button onClick={() => setCustomLogoTarget(null)}>
-                <X />
-              </button>
-            </div>
-            <div className="modal-body flex-col gap-3">
-              {(() => {
-                const defaultUrl = isLiquidAccount(customLogoTarget)
-                  ? getLiquidLogoUrl(customLogoTarget)
-                  : getAssetLogoUrl(customLogoTarget);
-                const typed = customLogoInput.trim();
-                const previewUrl = customLogoPreview ? logoFromDomain(customLogoPreview) : defaultUrl;
-                const settled = typed === customLogoPreview;
-                const status = !typed
-                  ? { text: 'Using default mark', color: 'var(--text-secondary)' }
-                  : !settled || customLogoStatus === 'loading'
-                    ? { text: 'Looking up logo…', color: 'var(--text-secondary)' }
-                    : customLogoStatus === 'shown'
-                      ? { text: 'Logo found — Save to use it', color: 'var(--success)' }
-                      : { text: `No logo found for ${typed}`, color: 'var(--danger)' };
-
-                return (
-                  <div
-                    className="flex align-center gap-3"
-                    style={{
-                      padding: '0.85rem',
-                      background: 'var(--bg-hover)',
-                      borderRadius: '8px',
-                      border: '1px solid var(--border-color)',
-                    }}
-                  >
-                    <LogoAvatar
-                      name={customLogoTarget.name}
-                      logoUrl={previewUrl}
-                      size={52}
-                      accountType={customLogoTarget.type}
-                      metal={customLogoTarget.commodityMetal}
-                      isEpf={customLogoTarget.type === 'epf'}
-                      onStatus={setCustomLogoStatus}
-                    />
-                    <div className="flex-col" style={{ minWidth: 0, flex: 1 }}>
-                      <span className="text-sm font-bold" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
-                        {customLogoTarget.name}
-                      </span>
-                      <span className="text-xs" style={{ color: status.color }}>
-                        {status.text}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              <div className="input-group">
-                <label>Domain or Image URL</label>
-                <input
-                  className="input-field"
-                  value={customLogoInput}
-                  onChange={e => setCustomLogoInput(e.target.value)}
-                  placeholder="e.g. sbi.co.in, cheq.one, or https://..."
-                  autoFocus
-                />
-                <span className="text-xs text-muted" style={{ marginTop: '0.25rem' }}>
-                  Enter a website domain (e.g. <code>cheq.one</code>, <code>sbi.co.in</code>), image URL, or SVG. Leave empty for default.
-                </span>
-              </div>
-            </div>
-            <div className="modal-footer flex-row gap-2">
-              <button className="btn btn-secondary flex-1" style={{ padding: '1rem' }} onClick={() => setCustomLogoTarget(null)}>
-                Cancel
-              </button>
-              <button
-                className="btn btn-primary flex-1"
-                style={{ padding: '1rem' }}
-                onClick={() => {
-                  const canonical = data.accounts.find(a => a.id === customLogoTarget.id) || customLogoTarget;
-                  const updated: Account = {
-                    ...canonical,
-                    customLogoUrl: customLogoInput.trim() || undefined,
-                  };
-                  updateAccount(updated);
-                  if (selectedAsset && selectedAsset.id === canonical.id) {
-                    setSelectedAsset(updated);
-                  }
-                  notifyLogosUpdated();
-                  setCustomLogoTarget(null);
-                }}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            )}
+            {viewingLogo && (
+              <LogoViewer
+                name={viewingLogo.title} url={viewingLogo.url} accountType={viewingLogo.accountType}
+                metal={viewingLogo.metal} isEpf={viewingLogo.isEpf} onClose={() => setViewingLogo(null)}
+              />
+            )}
+            {editingLogo && (
+              <CustomLogoModal
+                slot={editingLogo.slot}
+                onClose={() => setEditingLogo(null)}
+                onSave={value => { saveLogo(editingLogo.accountId, value); setEditingLogo(null); setLogoSheetAccountId(null); }}
+              />
+            )}
+          </>
+        );
+      })()}
     </div>
   );
 }

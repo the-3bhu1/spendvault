@@ -6,6 +6,7 @@ import type { Account, CashbackStatement, Transaction } from '../types';
 import { buildRewardRows, getRewardUnit, type RewardRow as StatementRow } from '../services/RewardsService';
 import { Info, Pencil, Check, X, ChevronDown, RotateCcw, Calendar } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
+import { NumericInput } from './NumericInput';
 
 /**
  * `showAll` / `onShowAllChange` make the credited-cycles filter a CONTROLLED value. The Rewards hero
@@ -787,12 +788,11 @@ export default function Cashback({ embedded = false, showAll, onShowAllChange }:
                                 <div className="flex-col align-end gap-2" style={{ flexShrink: 0 }}>
                                   <div className="flex align-center gap-2">
                                     {isEditing ? (
-                                      <input
-                                        type="number"
+                                      <NumericInput
                                         className="input-field text-mono"
                                         style={{ padding: '0.3rem 0.5rem', width: '90px', fontSize: '0.95rem', textAlign: 'right' }}
                                         value={editingValue}
-                                        onChange={(e) => setEditingValue(parseFloat(e.target.value))}
+                                        onValueChange={(_text, num) => setEditingValue(num ?? NaN)}
                                         autoFocus
                                       />
                                     ) : (

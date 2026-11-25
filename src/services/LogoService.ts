@@ -203,9 +203,13 @@ const LIQUID_REGISTRY: BrandEntry[] = [
 // words — 'cred' in "credit", 'ola' in "Volatility". Longest matched keyword still wins, so
 // "amazon pay" beats "amazon" and "namma metro" beats a bare "metro" entry if one is ever added.
 function resolveLiquidDomain(name: string): string | null {
+  return matchRegistry(name, LIQUID_REGISTRY);
+}
+
+function matchRegistry(name: string, registry: BrandEntry[]): string | null {
   const n = name.toLowerCase();
   let best: { domain: string; len: number } | null = null;
-  for (const entry of LIQUID_REGISTRY) {
+  for (const entry of registry) {
     for (const kw of entry.match) {
       if (!best || kw.length > best.len) {
         const re = new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
@@ -214,6 +218,100 @@ function resolveLiquidDomain(name: string): string | null {
     }
   }
   return best?.domain ?? null;
+}
+
+// --- Co-branded credit cards ----------------------------------------------------------
+// The PROGRAMME a card is built around — the brand printed biggest on the plastic and the one a
+// person names the card by: "Marriott HDFC", "IndiGo IDFC", "Tata Neu HDFC". Checked BEFORE the bank
+// for a card, and as a list of its own rather than more rows in LIQUID_REGISTRY, because that list
+// lets the longest keyword win: "HDFC Marriott" happened to work only because "marriott" is longer
+// than "hdfc", "Amazon ICICI" only because "amazon" outruns "icici", and "IndiGo IDFC" lost outright
+// to "idfc". A co-brand is not a longer word for the bank; it is a different answer to the question.
+// Whole-word, like the liquid matcher, so 'ola' never lights up inside another word.
+const CARD_COBRAND_REGISTRY: BrandEntry[] = [
+  // Shopping
+  { match: ['amazon pay', 'amazon'], domain: 'amazon.in' },
+  { match: ['flipkart'], domain: 'flipkart.com' },
+  { match: ['myntra'], domain: 'myntra.com' },
+  { match: ['tata neu', 'tataneu', 'neu'], domain: 'tataneu.com' },
+  { match: ['shoppers stop'], domain: 'shoppersstop.com' },
+  { match: ['snapdeal'], domain: 'snapdeal.com' },
+  { match: ['samsung'], domain: 'samsung.com' },
+  // Food & dining
+  { match: ['swiggy'], domain: 'swiggy.com' },
+  { match: ['zomato'], domain: 'zomato.com' },
+  { match: ['eazydiner', 'eazy diner', 'easydiner'], domain: 'eazydiner.com' },
+  // Travel — airlines, hotels, booking
+  { match: ['indigo', '6e rewards', '6e'], domain: 'goindigo.in' },
+  { match: ['air india'], domain: 'airindia.com' },
+  { match: ['club vistara', 'vistara'], domain: 'airvistara.com' },
+  { match: ['spicejet'], domain: 'spicejet.com' },
+  { match: ['etihad'], domain: 'etihad.com' },
+  { match: ['emirates', 'skywards'], domain: 'emirates.com' },
+  { match: ['british airways', 'avios'], domain: 'britishairways.com' },
+  { match: ['marriott bonvoy', 'marriott', 'bonvoy'], domain: 'marriott.com' },
+  { match: ['makemytrip', 'make my trip', 'mmt'], domain: 'makemytrip.com' },
+  { match: ['yatra'], domain: 'yatra.com' },
+  { match: ['irctc'], domain: 'irctc.co.in' },
+  { match: ['ola'], domain: 'olacabs.com' },
+  { match: ['uber'], domain: 'uber.com' },
+  // Fuel
+  { match: ['indianoil', 'indian oil', 'iocl'], domain: 'iocl.com' },
+  { match: ['bpcl', 'bharat petroleum'], domain: 'bharatpetroleum.in' },
+  { match: ['hpcl', 'hindustan petroleum'], domain: 'hindustanpetroleum.com' },
+  // Payments, telecom, insurance, fintech
+  { match: ['super.money', 'super money', 'supermoney'], domain: 'super.money' },
+  { match: ['paytm'], domain: 'paytm.com' },
+  { match: ['phonepe', 'phone pe'], domain: 'phonepe.com' },
+  { match: ['airtel'], domain: 'airtel.in' },
+  { match: ['lic'], domain: 'licindia.in' },
+  { match: ['bajaj finserv', 'bajaj'], domain: 'bajajfinserv.in' },
+  { match: ['jupiter'], domain: 'jupiter.money' },
+  { match: ['onecard', 'one card'], domain: 'getonecard.app' },
+  { match: ['scapia'], domain: 'scapia.cards' },
+  { match: ['kiwi'], domain: 'gokiwi.in' },
+  { match: ['slice'], domain: 'sliceit.com' },
+];
+
+/** The co-brand a card is built around, from its name, or null for a plain bank card. */
+function resolveCardCoBrandDomain(name: string): string | null {
+  return matchRegistry(name, CARD_COBRAND_REGISTRY);
+}
+
+/** A card with TWO marks: a co-brand programme, and the bank that issues it. Also any card the user
+ *  has given a bank logo of its own, which is them saying the card has two. */
+export function isCoBrandedCard(account: { name: string; customIssuerLogoUrl?: string }): boolean {
+  return !!resolveCardCoBrandDomain(account.name) || !!account.customIssuerLogoUrl?.trim();
+}
+
+/** The issuing BANK's logo for a card — its own override, else the issuer named in the card's name or
+ *  saved details. Null when no bank can be told; a co-branded card then simply shows one mark. */
+export function getCardIssuerLogoUrl(account: { name: string; customIssuerLogoUrl?: string; cardDetails?: { issuer?: BrandKey; issuerName?: string } }): string | null {
+  if (account.customIssuerLogoUrl?.trim()) return logoFromDomain(account.customIssuerLogoUrl.trim());
+  const issuer = resolveCardIssuer(account.name, account.cardDetails);
+  const fromKey = issuer ? resolveLiquidDomain(issuer) : null;
+  if (fromKey) return logoFromDomain(fromKey);
+  const typed = account.cardDetails?.issuerName?.trim();
+  const fromName = typed ? resolveLiquidDomain(typed) : null;
+  return fromName ? logoFromDomain(fromName) : null;
+}
+
+/** The co-brand's DOMAIN — what a brandmark is looked up by (BrandmarkService). A custom brand logo
+ *  entered as a bare domain ("iocl.com") wins over the registry, since it is the user telling us who
+ *  the brand is; an image URL can't be looked up, so the registry answers then. */
+export function getCardCoBrandDomain(account: { name: string; customLogoUrl?: string }): string | null {
+  const registry = resolveCardCoBrandDomain(account.name);
+  if (!registry) return null;
+  const custom = account.customLogoUrl?.trim().toLowerCase();
+  return custom && /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(custom) ? custom : registry;
+}
+
+/** The co-brand's logo, for the BACK of a card that has no hand-drawn mark (see ViewCardOverlay).
+ *  Null for a plain bank card: the bank is already on the front, and printing it again on the back
+ *  would read as a co-brand it is not. */
+export function getCardCoBrandLogoUrl(account: { name: string }): string | null {
+  const domain = resolveCardCoBrandDomain(account.name);
+  return domain ? logoFromDomain(domain) : null;
 }
 
 // --- Brand heuristic (liquid accounts the registry misses) ----------------------------
@@ -771,6 +869,10 @@ export function getLiquidLogoUrl(account: AccountLike): string | null {
  */
 export function getCardLogoUrl(account: AccountLike & { cardDetails?: { issuer?: BrandKey } }): string | null {
   if (account.customLogoUrl?.trim()) return logoFromDomain(account.customLogoUrl.trim());
+
+  // The programme before the bank — see CARD_COBRAND_REGISTRY.
+  const coBrand = resolveCardCoBrandDomain(account.name);
+  if (coBrand) return logoFromDomain(coBrand);
 
   const registry = resolveLiquidDomain(account.name);
   if (registry) return logoFromDomain(registry);

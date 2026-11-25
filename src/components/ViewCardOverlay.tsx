@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X, CornerDownRight, Share2 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
@@ -9,6 +9,55 @@ import { CardChip } from './CardChip';
 import { CardBrandLogo, CardIssuerMark } from './CardBrandLogo';
 import { getCardGradients, issuerMarkOf } from '../utils';
 import { useFinance } from '../FinanceContext';
+import { LogoAvatar, type LogoStatus } from './LogoAvatar';
+import { getCardCoBrandLogoUrl, getCardCoBrandDomain, LOGOS_UPDATED_EVENT } from '../services/LogoService';
+import { ensureBrandmark, getCachedBrandmark } from '../services/BrandmarkService';
+
+/** The co-brand's own logo on the back of a card that has no hand-drawn mark for it — Flipkart,
+ *  Amazon, Marriott, IndiGo… — in the spot the super.money and Swiggy marks take. The same logo the
+ *  card's tile shows, so the two read as one brand. Gone entirely if the image can't be had: on the
+ *  plastic, a monogram would be a mark the real card does not carry. */
+function CoBrandBadge({ account, ink }: { account: Account; ink: 'light' | 'dark' }) {
+  const url = getCardCoBrandLogoUrl(account);
+  const [status, setStatus] = useState<LogoStatus>('loading');
+  /* The FULL wordmark when logo.dev's Brand API has given us one (a secret key in Settings — see
+     BrandmarkService), recoloured for the card: light ink means a dark card, which wants logo.dev's
+     "dark" version (artwork lightened to sit on a dark background), and the reverse. Asked for once
+     and kept; until it lands, and for a brand with none, the round icon below stands in. */
+  const domain = getCardCoBrandDomain(account);
+  const theme = ink === 'dark' ? 'light' : 'dark';
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    if (domain) void ensureBrandmark(domain, theme);
+  }, [domain, theme]);
+  useEffect(() => {
+    const onLogos = () => rerender(n => n + 1);
+    window.addEventListener(LOGOS_UPDATED_EVENT, onLogos);
+    return () => window.removeEventListener(LOGOS_UPDATED_EVENT, onLogos);
+  }, []);
+  const wordmark = domain ? getCachedBrandmark(domain, theme) : null;
+  if (wordmark) {
+    return (
+      <img
+        src={wordmark}
+        alt=""
+        style={{
+          flexShrink: 0,
+          height: 'calc(100cqw * 24 / 360)',
+          maxWidth: 'calc(100cqw * 130 / 360)',
+          objectFit: 'contain',
+          objectPosition: 'right bottom',
+        }}
+      />
+    );
+  }
+  if (!url) return null;
+  return (
+    <div style={{ display: status === 'none' ? 'none' : 'block', flexShrink: 0, borderRadius: '50%', boxShadow: '0 1px 3px rgba(0,0,0,0.45)' }}>
+      <LogoAvatar name={account.name} logoUrl={url} size={30} accountType={account.type} onStatus={setStatus} />
+    </div>
+  );
+}
 
 interface ViewCardOverlayProps {
   account: Account;
@@ -313,9 +362,9 @@ export function FlippableCard({ account, style, children }: { account: Account; 
               </div>
             </div>
 
-              {cardDetails && gradients.coBrand && (
-                <CardBrandLogo brand={gradients.coBrand} height={20} />
-              )}
+              {cardDetails && (gradients.coBrand
+                ? <CardBrandLogo brand={gradients.coBrand} height={20} />
+                : <CoBrandBadge account={account} ink={gradients.ink} />)}
             </div>
           </div>
         </CardSurface>

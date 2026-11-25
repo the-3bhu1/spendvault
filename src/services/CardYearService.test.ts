@@ -58,18 +58,19 @@ describe('getCardYear — the membership window', () => {
     expect(y.start).toBe('2030-01-01');
   });
 
-  it('falls back to the financial year, and says so, when no open date is set', () => {
+  it('falls back to the calendar year, and says so, when no open date is set', () => {
     const y = getCardYear(card(), new Date(2026, 7, 30));
     expect(y.isAnniversary).toBe(false);
-    expect(y.start).toBe('2026-04-01');
-    expect(y.end).toBe('2027-03-31');
+    expect(y.start).toBe('2026-01-01');
+    expect(y.end).toBe('2026-12-31');
     expect(y.yearsHeld).toBeUndefined();
   });
 
-  it('puts January in the financial year that began the previous April', () => {
-    const y = getCardYear(card(), new Date(2027, 0, 15));
-    expect(y.start).toBe('2026-04-01');
-    expect(y.end).toBe('2027-03-31');
+  it('starts a new calendar year on 1 January, and ends the old one on 31 December', () => {
+    expect(getCardYear(card(), new Date(2027, 0, 1)).start).toBe('2027-01-01');
+    const dec = getCardYear(card(), new Date(2026, 11, 31));
+    expect(dec.start).toBe('2026-01-01');
+    expect(dec.daysLeft).toBe(0);
   });
 });
 
@@ -147,7 +148,7 @@ describe('getCardFeeStanding', () => {
     expect(getCardFeeStanding(second, anniversaryYear('2025-06-20', new Date(2026, 7, 30)), 0).inFirstFreeYear).toBe(false);
   });
 
-  it('will not claim a first free year on the financial-year fallback, where "which year" has no answer', () => {
+  it('will not claim a first free year on the calendar-year fallback, where "which year" has no answer', () => {
     const acc = card({ cardFees: { annualFee: 1000, firstYearFree: true } });
     expect(getCardFeeStanding(acc, getCardYear(acc), 0).inFirstFreeYear).toBe(false);
   });

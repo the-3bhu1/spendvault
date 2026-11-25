@@ -3,39 +3,15 @@ import { format } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import { ScrollToTopButton } from './ScrollToTopButton';
 import type { Transaction, TransactionType, Account, InvestmentKind } from '../types';
-import { formatCurrency, formatAmount, formatDateString, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, getInvestmentKind, isCountableTransaction, isExternalRewardSource, isPointsDenominated, getRewardSplits, rewardSplitIndexOfLeg, rewardSplitOfLeg, rewardSplitTotal, rewardSplitGross, accountNameOf, linkedGroupOf, applyVisibleReorder, dayOrderUpdates, sortDayByOrder } from '../utils';
+import { formatCurrency, formatAmount, formatDateString, getCurrentMonthStr, isStatsExcludedCategory, isInvestmentCategory, INVESTMENT_KIND_OPTIONS, investmentKindLabel, getInvestmentKind, isCountableTransaction, isExternalRewardSource, isPointsDenominated, getRewardSplits, rewardSplitAnchorOf, rewardSplitOfLeg, rewardSplitTotal, rewardSplitGross, accountNameOf, linkedGroupOf, applyVisibleReorder, dayOrderUpdates, sortDayByOrder } from '../utils';
 import { Wallet, ArrowRightLeft, Calendar, Activity, X, Search, Smartphone, ChevronRight, ChevronDown, Hash, Shapes, Layers, Sparkles, Loader2, Filter } from 'lucide-react';
 import { CustomPicker } from './CustomPicker';
 import ConfirmDialog from './ConfirmDialog';
 import { getCategoryIcon, getAccountTypeIcon, getAccountGroupLabel, getInvestmentKindIcon } from './transactionIcons';
 import { LogTransactionForm } from './LogTransactionForm';
 
-// The anchor a reward-redemption leg belongs to — and WHICH of its sources this leg is — or null if
-// `tx` isn't one. A leg carries no editable identity of its own: its amount is its source's amount on
-// the anchor, its account is that source's account, and description/category/date are derived and
-// propagated down — so tapping one has to edit the anchor instead. The index comes back with it
-// because a split can be funded from several wallets, each with its own leg in the ledger: the form
-// has to open at the card the tap came from, or it would land on the first source every time.
-//
-// Matched through rewardSplitOfLeg (leg id first, account for a legacy row) rather than on
-// `isRewardTransaction`, which is only set when the reward source is points-denominated (a rupee
-// wallet like CRED coins leaves it false). The `p.id !== tx.id` guard is load-bearing: a card
-// redeeming its OWN points has leg.accountId === anchor.accountId, so without it the anchor, whose
-// linkedTransactionIds point back at the leg, would resolve to itself.
-function rewardSplitAnchorOf(
-  tx: Transaction,
-  transactions: Transaction[],
-): { anchor: Transaction; index: number } | null {
-  const linkedIds = tx.linkedTransactionIds || (tx.linkedTransactionId ? [tx.linkedTransactionId] : []);
-  if (!linkedIds.length) return null;
-  const anchor = transactions.find(p =>
-    p.id !== tx.id
-    && linkedIds.includes(p.id)
-    && !!rewardSplitOfLeg(p, tx)
-  );
-  return anchor ? { anchor, index: Math.max(0, rewardSplitIndexOfLeg(anchor, tx)) } : null;
-}
-
+// rewardSplitAnchorOf (utils) maps a split leg to the anchor it belongs to — a tap on a leg edits
+// the anchor, opened at that source's card. See its comment for why.
 
 function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, blockLen, counterparts }: {
   tx: Transaction,
@@ -458,6 +434,11 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                       return src?.type === 'rewards' || isPointsDenominated(src);
                     };
                     const moneyLegCount = rewardLegs.filter(c => !isWinnings(c.tx)).length;
+                    // A bank account is a source too — a wallet order topped up by UPI — and its
+                    // money is the user's like a wallet's, but it is not a wallet. Counted apart so
+                    // an all-bank split reads "from bank" and a wallet + bank one reads "2 sources".
+                    const bankLegCount = rewardLegs.filter(c =>
+                      data.accounts.find(a => a.id === c.tx.accountId)?.type === 'bank_account').length;
                     // Two wallets funding one bill are two separate entries in there, and the toggle
                     // is the only hint of how many before it is opened. A mixed split gets the
                     // neutral "sources": there is no honest collective noun for a coupon and a
@@ -467,9 +448,11 @@ function TransactionRow({ tx, acc, isFirst, isLast, onEdit, onDelete, onMoveBy, 
                     // count noun and does not ("Part-paid from wallet").
                     const sourceWord = moneyLegCount === 0
                       ? (rewardLegCount > 1 ? `${rewardLegCount} rewards` : 'rewards')
-                      : moneyLegCount === rewardLegCount
-                        ? (rewardLegCount > 1 ? `${rewardLegCount} wallets` : 'wallet')
-                        : `${rewardLegCount} sources`;
+                      : bankLegCount === rewardLegCount
+                        ? (rewardLegCount > 1 ? `${rewardLegCount} banks` : 'bank')
+                        : moneyLegCount === rewardLegCount && bankLegCount === 0
+                          ? (rewardLegCount > 1 ? `${rewardLegCount} wallets` : 'wallet')
+                          : `${rewardLegCount} sources`;
                     // "with rewards" but "from a wallet" — the money was already the user's.
                     const partPaid = `Part-paid ${moneyLegCount === 0 ? 'with' : 'from'} ${sourceWord}`;
                     /* Same argument one category over: an instant-cashback leg is money that

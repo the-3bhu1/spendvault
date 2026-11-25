@@ -8,6 +8,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, 
 import RollingNumber from './RollingNumber';
 import type { Transaction } from '../types';
 import { CustomPicker } from './CustomPicker';
+import { NumericInput } from './NumericInput';
 
 
 
@@ -43,12 +44,10 @@ function BudgetInput({ value, onChange, onCommit, onCancel }: {
         style={{ flex: 1, minWidth: 0, height: '30px', boxSizing: 'border-box', background: 'var(--bg-color)', border: '1px solid var(--accent)', borderRadius: '8px', padding: '0 0.7rem' }}
       >
         <span className="text-muted" style={{ fontWeight: 700, fontSize: '0.95rem', flexShrink: 0 }}>₹</span>
-        <input
-          type="number"
-          inputMode="numeric"
+        <NumericInput
           autoFocus
           value={value}
-          onChange={e => onChange(e.target.value)}
+          onValueChange={(text) => onChange(text)}
           onBlur={() => { if (!resolved.current) onCommit(); }}
           onKeyDown={e => {
             if (e.key === 'Enter') { resolved.current = true; onCommit(); }

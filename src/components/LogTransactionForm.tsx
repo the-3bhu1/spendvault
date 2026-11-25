@@ -811,10 +811,17 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
         if (sp.accountId && splits.findIndex(o => o.accountId === sp.accountId) !== i) {
           newErrors[`rewardSource_${i}`] = 'Already used by another source on this split';
         }
+        if (isPrimaryMoney(sourceAccountOf(sp))) {
+          newErrors[`rewardSource_${i}`] = 'Already paying the rest of this — pick another source';
+        }
         // Can't redeem more than the account holds. Compared in the account's own unit, and the
         // message names the figure because the collapsed picker shows only the account name. Skipped
         // for a one-time reward: it has no tracked balance, so there is no ceiling to test against.
-        if (sp.accountId && !isExternalRewardSource(sp.accountId) && amount > 0) {
+        // Skipped for a bank account too: the primary debit on a bank is never held to its tracked
+        // balance, so a bank source must not be either — swapping which side the bank sits on would
+        // otherwise decide whether the same payment can be saved.
+        if (sp.accountId && !isExternalRewardSource(sp.accountId) && amount > 0
+          && sourceAccountOf(sp)?.type !== 'bank_account') {
           const acc = sourceAccountOf(sp);
           const points = isUnitDenominated(acc);
           // On an edit, what this source had already redeemed has been taken out of its balance —
@@ -1703,11 +1710,35 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
      Accounts screen — there was no way to record a redemption the app had decided was impossible.
      The arithmetic never depended on it: a points leg carries `isRewardTransaction`, so it is read
      into its OWN card's points ledger by calculateBalance whichever account the anchor sits on.
-     Cash is deliberately absent: a cash purchase has no second leg to reconcile. */
+     Cash is deliberately absent: a cash purchase has no second leg to reconcile.
+
+     BANK ACCOUNTS are sources for the same reason e-wallets are: the leg is a plain rupee debit, and
+     nothing downstream cares what kind of account it sits on. Without them the split could only run
+     one way round — a ₹1,095 order paid ₹1,076 from the Myntra Wallet and ₹19 by UPI had to be
+     logged with the BANK as the primary and the wallet as the split, because the wallet could not
+     be the primary with the bank beside it. Credit cards stay out: a points card is already listed
+     here for its POINTS, and the same card again as a rupee source would be two different things
+     under one name.
+
+     A rupee source cannot also be the account paying the rest — the same money twice. The account
+     on the primary side (and the bank behind a linked debit card) is dropped from the list; a points
+     card is not, because redeeming its own points against its own charge is a real thing. */
+  const isRupeeSplitSource = (a: Account | undefined) => a?.type === 'bank_account' || a?.type === 'e_wallet';
+  const primaryMoneyIds = new Set(
+    // paymentSourceAccountId is the funding bank only on a CC Payment seen from the card's side;
+    // anywhere else it can be left over from a category the user switched away from.
+    [newTx.accountId, ...(isCCPayment ? [paymentSourceAccountId] : [])].flatMap(id => {
+      const acc = data.accounts.find(a => a.id === id);
+      return acc ? [acc.id, linkedBankOf(acc, data.accounts)?.id ?? acc.id] : [];
+    }));
+  const isPrimaryMoney = (a: Account | undefined) => !!a && isRupeeSplitSource(a) && primaryMoneyIds.has(a.id);
   const splitSourceAccounts = data.accounts.filter(a =>
     (!a.archived || splits.some(sp => sp.accountId === a.id))
-    && (a.type === 'rewards' || a.type === 'e_wallet'
+    && (a.type === 'rewards' || isRupeeSplitSource(a)
       || (a.isCashbackEnabled && a.rewardType === 'points'))
+    // Kept if already chosen, so a primary switched onto it afterwards leaves the card readable —
+    // validation names the clash instead of the picker silently emptying.
+    && (!isPrimaryMoney(a) || splits.some(sp => sp.accountId === a.id))
   );
   // Investments are excluded: paying part of a fund/stock/metal buy out of reward points isn't a
   // thing the holdings math models. Everything else that spends money can be split — a CC Payment

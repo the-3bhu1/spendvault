@@ -8,6 +8,7 @@ import { getCommodityVendor } from '../services/GeminiConfig';
 import { CustomPicker } from './CustomPicker';
 import CustomDatePicker from './CustomDatePicker';
 import { getAccountEmoji } from './transactionIcons';
+import { NumericInput } from './NumericInput';
 import ConfirmDialog from './ConfirmDialog';
 import type { Account, AccountType, CardDetails, CardFees, CardNetwork, BrandKey, IssuerMark, RoundingRule, EPFContributionBasis, EPFSalaryRevision } from '../types';
 import { notifyLogosUpdated } from '../services/LogoService';
@@ -16,6 +17,8 @@ import { resolveCardIssuer, resolveIssuerMark, linkedBankOf, cardMovableTransact
 import { calculateEPFProjection } from '../utils/epfEngine';
 import { generateId, formatCurrency, getCurrentMonthStr, calculateBalance, calculateCycleBalance, getLatestBilledCycle, getOrdinalSuffix, affectsRupeeBalance, cardEarnsCashback, isUnitDenominated, rewardUnitBalance, rewardPointsToRupees, rupeesToRewardPoints, rupeeLedgerAmount, rewardPointsAdjustmentFor } from '../utils';
 import { getCardCycleFigures } from '../services/CardDuesService';
+import { getCardYear } from '../services/CardYearService';
+import { lastBillOf, planCardStart } from '../services/CardStartService';
 import { scrollToFirstError } from '../utils/formErrors';
 import { CardNetworkLogo, NETWORK_LABELS } from './CardNetworkLogo';
 import { ViewCardOverlay } from './ViewCardOverlay';
@@ -81,7 +84,7 @@ const issuerMarkLabel = (mark: IssuerMark): string =>
   'brand' in mark ? brandLabel(mark.brand) : mark.name;
 
 export default function Accounts({ onViewStatement }: { onViewStatement: (acc: Account) => void }) {
-  const { data, setPendingTransfer, addAccount, updateAccount, archiveAccount, restoreAccount } = useFinance();
+  const { data, setPendingTransfer, addAccount, updateAccount, archiveAccount, restoreAccount, addTransaction } = useFinance();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [viewingCard, setViewingCard] = useState<Account | null>(null);
@@ -277,6 +280,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   });
 
   const [openingBalanceInput, setOpeningBalanceInput] = useState('');
+  /* Where a credit card stands on the day it is ADDED — the last bill still owed, the spends since,
+     and (for a spend-waived card) the total spent this card year. They replace the one "opening
+     balance" a card used to get, which no card screen ever read. See CardStartService. */
+  const [startBilledInput, setStartBilledInput] = useState('');
+  const [startUnbilledInput, setStartUnbilledInput] = useState('');
+  const [spentThisYearInput, setSpentThisYearInput] = useState('');
   const [newCbName, setNewCbName] = useState('');
   const [newCbRate, setNewCbRate] = useState('');
   const [travelOpeningBalanceInput, setTravelOpeningBalanceInput] = useState('');
@@ -291,6 +300,15 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
   const [editingCashbackRateId, setEditingCashbackRateId] = useState<string | null>(null);
   const [isEditingCardDetails, setIsEditingCardDetails] = useState(false);
+  /* The open Card Details panel holds details that were never saved — it was opened from "+" (or by a
+     scan) on a card that had none. Its dismiss control is then a CANCEL (×), not a delete: there is
+     nothing on the card to remove, only a draft to walk away from. ✓ commits the draft and the
+     trash bin returns, because from then on there IS something to delete. */
+  const [cardDetailsDraftIsNew, setCardDetailsDraftIsNew] = useState(false);
+  /* The balances an EDIT pre-filled. A wallet can genuinely sit below zero (a payment logged before
+     its top-up), and refusing to save the account over a figure the user never touched would block
+     renaming it. So a negative balance is refused only when it was typed — on add, or changed here. */
+  const seededBalances = useRef({ opening: '', travel: '', reward: '' });
   const [issuerQuery, setIssuerQuery] = useState('');
   const [issuerDropdownOpen, setIssuerDropdownOpen] = useState(false);
   // The dropdown is closed by the input's own blur, so anything that opens it has to make sure the
@@ -424,6 +442,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
   const addCashbackRate = () => {
     if (!newCbName || !newCbRate) return;
+    const rate = parseFloat(newCbRate);
+    if (isNaN(rate) || rate < 0 || rate > 100) {
+      setErrors(prev => ({ ...prev, cbRate: rate < 0 ? "Rate can't be negative" : 'Enter a rate from 0 to 100%' }));
+      return;
+    }
+    if (errors.cbRate) setErrors(prev => ({ ...prev, cbRate: '' }));
     const trimmedName = newCbName.trim();
     if (editingCashbackRateId) {
       setNewAccount(prev => ({
@@ -516,6 +540,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     stopNfcScan();
     if (!newAccount.cardDetails) {
       setNewAccount(prev => ({ ...prev, cardDetails: {} }));
+      setCardDetailsDraftIsNew(true);
       setExpiryInput('');
       setIssuerQuery(issuerSeedLabel);
       setIssuerDropdownOpen(false);
@@ -598,11 +623,16 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setEditId(null);
     setNewAccount({ name: '', type: 'bank_account', openingBalances: {}, cashbackRates: [], isCashbackEnabled: false, customLogoUrl: '', ...prefill });
     setOpeningBalanceInput('');
+    seededBalances.current = { opening: '', travel: '', reward: '' };
+    setStartBilledInput('');
+    setStartUnbilledInput('');
+    setSpentThisYearInput('');
     setNewCbName('');
     setNewCbRate('');
     setNewCbRoundOff(false);
     setEditingCashbackRateId(null);
     setIsEditingCardDetails(false);
+    setCardDetailsDraftIsNew(false);
     setTravelOpeningBalanceInput('');
     setRewardOpeningBalanceInput('');
     setExpiryInput('');
@@ -631,6 +661,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setNewCbRoundOff(false);
     setEditingCashbackRateId(null);
     setIsEditingCardDetails(false);
+    setCardDetailsDraftIsNew(false);
 
     /* A unit-denominated rewards wallet is entered in its own unit (500 Chips, not the ₹50 those
        Chips are worth) — that is the figure the user reads off the app that issued them, and the
@@ -659,14 +690,17 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       : calculateBalance(acc, data.transactions, month);
     const cleanBalance = Math.round(currentBalance * 100) / 100;
     setOpeningBalanceInput((cleanBalance === 0 ? 0 : cleanBalance).toString());
+    seededBalances.current.opening = (cleanBalance === 0 ? 0 : cleanBalance).toString();
 
     const currentTravelBalance = calculateBalance(acc, data.transactions, month, true);
     const cleanTravelBalance = Math.round(currentTravelBalance * 100) / 100;
     setTravelOpeningBalanceInput((cleanTravelBalance === 0 ? 0 : cleanTravelBalance).toString());
+    seededBalances.current.travel = (cleanTravelBalance === 0 ? 0 : cleanTravelBalance).toString();
 
     const currentRewardBalance = calculateBalance(acc, data.transactions, month, false, true, data.cashbackStatements);
     const cleanRewardBalance = Math.round(currentRewardBalance * 100) / 100;
     setRewardOpeningBalanceInput((cleanRewardBalance === 0 ? 0 : cleanRewardBalance).toString());
+    seededBalances.current.reward = (cleanRewardBalance === 0 ? 0 : cleanRewardBalance).toString();
 
     // Pre-fill expiry string from saved cardDetails
     const cd = acc.cardDetails;
@@ -687,9 +721,18 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     setSymbolResults([]);
     setSymbolDropdownOpen(false);
     setFeeMode(feeModeOf(acc.cardFees));
+    setStartBilledInput('');
+    setStartUnbilledInput('');
+    setSpentThisYearInput(acc.spendBeforeTracking ? String(acc.spendBeforeTracking.amount) : '');
 
     setIsModalOpen(true);
   };
+
+  // The third card question only matters to a spend-based fee waiver — the one figure on the card
+  // screen measured over the card's whole year rather than over what was logged.
+  // Accounts whose balance can genuinely be below zero: an overdrawn bank, a ledger that nets either way.
+  const balanceMayBeNegative = !['cash', 'e_wallet', 'rewards', 'epf', 'debit_card'].includes(newAccount.type || '');
+  const showSpentThisYear = newAccount.type === 'credit_card' && feeMode !== 'ltf' && (newAccount.cardFees?.waiverSpend || 0) > 0;
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
@@ -699,48 +742,85 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     if (!newAccount.type) {
       newErrors.type = 'Account Type is required';
     }
-    if (newAccount.type !== 'mutual_funds' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && !linkedBankOf(newAccount, data.accounts) && !openingBalanceInput.trim()) {
-      newErrors.openingBalance = 'Opening Balance is required';
+    // A credit card asks its own two questions instead (below), and on edit asks none — see startBilledInput.
+    /* EVERY MESSAGE SAYS WHAT IS WRONG. These used to answer every bad value with "<Field> is
+       required" — so 250 in Payment Due Day, a field that plainly had something in it, was told it was
+       missing. "Required" now means blank and nothing else; a value that is there but wrong says why. */
+    const NEGATIVE = "Can't be negative";
+    const typedNegative = (input: string, seed: string) =>
+      (parseFloat(input) || 0) < 0 && (!editId || input.trim() !== seed.trim());
+    // Accounts that hold money you have, which cannot be below zero when you START tracking them. A
+    // bank account can be overdrawn and a custom ledger may net either way, so those are left free.
+    const cannotBeNegative = ['cash', 'e_wallet', 'rewards', 'epf', 'debit_card'].includes(newAccount.type || '');
+
+    if (newAccount.type !== 'mutual_funds' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && newAccount.type !== 'credit_card' && !linkedBankOf(newAccount, data.accounts)) {
+      if (!openingBalanceInput.trim()) newErrors.openingBalance = 'Opening Balance is required';
+      else if (cannotBeNegative && typedNegative(openingBalanceInput, seededBalances.current.opening)) newErrors.openingBalance = NEGATIVE;
     }
-    if ((newAccount.type === 'mutual_funds' || newAccount.type === 'stocks' || newAccount.type === 'commodity') && newAccount.numberOfShares === undefined) {
-      newErrors.openingUnits = newAccount.type === 'mutual_funds' ? 'Opening Units is required' : newAccount.type === 'commodity' ? 'Opening Grams is required' : 'Opening Shares is required';
+    if (newAccount.type === 'credit_card' && !editId) {
+      if (!startBilledInput.trim()) newErrors.startBilled = 'Enter what is still due on the last bill — 0 if it is paid';
+      else if ((parseFloat(startBilledInput) || 0) < 0) newErrors.startBilled = NEGATIVE;
+      if (!startUnbilledInput.trim()) newErrors.startUnbilled = 'Enter the spends since the last bill — 0 if none';
+      else if ((parseFloat(startUnbilledInput) || 0) < 0) newErrors.startUnbilled = NEGATIVE;
     }
-    if ((newAccount.type === 'mutual_funds' || newAccount.type === 'stocks' || newAccount.type === 'commodity') && newAccount.investedValue === undefined) {
-      newErrors.investedValue = 'Total Invested Value is required';
+    if (showSpentThisYear && (parseFloat(spentThisYearInput) || 0) < 0) {
+      newErrors.spentThisYear = NEGATIVE;
+    }
+    if (newAccount.type === 'mutual_funds' || newAccount.type === 'stocks' || newAccount.type === 'commodity') {
+      const unitWord = newAccount.type === 'mutual_funds' ? 'Units' : newAccount.type === 'commodity' ? 'Grams' : 'Shares';
+      if (newAccount.numberOfShares === undefined) newErrors.openingUnits = `Opening ${unitWord} is required`;
+      else if (newAccount.numberOfShares < 0) newErrors.openingUnits = NEGATIVE;
+      if (newAccount.investedValue === undefined) newErrors.investedValue = 'Total Invested Value is required';
+      else if (newAccount.investedValue < 0) newErrors.investedValue = NEGATIVE;
     }
     if (newAccount.type === 'commodity' && !newAccount.commodityMetal) {
       newErrors.commodityMetal = 'Metal type is required';
     }
     if (newAccount.type === 'credit_card') {
-      if (newAccount.creditLimit === undefined || isNaN(newAccount.creditLimit) || newAccount.creditLimit <= 0) {
+      if (newAccount.creditLimit === undefined || isNaN(newAccount.creditLimit)) {
         newErrors.creditLimit = 'Card Limit is required';
+      } else if (newAccount.creditLimit <= 0) {
+        newErrors.creditLimit = 'Card Limit must be more than 0';
       }
-      if (!newAccount.statementDay || newAccount.statementDay < 1 || newAccount.statementDay > 31) {
+      if (newAccount.statementDay === undefined || isNaN(newAccount.statementDay)) {
         newErrors.statementDay = 'Statement Generation Day is required';
+      } else if (newAccount.statementDay < 1 || newAccount.statementDay > 31) {
+        newErrors.statementDay = 'Enter a day from 1 to 31';
       }
       // A mode with a fee in its name has to carry the amount. This is the whole reason the shape is
       // chosen before the numbers: without it, picking 'Annual fee' and typing nothing would save a
       // card that every downstream screen correctly reports as lifetime free — the user having just
       // said the opposite.
       const fees = newAccount.cardFees;
-      if (feeMode !== 'ltf' && (fees?.annualFee === undefined || isNaN(fees.annualFee) || fees.annualFee <= 0)) {
-        newErrors.annualFee = 'Annual Fee is required';
+      if (feeMode !== 'ltf') {
+        if (fees?.annualFee === undefined || isNaN(fees.annualFee)) newErrors.annualFee = 'Annual Fee is required';
+        else if (fees.annualFee <= 0) newErrors.annualFee = 'Annual Fee must be more than 0 — pick "Lifetime free" if there is none';
+        if (fees?.waiverSpend !== undefined && fees.waiverSpend < 0) newErrors.waiverSpend = NEGATIVE;
       }
-      if (feeMode === 'joining_annual' && (fees?.joiningFee === undefined || isNaN(fees.joiningFee) || fees.joiningFee <= 0)) {
-        newErrors.joiningFee = 'Joining Fee is required';
+      if (feeMode === 'joining_annual') {
+        if (fees?.joiningFee === undefined || isNaN(fees.joiningFee)) newErrors.joiningFee = 'Joining Fee is required';
+        else if (fees.joiningFee <= 0) newErrors.joiningFee = 'Joining Fee must be more than 0';
       }
-      if (!newAccount.dueDay || newAccount.dueDay < 1 || newAccount.dueDay > 31) {
+      if (newAccount.dueDay === undefined || isNaN(newAccount.dueDay)) {
         newErrors.dueDay = 'Payment Due Day is required';
+      } else if (newAccount.dueDay < 1 || newAccount.dueDay > 31) {
+        newErrors.dueDay = 'Enter a day from 1 to 31';
       }
     }
     if (newAccount.isNcmcEnabled) {
       if (!travelOpeningBalanceInput.trim()) {
         newErrors.travelOpeningBalance = 'Travel Wallet Opening Balance is required';
+      } else if (typedNegative(travelOpeningBalanceInput, seededBalances.current.travel)) {
+        newErrors.travelOpeningBalance = NEGATIVE;
       }
     }
     if (((newAccount.type === 'credit_card' && newAccount.isCashbackEnabled) || (newAccount.type === 'debit_card' && newAccount.isCashbackEnabled))) {
-      if (newAccount.defaultCashbackRate === undefined || isNaN(newAccount.defaultCashbackRate) || newAccount.defaultCashbackRate < 0) {
+      if (newAccount.defaultCashbackRate === undefined || isNaN(newAccount.defaultCashbackRate)) {
         newErrors.defaultCashbackRate = 'Default Cashback Rate is required';
+      } else if (newAccount.defaultCashbackRate < 0) {
+        newErrors.defaultCashbackRate = NEGATIVE;
+      } else if (newAccount.defaultCashbackRate > 100) {
+        newErrors.defaultCashbackRate = "Can't be more than 100%";
       }
       if (newAccount.rewardType === 'points') {
         if (!newAccount.rewardUnit?.trim()) {
@@ -748,6 +828,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
         }
         if (!rewardOpeningBalanceInput.trim()) {
           newErrors.rewardOpeningBalance = 'Reward Points Opening Balance is required';
+        } else if (typedNegative(rewardOpeningBalanceInput, seededBalances.current.reward)) {
+          newErrors.rewardOpeningBalance = NEGATIVE;
         }
       }
     }
@@ -851,53 +933,58 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
     if (editId && newAccount.type !== 'mutual_funds' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity') {
       const originalAcc = data.accounts.find(a => a.id === editId);
       if (originalAcc) {
-        // 1. Standard Wallet Opening Balance setup/rollover folding
-        let opening = originalAcc.openingBalances[month];
-        if (opening === undefined) {
-          const prevMonthDate = new Date();
-          prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
-          const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
-          opening = calculateBalance(originalAcc, data.transactions, prevMonthStr);
-          const cleanOpening = Math.round(opening * 100) / 100;
-          opening = cleanOpening === 0 ? 0 : cleanOpening;
-          updatedOpeningBalances[month] = opening;
-        }
-
-        // Calculate standard transactions change for the current month
-        const currentMonthTransactions = data.transactions.filter(t => {
-          if (t.accountId !== editId) return false;
-          const tMonth = t.date.slice(0, 7);
-          return tMonth === month && affectsRupeeBalance(t);
-        });
-        const standardChange = currentMonthTransactions.reduce((acc, t) => {
-          // Already net of any reward split — see the same note in calculateBalance. This block mirrors
-          // it so a re-entered opening balance derives the same figure the account displays.
-          const effectiveAmount = rupeeLedgerAmount(originalAcc, t);
-          if (originalAcc.type === 'credit_card') {
-            return t.type === 'debit' ? acc + effectiveAmount : acc - effectiveAmount;
-          } else {
-            return t.type === 'credit' ? acc + effectiveAmount : acc - effectiveAmount;
+        // A credit card has no balance field on edit any more: a bill is corrected by long-pressing it
+        // on the statement screen, and unbilled spends are the ledger's. Re-deriving an adjustment
+        // from a hidden field could only ever write rounding noise into the card's balance.
+        if (newAccount.type !== 'credit_card') {
+          // 1. Standard Wallet Opening Balance setup/rollover folding
+          let opening = originalAcc.openingBalances[month];
+          if (opening === undefined) {
+            const prevMonthDate = new Date();
+            prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+            const prevMonthStr = `${prevMonthDate.getFullYear()}-${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}`;
+            opening = calculateBalance(originalAcc, data.transactions, prevMonthStr);
+            const cleanOpening = Math.round(opening * 100) / 100;
+            opening = cleanOpening === 0 ? 0 : cleanOpening;
+            updatedOpeningBalances[month] = opening;
           }
-        }, 0);
 
-        // Back into rupees, which is what the balance maps hold. Identity for every other account:
-        // rewardPointsToRupees divides by a rate of 1 unless the account is unit-denominated. The
-        // account being saved is what decides the unit — the rate may have just been edited.
-        const enteredCurrentBalance = entersBalanceInUnits
-          ? rewardPointsToRupees(parseFloat(openingBalanceInput) || 0, unitAccountForEntry)
-          : (parseFloat(openingBalanceInput) || 0);
-        const previousBalance = calculateBalance(originalAcc, data.transactions, month);
-        const rawBalAdj = enteredCurrentBalance - opening - standardChange;
-        const cleanBalAdj = Math.round(rawBalAdj * 100) / 100;
-        updatedBalanceAdjustments[month] = cleanBalAdj === 0 ? 0 : cleanBalAdj;
-
-        if (enteredCurrentBalance !== previousBalance) {
-          updatedBalanceEditHistory.push({
-            editedAt: new Date().toISOString(),
-            monthKey: month,
-            previousBalance,
-            newBalance: enteredCurrentBalance,
+          // Calculate standard transactions change for the current month
+          const currentMonthTransactions = data.transactions.filter(t => {
+            if (t.accountId !== editId) return false;
+            const tMonth = t.date.slice(0, 7);
+            return tMonth === month && affectsRupeeBalance(t);
           });
+          const standardChange = currentMonthTransactions.reduce((acc, t) => {
+            // Already net of any reward split — see the same note in calculateBalance. This block mirrors
+            // it so a re-entered opening balance derives the same figure the account displays.
+            const effectiveAmount = rupeeLedgerAmount(originalAcc, t);
+            if (originalAcc.type === 'credit_card') {
+              return t.type === 'debit' ? acc + effectiveAmount : acc - effectiveAmount;
+            } else {
+              return t.type === 'credit' ? acc + effectiveAmount : acc - effectiveAmount;
+            }
+          }, 0);
+
+          // Back into rupees, which is what the balance maps hold. Identity for every other account:
+          // rewardPointsToRupees divides by a rate of 1 unless the account is unit-denominated. The
+          // account being saved is what decides the unit — the rate may have just been edited.
+          const enteredCurrentBalance = entersBalanceInUnits
+            ? rewardPointsToRupees(parseFloat(openingBalanceInput) || 0, unitAccountForEntry)
+            : (parseFloat(openingBalanceInput) || 0);
+          const previousBalance = calculateBalance(originalAcc, data.transactions, month);
+          const rawBalAdj = enteredCurrentBalance - opening - standardChange;
+          const cleanBalAdj = Math.round(rawBalAdj * 100) / 100;
+          updatedBalanceAdjustments[month] = cleanBalAdj === 0 ? 0 : cleanBalAdj;
+
+          if (enteredCurrentBalance !== previousBalance) {
+            updatedBalanceEditHistory.push({
+              editedAt: new Date().toISOString(),
+              monthKey: month,
+              previousBalance,
+              newBalance: enteredCurrentBalance,
+            });
+          }
         }
 
         // 2. Travel Wallet Setup
@@ -983,8 +1070,36 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       }
     }
 
+    const accountId = editId || generateId();
+    const isCard = newAccount.type === 'credit_card';
+    const originalCard = editId ? data.accounts.find(a => a.id === editId) : undefined;
+    // The add form's answers, turned into what each card screen already reads. Edit asks none of them.
+    const cardStart = isCard && !editId
+      ? planCardStart({ id: accountId, statementDay: newAccount.statementDay || 1 }, {
+        billed: parseFloat(startBilledInput) || 0,
+        unbilled: parseFloat(startUnbilledInput) || 0,
+        spentThisYear: showSpentThisYear ? (parseFloat(spentThisYearInput) || 0) : undefined,
+      })
+      : undefined;
+    if (cardStart) {
+      updatedOpeningBalances[month] = cardStart.openingBalance;
+      updatedBalanceAdjustments[month] = 0;
+    }
+    // On edit the figure keeps the day it was first entered — that day is what separates it from the
+    // spends logged after it. A total typed in for the first time on an edit means "spent before the
+    // card was ADDED", so it is dated from then: dating it today would drop every spend logged in
+    // between from the waiver. Only a card with no add date falls back to today.
+    const editedSpentBefore = (() => {
+      const amount = Math.round((parseFloat(spentThisYearInput) || 0) * 100) / 100;
+      if (!showSpentThisYear || amount <= 0) return undefined;
+      return {
+        amount,
+        asOf: originalCard?.spendBeforeTracking?.asOf || originalCard?.trackedFrom || format(new Date(), 'yyyy-MM-dd'),
+      };
+    })();
+
     const accountData: Account = {
-      id: editId || generateId(),
+      id: accountId,
       name: (newAccount.name || '').trim(),
       type: newAccount.type as AccountType,
       openingBalances: newBank ? {} : updatedOpeningBalances,
@@ -1001,6 +1116,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       dueDay: newAccount.type === 'credit_card' ? newAccount.dueDay : undefined,
       cashbackCreditCycle: newAccount.type === 'credit_card' ? (newAccount.cashbackCreditCycle || 'next_cycle') : undefined,
       cardOpenedOn: newAccount.type === 'credit_card' ? newAccount.cardOpenedOn : undefined,
+      // Carried through an edit: the form never shows these, and the save rebuilds the account from
+      // scratch, so leaving them out used to erase every bill corrected on the statement screen the
+      // next time the card was edited for anything at all.
+      statementAdjustments: isCard ? (cardStart ? cardStart.statementAdjustments : originalCard?.statementAdjustments) : undefined,
+      spendBeforeTracking: isCard ? (cardStart ? cardStart.spendBeforeTracking : editedSpentBefore) : undefined,
+      // The day the card entered the app — what lets its screen say "spent since 24 Nov" when no
+      // earlier total was given. Stamped once, on add, and carried through every edit.
+      trackedFrom: isCard ? (editId ? originalCard?.trackedFrom : format(new Date(), 'yyyy-MM-dd')) : undefined,
       // Dropped entirely when every field is blank, so a card nobody filled the form in for carries
       // no cardFees key at all rather than an object of undefineds — which is what lets the summary
       // screen tell "not told" from "told, and it's free".
@@ -1045,6 +1168,8 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
       updateAccount(accountData);
     } else {
       addAccount(accountData);
+      // After the account, so the row lands on a card that exists.
+      if (cardStart?.openingEntry) addTransaction(cardStart.openingEntry);
     }
     notifyLogosUpdated();
 
@@ -1480,18 +1605,27 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           </div>
                         )}
 
+                        {/* Two fixed rows, not one wrapping one. The days and the buttons used to share
+                            a single flex row, so a card WITH saved details (two buttons) wrapped and
+                            pushed "Pay due by" to the far edge, while a card without them (one button)
+                            fitted on one line — the same footer in two layouts depending on whether a
+                            card number had been typed in. Now the days always sit on their own row,
+                            cycle left and due right, and the buttons on the row below: Statement at
+                            the left end, Card at the right end when there is a card to show. */}
                         {acc.type === 'credit_card' && (
-                          <div className="flex justify-between align-center gap-4" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)' }}>
-                            <div className="flex-col gap-1">
-                              <span className="text-mono text-muted" style={{ fontSize: '10px' }}>STATEMENT CYCLE</span>
-                              <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{acc.statementDay ? getOrdinalSuffix(acc.statementDay) : 'N/A'}</span>
-                            </div>
-                            <div className="flex-col gap-1">
-                              <span className="text-mono text-muted" style={{ fontSize: '10px' }}>PAY DUE BY</span>
-                              <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{acc.dueDay ? getOrdinalSuffix(acc.dueDay) : 'N/A'}</span>
+                          <div style={{ borderTop: '1px solid var(--border-color)' }}>
+                            <div className="flex justify-between align-center gap-4" style={{ padding: '0.65rem 1rem' }}>
+                              <div className="flex-col gap-1">
+                                <span className="text-mono text-muted" style={{ fontSize: '10px' }}>STATEMENT CYCLE</span>
+                                <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{acc.statementDay ? getOrdinalSuffix(acc.statementDay) : 'N/A'}</span>
+                              </div>
+                              <div className="flex-col align-end gap-1">
+                                <span className="text-mono text-muted" style={{ fontSize: '10px' }}>PAY DUE BY</span>
+                                <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{acc.dueDay ? getOrdinalSuffix(acc.dueDay) : 'N/A'}</span>
+                              </div>
                             </div>
 
-                            <div className="flex gap-3" style={{ marginLeft: 'auto' }}>
+                            <div className="flex justify-between align-center gap-3" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)' }}>
                               <button
                                 className="btn btn-secondary flex align-center gap-2"
                                 style={{ fontSize: '0.7rem', padding: '0.4rem 0.8rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700 }}
@@ -1995,7 +2129,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   </>
                 );
               })()}
-              {newAccount.type !== 'mutual_funds' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && !linkedBankOf(newAccount, data.accounts) && (
+              {newAccount.type !== 'mutual_funds' && newAccount.type !== 'stocks' && newAccount.type !== 'commodity' && newAccount.type !== 'credit_card' && !linkedBankOf(newAccount, data.accounts) && (
                 <div className="input-group">
                   {/* Named in the unit it is actually typed in, for a wallet that has one — the
                       field means 500 Chips, not ₹500, and nothing else on the form would say so. */}
@@ -2005,12 +2139,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       ? newAccount.rewardUnit.trim()
                       : 'Current Month'})
                   </label>
-                  <input
-                    type="number"
+                  <NumericInput
+                    allowNegative={balanceMayBeNegative || !!editId}
                     className={`input-field ${errors.openingBalance ? 'border-danger' : ''}`}
                     value={openingBalanceInput}
-                    onChange={e => {
-                      setOpeningBalanceInput(e.target.value);
+                    onValueChange={(text) => {
+                      setOpeningBalanceInput(text);
                       if (errors.openingBalance) setErrors(prev => ({ ...prev, openingBalance: '' }));
                     }}
                     placeholder="0.00"
@@ -2022,13 +2156,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
               {newAccount.type === 'credit_card' && (
                 <div className="input-group">
                   <label>Card Limit — ₹</label>
-                  <input
-                    type="number"
+                  <NumericInput
                     className={`input-field ${errors.creditLimit ? 'border-danger' : ''}`}
                     placeholder="e.g. 100000"
                     value={newAccount.creditLimit ?? ''}
-                    onChange={e => {
-                      const val = e.target.value !== '' ? parseFloat(e.target.value) : undefined;
+                    onValueChange={(_text, num) => {
+                      const val = num;
                       setNewAccount({ ...newAccount, creditLimit: val });
                       if (errors.creditLimit) setErrors(prev => ({ ...prev, creditLimit: '' }));
                     }}
@@ -2045,7 +2178,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                 <>
                   {/* The anchor for the membership year, which is the window a fee waiver is measured
                       over and the year the card summary totals spend and cashback across. Optional —
-                      without it that screen falls back to the financial year and says so. */}
+                      without it that screen falls back to the calendar year and says so. */}
                   <div className="input-group">
                     <label>Card Opened On</label>
                     <button
@@ -2059,6 +2192,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       </span>
                       <CalendarDays size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
                     </button>
+                    {/* The one card fact the bank and card apps rarely show — but every credit report
+                        does, per card, and the common ones are free. Only while it is still unset:
+                        once a date is in, the pointer is noise. */}
+                    {!newAccount.cardOpenedOn && (
+                      <span className="text-xs text-muted" style={{ marginTop: '0.35rem', lineHeight: 1.45 }}>
+                        Not sure? Check your credit report: CIBIL or Experian list each card's "Date Opened", free in apps like CRED or OneScore.
+                      </span>
+                    )}
                   </div>
 
                   {/* Not wrapped in an .input-group — CustomPicker renders its own, and nesting the
@@ -2083,15 +2224,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   {feeMode === 'joining_annual' && (
                     <div className="input-group">
                       <label>Joining Fee — ₹</label>
-                      <input
-                        type="number"
+                      <NumericInput
                         className={`input-field ${errors.joiningFee ? 'border-danger' : ''}`}
                         placeholder="e.g. 500"
                         value={newAccount.cardFees?.joiningFee ?? ''}
-                        onChange={e => {
+                        onValueChange={(_text, num) => {
                           setNewAccount({
                             ...newAccount,
-                            cardFees: { ...newAccount.cardFees, joiningFee: e.target.value !== '' ? parseFloat(e.target.value) : undefined },
+                            cardFees: { ...newAccount.cardFees, joiningFee: num },
                           });
                           if (errors.joiningFee) setErrors(prev => ({ ...prev, joiningFee: '' }));
                         }}
@@ -2104,15 +2244,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     <>
                       <div className="input-group">
                         <label>Annual Fee — ₹</label>
-                        <input
-                          type="number"
+                        <NumericInput
                           className={`input-field ${errors.annualFee ? 'border-danger' : ''}`}
                           placeholder="e.g. 1000"
                           value={newAccount.cardFees?.annualFee ?? ''}
-                          onChange={e => {
+                          onValueChange={(_text, num) => {
                             setNewAccount({
                               ...newAccount,
-                              cardFees: { ...newAccount.cardFees, annualFee: e.target.value !== '' ? parseFloat(e.target.value) : undefined },
+                              cardFees: { ...newAccount.cardFees, annualFee: num },
                             });
                             if (errors.annualFee) setErrors(prev => ({ ...prev, annualFee: '' }));
                           }}
@@ -2122,16 +2261,19 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
                       <div className="input-group">
                         <label>Annual Fee Waived On Yearly Spend — ₹</label>
-                        <input
-                          type="number"
+                        <NumericInput
                           className="input-field"
                           placeholder="Blank = never waived"
                           value={newAccount.cardFees?.waiverSpend ?? ''}
-                          onChange={e => setNewAccount({
-                            ...newAccount,
-                            cardFees: { ...newAccount.cardFees, waiverSpend: e.target.value !== '' ? parseFloat(e.target.value) : undefined },
-                          })}
+                          onValueChange={(_text, num) => {
+                            setNewAccount({
+                              ...newAccount,
+                              cardFees: { ...newAccount.cardFees, waiverSpend: num },
+                            });
+                            if (errors.waiverSpend) setErrors(prev => ({ ...prev, waiverSpend: '' }));
+                          }}
                         />
+                        {errors.waiverSpend && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.waiverSpend}</span>}
                       </div>
 
                       <div className="input-group" style={{ margin: '1.25rem 0' }}>
@@ -2170,12 +2312,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   {newAccount.isNcmcEnabled && (
                     <div className="input-group">
                       <label>{editId ? 'Travel Wallet Current Balance' : 'Travel Wallet Opening Balance'}</label>
-                      <input
-                        type="number"
+                      <NumericInput
+                        allowNegative={!!editId}
                         className={`input-field ${errors.travelOpeningBalance ? 'border-danger' : ''}`}
                         value={travelOpeningBalanceInput}
-                        onChange={e => {
-                          setTravelOpeningBalanceInput(e.target.value);
+                        onValueChange={(text) => {
+                          setTravelOpeningBalanceInput(text);
                           if (errors.travelOpeningBalance) setErrors(prev => ({ ...prev, travelOpeningBalance: '' }));
                         }}
                         placeholder="0.00"
@@ -2221,14 +2363,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   {newAccount.rewardUnit && (
                     <div className="input-group">
                       <label>Points to ₹1 Conversion Rate (Optional)</label>
-                      <input
-                        type="number"
+                      <NumericInput
                         className="input-field"
                         value={newAccount.pointsConversionRate || ''}
-                        onChange={e => setNewAccount({ ...newAccount, pointsConversionRate: parseFloat(e.target.value) || undefined })}
+                        onValueChange={(_text, num) => setNewAccount({ ...newAccount, pointsConversionRate: num || undefined })}
                         placeholder="e.g. 5 (means 5 Jewels = ₹1)"
-                        step="any"
-                        min="0.0001"
                       />
                       <p className="text-xs text-muted" style={{ marginTop: '0.25rem' }}>
                         This wallet's balance is counted in {newAccount.rewardUnit?.trim() || 'points'} at this rate, and converted
@@ -2248,13 +2387,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                 <>
                   <div className="input-group">
                     <label>Pension (EPS) share of this balance — ₹</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       className={`input-field ${errors.basePensionBalance ? 'border-danger' : ''}`}
                       placeholder="0"
                       value={newAccount.basePensionBalance ?? ''}
-                      onChange={e => {
-                        setNewAccount({ ...newAccount, basePensionBalance: e.target.value !== '' ? parseFloat(e.target.value) : undefined });
+                      onValueChange={(_text, num) => {
+                        setNewAccount({ ...newAccount, basePensionBalance: num });
                         if (errors.basePensionBalance) setErrors(prev => ({ ...prev, basePensionBalance: '' }));
                       }}
                     />
@@ -2313,13 +2451,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     return (
                       <div className="input-group">
                         <label>{isPayslipBasis ? 'Monthly PF deduction (from payslip) — ₹' : 'Monthly Basic Salary (+ DA, if any) — ₹'}</label>
-                        <input
-                          type="number"
+                        <NumericInput
                           className="input-field"
                           placeholder={isPayslipBasis ? 'e.g. 1800' : 'e.g. 25000'}
                           value={(isPayslipBasis ? revision?.employeeContribution : revision?.basicSalary) || ''}
-                          onChange={e => {
-                            const value = parseFloat(e.target.value) || 0;
+                          onValueChange={(_text, num) => {
+                            const value = num ?? 0;
                             setRevision(isPayslipBasis ? { employeeContribution: value } : { basicSalary: value });
                           }}
                         />
@@ -2338,17 +2475,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                 <>
                   <div className="input-group">
                     <label>Total Invested Value — ₹</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       className={`input-field ${errors.investedValue ? 'border-danger' : ''}`}
                       value={newAccount.investedValue ?? ''}
-                      onChange={e => {
-                        setNewAccount({ ...newAccount, investedValue: e.target.value !== '' ? parseFloat(e.target.value) : undefined });
+                      onValueChange={(_text, num) => {
+                        setNewAccount({ ...newAccount, investedValue: num });
                         if (errors.investedValue) setErrors(prev => ({ ...prev, investedValue: '' }));
                       }}
                       placeholder="e.g. 15000"
-                      step="any"
-                      min="0"
                     />
                     {errors.investedValue
                       ? <span className="text-xs text-danger" style={{ marginTop: '0.25rem', display: 'block' }}>{errors.investedValue}</span>
@@ -2357,17 +2491,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   </div>
                   <div className="input-group">
                     <label>{newAccount.type === 'mutual_funds' ? 'Opening Units' : 'Opening Shares'}</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       className={`input-field ${errors.openingUnits ? 'border-danger' : ''}`}
                       value={newAccount.numberOfShares ?? ''}
-                      onChange={e => {
-                        setNewAccount({ ...newAccount, numberOfShares: e.target.value !== '' ? parseFloat(e.target.value) : undefined });
+                      onValueChange={(_text, num) => {
+                        setNewAccount({ ...newAccount, numberOfShares: num });
                         if (errors.openingUnits) setErrors(prev => ({ ...prev, openingUnits: '' }));
                       }}
                       placeholder={newAccount.type === 'mutual_funds' ? 'e.g. 484.775' : 'e.g. 100'}
-                      step="any"
-                      min="0"
                     />
                     {errors.openingUnits && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.openingUnits}</span>}
                   </div>
@@ -2457,14 +2588,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   {newAccount.type === 'mutual_funds' && (
                     <div className="input-group">
                       <label>Average NAV — ₹/unit (Optional)</label>
-                      <input
-                        type="number"
+                      <NumericInput
                         className="input-field"
                         value={newAccount.avgNav ?? ''}
-                        onChange={e => setNewAccount({ ...newAccount, avgNav: e.target.value ? parseFloat(e.target.value) : undefined })}
+                        onValueChange={(_text, num) => setNewAccount({ ...newAccount, avgNav: num })}
                         placeholder="e.g. 32.50"
-                        step="any"
-                        min="0"
                       />
                       <span className="text-xs text-muted" style={{ marginTop: '0.25rem', display: 'block' }}>Only a fallback for invested value if you leave it blank — the AVG shown on the card is derived from invested ÷ units</span>
                     </div>
@@ -2490,17 +2618,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   />
                   <div className="input-group">
                     <label>Total Invested Value — ₹</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       className={`input-field ${errors.investedValue ? 'border-danger' : ''}`}
                       value={newAccount.investedValue ?? ''}
-                      onChange={e => {
-                        setNewAccount({ ...newAccount, investedValue: e.target.value !== '' ? parseFloat(e.target.value) : undefined });
+                      onValueChange={(_text, num) => {
+                        setNewAccount({ ...newAccount, investedValue: num });
                         if (errors.investedValue) setErrors(prev => ({ ...prev, investedValue: '' }));
                       }}
                       placeholder="e.g. 50000"
-                      step="any"
-                      min="0"
                     />
                     {errors.investedValue
                       ? <span className="text-xs text-danger" style={{ marginTop: '0.25rem', display: 'block' }}>{errors.investedValue}</span>
@@ -2509,30 +2634,24 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                   </div>
                   <div className="input-group">
                     <label>Opening Weight — grams</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       className={`input-field ${errors.openingUnits ? 'border-danger' : ''}`}
                       value={newAccount.numberOfShares ?? ''}
-                      onChange={e => {
-                        setNewAccount({ ...newAccount, numberOfShares: e.target.value !== '' ? parseFloat(e.target.value) : undefined });
+                      onValueChange={(_text, num) => {
+                        setNewAccount({ ...newAccount, numberOfShares: num });
                         if (errors.openingUnits) setErrors(prev => ({ ...prev, openingUnits: '' }));
                       }}
                       placeholder="e.g. 10.5"
-                      step="any"
-                      min="0"
                     />
                     {errors.openingUnits && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.openingUnits}</span>}
                   </div>
                   <div className="input-group">
                     <label>Manual Price Override — ₹/gram (optional)</label>
-                    <input
-                      type="number"
+                    <NumericInput
                       className="input-field"
                       value={newAccount.manualPricePerGram ?? ''}
-                      onChange={e => setNewAccount({ ...newAccount, manualPricePerGram: e.target.value !== '' ? parseFloat(e.target.value) : undefined })}
+                      onValueChange={(_text, num) => setNewAccount({ ...newAccount, manualPricePerGram: num })}
                       placeholder="Leave blank to use the AI estimate"
-                      step="any"
-                      min="0"
                     />
                     <span className="text-xs text-muted" style={{ marginTop: '0.25rem', display: 'block' }}>
                       Set this to the exact ₹/g from your vendor for precise valuation. Blank = use the auto AI estimate.
@@ -2548,34 +2667,131 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                 <>
                   <div className="input-group">
                     <label>Statement Generation Day (1-31)</label>
-                    <input
-                      type="number"
+                    <NumericInput
+                      integer maxDigits={2}
                       className={`input-field ${errors.statementDay ? 'border-danger' : ''}`}
                       value={newAccount.statementDay || ''}
-                      onChange={e => {
-                        setNewAccount({ ...newAccount, statementDay: parseInt(e.target.value) });
+                      onValueChange={(_text, num) => {
+                        setNewAccount({ ...newAccount, statementDay: num });
                         if (errors.statementDay) setErrors(prev => ({ ...prev, statementDay: '' }));
                       }}
                       placeholder="e.g. 5"
-                      min="1" max="31"
                     />
                     {errors.statementDay && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.statementDay}</span>}
                   </div>
                   <div className="input-group">
                     <label>Payment Due Day (1-31)</label>
-                    <input
-                      type="number"
+                    <NumericInput
+                      integer maxDigits={2}
                       className={`input-field ${errors.dueDay ? 'border-danger' : ''}`}
                       value={newAccount.dueDay || ''}
-                      onChange={e => {
-                        setNewAccount({ ...newAccount, dueDay: parseInt(e.target.value) });
+                      onValueChange={(_text, num) => {
+                        setNewAccount({ ...newAccount, dueDay: num });
                         if (errors.dueDay) setErrors(prev => ({ ...prev, dueDay: '' }));
                       }}
                       placeholder="e.g. 25"
-                      min="1" max="31"
                     />
                     {errors.dueDay && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.dueDay}</span>}
                   </div>
+                  {(() => {
+                    /* WHERE THE CARD STANDS TODAY — asked only when adding it; see CardStartService for
+                       where each answer lands. Placed after the two days because the questions are
+                       ABOUT them: "the last bill" is the one cut on the statement day, and naming its
+                       date is what stops "billed" and "unbilled" being two words for the same thing. */
+                    const day = newAccount.statementDay && newAccount.statementDay >= 1 && newAccount.statementDay <= 31 ? newAccount.statementDay : undefined;
+                    const cutLabel = day ? format(lastBillOf(day).cutOn, 'd MMM') : undefined;
+                    const billedN = parseFloat(startBilledInput) || 0;
+                    const unbilledN = parseFloat(startUnbilledInput) || 0;
+                    const spentN = parseFloat(spentThisYearInput) || 0;
+                    const year = getCardYear({ ...newAccount, cardOpenedOn: newAccount.cardOpenedOn } as Account);
+                    const sinceLabel = format(parseISO(year.start), 'd MMM yyyy');
+                    const owedSoFar = billedN + unbilledN;
+                    const editedCard = editId ? data.accounts.find(a => a.id === editId) : undefined;
+                    const before = editedCard?.spendBeforeTracking;
+                    const addedOn = editedCard?.trackedFrom ? format(parseISO(editedCard.trackedFrom), 'd MMM') : undefined;
+                    return (
+                      <>
+                        {!editId && (
+                          <>
+                            <div className="input-group">
+                              <label>{cutLabel ? `Last bill (cut ${cutLabel}) — still due` : 'Last bill — still due'}</label>
+                              <NumericInput
+                                className={`input-field ${errors.startBilled ? 'border-danger' : ''}`}
+                                value={startBilledInput}
+                                onValueChange={(text) => {
+                                  setStartBilledInput(text);
+                                  if (errors.startBilled) setErrors(prev => ({ ...prev, startBilled: '' }));
+                                }}
+                                placeholder="0 if already paid"
+                              />
+                              {errors.startBilled && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.startBilled}</span>}
+                            </div>
+                            <div className="input-group">
+                              <label>{cutLabel ? `Unbilled spends since ${cutLabel}` : 'Unbilled spends since the last bill'}</label>
+                              <NumericInput
+                                className={`input-field ${errors.startUnbilled ? 'border-danger' : ''}`}
+                                value={startUnbilledInput}
+                                onValueChange={(text) => {
+                                  setStartUnbilledInput(text);
+                                  if (errors.startUnbilled) setErrors(prev => ({ ...prev, startUnbilled: '' }));
+                                }}
+                                placeholder="0 if none"
+                              />
+                              {errors.startUnbilled && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.startUnbilled}</span>}
+                            </div>
+                          </>
+                        )}
+                        {showSpentThisYear && (
+                          <div className="input-group">
+                            <label>
+                              {editId && before
+                                ? `Spent before tracking (added ${format(parseISO(before.asOf), 'd MMM')})`
+                                : editId && addedOn
+                                  ? `Spent before tracking (before ${addedOn})`
+                                  : `Total spent since ${sinceLabel}`}
+                            </label>
+                            <NumericInput
+                              className={`input-field ${errors.spentThisYear ? 'border-danger' : ''}`}
+                              value={spentThisYearInput}
+                              onValueChange={(text) => {
+                                setSpentThisYearInput(text);
+                                if (errors.spentThisYear) setErrors(prev => ({ ...prev, spentThisYear: '' }));
+                              }}
+                              placeholder={editId && !before ? 'Blank = count only what is logged' : 'e.g. 50000'}
+                            />
+                            {errors.spentThisYear && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.spentThisYear}</span>}
+                            {/* "Spent" vs "billed" is the easy mistake here: the bill and the unbilled
+                                spends above ARE spending, and leaving them out would short the waiver
+                                by exactly their sum. So the line under the box does the arithmetic out
+                                loud with the user's own figures, and says plainly when the total is
+                                smaller than the two parts it has to contain. A warning, not a block: a
+                                bill straddling the card's renewal can hold spends from the year before. */}
+                            <span
+                              className="text-xs"
+                              style={{
+                                marginTop: '0.35rem', lineHeight: 1.45,
+                                color: !editId && spentN > 0 && spentN + 0.005 < owedSoFar ? 'var(--accent)' : 'var(--text-muted)',
+                              }}
+                            >
+                              {editId
+                                ? (before
+                                  ? `Everything spent this card year up to ${format(parseISO(before.asOf), 'd MMM')}. Spends logged after that are added to it for the fee waiver.`
+                                  : addedOn
+                                    ? `Everything spent since ${sinceLabel} before the card was added on ${addedOn}, its bill and unbilled spends included. Spends logged from ${addedOn} are added to it for the fee waiver.`
+                                    : 'Total spent this card year before you started logging it, for the fee waiver. Counted from today.')
+                                : !spentThisYearInput.trim()
+                                  ? `Everything spent on the card since ${sinceLabel}${year.isAnniversary ? '' : ' (calendar year — set Card Opened On to use the card\'s own year)'} — including the bill and unbilled above. Counts toward the fee waiver.`
+                                  : spentN + 0.005 < owedSoFar
+                                    ? `Less than the bill + unbilled above (${formatCurrency(owedSoFar)}). Enter the TOTAL spent, including them.`
+                                    : owedSoFar > 0
+                                      ? `Includes ${[billedN > 0 && `the ${formatCurrency(billedN)} bill`, unbilledN > 0 && `${formatCurrency(unbilledN)} unbilled`].filter(Boolean).join(' and ')} above${spentN - owedSoFar >= 0.005 ? `, plus ${formatCurrency(spentN - owedSoFar)} of earlier spends` : ''}.`
+                                      : 'Spends you log from now on are added to this.'}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                   <div style={{ marginTop: '0.5rem' }}>
                     <CustomPicker
                       label="Statement Bill Rounding"
@@ -2670,14 +2886,11 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       </div>
                       <div className="input-group">
                         <label>Points to ₹1 Conversion Rate (Optional)</label>
-                        <input
-                          type="number"
+                        <NumericInput
                           className="input-field"
                           value={newAccount.pointsConversionRate || ''}
-                          onChange={e => setNewAccount({ ...newAccount, pointsConversionRate: parseFloat(e.target.value) || undefined })}
+                          onValueChange={(_text, num) => setNewAccount({ ...newAccount, pointsConversionRate: num || undefined })}
                           placeholder="e.g. 5 (means 5 Jewels = ₹1)"
-                          step="any"
-                          min="0.0001"
                         />
                         <p className="text-xs text-muted" style={{ marginTop: '0.25rem' }}>
                           Used to automatically convert cashback rupees to points.
@@ -2685,12 +2898,12 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       </div>
                       <div className="input-group">
                         <label>{editId ? 'Reward Points Current Balance' : 'Reward Points Opening Balance'}</label>
-                        <input
-                          type="number"
+                        <NumericInput
+                          allowNegative={!!editId}
                           className={`input-field ${errors.rewardOpeningBalance ? 'border-danger' : ''}`}
                           value={rewardOpeningBalanceInput}
-                          onChange={e => {
-                            setRewardOpeningBalanceInput(e.target.value);
+                          onValueChange={(text) => {
+                            setRewardOpeningBalanceInput(text);
                             if (errors.rewardOpeningBalance) setErrors(prev => ({ ...prev, rewardOpeningBalance: '' }));
                           }}
                           placeholder="0"
@@ -2709,16 +2922,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         return unit ? ` in ${unit.toLowerCase()}` : '';
                       })()})
                     </label>
-                    <input
-                      type="number"
+                    <NumericInput
                       className={`input-field ${errors.defaultCashbackRate ? 'border-danger' : ''}`}
                       value={newAccount.defaultCashbackRate || ''}
-                      onChange={e => {
-                        setNewAccount({ ...newAccount, defaultCashbackRate: parseFloat(e.target.value) });
+                      onValueChange={(_text, num) => {
+                        setNewAccount({ ...newAccount, defaultCashbackRate: num });
                         if (errors.defaultCashbackRate) setErrors(prev => ({ ...prev, defaultCashbackRate: '' }));
                       }}
                       placeholder="e.g. 1.5"
-                      step="0.1"
                     />
                     {errors.defaultCashbackRate && <span className="text-xs text-danger" style={{ marginTop: '0.25rem' }}>{errors.defaultCashbackRate}</span>}
                   </div>
@@ -2809,17 +3020,15 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     <div className="flex-col gap-2">
                       <div className="flex gap-2" style={{ alignItems: 'stretch' }}>
                         <input className="input-field" style={{ flex: 1, minWidth: '100px' }} placeholder="Label (e.g. UPI)" value={newCbName} onChange={e => setNewCbName(e.target.value)} />
-                        <input
+                        <NumericInput
                           className="input-field"
                           style={{ width: '70px', flexShrink: 0, textAlign: 'center' }}
                           placeholder={(() => {
                             const unit = getDestAccountUnit(newAccount);
                             return unit ? `% ${unit.slice(0, 3).toLowerCase()}` : "%";
                           })()}
-                          type="number"
-                          step="0.1"
                           value={newCbRate}
-                          onChange={e => setNewCbRate(e.target.value)}
+                          onValueChange={(text) => { setNewCbRate(text); if (errors.cbRate) setErrors(prev => ({ ...prev, cbRate: '' })); }}
                         />
                         {editingCashbackRateId ? (
                           <div className="flex gap-2">
@@ -2830,6 +3039,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           <button className="btn btn-secondary" style={{ padding: '0.75rem', minWidth: '54px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'none' }} onClick={addCashbackRate} aria-label="Add Cashback Rate"><Plus size={18} /></button>
                         )}
                       </div>
+                      {errors.cbRate && <span className="text-xs text-danger">{errors.cbRate}</span>}
                     </div>
                   </div>
                 </>
@@ -2862,7 +3072,14 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                 minHeight: 'auto',
                                 boxShadow: '2px 2px 0 #000'
                               }}
-                              onClick={() => setIsEditingCardDetails(false)}
+                              onClick={() => {
+                                // Nothing typed is nothing to save: ✓ on an empty panel closes it the
+                                // way × would, rather than leaving a blank "Card Details" behind.
+                                const filled = Object.values(newAccount.cardDetails || {}).some(v => v !== undefined && v !== '');
+                                if (!filled) setNewAccount({ ...newAccount, cardDetails: undefined });
+                                setIsEditingCardDetails(false);
+                                setCardDetailsDraftIsNew(false);
+                              }}
                               title="Save Details"
                             >
                               <Check size={14} />
@@ -2906,17 +3123,19 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
-                              color: 'var(--danger)',
+                              color: cardDetailsDraftIsNew ? 'var(--text-muted)' : 'var(--danger)',
                               minHeight: 'auto',
                               boxShadow: '2px 2px 0 #000'
                             }}
                             onClick={() => {
                               setNewAccount({ ...newAccount, cardDetails: undefined });
                               setIsEditingCardDetails(false);
+                              setCardDetailsDraftIsNew(false);
                             }}
-                            title="Remove Details"
+                            title={cardDetailsDraftIsNew ? 'Cancel' : 'Remove Details'}
+                            aria-label={cardDetailsDraftIsNew ? 'Cancel' : 'Remove Details'}
                           >
-                            <Trash2 size={14} />
+                            {cardDetailsDraftIsNew ? <X size={14} /> : <Trash2 size={14} />}
                           </button>
                         </div>
                       ) : (
@@ -2939,6 +3158,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                             onClick={() => {
                               setNewAccount({ ...newAccount, cardDetails: {} });
                               setIsEditingCardDetails(true);
+                              setCardDetailsDraftIsNew(true);
                               setExpiryInput('');
                               setIssuerQuery(issuerSeedLabel);
                               setIssuerDropdownOpen(false);
@@ -2989,7 +3209,10 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                               className="input-field"
                               placeholder="e.g. TRIBHUVAN K"
                               value={newAccount.cardDetails.cardholderName || ''}
-                              onChange={e => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cardholderName: e.target.value.toUpperCase() } as CardDetails })}
+                              // A name, as embossed: letters, spaces and the punctuation names carry
+                              // (K. S., D'Souza, Anne-Marie). Digits and symbols are dropped as typed
+                              // rather than refused at save — nothing on a card's name line is a number.
+                              onChange={e => setNewAccount({ ...newAccount, cardDetails: { ...newAccount.cardDetails, cardholderName: e.target.value.replace(/[^\p{L}\s.'-]/gu, '').toUpperCase() } as CardDetails })}
                               enterKeyHint="next"
                               onKeyDown={focusOnEnter(cardNumberInputRef)}
                               style={{ textTransform: 'uppercase', height: '48px', fontWeight: 'normal' }}

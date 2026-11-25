@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getLiquidLogoUrl, getCardLogoUrl, getAssetLogoUrl, cacheLogoImage, isDeadLogo } from './LogoService';
+import { getLiquidLogoUrl, getCardLogoUrl, getCardCoBrandLogoUrl, getAssetLogoUrl, cacheLogoImage, isDeadLogo } from './LogoService';
 
 describe('LogoService resolution & overrides', () => {
   it('resolves State Bank of India to SBI vector badge and NOT Bank of India', () => {
@@ -118,5 +118,34 @@ describe('Google favicon placeholder', () => {
 
     expect(await cacheLogoImage(url)).toBe(false);
     expect(isDeadLogo(url)).toBe(false);
+  });
+});
+
+// The co-brand is the card's identity, and must beat the bank whatever the keyword lengths:
+// "IndiGo IDFC" used to lose to 'idfc', and Marriott / Tata Neu / IndianOil / EazyDiner were not
+// known at all, so all of them showed their bank's logo.
+describe('co-branded credit cards', () => {
+  const host = (url: string | null) => (url ? decodeURIComponent(url) : '');
+  const card = (name: string) => host(getCardLogoUrl({ type: 'credit_card', name }));
+
+  it('shows the programme, not the bank', () => {
+    expect(card('IndiGo IDFC')).toContain('goindigo.in');
+    expect(card('HDFC Marriott Bonvoy')).toContain('marriott.com');
+    expect(card('HDFC Tata Neu Infinity')).toContain('tataneu.com');
+    expect(card('HDFC IndianOil')).toContain('iocl.com');
+    expect(card('EazyDiner IndusInd')).toContain('eazydiner.com');
+    expect(card('Amazon ICICI')).toContain('amazon.in');
+    expect(card('Flipkart SBI')).toContain('flipkart.com');
+  });
+
+  it('still shows the bank for a plain bank card', () => {
+    expect(card('HDFC Millennia')).toContain('hdfcbank');
+    expect(card('IndusInd Tiger')).toContain('indusind');
+  });
+
+  it('offers a back-of-card logo only for a co-brand', () => {
+    expect(host(getCardCoBrandLogoUrl({ name: 'Flipkart SBI' }))).toContain('flipkart.com');
+    expect(getCardCoBrandLogoUrl({ name: 'IndusInd Tiger' })).toBeNull();
+    expect(getCardCoBrandLogoUrl({ name: 'HDFC Millennia' })).toBeNull();
   });
 });

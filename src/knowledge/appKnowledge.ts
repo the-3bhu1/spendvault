@@ -262,7 +262,7 @@ deleting one keeps the legs in sync / removes them together. By category:
     account for the points used and the bank leg covers the rest — and a fourth leg, and so on, if the
     payment draws on more than one reward source.
   - Which accounts can be used: the "Paid from" picker is grouped under account-type headings and
-    offers three kinds, all of them unconditionally.
+    offers four kinds, all of them unconditionally.
     (1) Standalone "rewards" wallets, whether counted in rupees (CRED coins) or in their own unit
     (Cheq Chips at 10 = ₹1 — the picker shows "500 Chips" and a Chips field appears beside the ₹ amount).
     (2) E-WALLETS — a Flipkart, Amazon Pay, AJIO or Uber balance and the like. A purchase part-paid
@@ -274,6 +274,14 @@ deleting one keeps the legs in sync / removes them together. By category:
     card or straight from a bank. The points always come out of that card's OWN points ledger and its
     rupee/credit balance is untouched. Most issuers only let their points offset their own bill; the
     app records what you tell it and does not enforce that rule.
+    (4) BANK ACCOUNTS — for the top-up case: a ₹1,095 Myntra order paid ₹1,076 from the Myntra Wallet
+    and ₹19 by UPI is logged with the WALLET as the paying account and the bank as the split source
+    (the other way round works too). The bank's leg is an ordinary rupee debit, and unlike a wallet
+    source the bank's tracked balance is not a ceiling — the paying account's isn't either.
+    Credit cards are not offered as a rupee source (a points card is listed for its points only).
+    The account already paying the rest — and the bank behind a debit card used to pay — is left out
+    of the picker; if the paying account is switched onto a source already chosen, the save is refused
+    with "Already paying the rest of this".
     Physical cash is deliberately NOT a source — a cash purchase has no second leg to reconcile.
     There is no "None" entry in the picker: the panel's "×" is how you abandon a split, and it clears
     the amount and the source together. Switching category (or investment type) clears an in-progress
@@ -347,7 +355,8 @@ the "Other" source below covers one-off rewards.
   entry, and THAT TOGGLE NAMES WHAT THE SOURCE ACTUALLY IS. Winnings — a rewards wallet, a card's
   own points ledger, or a one-time coupon — read "Part-paid with rewards" ("Funding + rewards" on a
   CC Payment). An E-WALLET is the user's own money, not a discount, so a Flipkart or Amazon Pay leg
-  reads "Part-paid from wallet" ("Funding + wallet"). A split drawing on both at once reads
+  reads "Part-paid from wallet" ("Funding + wallet"), and a bank account's leg reads "Part-paid from
+  bank" ("Funding + bank"). A split drawing on more than one kind at once reads
   "Part-paid from 2 sources", since no collective noun covers a coupon and a stored balance without
   misdescribing one of them. Each leg is named
   "Paid toward: <the spend's description>" (on a CC Payment, "Paid toward: <the card>"). Two sources
@@ -598,8 +607,47 @@ spend inside one membership year that cancels the next annual fee.
 "Card Opened On" anchors the MEMBERSHIP YEAR — the twelve months from the card's own anniversary,
 which is the window a bank actually measures a fee waiver over. A card's summary screen reports its
 waiver progress, spend and rewards over that year and prints its exact dates. Without an opening date
-the app falls back to the financial year and says so on screen rather than quoting the wrong window.
+the app falls back to the calendar year (1 Jan – 31 Dec) and says so on screen rather than quoting the
+wrong window.
+Not sure when a card was opened? The form says where to look while the date is unset: the credit
+report — CIBIL and Experian list every credit card's "Date Opened", and apps like CRED and OneScore show
+the report free. (The annual-fee statement month or the card's welcome email/SMS also give it away.)
 A card with no fees recorded is treated as lifetime free.
+
+## Adding a credit card that is already in use
+A credit card has no "Opening Balance" field. When ADDING one, below Statement Generation Day and
+Payment Due Day the form asks where the card stands today, naming the dates from the statement day:
+- "Last bill (cut 5 Nov) — still due": what is still owed on the latest statement already cut — 0 if
+  it is paid. It is saved as that statement's amount (the same thing long-pressing a statement and
+  typing the bank's figure does), so Cards, Bills and the Accounts tile show it as billed, due on the
+  card's due day, OVERDUE once that passes; a CC Payment applied to "Previous Statement" clears it.
+- "Unbilled spends since 5 Nov": spent since that bill — 0 if none. It becomes ONE ledger entry on the
+  card dated the day it was added, "Unbilled spends before tracking", category "Opening Balance". It
+  counts in unbilled and rolls into the next bill with everything logged after it, and can be edited or
+  deleted like any entry. It is NOT counted in Spends, Insights or the Dashboard, since what it was
+  spent on is unknown.
+- "Total spent since 14 Jul 2026" — shown only when the card has a spend-based fee waiver: the TOTAL
+  spent on the card this card year (since its "Card Opened On" anniversary, or since 1 January if no open
+  date is set), INCLUDING the bill and unbilled above. The line under the box spells it out ("Includes
+  the ₹8,000 bill and ₹3,500 unbilled above, plus ₹38,500 of earlier spends") and warns when the
+  figure is smaller than bill + unbilled. The waiver bar and "Spent this year / all-time" start from
+  it; spends logged from that day on are added, logged spends dated BEFORE it are not (the total
+  already holds them), and the "Opening Balance" entry is never counted toward the waiver. It stops
+  counting once the card year renews.
+  Left BLANK, the waiver bar and spend figure count only what is logged on the card (the "Opening
+  Balance" entry included); the last bill never counts toward the waiver, as it is a bill figure and
+  not purchases. A card added after its membership year began then says so: the card screen reads
+  "Spent since 24 Nov" instead of "Spent this year", and under the waiver bar "Counting from 24 Nov —
+  add 'Spent before tracking' in Accounts → Edit to include earlier spends". (Cards added before this
+  existed have no add date and keep the old wording.)
+EDITING a card asks none of the first two (the "last bill" moves on every cycle): correct a bill by
+long-pressing it on the Statements screen, and unbilled spends in the ledger. The third stays editable
+— as "Spent before tracking (added <date>)" once set, or "Spent before tracking (before <date the card
+was added>)" if it was skipped: a total entered later covers the spends from before the card was
+added, and everything logged since keeps counting. Clearing it goes back to counting only what is
+logged. Editing a card keeps any bill figures entered on the Statements screen.
+- The card screen's "Earned this year & all-time" row shows only for a card with cashback/rewards on,
+  or one that has earned before (switching cashback off does not hide past earnings).
 
 # Cashback / Rewards
 - Cards → Rewards opens on pending only; the pill switches to "Showing All", which adds a year picker
@@ -635,6 +683,11 @@ import), and tapping it repairs them. It is always safe to press; it never shows
   settles.
 - "+ Add Expense" opens "Select Transaction" first: search your ledger and tap a real debit to split
   it, or tap "Add Custom / Manual Expense" for something paid directly by you or a friend.
+  A part-paid (split-payment) purchase lists ONCE at its full price, exactly as in Link Ledger (see
+  Lending & Borrowing): tap it to split the whole bill, or open its "N sub logs · pick one" toggle to
+  split just one part. Splitting the whole purchase carves the Passive Log below across all its parts
+  — the primary account's part first, then each other source's in turn — so the purchase reopened in
+  Log Transaction shows the same combined passive amount.
 - ONLY YOUR SHARE COUNTS AS SPEND: with Settings → Smart Features → Passive Logs on, splitting a
   ledger debit turns that entry into a partial Passive Log automatically — everything except your
   share is excluded from Spends (a ₹812 locker split four ways counts ₹203; split among others
@@ -689,6 +742,12 @@ a lone "K" would be no more use than "Me". It falls back to "Me" if no name is s
   entry form, "Log in Ledger" is what creates the matching transaction and moves an account balance,
   while "Link Ledger" attaches an EXISTING transaction instead (tap again to unlink); leave both off
   for a ledger-only record.
+  The "Link Ledger" picker lists a part-paid (split) purchase ONCE, at its FULL price, with every
+  account that paid for it ("Shopping · Canara + Myntra Wallet"). Tapping it fills the entry with the
+  full price (₹1,095, not the ₹19 the primary account paid). Under it a small "2 sub logs · pick one"
+  toggle opens the separate parts — the primary account's own share and each "Paid toward:" entry —
+  and tapping one of those links just that part at its own amount. The same picker is used by "Link"
+  on Upcoming Bills and by "+ Add Expense" in Splits.
 - The entry forms' Description (Optional) suggests as you type, like Log Transaction: after 2 letters,
   up to 5 past descriptions — people's debt entries first, then the Transactions log — and the list
   scrolls itself into view. Picking one fills in the text only, not an amount or account. The default
@@ -1009,6 +1068,30 @@ can tap "Restore from backup" on the first step to import an existing backup fil
   In Settings → AI Features you can Test a saved key, and a meter shows today's AI-fetch count against
   the daily cap (50).
 - Asset Logos: Settings → Asset Logos — optionally add a logo.dev token for sharper brand logos.
+  CO-BRANDED CREDIT CARDS show the PROGRAMME's logo, not the bank's, wherever the name mentions it —
+  Amazon, Flipkart, Myntra, Tata Neu, Swiggy, Zomato, EazyDiner, IndiGo, Air India, Vistara, Marriott
+  Bonvoy, MakeMyTrip, IRCTC, IndianOil, BPCL, HPCL, Airtel, Paytm, PhonePe, super.money, Jupiter,
+  OneCard, Scapia and more; "HDFC Marriott Bonvoy" shows Marriott, "IndiGo IDFC" shows IndiGo. A plain
+  bank card ("HDFC Millennia") shows the bank. Viewing the card and turning it over, a co-brand's logo
+  sits bottom-right of the back, as the super.money mark does on its card. With a logo.dev SECRET key
+  saved in Settings → Logos → Card Wordmarks, the back shows the brand's FULL wordmark there instead
+  ("Flipkart", not just the "F"), from logo.dev's Brand API, in the light or dark version that suits
+  the card's colour. Each brand is fetched once (3 logo.dev credits; the free plan includes $5 a
+  month) and kept on the device; "Fetch wordmarks now" fetches them for every co-branded card at once
+  and reports how many were found, or that the key was refused / credits ran out. Brands logo.dev has
+  no wordmark for keep the round icon, and super.money, Swiggy and Jupiter keep their built-in
+  wordmarks (never looked up). The secret key is stored in the phone's secure storage, separate from
+  the publishable logo.dev token, and is never included in backups. The Settings tile is "Logos"
+  (shown when you hold stocks/funds or a co-branded card).
+  A co-branded card shows BOTH marks, on its tile and its detail screen: the brand fills the circle and
+  the issuing bank sits on its lower-right rim as a small round stamp; the detail screen's line under
+  the name also names the bank ("Credit card · HDFC Bank · VISA · •••• 3456"). Tap (or long-press) the
+  logo on a credit card's detail screen for logo options, as on Wealth: View Logo, Custom Logo (a
+  domain like iocl.com or an image URL, previewed as you type) and Reset to Default Logo. On a
+  co-branded card the sheet ("Logos") shows the two logos side by side — Brand and Bank — with the
+  Brand selected; tap the other to select it, and the options underneath act on whichever is selected
+  (a "custom" tag marks one you have overridden). Setting a bank logo on any card gives it
+  the two-logo mark.
   Real brand logos are shown for stocks/funds AND for liquid accounts (banks, e-wallets, debit cards,
   rewards wallets) on Wealth → Assets, resolved from the account's NAME: a built-in registry first, then
   a cached background Gemini lookup for brands the registry misses (cached permanently, so it's a

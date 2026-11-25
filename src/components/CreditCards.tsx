@@ -28,7 +28,7 @@ import type { Account } from '../types';
 import {
   formatCurrency, userPossessive, getOrdinalSuffix, getCardGradients,
   getBillingCycleForDate, formatBillingCycleRange, getAppliedBillingCycle, affectsRupeeBalance,
-  calculateBalance, getCurrentMonthStr, linkedBankOf, debitCardMonthSpend, cardEarnsCashback,
+  calculateBalance, getCurrentMonthStr, linkedBankOf, debitCardMonthSpend, cardEarnsCashback, issuerMarkOf,
 } from '../utils';
 import { getActiveCardDues, getCardCycleFigures, sumCardDues, cycleStatus, isCycleOverdue, CYCLE_STATUS_LABEL, type CardDues, type CycleStatus } from '../services/CardDuesService';
 import { buildRewardRows, summariseRewards, summariseCardRewards, type PendingRewards } from '../services/RewardsService';
@@ -37,9 +37,11 @@ import Cashback from './Cashback';
 import { CategoryCard, CategoryHero, HERO_MIN_H, SubviewHeader, SealedMark, FilterPills, SectionHeading } from './TreeUi';
 import { DetailHeroBand, DETAIL_HERO_AVATAR, DETAIL_HERO_LIFT } from './DetailHeroBackdrop';
 import { CardsBackdrop, MyCardsBackdrop, StatementsBackdrop, RewardsBackdrop, DebitCardsBackdrop } from './CardsBackdrops';
-import { LogoAvatar } from './LogoAvatar';
 import { ViewCardOverlay, FlippableCard } from './ViewCardOverlay';
-import { getCardLogoUrl } from '../services/LogoService';
+import { getCardLogoUrl, getCardIssuerLogoUrl, isCoBrandedCard, notifyLogosUpdated } from '../services/LogoService';
+import { CardLogoMark } from './CardLogoMark';
+import { LogoTapTarget, LogoActionSheet, LogoViewer, CustomLogoModal, type LogoSlot } from './LogoActions';
+import { brandLabel } from './CardBrandLogo';
 import ProfileAvatar from './ProfileAvatar';
 
 // 'mycards' was 'dues' until the category stopped being about what a card OWES. It now opens onto
@@ -406,7 +408,7 @@ const CardTile: React.FC<CardTileData & { wide: boolean; onOpen: (account: Accou
         ...(wide ? { minHeight: '148px' } : { aspectRatio: '1 / 1' }),
       }}
     >
-      <LogoAvatar name={account.name} logoUrl={getCardLogoUrl(account)} size={38} accountType={account.type} />
+      <CardLogoMark account={account} size={38} />
 
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: '1rem', fontWeight: 700, color: ink, lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -493,8 +495,14 @@ export default function CreditCards({ onExit, onViewStatement }: {
   // Opens the standalone statement screen, at a given cycle when the row names one.
   onViewStatement?: (account: Account, cycle?: string) => void;
 }) {
-  const { data } = useFinance();
+  const { data, updateAccount } = useFinance();
   const [category, setCategory] = useState<CardsCategory | null>(null);
+  // The detail hero's logo sheet, and what it opened: the full-screen view of one logo, or the editor
+  // for one. Held as the card's ID and a slot key, so they always read the card as it is now.
+  const [logoSheetCardId, setLogoSheetCardId] = useState<string | null>(null);
+  const [logoSheetSlotKey, setLogoSheetSlotKey] = useState<string | undefined>(undefined);
+  const [viewingLogo, setViewingLogo] = useState<LogoSlot | null>(null);
+  const [editingLogo, setEditingLogo] = useState<{ cardId: string; slot: LogoSlot } | null>(null);
   const [statementsFilter, setStatementsFilter] = useState<string>('all');
   // Level 3: which card's statement is open, and which of its cycles. The card is held by ID rather
   // than as an object so the screen reads today's figures — an Account captured on open would keep
@@ -764,9 +772,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
    * name resolves nothing, getCardLogoUrl falls back to the issuing bank in the card's saved details
    * before it will guess at a domain; see the note there for what that guess does otherwise.
    */
-  const renderCardMark = (account: Account, size: number) => (
-    <LogoAvatar name={account.name} logoUrl={getCardLogoUrl(account)} size={size} accountType={account.type} />
-  );
+  const renderCardMark = (account: Account, size: number) => <CardLogoMark account={account} size={size} />;
 
   /** The utilization meter. A BAR rather than an arc: the backdrop behind it is concentric about the
    *  same centre, and a second ring there competes with the engraving instead of reading on it.
@@ -1487,7 +1493,11 @@ export default function CreditCards({ onExit, onViewStatement }: {
           : null;
 
         const last4 = card.cardDetails?.cardNumber?.replace(/\D/g, '').slice(-4);
-        const identity = ['Credit card', card.cardDetails?.network?.toUpperCase(), last4 && `•••• ${last4}`]
+        // A co-branded card names its bank here too: the hero's mark leads with the programme, and
+        // this line is where "issued by HDFC Bank" is said in words.
+        const issuer = isCoBrandedCard(card) ? issuerMarkOf(card, data.accounts) : undefined;
+        const issuerName = issuer ? ('brand' in issuer ? brandLabel(issuer.brand) : issuer.name) : undefined;
+        const identity = ['Credit card', issuerName, card.cardDetails?.network?.toUpperCase(), last4 && `•••• ${last4}`]
           .filter(Boolean).join(' · ');
 
         // What the card costs, as one line, and an ABSENT fee block reads as LTF.
@@ -1523,7 +1533,9 @@ export default function CreditCards({ onExit, onViewStatement }: {
                     mark and falls back to a monogram, which is what a seal carries anyway. The tiles
                     this screen is opened from now use the same avatar, so the mark does not change
                     shape on the way in. */}
-                <LogoAvatar name={card.name} logoUrl={getCardLogoUrl(card)} size={DETAIL_HERO_AVATAR} accountType={card.type} />
+                <LogoTapTarget onTrigger={() => { setLogoSheetSlotKey(undefined); setLogoSheetCardId(card.id); }}>
+                  <CardLogoMark account={card} size={DETAIL_HERO_AVATAR} />
+                </LogoTapTarget>
               </SealedMark>
 
               <div style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.35, maxWidth: '90%' }}>
@@ -1548,15 +1560,20 @@ export default function CreditCards({ onExit, onViewStatement }: {
             <div style={{ padding: '0 1.5rem calc(1.5rem + var(--safe-area-inset-bottom))' }}>
               {/* The plastic itself, one tap away. Same overlay the Accounts screen opens, taking
                   nothing but the account — so the card that flips here is the card that flips there,
-                  rather than a second rendering of it that could drift. */}
-              <button
-                className="btn btn-secondary"
-                style={{ width: '100%', marginTop: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
-                onClick={() => setViewingCard(card)}
-              >
-                <CreditCard size={16} />
-                <span>View card</span>
-              </button>
+                  rather than a second rendering of it that could drift.
+                  Only once a card number is saved — the same test the Accounts tile's Card button
+                  uses. Without one the overlay is a blank plastic reading "CARDHOLDER NAME" and
+                  "•••• ••••", which is a placeholder, not the card. */}
+              {card.cardDetails?.cardNumber && (
+                <button
+                  className="btn btn-secondary"
+                  style={{ width: '100%', marginTop: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                  onClick={() => setViewingCard(card)}
+                >
+                  <CreditCard size={16} />
+                  <span>View card</span>
+                </button>
+              )}
 
               {/* ── The membership year ────────────────────────────────────────────────────────
                   Named with its actual dates rather than as "this year", because on this screen it
@@ -1564,7 +1581,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
                   open date it is not even the year the bank would use. Saying which one you are
                   looking at costs a line and removes the whole question. */}
               <div style={{ marginTop: '1.75rem' }}>
-                <SectionHeading label={year.isAnniversary ? 'Membership year' : 'Financial year'} count={null} marginBottom="0.4rem" />
+                <SectionHeading label={year.isAnniversary ? 'Membership year' : 'Calendar year'} count={null} marginBottom="0.4rem" />
               </div>
               <div className="text-mono uppercase" style={{ fontSize: '0.6rem', letterSpacing: '1px', color: 'var(--text-secondary)', marginBottom: '0.85rem' }}>
                 {year.label}
@@ -1614,6 +1631,14 @@ export default function CreditCards({ onExit, onViewStatement }: {
                         ? 'Waived · next annual fee is off'
                         : `${formatWhole(fees.waiverRemaining ?? 0)} to go · ${year.daysLeft} day${year.daysLeft === 1 ? '' : 's'} left`}
                     </div>
+                    {/* The bar is only counting part of the year — the card was added mid-way and
+                        nothing was typed in for the months before. Said under the bar, because the
+                        bar is the figure it makes look worse than it is, and with the fix beside it. */}
+                    {spend.countedFrom && (
+                      <div className="text-mono uppercase" style={{ fontSize: '0.55rem', letterSpacing: '0.5px', color: 'var(--text-muted)', marginTop: '0.6rem', lineHeight: 1.6 }}>
+                        Counting from {format(parseISO(spend.countedFrom), 'd MMM')} — add "Spent before tracking" in Accounts → Edit to include earlier spends
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1642,23 +1667,36 @@ export default function CreditCards({ onExit, onViewStatement }: {
 
               {/* Spend, then rewards — each a year figure beside its all-time counterpart, and each
                   collapsing to one cell while those two agree. See StatPair. */}
-              <StatPair
-                marginTop={rewardBalance ? '0.75rem' : '0.85rem'}
-                same={spend.yearSpend === spend.lifetimeSpend}
-                yearLabel="Spent this year" allLabel="Spent all-time" bothLabel="Spent this year & all-time"
-                yearValue={formatWhole(spend.yearSpend)} allValue={formatWhole(spend.lifetimeSpend)}
-              />
+              {/* "This year" only when the figure covers the year. A card added mid-year with no
+                  earlier total says when it starts counting instead — see countedFrom. */}
+              {(() => {
+                const since = spend.countedFrom ? `Spent since ${format(parseISO(spend.countedFrom), 'd MMM')}` : undefined;
+                return (
+                  <StatPair
+                    marginTop={rewardBalance ? '0.75rem' : '0.85rem'}
+                    same={spend.yearSpend === spend.lifetimeSpend}
+                    yearLabel={since ?? 'Spent this year'} allLabel="Spent all-time" bothLabel={since ?? 'Spent this year & all-time'}
+                    yearValue={formatWhole(spend.yearSpend)} allValue={formatWhole(spend.lifetimeSpend)}
+                  />
+                );
+              })()}
 
               {/* Cashback through leadFigure, the same formatter the Rewards hero uses — so a card
                   that pays in Jewels says "630 jewels" here too rather than a rupee figure it never
                   earned. Units are never converted; see RewardsService. */}
-              <StatPair
-                marginTop="0.75rem"
-                same={sameRewards(yearRewards, lifeRewards)}
-                yearLabel="Earned this year" allLabel="Earned all-time" bothLabel="Earned this year & all-time"
-                yearValue={leadFigure(yearRewards)} allValue={leadFigure(lifeRewards)}
-                tone="var(--success)"
-              />
+              {/* Only for a card that earns, or once did. A card with cashback switched off and
+                  nothing ever earned has no reward story, and a permanent "₹0 earned" read as a
+                  feature it was missing rather than one it does not have. Kept when there is
+                  history, so switching cashback off does not hide what the card already paid. */}
+              {(card.isCashbackEnabled || lifeRewards.rupees > 0 || lifeRewards.byUnit.length > 0) && (
+                <StatPair
+                  marginTop="0.75rem"
+                  same={sameRewards(yearRewards, lifeRewards)}
+                  yearLabel="Earned this year" allLabel="Earned all-time" bothLabel="Earned this year & all-time"
+                  yearValue={leadFigure(yearRewards)} allValue={leadFigure(lifeRewards)}
+                  tone="var(--success)"
+                />
+              )}
             </div>
           </div>
         );
@@ -1756,6 +1794,87 @@ export default function CreditCards({ onExit, onViewStatement }: {
       })()}
 
       {viewingCard && <ViewCardOverlay account={viewingCard} onClose={() => setViewingCard(null)} />}
+
+      {(() => {
+        /* The hero mark's logo sheet. One slot for a plain card; two for a co-brand — the programme
+           (the card's main mark, customLogoUrl) and the bank (customIssuerLogoUrl) — each with its
+           own view, custom and reset. */
+        const slotsFor = (card: Account): LogoSlot[] => {
+          const main: LogoSlot = {
+            key: 'main',
+            title: card.name,
+            role: 'Brand',
+            url: getCardLogoUrl(card),
+            defaultUrl: getCardLogoUrl({ ...card, customLogoUrl: undefined }),
+            custom: card.customLogoUrl?.trim() || undefined,
+            accountType: card.type,
+          };
+          if (!isCoBrandedCard(card)) return [{ ...main, role: undefined }];
+          const mark = issuerMarkOf(card, data.accounts);
+          const bankName = mark ? ('brand' in mark ? brandLabel(mark.brand) : mark.name) : undefined;
+          // The brand group is titled with the BRAND, not the card's whole name: "HDFC IndianOil"
+          // with the bank's word taken out is "IndianOil", "Supermoney x AXIS" is "Supermoney". Falls
+          // back to the full name if stripping would leave nothing.
+          const bankWords = [mark && 'brand' in mark ? mark.brand : undefined, ...(bankName || '').split(/\s+/)]
+            .filter((w): w is string => !!w && !/^bank$/i.test(w))
+            .map(w => w.toLowerCase());
+          const brandTitle = card.name
+            .split(/\s+/)
+            .filter(w => !bankWords.includes(w.toLowerCase()) && !/^(x|×|&|-|\|)$/i.test(w))
+            .join(' ')
+            .trim();
+          main.title = brandTitle || card.name;
+          return [main, {
+            key: 'issuer',
+            title: bankName || 'Issuing bank',
+            role: 'Bank',
+            url: getCardIssuerLogoUrl(card),
+            defaultUrl: getCardIssuerLogoUrl({ ...card, customIssuerLogoUrl: undefined }),
+            custom: card.customIssuerLogoUrl?.trim() || undefined,
+            accountType: card.type,
+          }];
+        };
+        const saveLogo = (cardId: string, slotKey: string, value: string | undefined) => {
+          const card = data.accounts.find(a => a.id === cardId);
+          if (!card) return;
+          updateAccount(slotKey === 'issuer' ? { ...card, customIssuerLogoUrl: value } : { ...card, customLogoUrl: value });
+          notifyLogosUpdated();
+        };
+        const sheetCard = logoSheetCardId ? data.accounts.find(a => a.id === logoSheetCardId) : undefined;
+        return (
+          <>
+            {/* The sheet stays OPEN under the viewer and the editor — hidden, not closed — so backing
+                out of either (Cancel, ✕, a tap outside) lands on the sheet again, with the logo you
+                were on still selected. Only finishing (Save, Reset) or the sheet's own Cancel ends it. */}
+            {sheetCard && !viewingLogo && !editingLogo && (
+              <LogoActionSheet
+                slots={slotsFor(sheetCard)}
+                initialKey={logoSheetSlotKey}
+                onClose={() => { setLogoSheetCardId(null); setLogoSheetSlotKey(undefined); }}
+                onView={slot => { setLogoSheetSlotKey(slot.key); setViewingLogo(slot); }}
+                onCustom={slot => { setLogoSheetSlotKey(slot.key); setEditingLogo({ cardId: sheetCard.id, slot }); }}
+                onReset={slot => { saveLogo(sheetCard.id, slot.key, undefined); setLogoSheetCardId(null); setLogoSheetSlotKey(undefined); }}
+              />
+            )}
+            {viewingLogo && (
+              <LogoViewer name={viewingLogo.title} url={viewingLogo.url} accountType={viewingLogo.accountType} onClose={() => setViewingLogo(null)} />
+            )}
+            {editingLogo && (
+              <CustomLogoModal
+                slot={editingLogo.slot}
+                heading={editingLogo.slot.key === 'issuer' ? 'Bank Logo' : undefined}
+                onClose={() => setEditingLogo(null)}
+                onSave={value => {
+                  saveLogo(editingLogo.cardId, editingLogo.slot.key, value);
+                  setEditingLogo(null);
+                  setLogoSheetCardId(null);
+                  setLogoSheetSlotKey(undefined);
+                }}
+              />
+            )}
+          </>
+        );
+      })()}
     </div>
   );
 }

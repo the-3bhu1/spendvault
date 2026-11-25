@@ -159,6 +159,9 @@ export interface Account {
   balanceEditHistory?: BalanceEditEntry[];
   /** Optional custom logo URL or domain (e.g. 'sbi.co.in', 'cheq.one', or an image URL / data URL). Takes precedence over auto-detection. */
   customLogoUrl?: string;
+  /** A CO-BRANDED card's second logo — the issuing bank's — when the one found from the card's name
+   *  or saved details is wrong or missing. `customLogoUrl` stays the card's main mark (the brand). */
+  customIssuerLogoUrl?: string;
 
   // Specific to credit_card
   statementDay?: number;
@@ -175,10 +178,23 @@ export interface Account {
    * a bank actually measures a fee waiver over — not the financial year and not the calendar year.
    *
    * Optional, and the card summary degrades rather than guesses when it is missing: it falls back to
-   * the financial year and says so, because a waiver bar measured over the wrong twelve months would
+   * the calendar year (January–December) and says so, because a waiver bar measured over the wrong twelve months would
    * read "waived" while the bank was still charging.
    */
   cardOpenedOn?: string;
+  /**
+   * What the card had already been spent on THIS CARD YEAR when it was added — the bill and unbilled
+   * spends included — so a spend-based fee waiver starts from the truth rather than from zero.
+   * `asOf` is the day it was entered: CardYearService counts it in the card year containing that day
+   * and ignores logged spends dated before it, which the total already holds. See CardStartService.
+   */
+  spendBeforeTracking?: { amount: number; asOf: string };
+  /**
+   * The day the card was added to the app ('YYYY-MM-DD'). Set on cards added since this existed;
+   * absent on older ones. Without a spendBeforeTracking total, a card added mid-year only knows its
+   * spending from here on, and the card screen says "Spent since 24 Nov" rather than "this year".
+   */
+  trackedFrom?: string;
 
   // Specific to debit_card/ncmc travel
   linkedBankAccountId?: string;
@@ -412,6 +428,14 @@ export interface SplitItem {
    * losing who paid altogether.
    */
   paidAmounts?: Record<string, number>;
+  /**
+   * The item is linked to a PART-PAID purchase as a whole — `transactionId` is its anchor, and
+   * `amount` its full price across every source (₹1,095 = ₹19 from the bank + ₹1,076 from a wallet),
+   * not the anchor's own share. Absent means the item is just the one row `transactionId` names,
+   * which is also how a single leg of such a purchase is linked when picked on its own. The passive
+   * carve (`ledgerPassive`) then spans the anchor and its legs — see syncSplitLedgerPassive.
+   */
+  wholePurchase?: boolean;
   /**
    * Set when linking this item carved the friends' part out of its ledger row as a Passive Log, so
    * only your share counts toward Spends. `excludedAmount` is what was written; `prior` is the row's

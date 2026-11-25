@@ -52,6 +52,7 @@ interface ConfirmConfig {
 }
 import { CustomPicker } from './CustomPicker';
 import { TransactionSelector } from './TransactionSelector';
+import { NumericInput } from './NumericInput';
 import { SubviewWrapper } from './SubviewWrapper';
 import { DescriptionField } from './DescriptionSuggestions';
 
@@ -1119,7 +1120,9 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
     [accounts, data.transactions]);
 
   const handleCreateRecord = () => {
-    if (!name || !amount || (logInLedger && !accountId)) return;
+    // More than zero, the same rule as the entry form below: "-25" is not empty, so the old `!amount`
+    // test let a negative debt through.
+    if (!name || !((parseFloat(amount) || 0) > 0) || (logInLedger && !accountId)) return;
     onAdd(name, parseFloat(amount), type, desc, date, accountId, logInLedger, linkedTxId || undefined);
   };
 
@@ -1132,7 +1135,7 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
           <button
             className="btn btn-primary w-100"
             style={{ padding: '1rem' }}
-            disabled={!name || !amount || (logInLedger && !accountId)}
+            disabled={!name || !((parseFloat(amount) || 0) > 0) || (logInLedger && !accountId)}
             onClick={handleCreateRecord}
           >
             Create Record
@@ -1294,12 +1297,11 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
 
           <div className="input-group">
             <label>Amount</label>
-            <input
+            <NumericInput
               className="input-field"
-              type="number"
               placeholder="0.00"
               value={amount}
-              onChange={e => setAmount(e.target.value)}
+              onValueChange={(text) => setAmount(text)}
             />
           </div>
 
@@ -1341,8 +1343,8 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
       <TransactionSelector
         isOpen={isLinking}
         onClose={() => setIsLinking(false)}
-        onSelect={(t) => {
-          setAmount(t.amount.toString());
+        onSelect={(t, amount) => {
+          setAmount(amount.toString());
           setDesc(t.description || '');
           setDate(t.date);
           setAccountId(t.accountId);
@@ -1630,12 +1632,11 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, tra
 
             <div className="input-group">
               <label>Amount</label>
-              <input
+              <NumericInput
                 className="input-field"
-                type="number"
                 placeholder="0.00"
                 value={amount}
-                onChange={e => setAmount(e.target.value)}
+                onValueChange={(text) => setAmount(text)}
               />
             </div>
 
@@ -1687,8 +1688,8 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, tra
       <TransactionSelector
         isOpen={isLinking}
         onClose={() => setIsLinking(false)}
-        onSelect={(t) => {
-          setAmount(t.amount.toString());
+        onSelect={(t, amount) => {
+          setAmount(amount.toString());
           setDesc(t.description || '');
           setDate(t.date);
           setAccountId(t.accountId);

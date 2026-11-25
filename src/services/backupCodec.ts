@@ -60,6 +60,9 @@ export const KEY_MAP: Record<string, string> = {
   paidAmounts: 'pam', // several payers on one split item; 'pb' (paidBy) is still written beside it
   // The Passive Log a split item carved into its ledger row; its fields reuse 'ea'/'e'.
   ledgerPassive: 'lgp', prior: 'lgpr',
+  wholePurchase: 'wph', // a split item linked to a part-paid purchase as a whole
+  spendBeforeTracking: 'sbt', asOf: 'aof', // a card's spend before it was tracked; see CardStartService
+  trackedFrom: 'tfr', // the day a card was added to the app
   personName: 'pn', frequency: 'fq', nextDueDate: 'nd',
   isActive: 'ia', status: 'ss', createdAt: 'ca', updatedAt: 'ua',
   billingCycleYearMonth: 'bc', expected: 'ex', realized: 'rl',
@@ -104,6 +107,7 @@ export const KEY_MAP: Record<string, string> = {
   archived: 'arc',
   // Custom logo override for accounts/assets
   customLogoUrl: 'clu',
+  customIssuerLogoUrl: 'cilu', // a co-branded card's bank logo override
 };
 
 const REVERSE_MAP: Record<string, string> = Object.fromEntries(

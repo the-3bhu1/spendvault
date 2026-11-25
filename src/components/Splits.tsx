@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
-import { format } from 'date-fns';
-import { Plus, Users, CheckCircle2, ChevronRight, Trash2, Check, Search, ChevronDown, Calendar, Edit2, ChevronLeft, ArrowRight, ImageDown, ReceiptIndianRupee, Loader2, X } from 'lucide-react';
+import { Plus, Users, CheckCircle2, ChevronRight, Trash2, Check, Search, Edit2, ChevronLeft, ArrowRight, ImageDown, ReceiptIndianRupee, Loader2, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import ConfirmDialog from './ConfirmDialog';
 import { useFinance } from '../FinanceContext';
 import type { SplitEvent, SplitItem } from '../types';
-import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, shareSelfName, distributePaise, equalSplitShares, formatDateString, errorMessage, describeSplitPayers, mySplitShare, isStatsExcludedCategory } from '../utils';
+import { generateId, computeSplitNetBalances, simplifyDebts, splitDisplayName, shareSelfName, distributePaise, equalSplitShares, errorMessage, describeSplitPayers, mySplitShare, isStatsExcludedCategory, rewardSplitGross } from '../utils';
+import { TransactionPickList } from './TransactionPickList';
+import { NumericInput } from './NumericInput';
 import { scrollToFirstError } from '../utils/formErrors';
 import { buildSplitShareImages } from '../services/splitImage';
 import { blobToBase64 } from '../services/shareCanvas';
@@ -410,6 +411,9 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [selectedTxId, setSelectedTxId] = useState<string | null>(null);
+  // The pick is a part-paid purchase taken WHOLE — selectedTxId is then its anchor, and the bill is
+  // the full price across every source, not the anchor's own share. See SplitItem.wholePurchase.
+  const [selectedWhole, setSelectedWhole] = useState(false);
   const [involvedPeople, setInvolvedPeople] = useState<string[]>(event.people);
   const [includeMe, setIncludeMe] = useState(true);
   
@@ -421,9 +425,6 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
   const effectiveItems = event.items || [];
 
   const [selectorSearch, setSelectorSearch] = useState('');
-  const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>({
-    [format(new Date(), 'yyyy-MM')]: true
-  });
 
   const [customDescription, setCustomDescription] = useState('');
   const [customAmount, setCustomAmount] = useState('');
@@ -439,6 +440,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
 
   const resetForm = () => {
     setSelectedTxId(null);
+    setSelectedWhole(false);
     setEditingItemId(null);
     setSelectorSearch('');
     setInvolvedPeople(event.people);
@@ -455,7 +457,12 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
 
   const selectedTx = selectedTxId === 'custom'
     ? { id: 'custom', description: customDescription, amount: parseFloat(customAmount) || 0 }
-    : data.transactions.find(t => t.id === selectedTxId);
+    : (() => {
+      const tx = data.transactions.find(t => t.id === selectedTxId);
+      // Whole purchase: the same row, priced at what the purchase cost across every source.
+      return tx && selectedWhole ? { ...tx, amount: rewardSplitGross(tx) || tx.amount } : tx;
+    })();
+  const isWholePick = selectedTxId !== 'custom' && selectedWhole && !!selectedTx;
 
   // Payer keys in roster order, "me" first — the order the chips and amount boxes are drawn in.
   const orderedPayers = ['me', ...event.people].filter(k => payers.includes(k));
@@ -500,13 +507,14 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
     const buildUpdatedItems = (currentItems: SplitItem[]) => {
       if (editingItemId) {
         return currentItems.map(item => item.id === editingItemId ? {
-          ...item, transactionId: selectedTxId || '', amount: finalAmount,
+          ...item, transactionId: selectedTxId || '', amount: finalAmount, wholePurchase: isWholePick || undefined,
           description: finalDesc, involvedPeople, includeMe, paidBy, paidAmounts, splitType, shares: finalShares
         } : item);
       }
       const newItem: SplitItem = {
         id: generateId(), transactionId: selectedTxId || '',
         amount: finalAmount, description: finalDesc,
+        ...(isWholePick ? { wholePurchase: true } : {}),
         involvedPeople, includeMe, splitType, shares: finalShares, paidBy,
         ...(paidAmounts ? { paidAmounts } : {})
       };
@@ -830,6 +838,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                           style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                           onClick={() => {
                             setSelectedTxId(item.transactionId || 'custom');
+                            setSelectedWhole(!!item.wholePurchase);
                             setEditingItemId(item.id);
                             setCustomDescription(item.description);
                             setCustomAmount(item.amount.toString());
@@ -958,114 +967,11 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                       </div>
                       <ChevronRight size={18} className="text-muted" style={{ transform: 'rotate(0deg)' }} />
                     </div>
-                    {(() => {
-                      const filtered = data.transactions
-                        .filter(t => t.type === 'debit')
-                        .filter(t =>
-                          (t.description || '').toLowerCase().includes(selectorSearch.toLowerCase()) ||
-                          (t.category || '').toLowerCase().includes(selectorSearch.toLowerCase())
-                        )
-                        .sort((a, b) => b.date.localeCompare(a.date));
-
-                      const months = Array.from(new Set(filtered.map(t => t.date.substring(0, 7))))
-                        .sort((a, b) => b.localeCompare(a));
-
-                      if (filtered.length === 0) {
-                        return <div className="flex-col align-center justify-center gap-4" style={{ padding: '4rem 2rem', opacity: 0.5 }}>
-                          <Search size={40} />
-                          <p>No transactions found</p>
-                        </div>;
-                      }
-
-                      return months.map(m => {
-                        const txsInMonth = filtered.filter(t => t.date.substring(0, 7) === m);
-                        const isExpanded = expandedMonths[m];
-                        const monthDate = new Date(`${m}-01`);
-                        const monthLabel = monthDate.toLocaleString('default', { month: 'long', year: 'numeric' });
-
-                        return (
-                          <div key={m} className="flex-col">
-                            <div
-                              className="flex justify-between align-center clickable"
-                              onClick={() => setExpandedMonths(prev => ({ ...prev, [m]: !prev[m] }))}
-                              style={{ padding: '0.75rem 1.5rem', background: 'var(--bg-hover)', borderBottom: '1px solid var(--border-color)' }}
-                            >
-                              <div className="flex align-center gap-3 text-mono font-bold" style={{ fontSize: '0.8rem', letterSpacing: '1px' }}>
-                                <Calendar size={14} className="text-primary" />
-                                {/* Optical centring: Overpass Mono's ascent and descent are asymmetric, so an all-caps
-                                    label draws ~0.2em above the middle of its own line box. Flexbox centres that box, not
-                                    the glyphs, and line-height cannot move them — the half-leading cancels out. A nudge of
-                                    the measured difference is the only lever. */}
-                                <span style={{ position: 'relative', top: '0.2em' }}>{monthLabel.toUpperCase()}</span>
-                              </div>
-                              <div className="flex align-center gap-2 text-muted" style={{ fontSize: '0.7rem' }}>
-                                {txsInMonth.length} items
-                                <ChevronDown size={14} style={{ transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-                              </div>
-                            </div>
-
-                            {isExpanded && (
-                              <div className="flex-col fade-in">
-                                {(() => {
-                                  const groupedByDate = txsInMonth.reduce((acc, tx) => {
-                                    if (!acc[tx.date]) acc[tx.date] = [];
-                                    acc[tx.date].push(tx);
-                                    return acc;
-                                  }, {} as Record<string, typeof data.transactions>);
-
-                                  return Object.entries(groupedByDate)
-                                    .sort((a, b) => b[0].localeCompare(a[0]))
-                                    .map(([date, txs]) => {
-                                      const sortedTxs = [...txs].sort((a, b) => {
-                                        const orderA = a.order !== undefined ? a.order : txs.indexOf(a);
-                                        const orderB = b.order !== undefined ? b.order : txs.indexOf(b);
-                                        return orderA - orderB;
-                                      });
-                                      return (
-                                      <div key={date} className="flex-col">
-                                        <div style={{ padding: '0.4rem 1.5rem', background: 'var(--bg-color)', borderBottom: '1px solid var(--border-color)', fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-secondary)', letterSpacing: '0.5px' }}>
-                                          {formatDateString(date)}
-                                        </div>
-                                        {sortedTxs.map(t => (
-                                          <div
-                                            key={t.id}
-                                            className="flex justify-between align-center clickable"
-                                            onClick={() => setSelectedTxId(t.id)}
-                                            style={{ padding: '1rem 1.5rem', borderBottom: '1px solid var(--border-color)', flexWrap: 'nowrap' }}
-                                          >
-                                            <div className="flex align-center gap-3 flex-1" style={{ minWidth: 0 }}>
-                                              <div className="flex-center" style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', flexShrink: 0 }}>
-                                                <ReceiptIndianRupee size={18} className="text-primary" />
-                                              </div>
-                                              <div className="flex-col" style={{ minWidth: 0, flex: 1 }}>
-                                                <span className="font-bold truncate" style={{ fontSize: '0.9rem', display: 'block' }}>{t.description}</span>
-                                                {(() => {
-                                                  const acctName = data.accounts.find(a => a.id === t.accountId)?.name || '';
-                                                  return (
-                                                    <span className="text-xs text-muted truncate" style={{ display: 'block' }}>
-                                                      {acctName ? `${t.category} · ${acctName}` : t.category}
-                                                    </span>
-                                                  );
-                                                })()}
-                                              </div>
-                                            </div>
-                                            <div className="flex-col align-end" style={{ flexShrink: 0, marginLeft: '1rem' }}>
-                                              <span className="text-mono font-bold" style={{ color: '#ef4444' }}>
-                                                -₹{t.amount}
-                                              </span>
-                                            </div>
-                                          </div>
-                                        ))}
-                                      </div>
-                                      );
-                                    });
-                                })()}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      });
-                    })()}
+                    <TransactionPickList
+                      filter={t => t.type === 'debit'}
+                      search={selectorSearch}
+                      onPick={p => { setSelectedTxId(p.tx.id); setSelectedWhole(p.wholePurchase); }}
+                    />
                   </div>
                 </div>
               ) : (() => {
@@ -1092,12 +998,11 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                           </div>
                           <div className="input-group text-left" style={{ width: '100%' }}>
                             <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Amount (₹)</label>
-                            <input
-                              type="number"
+                            <NumericInput
                               className="input-field"
                               placeholder="0.00"
                               value={customAmount}
-                              onChange={e => setCustomAmount(e.target.value)}
+                              onValueChange={(text) => setCustomAmount(text)}
                               style={{ background: 'var(--bg-color)', width: '100%', borderRadius: '8px' }}
                             />
                           </div>
@@ -1199,13 +1104,12 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                                 <span className="font-bold" style={{ fontSize: '1rem' }}>{splitDisplayName(key)} paid</span>
                                 <div style={{ position: 'relative', width: '120px' }}>
                                   <span style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.85rem', color: 'var(--text-muted)' }}>₹</span>
-                                  <input
-                                    type="number"
+                                  <NumericInput
                                     className="input-field"
                                     placeholder="0.00"
                                     value={payerAmounts[key] || ''}
-                                    onChange={e => {
-                                      const val = e.target.value;
+                                    onValueChange={(text) => {
+                                      const val = text;
                                       setPayerAmounts(prev => ({ ...prev, [key]: val }));
                                     }}
                                     style={{ paddingLeft: '1.75rem', borderRadius: '0px', textAlign: 'right', width: '100%', height: '36px', background: 'var(--bg-color)' }}
@@ -1339,13 +1243,12 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                               <span className="font-bold" style={{ fontSize: '1rem' }}>Me (Include myself)</span>
                               <div style={{ position: 'relative', width: '120px' }}>
                                 <span style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.85rem', color: 'var(--text-muted)' }}>₹</span>
-                                <input
-                                  type="number"
+                                <NumericInput
                                   className="input-field"
                                   placeholder="0.00"
                                   value={customShares['me'] || ''}
-                                  onChange={e => {
-                                    const val = e.target.value;
+                                  onValueChange={(text) => {
+                                    const val = text;
                                     setCustomShares(prev => ({ ...prev, me: val }));
                                     setIncludeMe((parseFloat(val) || 0) > 0);
                                   }}
@@ -1370,13 +1273,12 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                                 <span className="font-bold" style={{ fontSize: '1rem' }}>{person}</span>
                                 <div style={{ position: 'relative', width: '120px' }}>
                                   <span style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.85rem', color: 'var(--text-muted)' }}>₹</span>
-                                  <input
-                                    type="number"
+                                  <NumericInput
                                     className="input-field"
                                     placeholder="0.00"
                                     value={customShares[person] || ''}
-                                    onChange={e => {
-                                      const val = e.target.value;
+                                    onValueChange={(text) => {
+                                      const val = text;
                                       setCustomShares(prev => ({ ...prev, [person]: val }));
                                       const floatVal = parseFloat(val) || 0;
                                       if (floatVal > 0) {
@@ -1409,14 +1311,16 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                       // What linking will carve out of the ledger row as a Passive Log — the same
                       // rule syncSplitLedgerPassive applies on save, previewed so it isn't a surprise.
                       const ledgerRow = selectedTxId !== 'custom' ? data.transactions.find(t => t.id === selectedTxId) : undefined;
-                      const alreadyCarves = !!(event.items || []).find(i => i.id === editingItemId && i.transactionId === selectedTxId)?.ledgerPassive;
+                      const alreadyCarves = !!(event.items || []).find(i => i.id === editingItemId && i.transactionId === selectedTxId
+                        && !!i.wholePurchase === isWholePick)?.ledgerPassive;
                       const carvesRow = !!ledgerRow && ledgerRow.type === 'debit' && !isStatsExcludedCategory(ledgerRow.category)
                         && (!!data.user?.enablePassiveTransactions || alreadyCarves);
                       const liveMyShare = mySplitShare({
                         amount: splitAmount, involvedPeople, includeMe, splitType,
                         shares: splitType === 'unequal' ? { me: parseFloat(customShares['me']) || 0 } : undefined,
                       });
-                      const carvedOut = ledgerRow ? Math.max(0, ledgerRow.amount - liveMyShare) : 0;
+                      // Against what was picked: a whole purchase carves across its rows together.
+                      const carvedOut = ledgerRow ? Math.max(0, splitAmount - liveMyShare) : 0;
 
                       return (
                         <>

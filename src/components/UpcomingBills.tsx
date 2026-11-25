@@ -19,6 +19,7 @@ import type { RecurringBill, RecurringFrequency, Transaction } from '../types';
 import { SubviewWrapper } from './SubviewWrapper';
 import { CustomPicker } from './CustomPicker';
 import { TransactionSelector } from './TransactionSelector';
+import { NumericInput } from './NumericInput';
 import { LogTransactionForm } from './LogTransactionForm';
 import { getCategoryIcon } from './transactionIcons';
 import CustomDatePicker from './CustomDatePicker';
@@ -141,8 +142,12 @@ export default function UpcomingBills() {
     const newErrors: Record<string, string> = {};
     if (!newBill.name?.trim()) newErrors.name = 'Bill Name is required';
     if (!newBill.amount) newErrors.amount = 'Amount must be greater than 0';
-    if (newBill.frequency === 'custom' && !newBill.customDays) {
-      newErrors.customDays = 'Number of days is required for a custom frequency';
+    if (newBill.frequency === 'custom') {
+      if (newBill.customDays === undefined || isNaN(newBill.customDays)) {
+        newErrors.customDays = 'Number of days is required for a custom frequency';
+      } else if (newBill.customDays < 1) {
+        newErrors.customDays = 'Enter 1 day or more';
+      }
     }
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) {
@@ -518,13 +523,12 @@ export default function UpcomingBills() {
             {newBill.frequency === 'custom' && (
               <div className="input-group animate-in">
                 <label>Days Interval</label>
-                <input
-                  type="number"
+                <NumericInput integer maxDigits={4}
                   className={`input-field ${errors.customDays ? 'border-danger' : ''}`}
                   placeholder="e.g. 28, 56, 84"
                   value={newBill.customDays || ''}
-                  onChange={e => {
-                    setNewBill({ ...newBill, customDays: parseInt(e.target.value) });
+                  onValueChange={(_text, num) => {
+                    setNewBill({ ...newBill, customDays: num });
                     if (errors.customDays) setErrors(prev => ({ ...prev, customDays: '' }));
                   }}
                 />

@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   getRewardSplits, rewardSplitTotal, rewardSplitGross, cardRewardOn, isRewardSourceOf, rewardSplitOfLeg, accountNameOf,
-  rewardSplitIndexOfLeg, rewardLegIdsOf, withRewardSplits, redistributeRewardSplits,
+  rewardSplitIndexOfLeg, rewardSplitAnchorOf, rewardLegIdsOf, withRewardSplits, redistributeRewardSplits,
   isPointsDenominated, isUnitDenominated, rewardUnitBalance, formatRewardBalance,
   rupeesToRewardPoints, formatAmount, formatCurrency, EXTERNAL_REWARD_SOURCE_ID,
 } from '../utils';
@@ -390,5 +390,48 @@ describe('a card reward is paid on what the card lent', () => {
 
   it('never pays on a negative charge', () => {
     expect(cardRewardOn(jupiter, 'online', -50)).toBe(0);
+  });
+});
+
+// The picker and the ledger both fold a split's legs into the anchor through this. The case that
+// prompted sharing it: a ₹1,095 order paid ₹1,076 from a wallet and ₹19 from a bank, which the
+// Link Ledger picker offered as its two halves and never as the order.
+describe('rewardSplitAnchorOf', () => {
+  const anchor = tx({
+    id: 'order', description: 'Myntra Order', accountId: 'canara', amount: 19, category: 'Shopping',
+    rewardSplits: [{ accountId: 'myntra', amount: 1076, legId: 'leg' }], linkedTransactionIds: ['leg'],
+  });
+  const leg = tx({
+    id: 'leg', description: 'Paid toward: Myntra Order', accountId: 'myntra', amount: 1076,
+    category: 'Shopping', linkedTransactionIds: ['order'],
+  });
+
+  it('maps a leg to its anchor, and the anchor to nothing', () => {
+    expect(rewardSplitAnchorOf(leg, [anchor, leg])?.anchor.id).toBe('order');
+    expect(rewardSplitAnchorOf(anchor, [anchor, leg])).toBeNull();
+    expect(rewardSplitGross(anchor)).toBe(1095);
+  });
+
+  it('works the same with the bank as the source and the wallet paying', () => {
+    const walletAnchor = { ...anchor, accountId: 'myntra', amount: 1076,
+      rewardSplits: [{ accountId: 'canara', amount: 19, legId: 'leg' }] };
+    const bankLeg = { ...leg, accountId: 'canara', amount: 19 };
+    expect(rewardSplitAnchorOf(bankLeg, [walletAnchor, bankLeg])?.anchor.id).toBe('order');
+    expect(rewardSplitGross(walletAnchor)).toBe(1095);
+  });
+
+  it('does not resolve the anchor to itself when a card redeems its own points', () => {
+    const own = tx({ id: 'a', accountId: 'jupiter', rewardSplits: [{ accountId: 'jupiter', amount: 86, legId: 'l' }],
+      linkedTransactionIds: ['l'] });
+    const ownLeg = tx({ id: 'l', accountId: 'jupiter', amount: 86, linkedTransactionIds: ['a'] });
+    expect(rewardSplitAnchorOf(own, [own, ownLeg])).toBeNull();
+    expect(rewardSplitAnchorOf(ownLeg, [own, ownLeg])?.anchor.id).toBe('a');
+  });
+
+  it('leaves an ordinary transfer pair alone', () => {
+    const out = tx({ id: 't1', category: 'Transfer', linkedTransactionIds: ['t2'] });
+    const inn = tx({ id: 't2', category: 'Transfer', type: 'credit', accountId: 'myntra', linkedTransactionIds: ['t1'] });
+    expect(rewardSplitAnchorOf(out, [out, inn])).toBeNull();
+    expect(rewardSplitAnchorOf(inn, [out, inn])).toBeNull();
   });
 });

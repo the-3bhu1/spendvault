@@ -18,7 +18,7 @@ import { getGeminiUsageToday, testGeminiKey } from '../services/GeminiService';
 import { invalidateCommodityCache } from '../services/MarketDataService';
 import { minifyPayload, expandPayload } from '../services/backupCodec';
 import { stripCardSecrets } from '../services/cardSecrets';
-import { APP_VERSION, PRIVACY_POLICY_URL, SUPPORT_EMAIL } from '../utils';
+import { APP_VERSION, PRIVACY_POLICY_URL, SUPPORT_EMAIL, getCardGradients } from '../utils';
 import { BUILT_IN_ACCOUNT_TYPES, isOffsetTypeAlias } from '../types';
 
 const GridButton = ({ icon: Icon, label, onClick }: { icon: React.ElementType, label: string, onClick?: () => void }) => (
@@ -104,7 +104,8 @@ const backupActionIconStyle = {
 };
 
 import { SubviewWrapper } from './SubviewWrapper.tsx';
-import { hasLogoDevToken, setLogoDevToken } from '../services/LogoService';
+import { hasLogoDevToken, setLogoDevToken, getCardCoBrandDomain, LOGOS_UPDATED_EVENT } from '../services/LogoService';
+import { setLogoDevSecret, hasLogoDevSecret, ensureBrandmark, getCachedBrandmark, getLastBrandmarkStatus, type BrandmarkStatus } from '../services/BrandmarkService';
 
 export default function Settings() {
   const { data, updateCategories, updateCustomAccountTypes, updateTags, updateEventTags, updateTransaction, clearAllData, updateUser, setAuthenticated, setTheme } = useFinance();
@@ -831,6 +832,53 @@ export default function Settings() {
     setLogoDevToken('');
     setLogoTokenSaved(false);
     setLogoTokenInput('');
+  };
+
+  /* Card wordmarks — logo.dev's Brand API, behind its SECRET key. See BrandmarkService for why it is
+     opt-in, fetched once per brand, and kept in the keystore like the Gemini key. */
+  const coBrandedCards = (data.accounts || []).filter(a => a.type === 'credit_card' && !a.archived && !!getCardCoBrandDomain(a));
+  const [secretInput, setSecretInput] = useState('');
+  const [secretSaved, setSecretSaved] = useState(false);
+  const [wordmarkStatus, setWordmarkStatus] = useState<BrandmarkStatus | 'fetching' | undefined>(() => getLastBrandmarkStatus());
+  const [, setWordmarkTick] = useState(0);
+  useEffect(() => { void hasLogoDevSecret().then(setSecretSaved); }, []);
+  useEffect(() => {
+    const onLogos = () => setWordmarkTick(n => n + 1);
+    window.addEventListener(LOGOS_UPDATED_EVENT, onLogos);
+    return () => window.removeEventListener(LOGOS_UPDATED_EVENT, onLogos);
+  }, []);
+  // Each card's wordmark in the colours its own card needs — the same choice its back makes.
+  // Cards with a wordmark drawn into the app (super.money, Swiggy, Jupiter) never ask logo.dev —
+  // their back already carries it, and a lookup would only spend credits.
+  const wordmarkTargets = coBrandedCards.flatMap(card => {
+    const index = [...data.accounts].sort((x, y) => x.id.localeCompare(y.id)).findIndex(x => x.id === card.id);
+    const skin = getCardGradients(Math.max(0, index), card.cardDetails?.network, card.name);
+    if (skin.coBrand) return [];
+    return [{ card, domain: getCardCoBrandDomain(card) as string, theme: (skin.ink === 'dark' ? 'light' : 'dark') as 'light' | 'dark' }];
+  });
+  const wordmarksFound = wordmarkTargets.filter(t => getCachedBrandmark(t.domain, t.theme)).length;
+  const fetchWordmarks = async () => {
+    setWordmarkStatus('fetching');
+    for (const t of wordmarkTargets) {
+      await ensureBrandmark(t.domain, t.theme);
+      // A refused key, no credits left, a rate limit or a blocked caller will refuse every other
+      // card the same way — stop at the first rather than repeat the failure down the list.
+      const st = getLastBrandmarkStatus();
+      if (st === 'bad_key' || st === 'no_credits' || st === 'rate_limited' || st === 'blocked') break;
+    }
+    setWordmarkStatus(getLastBrandmarkStatus());
+  };
+  const handleSaveSecret = async () => {
+    await setLogoDevSecret(secretInput.trim());
+    setSecretSaved(await hasLogoDevSecret());
+    setSecretInput('');
+    setWordmarkStatus(undefined);
+  };
+  const handleClearSecret = async () => {
+    await setLogoDevSecret('');
+    setSecretSaved(false);
+    setSecretInput('');
+    setWordmarkStatus(undefined);
   };
 
   // AI Features view: save the shared Gemini key only. The vendor is configured separately.
@@ -2443,7 +2491,7 @@ export default function Settings() {
   } else if (activeView === 'logos') {
     const logoDirty = logoTokenInput.trim() !== '';
     viewContent = (
-      <SubviewWrapper title="Asset Logos" onBack={() => setActiveView('main')}>
+      <SubviewWrapper title="Logos" onBack={() => setActiveView('main')}>
         <div className="flex-col gap-4">
           <div className="card flex-col gap-3" style={{ padding: '1rem' }}>
             <SettingsCardHeader icon={ImageIcon} title="Investment Logos" level="h3" size={20} marginBottom="0.5rem" />
@@ -2475,6 +2523,58 @@ export default function Settings() {
               {logoTokenSaved && <button className="btn btn-secondary" onClick={handleClearLogoToken}>Remove</button>}
             </div>
           </div>
+
+          {coBrandedCards.length > 0 && (() => {
+            const secretDirty = secretInput.trim() !== '';
+            const statusLine: { text: string; color: string } | null = wordmarkStatus === 'fetching'
+              ? { text: 'Fetching…', color: 'var(--text-secondary)' }
+              : wordmarkStatus === 'bad_key' ? { text: 'logo.dev rejected the key — check it is the secret key (sk_…), not the token.', color: 'var(--danger)' }
+              : wordmarkStatus === 'no_credits' ? { text: 'Your logo.dev credits have run out for this month.', color: 'var(--danger)' }
+              : wordmarkStatus === 'rate_limited' ? { text: 'logo.dev is rate-limiting — try again in a minute.', color: 'var(--danger)' }
+              : wordmarkStatus === 'blocked' ? { text: "This browser can't reach logo.dev's Brand API directly. It works in the Android app.", color: 'var(--danger)' }
+              : wordmarkStatus === 'error' ? { text: "Couldn't reach logo.dev — check your connection and try again.", color: 'var(--danger)' }
+              : secretSaved ? { text: `${wordmarksFound} of ${wordmarkTargets.length} co-branded card${wordmarkTargets.length === 1 ? '' : 's'} have a wordmark.`, color: wordmarksFound > 0 ? 'var(--success)' : 'var(--text-secondary)' }
+              : null;
+            return (
+              <div className="card flex-col gap-3" style={{ padding: '1rem' }}>
+                <SettingsCardHeader icon={ImageIcon} title="Card Wordmarks" level="h3" size={20} marginBottom="0.5rem" />
+                <span className="text-xs text-muted">
+                  Prints each co-branded card's full brand wordmark ("Flipkart", not just its "F") on the back of the card, from logo.dev's Brand API. It needs your logo.dev SECRET key (sk_…) — the token above can't do it. Each brand is looked up once (3 credits; the free plan includes $5 a month) and kept on this device. The key stays on this device too, in its secure storage, and is never part of a backup. Cards logo.dev has no wordmark for keep the round icon.
+                </span>
+                <div className="input-group" style={{ marginBottom: 0 }}>
+                  <label>logo.dev Secret Key {secretSaved && <span style={{ color: 'var(--success)' }}>· saved</span>}</label>
+                  <input
+                    type="password"
+                    className="input-field"
+                    value={secretInput}
+                    onChange={e => setSecretInput(e.target.value)}
+                    placeholder={secretSaved ? '•••••••• (saved — type to replace)' : 'sk_… (optional)'}
+                    autoComplete="off"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    className="btn btn-primary"
+                    style={{ flex: 1, opacity: secretDirty ? 1 : 0.5, cursor: secretDirty ? 'pointer' : 'not-allowed' }}
+                    disabled={!secretDirty}
+                    onClick={handleSaveSecret}
+                  >Save</button>
+                  {secretSaved && <button className="btn btn-secondary" onClick={handleClearSecret}>Remove</button>}
+                </div>
+                {secretSaved && (
+                  <button
+                    className="btn btn-secondary"
+                    disabled={wordmarkStatus === 'fetching'}
+                    onClick={fetchWordmarks}
+                  >Fetch wordmarks now</button>
+                )}
+                {statusLine && <span className="text-xs" style={{ color: statusLine.color }}>{statusLine.text}</span>}
+              </div>
+            );
+          })()}
         </div>
       </SubviewWrapper>
     );
@@ -2646,11 +2746,11 @@ export default function Settings() {
                     onClick={() => navigateTo('commodity')}
                   />
                 )}
-                {hasInvestments && (
+                {(hasInvestments || coBrandedCards.length > 0) && (
                   <GridToggleButton
                     icon={ImageIcon}
-                    label="Asset Logos"
-                    active={logoTokenSaved}
+                    label="Logos"
+                    active={logoTokenSaved || secretSaved}
                     onClick={() => navigateTo('logos')}
                   />
                 )}
