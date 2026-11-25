@@ -32,6 +32,32 @@ import { format, parseISO, subMonths } from 'date-fns';
 import { calculateEPFProjection } from '../utils/epfEngine';
 import { getCachedPrice, getCachedPrevPrice, getCachedCommodityPriceINR } from './MarketDataService';
 import { getActiveCardDues } from './CardDuesService';
+import { getCardYear, getCardSpendFigures, getCardFeeStanding } from './CardYearService';
+
+/* THE CARD-YEAR SPEND AND WAIVER STANDING the card screen shows, from the same CardYearService
+   calls. The doc explains the waiver bar and "spent before tracking" in detail, but only the waiver
+   THRESHOLD was emitted, so "how much more to waive my annual fee?" had no figures to answer from. */
+const cardYearPart = (cc: FinanceData['accounts'][number], transactions: Transaction[]) => {
+  const year = getCardYear(cc);
+  const spend = getCardSpendFigures(cc, transactions, year);
+  const fees = getCardFeeStanding(cc, year, spend.yearSpend);
+  const window = year.isAnniversary
+    ? `card year ${year.label}`
+    : `calendar year ${year.label} (no open date, so not the real card year)`;
+  const parts = [`${window}, ${year.daysLeft} days left`];
+  parts.push(spend.countedFrom
+    ? `spent ${formatCurrency(spend.yearSpend)} since ${spend.countedFrom} only (card added mid-year, no "spent before tracking" total)`
+    : `spent ${formatCurrency(spend.yearSpend)} this card year`);
+  if (spend.carriedIn > 0) parts.push(`of which ${formatCurrency(spend.carriedIn)} entered as spent before tracking`);
+  parts.push(`all-time ${formatCurrency(spend.lifetimeSpend)}`);
+  if (fees.inFirstFreeYear) parts.push('in its first (fee-free) year');
+  if (fees.waiverSpend) {
+    parts.push(fees.waiverMet
+      ? 'annual-fee waiver MET this year'
+      : `${formatCurrency(fees.waiverRemaining || 0)} more to spend for the annual-fee waiver`);
+  }
+  return `; ${parts.join(', ')}`;
+};
 
 const SLICE_CAP = 60;
 const RECENT_FALLBACK = 40;
@@ -254,7 +280,8 @@ function buildSummary(data: FinanceData): string {
         (cc.dueDay ? `, due day ${cc.dueDay}${countdown}` : '') +
         (cc.creditLimit ? `, limit ${formatCurrency(cc.creditLimit)}` : '') +
         `, fees: ${feeParts.join(', ')}` +
-        (cc.cardOpenedOn ? `, opened ${cc.cardOpenedOn}` : ', opening date not set'));
+        (cc.cardOpenedOn ? `, opened ${cc.cardOpenedOn}` : ', opening date not set') +
+        cardYearPart(cc, data.transactions));
     });
   }
 
