@@ -140,8 +140,8 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       {
         title: "Smart Features",
         description: isAndroid
-          ? "SpendVault does the busywork for you. Auto-Log SMS reads your bank's transaction texts and logs spends automatically — add a Gemini key to enable an AI filter that drops promos & OTPs. Commodity AI and Asset Logos enrich your wealth dashboard, and Passive Logs let you keep investments or pass-through expenses out of your budget stats."
-          : "Power up your vault. Add a Gemini key for AI-estimated commodity prices and real brand logos on your holdings, and use Passive Logs to flag investments or pass-through expenses so they don't distort your budget stats. (Automatic bank-SMS logging is available on the Android app.)",
+          ? "SpendVault does the busywork for you. Auto-Log SMS reads your bank's transaction texts and logs spends automatically — add a Gemini key to enable an AI filter that drops promos & OTPs. Commodity AI and Asset Logos enrich your wealth dashboard, and Passive Logs let you keep pass-through expenses — like a bill you paid for friends — out of your budget stats."
+          : "Power up your vault. Add a Gemini key for AI-estimated commodity prices and real brand logos on your holdings, and use Passive Logs to flag pass-through expenses — like a bill you paid for friends — so they don't distort your budget stats. (Automatic bank-SMS logging is available on the Android app.)",
         selector: ".tour-smart-features",
         tab: "settings",
         actionBefore: () => setIsHubOpen(false),

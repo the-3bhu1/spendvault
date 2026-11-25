@@ -2600,7 +2600,7 @@ export default function Settings() {
                     if (!data.user?.enablePassiveTransactions) {
                       setConfirmConfig({
                         title: "Enable Passive Logs?",
-                        message: "Passive Logs allow you to flag specific transactions to be excluded from your main Spends and Income analytics. This is perfect for tracking passive movements, investments, or pass-through expenses without distorting your actual budget statistics.",
+                        message: "Passive Logs allow you to flag specific transactions to be excluded from your main Spends and Income analytics. This is perfect for pass-through expenses — a bill you paid for friends, a purchase made on someone else's behalf — without distorting your actual budget statistics. Transfers, CC payments, refunds, investments and lending & borrowing are already left out automatically, so the option doesn't appear for them.",
                         confirmLabel: "Enable",
                         onConfirm: () => {
                           updateUser({ ...data.user!, enablePassiveTransactions: true });
