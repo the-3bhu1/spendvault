@@ -5,11 +5,15 @@ import {
   Train, ShoppingBag, Utensils, Car, Zap, HeartPulse, Film, BadgeIndianRupee, Banknote,
   CreditCard, ArrowRightLeft, Home, Handshake, Gift, ChartNoAxesCombined, ChartCandlestick,
   Gem, HandCoins, MoreHorizontal, Coins, Landmark, WalletCards, WalletMinimal, BarChart3,
-  TrendingUp, Medal, Wallet, ShieldUser, ChartLine, ArchiveX, Fuel, PiggyBank, Scale, BadgeMinus
+  TrendingUp, Medal, Wallet, ShieldUser, ChartLine, ArchiveX, Fuel, PiggyBank, Scale, BadgeMinus,
+  PackageArrowBendUpLeft
 } from 'lucide-react';
 
 export const getCategoryIcon = (category: string, size = 17) => {
   const cat = category.toLowerCase();
+  // First: "refunds" contains "fund" (Fund → PiggyBank below), and a custom "Fuel refund" should
+  // read as a refund, not a fuel spend.
+  if (cat.includes('refund')) return <PackageArrowBendUpLeft size={size} />;
   if (cat.includes('ncmc')) return <Train size={size} />;
   if (cat.includes('bank charge')) return <BadgeMinus size={size} />;
   if (cat.includes('shop')) return <ShoppingBag size={size} />;
