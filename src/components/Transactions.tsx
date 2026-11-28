@@ -1242,7 +1242,7 @@ export default function Transactions() {
               return (
                 <div key={monthStr} className="flex-col">
                   <div
-                    className={`flex justify-between align-center ${monthStr === getCurrentMonthStr() ? 'tour-demo-month-header' : ''}`}
+                    className={`flex justify-between row-with-action align-center ${monthStr === getCurrentMonthStr() ? 'tour-demo-month-header' : ''}`}
                     style={{ padding: '0.75rem 1.5rem', backgroundColor: 'var(--bg-hover)', cursor: 'pointer', borderBottom: '1px solid var(--border-color)' }}
                     onClick={() => toggleMonth(monthStr)}
                   >
@@ -1288,7 +1288,7 @@ export default function Transactions() {
 
                         return (
                           <React.Fragment key={date}>
-                            <div className="flex justify-between align-center" style={{ backgroundColor: 'rgba(99,102,241,0.06)', fontWeight: 700, color: 'var(--accent)', padding: '0.5rem 1.5rem', fontSize: '0.7rem', borderBottom: '2px solid rgba(99,102,241,0.2)', borderTop: '2px solid rgba(99,102,241,0.2)', letterSpacing: '0.5px' }}>
+                            <div className="flex justify-between row-with-action align-center" style={{ backgroundColor: 'rgba(99,102,241,0.06)', fontWeight: 700, color: 'var(--accent)', padding: '0.5rem 1.5rem', fontSize: '0.7rem', borderBottom: '2px solid rgba(99,102,241,0.2)', borderTop: '2px solid rgba(99,102,241,0.2)', letterSpacing: '0.5px' }}>
                               <span className="text-mono" style={{ textTransform: 'uppercase', letterSpacing: '1px' }}>{formatDateString(date)}</span>
                               <div className="flex gap-3">
                                 {dailyIncome > 0 && <span style={{ color: 'var(--success)' }}>+{formatCurrency(dailyIncome)}</span>}

@@ -355,6 +355,61 @@ describe('a due date is allowed to be in the past', () => {
   });
 });
 
+describe('a transfer out of the card', () => {
+  // Cycle 2026-12 on a 16th statement day: 16 Nov – 15 Dec.
+  const acc = card({ statementDay: 16, dueDay: 4 });
+  const bankPaid = tx({ id: 'bank-pay', accountId: 'bank', type: 'debit', category: 'CC Payment', date: '2026-10-22', amount: 1177 });
+  const payment = tx({ id: 'cc-pay', type: 'credit', category: 'CC Payment', date: '2026-10-22', amount: 1177, linkedTransactionIds: ['bank-pay'] });
+  const dinner = tx({ date: '2026-11-22', amount: 370 });
+  const shopping = tx({ date: '2026-11-22', amount: 1399, category: 'Shopping' });
+
+  it('to a wallet is a charge on the statement', () => {
+    const load = tx({ id: 'load', category: 'Transfer', date: '2026-11-24', amount: 525.12, linkedTransactionIds: ['wallet-in'] });
+    const walletIn = tx({ id: 'wallet-in', accountId: 'wallet', type: 'credit', category: 'Transfer', date: '2026-11-24', amount: 547, linkedTransactionIds: ['load'] });
+    const f = getCardCycleFigures(acc, [bankPaid, payment, dinner, shopping, load, walletIn], '2026-12');
+    expect(f.charged).toBeCloseTo(2294.12);
+    expect(f.settlement).toBe(0);
+    expect(f.due).toBeCloseTo(2294.12);
+  });
+
+  it('to an account that paid the card is still a returned payment', () => {
+    const back = tx({ id: 'back', category: 'Transfer', date: '2026-11-24', amount: 500, linkedTransactionIds: ['bank-in'] });
+    const bankIn = tx({ id: 'bank-in', accountId: 'bank', type: 'credit', category: 'Transfer', date: '2026-11-24', amount: 500 });
+    const f = getCardCycleFigures(acc, [bankPaid, payment, dinner, back, bankIn], '2026-12');
+    expect(f.charged).toBe(370);
+    expect(f.settlement).toBe(-500);
+    expect(f.due).toBe(870);
+  });
+
+  it('is matched when only the other leg carries the link', () => {
+    const load = tx({ id: 'load', category: 'Transfer', date: '2026-11-24', amount: 300 });
+    const walletIn = tx({ id: 'wallet-in', accountId: 'wallet', type: 'credit', category: 'Transfer', date: '2026-11-24', amount: 300, linkedTransactionIds: ['load'] });
+    expect(getCardCycleFigures(acc, [bankPaid, payment, load, walletIn], '2026-12').charged).toBe(300);
+  });
+
+  it('filed as CC Payment is a returned payment whatever it links to', () => {
+    const back = tx({ id: 'back', category: 'CC Payment', date: '2026-11-24', amount: 500, linkedTransactionIds: ['wallet-in'] });
+    const walletIn = tx({ id: 'wallet-in', accountId: 'wallet', type: 'credit', category: 'CC Payment', date: '2026-11-24', amount: 500 });
+    const f = getCardCycleFigures(acc, [dinner, back, walletIn], '2026-12');
+    expect(f.charged).toBe(370);
+    expect(f.settlement).toBe(-500);
+  });
+
+  it('with no other leg keeps the returned-payment reading', () => {
+    const lone = tx({ category: 'Transfer', date: '2026-11-24', amount: 300 });
+    const f = getCardCycleFigures(acc, [dinner, lone], '2026-12');
+    expect(f.charged).toBe(370);
+    expect(f.due).toBe(670);
+  });
+
+  it('never moves the balance, only the split', () => {
+    const load = tx({ id: 'load', category: 'Transfer', date: '2026-11-24', amount: 525.12, linkedTransactionIds: ['wallet-in'] });
+    const walletIn = tx({ id: 'wallet-in', accountId: 'wallet', type: 'credit', category: 'Transfer', date: '2026-11-24', amount: 547 });
+    const txs = [bankPaid, payment, dinner, shopping, load, walletIn];
+    expect(getCardCycleFigures(acc, txs, '2026-12').net).toBeCloseTo(calculateCycleBalanceForCycle(acc, txs, '2026-12'));
+  });
+});
+
 describe('the all-cycles reader cannot drift from the one-cycle reader', () => {
   it('agrees cycle for cycle', () => {
     const acc = card({ statementRounding: 'floor', statementAdjustments: { '2026-05': 700 } });

@@ -339,7 +339,7 @@ export default function Insights() {
 
   return (
     <div className="flex-col gap-6 insights-tab-root">
-      <div className="flex justify-between align-center">
+      <div className="flex justify-between row-with-action align-center">
         <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>insights</h2>
         {availableMonths.length > 0 && (
           <div style={{ width: '150px', flexShrink: 0 }}>
@@ -648,7 +648,7 @@ export default function Insights() {
                     return (
                       <div key={cat} className="flex-col gap-2">
                         {/* Line 1: category name + edit/delete actions */}
-                        <div className="flex justify-between align-center gap-3">
+                        <div className="flex justify-between row-with-action align-center gap-3">
                           <div className="flex align-center gap-2 min-width-0">
                             <Target size={15} style={{ color, flexShrink: 0 }} />
                             <span className="truncate" style={{ fontWeight: 700, fontSize: '1rem' }}>{cat.toLowerCase()}</span>
@@ -684,7 +684,7 @@ export default function Insights() {
                             onCancel={() => setEditingBudgetCat(null)}
                           />
                         ) : (
-                          <div className="flex justify-between align-center gap-3">
+                          <div className="flex justify-between row-with-action align-center gap-3">
                             <span
                               className="text-mono font-bold"
                               style={{ fontSize: '0.95rem', cursor: 'pointer' }}
@@ -811,7 +811,7 @@ export default function Insights() {
                   return (
                     <div 
                       key={entry.name} 
-                      className="flex justify-between align-center py-3" 
+                      className="flex justify-between row-with-action align-center py-3" 
                       style={{ 
                         borderBottom: '1px dashed var(--border-color)',
                         opacity: activeCatIndex === null || activeCatIndex === catPieData.findIndex(d => d.name === entry.name) ? 1 : 0.4,
@@ -909,7 +909,7 @@ export default function Insights() {
                 return (
                   <div 
                     key={entry.name} 
-                    className="flex justify-between align-center py-3" 
+                    className="flex justify-between row-with-action align-center py-3" 
                     style={{ 
                       borderBottom: '1px dashed var(--border-color)',
                       opacity: activeAccIndex === null || activeAccIndex === accPieData.findIndex(d => d.name === entry.name) ? 1 : 0.4,
@@ -959,7 +959,7 @@ export default function Insights() {
 
                     return (
                       <div key={tag} className="flex-col gap-2">
-                        <div className="flex justify-between align-center">
+                        <div className="flex justify-between row-with-action align-center">
                           <div className="flex align-center" style={{ gap: '0.15rem' }}>
                             <Hash size={13} style={{ color: 'var(--accent)', opacity: 0.8, flexShrink: 0 }} />
                             <span style={{ fontWeight: 700, fontSize: '1rem' }}>{tag}</span>

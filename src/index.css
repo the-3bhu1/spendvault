@@ -2112,6 +2112,31 @@ tr:hover td {
   box-shadow: 4px 4px 0 #000 !important;
 }
 
+/* ─── A row of text with a button at the end: the TEXT wraps, the button stays put ──────────────
+   The mobile block above sets `.flex.justify-between.align-center { flex-wrap: wrap }`, so any row
+   of that shape whose text runs long drops its trailing button onto a line of its own — an archived
+   "JioBlackRock Flexi Cap Fund Direct Growth" put its Restore button under the name while its
+   neighbours kept theirs on the right. It keeps happening because every new row is written in the
+   same three classes. Add `row-with-action` to such a row: the first child takes the remaining
+   width and wraps onto as many lines as it needs, the last child never shrinks or moves.
+   Same three classes plus this one, so it beats the media-query rule at every width. */
+.flex.justify-between.align-center.row-with-action {
+  flex-wrap: nowrap;
+  gap: 0.75rem;
+}
+
+.row-with-action > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* :not(:first-child) for rows whose action is conditional: with it absent the text is also the
+   last child, and a text that may not shrink is a text that cannot wrap. */
+.row-with-action > :last-child:not(:first-child) {
+  flex-shrink: 0;
+}
+
 /* ─── Debt detail header: one line, always ─────────────────────────────────
    The mobile block above sets `.flex.justify-between.align-center { flex-wrap: wrap }` for every
    row of that shape, which is right nearly everywhere and wrong here: this row is a back button, a
@@ -2723,4 +2748,30 @@ tr:hover td {
   user-select: none !important;
   -webkit-user-select: none !important;
   -webkit-touch-callout: none !important;
+}
+
+/* ─── Bank tile → its debit card's tile ─────────────────────────────────────
+   The card names on a bank account's tile jump to the card's own tile (Accounts.tsx,
+   revealAccount). Dotted underline so the name reads as tappable without becoming a second
+   button beside "+ Card". The flash is an OUTLINE, not a box-shadow: cards already wear the hard
+   offset shadow, and animating box-shadow would strip it for the length of the flash. */
+.linked-card-link .truncate {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--text-muted);
+}
+
+@keyframes account-card-reveal {
+  0%, 45% { outline-color: var(--accent); }
+  100% { outline-color: transparent; }
+}
+
+.account-card-reveal {
+  outline: 2px solid transparent;
+  outline-offset: 3px;
+  animation: account-card-reveal 1.8s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .account-card-reveal { animation: none; outline-color: var(--accent); }
 }

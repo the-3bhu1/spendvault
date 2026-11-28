@@ -271,7 +271,7 @@ export default function AuthScreen() {
       <>
       <div className="flex-col align-center justify-center fade-in bg-main" style={{ position: 'fixed', inset: 0, zIndex: 10000, padding: '2rem' }}>
         <div className="card flex-col gap-6 w-100" style={{ maxWidth: '360px' }}>
-          <div className="flex justify-between align-center">
+          <div className="flex justify-between row-with-action align-center">
             <h2 style={{ margin: 0 }}>forgot pin?</h2>
             <button className="text-muted" onClick={() => setView('unlock')}><X size={24} /></button>
           </div>
@@ -377,7 +377,7 @@ export default function AuthScreen() {
     return (
       <div className="flex-col align-center justify-center fade-in bg-main" style={{ position: 'fixed', inset: 0, zIndex: 10000, padding: '2rem' }}>
         <div className="card flex-col gap-6 w-100" style={{ maxWidth: '360px' }}>
-          <div className="flex justify-between align-center">
+          <div className="flex justify-between row-with-action align-center">
             <h2 style={{ margin: 0 }}>recovery</h2>
             <button className="text-muted" onClick={() => setView('forgot')}><X size={24} /></button>
           </div>

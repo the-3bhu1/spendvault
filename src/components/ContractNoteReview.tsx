@@ -244,7 +244,7 @@ export default function ContractNoteReview({ trades, reconciliationWarning, onCo
 
   return (
     <div className="card flex-col gap-3" style={{ padding: '1rem', marginTop: '0.5rem' }}>
-      <div className="flex justify-between align-center">
+      <div className="flex justify-between row-with-action align-center">
         <span className="font-bold" style={{ fontSize: '0.95rem' }}>Detected {rows.length} stock trade{rows.length === 1 ? '' : 's'}</span>
         <button className="askvault-icon-btn" onClick={onDismiss} title="Dismiss"><X size={18} /></button>
       </div>
@@ -326,7 +326,7 @@ export default function ContractNoteReview({ trades, reconciliationWarning, onCo
 
       <div className="input-group" style={{ marginBottom: 0 }}>
         <label>Date</label>
-        <div className="input-field flex align-center justify-between gap-3 clickable" onClick={() => setIsDatePickerOpen(true)}>
+        <div className="input-field flex align-center justify-between row-with-action gap-3 clickable" onClick={() => setIsDatePickerOpen(true)}>
           <span className="text-mono">{format(new Date(date), 'EEE, d MMM yyyy')}</span>
           <Calendar size={18} className="text-muted" />
         </div>

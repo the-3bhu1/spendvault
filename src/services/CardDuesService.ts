@@ -47,6 +47,7 @@ import {
   getBillingCycleForDate,
   getLatestBilledCycle,
   getOrdinalSuffix,
+  linkedIdsOf,
 } from '../utils';
 
 /** One card, one billing cycle. */
@@ -140,7 +141,10 @@ const ARREARS_MIN = 1;
  *  purchase it was meant for had posted. The two legs are a matched pair that nets to nothing, and
  *  counting the return as a PURCHASE (which is what "every debit is spend" did) inflated both the
  *  month's spend and the statement by the size of the payment: ₹17,747 of tickets read as ₹35,247
- *  spent and a ₹34,359 bill. Neither number happened. */
+ *  spent and a ₹34,359 bill. Neither number happened.
+ *
+ *  Not every transfer out of a card is a returned payment, though — a wallet load is a purchase.
+ *  transferChargeIds picks those out. */
 const SETTLEMENT_CATEGORIES = new Set(['cc payment', 'transfer']);
 
 export interface CardDues {
@@ -255,10 +259,74 @@ interface CycleTally { spend: number; settlement: number; credits: number; }
  *  cycle, and every cycle at once — and a returned payment classified as spend on one path and as a
  *  negative settlement on the other would let a card's overdue total disagree with the statement
  *  screen showing the very same month. One classifier, so they cannot. */
-const tally = (into: CycleTally, t: Transaction) => {
-  if (SETTLEMENT_CATEGORIES.has((t.category || '').toLowerCase())) into.settlement += t.type === 'debit' ? -t.amount : t.amount;
+const tally = (into: CycleTally, t: Transaction, transferCharges: ReadonlySet<string>) => {
+  if (SETTLEMENT_CATEGORIES.has((t.category || '').toLowerCase()) && !transferCharges.has(t.id)) {
+    into.settlement += t.type === 'debit' ? -t.amount : t.amount;
+  }
   else if (t.type === 'debit') into.spend += t.amount;
   else into.credits += t.amount;
+};
+
+const NO_TRANSFER_CHARGES: ReadonlySet<string> = new Set();
+
+/** Transfers OUT of the card that are purchases, not returned payments — by id.
+ *
+ *  A debit in a settlement category reads as a payment the bank sent back (see
+ *  SETTLEMENT_CATEGORIES). That is only true when the money went back to where payments come
+ *  from. Loading a wallet or buying a gift card with the card is logged as a Transfer too — card →
+ *  Myntra Wallet — because the wallet's balance rises and the purchases made from it are the spend.
+ *  For the CARD, though, that load is a charge the bank bills like any other. Read as a returned
+ *  payment it vanished from the Statement Amount (₹3,427 of charges headlined as ₹1,869) while still
+ *  counting in what was due, so the headline and the "still due" line under it disagreed.
+ *
+ *  The test is the definition of a returned payment: the other leg lands in an account that has
+ *  PAID this card — one that sits on the far side of a payment credit to it. Taken from the ledger
+ *  rather than from account types, so a card paid from a wallet still has a refund to that wallet
+ *  read as one. Legs are matched in both directions because linked groups are a star (a child
+ *  links to its parent, not the reverse). An unlinked transfer debit keeps the old reading: with no
+ *  other leg there is nothing to tell the two apart.
+ *
+ *  `net`, and so the card's balance, dues and utilisation, is unchanged by this — the row only
+ *  moves from a negative settlement to spend, across the same minus sign. */
+const transferChargeIds = (account: Account, transactions: Transaction[]): ReadonlySet<string> => {
+  const isSettlementOnCard = (t: Transaction) =>
+    t.accountId === account.id && SETTLEMENT_CATEGORIES.has((t.category || '').toLowerCase());
+  // Transfers only. A debit the user filed as CC Payment is a returned payment by their own say-so,
+  // and a payment logged unlinked would leave no payer to match it against.
+  const outgoing = transactions.filter(t =>
+    t.accountId === account.id && t.type === 'debit' && (t.category || '').toLowerCase() === 'transfer');
+  // The common case — no transfer out of this card at all — costs one filter and nothing more.
+  if (outgoing.length === 0) return NO_TRANSFER_CHARGES;
+
+  const byId = new Map(transactions.map(t => [t.id, t]));
+  // Card row id → the accounts on the other side of it.
+  const otherSides = new Map<string, Set<string>>();
+  const note = (cardRowId: string, other: Transaction | undefined) => {
+    if (!other || other.accountId === account.id) return;
+    let s = otherSides.get(cardRowId);
+    if (!s) { s = new Set(); otherSides.set(cardRowId, s); }
+    s.add(other.accountId);
+  };
+  for (const t of transactions) {
+    if (t.accountId === account.id) {
+      // Ids may point outside `transactions` (debt ledger entries); byId just misses them.
+      for (const id of linkedIdsOf(t)) note(t.id, byId.get(id));
+    } else {
+      for (const id of linkedIdsOf(t)) if (byId.get(id)?.accountId === account.id) note(id, t);
+    }
+  }
+
+  const payers = new Set<string>();
+  for (const t of transactions) {
+    if (isSettlementOnCard(t) && t.type === 'credit') otherSides.get(t.id)?.forEach(a => payers.add(a));
+  }
+
+  const charges = new Set<string>();
+  for (const t of outgoing) {
+    const sides = otherSides.get(t.id);
+    if (sides && sides.size > 0 && ![...sides].some(a => payers.has(a))) charges.add(t.id);
+  }
+  return charges;
 };
 
 /** Tally → statement. Everything below this line is the arithmetic that was always here. */
@@ -305,11 +373,12 @@ export const getCardCycleFigures = (
 ): CardCycleFigures => {
   const statementDay = account.statementDay || 1;
   const sums: CycleTally = { spend: 0, settlement: 0, credits: 0 };
+  const transferCharges = transferChargeIds(account, transactions);
   for (const t of transactions) {
     if (t.accountId !== account.id) continue;
     if (!affectsRupeeBalance(t)) continue;
     if (getAppliedBillingCycle(t, statementDay) !== cycle) continue;
-    tally(sums, t);
+    tally(sums, t, transferCharges);
   }
   return finalise(account, cycle, sums);
 };
@@ -337,10 +406,11 @@ export const getCardCycleFiguresByCycle = (
     if (!t) { t = { spend: 0, settlement: 0, credits: 0 }; sums.set(cycle, t); }
     return t;
   };
+  const transferCharges = transferChargeIds(account, transactions);
   for (const t of transactions) {
     if (t.accountId !== account.id) continue;
     if (!affectsRupeeBalance(t)) continue;
-    tally(bucket(getAppliedBillingCycle(t, statementDay)), t);
+    tally(bucket(getAppliedBillingCycle(t, statementDay)), t, transferCharges);
   }
   for (const cycle of Object.keys(account.statementAdjustments ?? {})) bucket(cycle);
   const out = new Map<string, CardCycleFigures>();

@@ -1402,7 +1402,7 @@ export default function Settings() {
             {data.categories.map((c, idx) => (
               <div
                 key={c}
-                className="flex justify-between align-center"
+                className="flex justify-between row-with-action align-center"
                 draggable={!Capacitor.isNativePlatform()}
                 onDragStart={() => setDraggedIdx(idx)}
                 onDragOver={handleDragOver}
@@ -1469,7 +1469,7 @@ export default function Settings() {
               (data.customAccountTypes || []).map(type => (
                 <div
                   key={type}
-                  className="flex justify-between align-center"
+                  className="flex justify-between row-with-action align-center"
                   style={{
                     padding: '0.75rem 1rem',
                     background: 'var(--bg-color)',
@@ -1649,7 +1649,7 @@ export default function Settings() {
 
             <div className="flex-col gap-3">
               <div
-                className="flex justify-between align-center"
+                className="flex justify-between row-with-action align-center"
                 onClick={() => setTheme('dark')}
                 style={{
                   padding: '1rem', background: data.theme === 'dark' ? 'var(--bg-hover)' : 'var(--bg-color)',
@@ -1668,7 +1668,7 @@ export default function Settings() {
               </div>
 
               <div
-                className="flex justify-between align-center"
+                className="flex justify-between row-with-action align-center"
                 onClick={() => setTheme('light')}
                 style={{
                   padding: '1rem', background: data.theme === 'light' ? 'var(--bg-hover)' : 'var(--bg-color)',
@@ -1762,7 +1762,7 @@ export default function Settings() {
           {/* Advanced: Clipboard fallback */}
           <div ref={advancedSectionRef} className="card flex-col gap-3">
             <button
-              className="flex justify-between align-center w-100"
+              className="flex justify-between row-with-action align-center w-100"
               style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}
               onClick={() => {
                 const willShow = !showExportAdvanced;
@@ -1852,7 +1852,7 @@ export default function Settings() {
           {/* Advanced: Clipboard paste fallback */}
           <div className="card flex-col gap-3">
             <button
-              className="flex justify-between align-center w-100"
+              className="flex justify-between row-with-action align-center w-100"
               style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}
               onClick={() => setShowImportAdvanced(v => !v)}
             >
@@ -1974,7 +1974,7 @@ export default function Settings() {
             <span className="text-xs text-muted font-bold uppercase" style={{ letterSpacing: '1px' }}>Developer</span>
             <a
               href={`mailto:${SUPPORT_EMAIL}`}
-              className="flex justify-between align-center"
+              className="flex justify-between row-with-action align-center"
               style={{
                 padding: '0.75rem',
                 background: 'var(--bg-hover)',
@@ -2191,7 +2191,7 @@ export default function Settings() {
                      only thing missing was permission to flip it. */
                   const pinExists = pinAlreadySet || pinPairEntered;
                   return (
-                    <div className="flex justify-between align-center" style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg-color)', borderRadius: '8px', border: '1px solid var(--border-color)', opacity: pinExists ? 1 : 0.55 }}>
+                    <div className="flex justify-between row-with-action align-center" style={{ marginTop: '0.5rem', padding: '0.75rem', background: 'var(--bg-color)', borderRadius: '8px', border: '1px solid var(--border-color)', opacity: pinExists ? 1 : 0.55 }}>
                       <div className="flex align-center gap-3">
                         <Fingerprint size={20} className={profileForm.biometricsEnabled ? "text-success" : "text-muted"} />
                         <div className="flex-col">
@@ -2321,7 +2321,7 @@ export default function Settings() {
             {geminiTestStatus === 'fail' && <span className="text-xs" style={{ color: 'var(--danger)' }}>✕ Key test failed. Check the key and your connection.</span>}
             {geminiKeySaved && (
               <div className="flex-col gap-2">
-                <div className="flex justify-between align-center" style={{ fontSize: '0.7rem' }}>
+                <div className="flex justify-between row-with-action align-center" style={{ fontSize: '0.7rem' }}>
                   <span className="text-mono text-muted" style={{ textTransform: 'uppercase', letterSpacing: '1px' }}>AI fetches today</span>
                   <span className="text-mono font-bold" style={{ color: atLimit ? 'var(--danger)' : 'var(--accent)' }}>{used} / {FETCH_LIMIT}</span>
                 </div>
@@ -2359,7 +2359,7 @@ export default function Settings() {
               summary of your accounts and transactions (plus the question) is sent to Gemini to answer. Card numbers,
               CVVs and your PIN are never sent. Requires the key above.
             </span>
-            <div className="flex justify-between align-center">
+            <div className="flex justify-between row-with-action align-center">
               <span className="text-sm font-bold">{data.user?.aiAssistant ? 'Enabled' : 'Disabled'}</span>
               <button
                 className={`btn ${data.user?.aiAssistant ? 'btn-primary' : 'btn-secondary'}`}
@@ -2381,7 +2381,7 @@ export default function Settings() {
               <span className="text-xs text-muted">
                 When on, bank SMS that pass the on-device keyword detection are sent to Gemini to confirm they're real transactions before logging — dropping EMI offers, promos, and reward-point "credits". OTPs and personal SMS are excluded on-device and never sent. Requires the key above.
               </span>
-              <div className="flex justify-between align-center">
+              <div className="flex justify-between row-with-action align-center">
                 <span className="text-sm font-bold">{smsFilterOn ? 'Enabled' : 'Disabled'}</span>
                 <button
                   className={`btn ${smsFilterOn ? 'btn-primary' : 'btn-secondary'}`}
@@ -2566,7 +2566,7 @@ export default function Settings() {
           <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>control panel</h2>
         </div>
 
-        <div className="flex justify-between align-center" style={{ background: 'var(--bg-card)', padding: '1rem', marginBottom: '2rem', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+        <div className="flex justify-between row-with-action align-center" style={{ background: 'var(--bg-card)', padding: '1rem', marginBottom: '2rem', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
           <div className="flex align-center gap-3">
             <ProfileAvatar size={44} onClick={() => navigateTo('profile')} />
             <div className="flex-col gap-0" onClick={() => navigateTo('profile')} style={{ cursor: 'pointer' }}>

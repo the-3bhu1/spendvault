@@ -233,7 +233,7 @@ export default function Splits() {
     <div className="flex-col gap-6 animate-in splits-tab-root" style={{ minHeight: '100%' }}>
       {activeView === 'main' && (
         <>
-          <div className="flex justify-between align-center">
+          <div className="flex justify-between row-with-action align-center">
             <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>group splits</h2>
             <button className="btn btn-primary flex align-center gap-2" onClick={() => setActiveView('create_event')}>
               <Plus size={18} strokeWidth={3} /> New Event
@@ -263,7 +263,7 @@ export default function Splits() {
                     setSelectedEventId(event.id);
                     setActiveView('detail');
                   }}>
-                    <div className="flex justify-between align-center">
+                    <div className="flex justify-between row-with-action align-center">
                       <div className="flex align-center gap-3">
                         <div className="flex-center" style={{ 
                           width: '40px', 
@@ -627,7 +627,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
     >
       <div className="flex-col gap-6" style={{ flexGrow: 1 }}>
 
-        <div className="flex justify-between align-center tour-split-detail-header">
+        <div className="flex justify-between row-with-action align-center tour-split-detail-header">
           <div className="flex-col">
             <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>Consolidated Summary</span>
             <span className="text-xl font-bold">₹{totalSpent.toFixed(2)}</span>
@@ -713,7 +713,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                 <p className="text-center text-sm text-muted" style={{ padding: '1rem 0' }}>All settled up — no payments needed.</p>
               ) : (
                 settlements.map((s, i) => (
-                  <div key={`${s.from}-${s.to}-${i}`} className="flex justify-between align-center" style={{
+                  <div key={`${s.from}-${s.to}-${i}`} className="flex justify-between row-with-action align-center" style={{
                     padding: '0.75rem 0.5rem',
                     borderBottom: i === settlements.length - 1 ? 'none' : '1px solid rgba(255,255,255,0.05)'
                   }}>
@@ -739,7 +739,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
             const netVal = balances[person]?.net ?? 0;
             
             return (
-              <div key={person} className="flex justify-between align-center clickable" 
+              <div key={person} className="flex justify-between row-with-action align-center clickable" 
                 onClick={() => handleTogglePaid(person)}
                 style={{
                   padding: '0.75rem 0.5rem',
@@ -796,7 +796,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
             in the middle of instead of a heading to hang under. With expenses present the extra room
             lands under the last card, where it was anyway. */}
         <div className="flex-col gap-4" style={{ flexGrow: 1 }}>
-          <div className="flex justify-between align-center">
+          <div className="flex justify-between row-with-action align-center">
             <span className="text-xs text-muted uppercase font-bold" style={{ letterSpacing: '1px' }}>Expenses ({effectiveItems.length})</span>
             {event.status !== 'settled' && (
               <button
@@ -942,7 +942,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
 
                   <div className="flex-1 overflow-y no-scrollbar" style={{ background: 'var(--bg-color)', overflowY: 'auto' }}>
                     <div
-                      className="flex justify-between align-center clickable"
+                      className="flex justify-between row-with-action align-center clickable"
                       onClick={() => {
                         setSelectedTxId('custom');
                         setCustomDescription('');
@@ -1034,7 +1034,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                     </div>
 
                     <div className="input-group" style={{ marginBottom: '1.5rem' }}>
-                      <div className="flex justify-between align-center" style={{ width: '100%' }}>
+                      <div className="flex justify-between row-with-action align-center" style={{ width: '100%' }}>
                         <label>Who Paid?</label>
                         <button
                           type="button"
@@ -1098,7 +1098,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                             {orderedPayers.map(key => (
                               <div
                                 key={key}
-                                className="flex justify-between align-center"
+                                className="flex justify-between row-with-action align-center"
                                 style={{ padding: '0.75rem 1rem', border: '1px solid var(--border-color)', background: 'var(--bg-hover)', marginBottom: '0.5rem', gap: '1rem' }}
                               >
                                 <span className="font-bold" style={{ fontSize: '1rem' }}>{splitDisplayName(key)} paid</span>
@@ -1185,7 +1185,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                         {splitType === 'equal' ? (
                           <>
                             <div
-                              className={`flex justify-between align-center clickable ${includeMe ? 'bg-primary-soft' : ''}`}
+                              className={`flex justify-between row-with-action align-center clickable ${includeMe ? 'bg-primary-soft' : ''}`}
                               style={{
                                 padding: '1.25rem 1rem',
                                 borderRadius: '0px',
@@ -1204,7 +1204,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                             {event.people.map(person => (
                               <div
                                 key={person}
-                                className={`flex justify-between align-center clickable ${involvedPeople.includes(person) ? 'bg-primary-soft' : ''}`}
+                                className={`flex justify-between row-with-action align-center clickable ${involvedPeople.includes(person) ? 'bg-primary-soft' : ''}`}
                                 style={{
                                   padding: '1.25rem 1rem',
                                   borderRadius: '0px',
@@ -1230,7 +1230,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                         ) : (
                           <>
                             <div
-                              className="flex justify-between align-center"
+                              className="flex justify-between row-with-action align-center"
                               style={{
                                 padding: '0.75rem 1rem',
                                 borderRadius: '0px',
@@ -1260,7 +1260,7 @@ function SplitDetail({ event, onBack, onUpdate, onDelete, onShareImage, isSharin
                             {event.people.map(person => (
                               <div
                                 key={person}
-                                className="flex justify-between align-center"
+                                className="flex justify-between row-with-action align-center"
                                 style={{
                                   padding: '0.75rem 1rem',
                                   borderRadius: '0px',

@@ -224,7 +224,7 @@ export function CustomPicker({
                 <React.Fragment key={opt.id}>
                   {showHeader && (
                     <div 
-                      className="clickable flex justify-between align-center"
+                      className="clickable flex justify-between row-with-action align-center"
                       onClick={() => {
                         setCollapsedGroups(prev => ({
                           ...prev,

@@ -110,7 +110,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
       },
       {
         title: "Your Accounts Vault",
-        description: "Manage bank savings, credit cards, e-wallets, or NCMC travel cards. This shows your current balances and statement due tracking. Tap + Card on a bank account to add its debit card: spends on the card come out of that bank's balance.",
+        description: "Manage bank savings, credit cards, e-wallets, or NCMC travel cards. This shows your current balances and statement due tracking. Tap + Card on a bank account to add its debit card: spends on the card come out of that bank's balance. Tap a linked card's name to jump to its own tile.",
         selector: ".tour-first-account",
         tab: "accounts",
         icon: Eye
@@ -836,7 +836,7 @@ export default function AppTour({ tourType, activeTab, setActiveTab, isHubOpen, 
         style={getCardStyle()}
       >
         <div className="flex-col gap-4">
-          <div className="flex justify-between align-center">
+          <div className="flex justify-between row-with-action align-center">
             <div className="flex align-center" style={{ gap: '0.75rem' }}>
               <div className="tour-icon-bg">
                 <StepIcon size={18} className="text-accent animate-pulse" />

@@ -172,7 +172,7 @@ const DatePickerPanel: React.FC<Omit<CustomDatePickerProps, 'isOpen'>> = ({
               </>
             ) : (
               <div className="flex-col flex-1" style={{ minHeight: '0' }}>
-                <div className="flex justify-between align-center" style={{ marginBottom: '1rem' }}>
+                <div className="flex justify-between row-with-action align-center" style={{ marginBottom: '1rem' }}>
                   <span className="text-xs font-bold text-muted uppercase tracking-widest">Jump to Date</span>
                   <button 
                     onClick={() => setViewMode('calendar')}

@@ -64,7 +64,8 @@ Rupees (₹). The app is also packaged for Android/iOS via Capacitor.
 - On Accounts, a linked card shows only "VIA CARD · <month>" (net spent through the card this month)
   with "From <bank>" under it, not the bank's balance; the bank's own card lists its linked "DEBIT CARD(S)"
   ("None linked" if there are none) beside a "+ CARD" button. Up to two card names are shown; more
-  are summarised as "+ N more".
+  are summarised as "+ N more". Tapping a card name there scrolls to that debit card's own tile
+  (opening the Debit Cards group if it was collapsed) and briefly outlines it.
 - Two shortcuts open the Add Account form already set to Debit Card, linked to that bank and named
   "<bank> Debit" (editable): saving a NEW bank account asks "Add a debit card for <bank>?" (Add card /
   Not now), and the "+ CARD" button on any bank account's tile does the same at any time — use it for
@@ -482,6 +483,17 @@ A card has a statement day and a due day.
   you were charged (cashback paid in rupees, refunds, reversals) — and payments are then subtracted
   from that rounded figure. That is the order a bank uses: it prints ₹1,538 and you clear it by
   paying ₹1,538, so the paise the rounding dropped must not come back as a balance.
+- Money sent OUT of a card as a Transfer is read by where it went. Loading a wallet or buying a gift
+  card with the card (a Transfer from the card to an e-wallet such as Myntra or Amazon Pay) is a
+  CHARGE: it counts in the Statement Amount like any purchase, while the purchases later made from
+  the wallet are the spend in Spends/Income. A Transfer from the card back to an account that has
+  paid the card before (usually the bank the bill is paid from) is a RETURNED PAYMENT: the bank sent
+  an overpayment back. It raises what is still owed but is not a purchase, so it stays out of the
+  Statement Amount. A transfer out with no other side linked is read as a returned payment.
+  How to log a returned payment: a debit on the CARD and a credit on the bank it went to, as a
+  Transfer or as CC Payment (a CC Payment debit on a card always means a returned payment). Do NOT
+  log it as Refunds and do NOT log it as a credit on the card: Refunds is for a shop giving money
+  back for a purchase, and a credit on the card would show it as overpaid by twice the amount.
 - A residue of ₹1 or less left behind by that rounding is NOT called arrears — a statement is
   rounded and the payment against it is not, so a rupee is noise rather than a debt. It is still
   COUNTED: it stays in the card's outstanding balance (shown under Billed, since it is money on a
@@ -900,8 +912,12 @@ account card in the Accounts tab.
 
 ### Average buy price
 Every market holding shows what it cost per unit: "Avg. Buy Price" (stocks), "Avg. Buy NAV" (funds) or
-an average ₹/gram (metals), on the holding's detail sheet directly under its unit count, and as an AVG
-line under TOTAL SHARES / TOTAL UNITS / TOTAL GRAMS on that account's card in the Accounts tab. It is
+an average ₹/gram (metals), on the holding's detail sheet directly under its unit count, and on that
+account's card in the Accounts tab. There the card has two rows under CURRENT VALUE / INVESTED, laid
+out the same way (left = worth now, right = what you paid): first the live price on the left
+(CURRENT NAV, LTP or PRICE / GRAM, with its refresh button beside it) and the average on the right
+(AVG NAV, AVG / SHARE or AVG / GRAM); then TOTAL UNITS / TOTAL SHARES / TOTAL GRAMS on the left and
+P&L on the right. It is
 DERIVED — total invested ÷ total units — and never entered by the user, so there is no field for it in
 the Add/Edit Account form and it cannot be edited directly; correct it by correcting the invested value
 or the unit count. Because it needs no market price, it still reads when a live quote fails to fetch.

@@ -313,7 +313,7 @@ export default function Debts() {
         />
       ) : (
         <div className="flex-col gap-6 fade-in debts-tab-root">
-          <div className="flex justify-between align-center">
+          <div className="flex justify-between row-with-action align-center">
             <div className="flex-col">
               <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>money owed</h2>
             </div>
@@ -370,7 +370,7 @@ export default function Debts() {
                 return (
                   <div
                     key={debt.id}
-                    className="card flex align-center justify-between clickable tour-debt-record-card"
+                    className="card flex align-center justify-between row-with-action clickable tour-debt-record-card"
                     style={{
                       padding: '1rem',
                       opacity: isSettled ? 0.6 : 1,
@@ -757,7 +757,7 @@ function DebtDetail({ debt, onBack, onAddTx, onUpdateDebt, onDelete, setConfirmC
             pointerEvents: isCompact ? 'auto' : 'none',
           }}
         >
-          <div className="flex justify-between align-center">
+          <div className="flex justify-between row-with-action align-center">
             <span className="font-bold" style={{ fontSize: '1rem' }}>{debt.personName}</span>
             <span className={`font-bold text-sm ${netBalance === 0 ? '' : (netBalance > 0 ? 'text-success' : 'text-danger')}`}>
               {formatCurrency(netBalance)}
@@ -1317,7 +1317,7 @@ function AddDebtModal({ existingNames, accounts, onAdd, onClose }: {
 
           <div className="input-group" onClick={() => setIsDatePickerOpen(true)}>
             <label>Date</label>
-            <div className="input-field flex align-center justify-between gap-3 clickable">
+            <div className="input-field flex align-center justify-between row-with-action gap-3 clickable">
               <span className="text-mono">{format(parseISO(date), 'EEE, d MMM yyyy')}</span>
               <Calendar size={18} className="text-muted" />
             </div>
@@ -1548,7 +1548,7 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, tra
                 <div className="input-group">
                   <label>Linked Ledger Transaction</label>
                   <div style={{ padding: '0.75rem 1rem', background: 'rgba(56,189,248,0.06)', borderRadius: '8px', border: '1px solid rgba(56,189,248,0.2)' }}>
-                    <div className="flex justify-between align-center" style={{ marginBottom: '0.35rem' }}>
+                    <div className="flex justify-between row-with-action align-center" style={{ marginBottom: '0.35rem' }}>
                       <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{ledgerTx.description}</span>
                       <span className="text-sm font-bold text-accent">{formatCurrency(ledgerTx.amount)}</span>
                     </div>
@@ -1652,7 +1652,7 @@ function DebtTransactionModal({ initialTx, type, personName, currentBalance, tra
 
             <div className="input-group" onClick={() => setIsDatePickerOpen(true)}>
               <label>Date</label>
-              <div className="input-field flex align-center justify-between gap-3 clickable">
+              <div className="input-field flex align-center justify-between row-with-action gap-3 clickable">
                 <span className="text-mono">{format(parseISO(date), 'EEE, d MMM yyyy')}</span>
                 <Calendar size={18} className="text-muted" />
               </div>

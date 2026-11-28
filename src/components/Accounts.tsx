@@ -1,4 +1,4 @@
-import { Fragment, useState, useRef, useEffect, useMemo, type KeyboardEvent, type RefObject } from 'react';
+import { Fragment, useState, useRef, useEffect, useMemo, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { format, parseISO } from 'date-fns';
 import { useFinance } from '../FinanceContext';
 import { Pencil, Trash2, Plus, FileText, CreditCard, Check, X, RefreshCw, ChevronDown, CalendarDays, Nfc, ScanLine } from 'lucide-react';
@@ -82,6 +82,71 @@ const buildCardFees = (mode: FeeMode, draft?: CardFees): CardFees | undefined =>
 
 const issuerMarkLabel = (mark: IssuerMark): string =>
   'brand' in mark ? brandLabel(mark.brand) : mark.name;
+
+// ── Holdings rows (mutual funds, stocks, gold/silver) ───────────────────────────────────────────
+// Two rows under the value/invested header, laid out as one grid that reads the same way as that
+// header — LEFT is what the holding is worth now, RIGHT is what you paid:
+//
+//     CURRENT NAV   |   AVG NAV           ← price now vs your average cost: the comparison you make
+//     TOTAL UNITS   |   P&L (+x%)         ← quantity, and the result of the line above times it
+//
+// The average is derived from stored figures alone, so it renders whatever state the live price is
+// in (loading, failed, never fetched, no market symbol at all). The refresh control sits beside the
+// price it refreshes rather than out by the P&L.
+const HOLDING_ROW_STYLE = { padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' } as const;
+const holdingValueStyle = (color: string) => ({ color, fontSize: '0.95rem', fontWeight: 700 }) as const;
+const fmtPrice = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function HoldingStat({ label, end, children }: { label: ReactNode; end?: boolean; children: ReactNode }) {
+  return (
+    <div className="flex-col gap-0" style={{ minWidth: 0, ...(end ? { alignItems: 'flex-end', textAlign: 'right' } : {}) }}>
+      <span className="text-mono text-muted text-xs">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function PnlStat({ pnl, pct }: { pnl: number; pct: number }) {
+  const pos = pnl >= 0;
+  return (
+    <HoldingStat label={<>P&amp;L ({pos ? '+' : ''}{pct.toFixed(2)}%)</>} end>
+      <span style={holdingValueStyle(pos ? 'var(--success)' : 'var(--danger)')}>
+        {pos ? '+' : '-'}₹{Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+      </span>
+    </HoldingStat>
+  );
+}
+
+function PriceRefreshButton({ title, isRefreshing, isFailed, isFresh, onClick }: {
+  title: string; isRefreshing: boolean; isFailed: boolean; isFresh: boolean; onClick: () => void;
+}) {
+  return (
+    <button
+      className="btn btn-secondary"
+      style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : !isFresh ? 'var(--success)' : undefined, color: !isFresh && !isRefreshing ? 'var(--success)' : undefined }}
+      title={title}
+      disabled={isRefreshing}
+      onClick={onClick}
+    >
+      <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
+    </button>
+  );
+}
+
+/** Label over the control that fetches a price nobody has fetched yet, or over the retry link once
+ *  a fetch has failed. Takes the price's slot in the row so the average stays where it always is. */
+function PriceNotLoaded({ label, failedText, fetchText, isFailed, isRefreshing, onFetch }: {
+  label: string; failedText: string; fetchText: string; isFailed: boolean; isRefreshing: boolean; onFetch: () => void;
+}) {
+  return (
+    <HoldingStat label={label}>
+      {isFailed && !isRefreshing
+        ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)', marginTop: '0.15rem' }}>{failedText} · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={onFetch}>Retry</button></span>
+        : <button className="btn btn-secondary" style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem', marginTop: '0.25rem', alignSelf: 'flex-start' }} onClick={onFetch}>{fetchText}</button>
+      }
+    </HoldingStat>
+  );
+}
 
 export default function Accounts({ onViewStatement }: { onViewStatement: (acc: Account) => void }) {
   const { data, setPendingTransfer, addAccount, updateAccount, archiveAccount, restoreAccount, addTransaction } = useFinance();
@@ -431,6 +496,34 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
   const [symbolSearching, setSymbolSearching] = useState(false);
   const [symbolDropdownOpen, setSymbolDropdownOpen] = useState(false);
   const symbolTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Tapping a debit card's name on its bank's tile jumps to that card's own tile. The group it sits
+  // in may be collapsed, so it is opened first; the scroll waits for the commit that renders it.
+  // `n` makes a second tap on the same name a new request, so it scrolls and flashes again.
+  const [revealTarget, setRevealTarget] = useState<{ id: string; n: number } | null>(null);
+  const revealAccount = (target: Account) => {
+    setCollapsedTypes(prev => {
+      if (!prev.has(target.type)) return prev;
+      const s = new Set(prev);
+      s.delete(target.type);
+      return s;
+    });
+    setRevealTarget(prev => ({ id: target.id, n: (prev?.n ?? 0) + 1 }));
+  };
+  useEffect(() => {
+    if (!revealTarget) return;
+    const el = document.querySelector(`[data-account-id="${CSS.escape(revealTarget.id)}"]`);
+    if (!el) return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
+    // Class toggled directly rather than through render: removing and re-adding it with a reflow
+    // between is what restarts the animation on a repeat tap.
+    el.classList.remove('account-card-reveal');
+    void (el as HTMLElement).offsetWidth;
+    el.classList.add('account-card-reveal');
+    const t = setTimeout(() => el.classList.remove('account-card-reveal'), 2000);
+    return () => clearTimeout(t);
+  }, [revealTarget]);
 
   const toggleCollapse = (type: string) => {
     setCollapsedTypes(prev => {
@@ -1200,7 +1293,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
   return (
     <div className="flex-col gap-6" style={{ maxWidth: '600px', margin: '0 auto', width: '100%' }}>
-      <div className="flex justify-between align-center" style={{ marginBottom: '1rem' }}>
+      <div className="flex justify-between row-with-action align-center" style={{ marginBottom: '1rem' }}>
         <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>accounts</h2>
         <button className="btn btn-primary" onClick={() => openAddModal()}>
           + Add New
@@ -1397,7 +1490,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       : null;
 
                     return (
-                      <div key={acc.id} className={`card flex-col ${isFirstAccount ? 'tour-first-account' : ''}`} style={{ padding: '0' }}>
+                      <div key={acc.id} data-account-id={acc.id} className={`card flex-col ${isFirstAccount ? 'tour-first-account' : ''}`} style={{ padding: '0' }}>
                         {/* Top Section - Hardware / Branding */}
                         <div className="flex justify-between align-start" style={{ padding: '0.85rem 1rem', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                           <div className="flex-col gap-1">
@@ -1585,7 +1678,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
 
                         {/* Bottom Section - Auxiliary Details */}
                         {acc.isNcmcEnabled && (
-                          <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                          <div className="flex justify-between row-with-action align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                             <span className="text-mono text-muted text-xs">TRAVEL WALLET</span>
                             <div className="flex align-center gap-3">
                               <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>
@@ -1675,10 +1768,16 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                                     {linkedCards.slice(0, 2).map((c, i) => (
                                       <Fragment key={c.id}>
                                         {i > 0 && <span style={{ flexShrink: 0, whiteSpace: 'pre' }}> · </span>}
-                                        <span className="flex align-center" style={{ minWidth: 0, gap: '0.3em' }}>
+                                        <button
+                                          type="button"
+                                          className="flex align-center linked-card-link"
+                                          style={{ minWidth: 0, gap: '0.3em', padding: 0, color: 'inherit', fontSize: 'inherit' }}
+                                          onClick={() => revealAccount(c)}
+                                          aria-label={`Go to ${c.name}`}
+                                        >
                                           <span style={{ flexShrink: 0, lineHeight: 1, display: 'flex', alignItems: 'center' }}>{getAccountIcon(c)}</span>
                                           <span className="truncate" style={{ minWidth: 0 }}>{c.name}</span>
-                                        </span>
+                                        </button>
                                       </Fragment>
                                     ))}
                                   </span>
@@ -1702,7 +1801,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         )}
 
                         {acc.isCashbackEnabled && acc.rewardType === 'points' && acc.rewardUnit && (
-                          <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
+                          <div className="flex justify-between row-with-action align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
                             <span className="text-mono text-muted text-xs" style={{ textTransform: 'uppercase', fontWeight: 800 }}>{acc.rewardUnit}</span>
                             <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.2rem', fontWeight: 700 }}>
                               {calculateBalance(acc, data.transactions, currentMonth, false, true, data.cashbackStatements)}
@@ -1713,100 +1812,66 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                         {acc.type === 'mutual_funds' && (() => {
                           const mfPnl = mfCurrentValue !== null && mfEffectiveInvested !== undefined ? mfCurrentValue - mfEffectiveInvested : null;
                           const mfPnlPct = mfPnl !== null && mfEffectiveInvested! > 0 ? (mfPnl / mfEffectiveInvested!) * 100 : null;
-                          const mfPnlPos = mfPnl !== null && mfPnl >= 0;
                           const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
                           const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
                           const isFresh = acc.marketSymbol ? isCacheFresh(acc.marketSymbol, 'mf') : false;
+                          const refreshNav = async () => {
+                            const sym = acc.marketSymbol!;
+                            setSymbolRefreshing(sym, true);
+                            const price = await fetchMFNav(sym);
+                            if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
+                            setSymbolRefreshing(sym, false);
+                          };
+                          const showPnl = mfPnl !== null && mfPnlPct !== null && !isRefreshing;
+                          const showPnlSkeleton = isRefreshing && mfEffectiveInvested !== undefined;
+                          // See HOLDING_ROW_STYLE for the grid these two rows form.
                           return (
                             <>
-                              {mfTotalUnits > 0 && (
-                                <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                  <span className="text-mono text-muted text-xs">TOTAL UNITS</span>
-                                  {/* Average cost sits with the quantity, NOT in the quote row below:
-                                    it is derived from stored figures alone, so it must still read when
-                                    the live price fails to fetch. The quote is the next row down, so
-                                    the avg-vs-LTP comparison stays adjacent. */}
-                                  <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
-                                    <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{mfTotalUnits.toLocaleString('en-IN', { maximumFractionDigits: 4 })}</span>
-                                    {mfAvgNav !== null && (
-                                      <span className="text-mono text-muted" style={{ fontSize: '0.62rem', marginTop: '0.1rem' }}>
-                                        AVG NAV ₹{mfAvgNav.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                              {acc.marketSymbol && (
-                                <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                  {(mfCurrentPrice !== null || isRefreshing) ? (
-                                    <>
-                                      <div className="flex-col gap-0">
-                                        <span className="text-mono text-muted text-xs">CURRENT NAV</span>
-                                        {isRefreshing
-                                          ? <span className="skeleton-bar" style={{ width: '4rem', height: '1.1rem', marginTop: '0.2rem' }} />
-                                          : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                            ₹{mfCurrentPrice!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                          </span>
-                                        }
-                                      </div>
-                                      <div className="flex align-center" style={{ gap: '0.75rem' }}>
-                                        {(mfPnl !== null && mfPnlPct !== null && !isRefreshing) && (
-                                          <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
-                                            <span className="text-mono text-muted text-xs">P&amp;L ({mfPnlPos ? '+' : ''}{mfPnlPct.toFixed(2)}%)</span>
-                                            <span style={{ color: mfPnlPos ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                              {mfPnlPos ? '+' : '-'}₹{Math.abs(mfPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                                            </span>
-                                          </div>
-                                        )}
-                                        {isRefreshing && mfEffectiveInvested !== undefined && (
-                                          <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
-                                            <span className="text-mono text-muted text-xs">P&amp;L</span>
-                                            <span className="skeleton-bar" style={{ width: '5rem', height: '1.1rem', marginTop: '0.2rem' }} />
-                                          </div>
-                                        )}
+                              {(acc.marketSymbol || mfAvgNav !== null) && (
+                                <div className="flex justify-between align-center row-with-action" style={HOLDING_ROW_STYLE}>
+                                  <div className="flex align-center" style={{ gap: '0.75rem', minWidth: 0 }}>
+                                    {acc.marketSymbol && ((mfCurrentPrice !== null || isRefreshing) ? (
+                                      <>
+                                        <HoldingStat label="CURRENT NAV">
+                                          {isRefreshing
+                                            ? <span className="skeleton-bar" style={{ width: '4rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                            : <span style={holdingValueStyle('var(--accent)')}>₹{fmtPrice(mfCurrentPrice!)}</span>
+                                          }
+                                        </HoldingStat>
                                         {isFailed && !isRefreshing && (
-                                          <span style={{ fontSize: '0.65rem', color: 'var(--danger)', textAlign: 'right' }}>fetch<br />failed</span>
+                                          <span style={{ fontSize: '0.65rem', color: 'var(--danger)' }}>fetch<br />failed</span>
                                         )}
                                         {(!isFresh || isRefreshing) && (
-                                          <button
-                                            className="btn btn-secondary"
-                                            style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : !isFresh ? 'var(--success)' : undefined, color: !isFresh && !isRefreshing ? 'var(--success)' : undefined }}
-                                            title="Refresh NAV"
-                                            disabled={isRefreshing}
-                                            onClick={async () => {
-                                              const sym = acc.marketSymbol!;
-                                              setSymbolRefreshing(sym, true);
-                                              const price = await fetchMFNav(sym);
-                                              if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
-                                              setSymbolRefreshing(sym, false);
-                                            }}
-                                          >
-                                            <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
-                                          </button>
+                                          <PriceRefreshButton title="Refresh NAV" isRefreshing={isRefreshing} isFailed={isFailed} isFresh={isFresh} onClick={refreshNav} />
                                         )}
-                                      </div>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span className="text-mono text-muted text-xs">CURRENT NAV</span>
-                                      {isFailed && !isRefreshing
-                                        ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Symbol not found · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const price = await fetchMFNav(sym); if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
-                                        : <button
-                                          className="btn btn-secondary"
-                                          style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
-                                          onClick={async () => {
-                                            const sym = acc.marketSymbol!;
-                                            setSymbolRefreshing(sym, true);
-                                            const price = await fetchMFNav(sym);
-                                            if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
-                                            setSymbolRefreshing(sym, false);
-                                          }}
-                                        >
-                                          Fetch NAV
-                                        </button>
-                                      }
-                                    </>
+                                      </>
+                                    ) : (
+                                      <PriceNotLoaded label="CURRENT NAV" failedText="Symbol not found" fetchText="Fetch NAV" isFailed={isFailed} isRefreshing={isRefreshing} onFetch={refreshNav} />
+                                    ))}
+                                  </div>
+                                  {mfAvgNav !== null && (
+                                    <HoldingStat label="AVG NAV" end>
+                                      <span style={holdingValueStyle('var(--text-primary)')}>₹{fmtPrice(mfAvgNav)}</span>
+                                    </HoldingStat>
                                   )}
+                                </div>
+                              )}
+                              {(mfTotalUnits > 0 || showPnl || showPnlSkeleton) && (
+                                <div className="flex justify-between align-center row-with-action" style={HOLDING_ROW_STYLE}>
+                                  {mfTotalUnits > 0
+                                    ? (
+                                      <HoldingStat label="TOTAL UNITS">
+                                        <span style={holdingValueStyle('var(--accent)')}>{mfTotalUnits.toLocaleString('en-IN', { maximumFractionDigits: 4 })}</span>
+                                      </HoldingStat>
+                                    )
+                                    : <div />}
+                                  {showPnl
+                                    ? <PnlStat pnl={mfPnl!} pct={mfPnlPct!} />
+                                    : showPnlSkeleton && (
+                                      <HoldingStat label="P&L" end>
+                                        <span className="skeleton-bar" style={{ width: '5rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                      </HoldingStat>
+                                    )}
                                 </div>
                               )}
                             </>
@@ -1828,94 +1893,64 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           const currentValue = stockCurrentValue;
                           const pnl = currentValue !== null && effectiveInvested !== undefined ? currentValue - effectiveInvested : null;
                           const pnlPct = pnl !== null && effectiveInvested! > 0 ? (pnl / effectiveInvested!) * 100 : null;
-                          const pnlPos = pnl !== null && pnl >= 0;
-
+                          const refreshPrice = async () => {
+                            const sym = acc.marketSymbol!;
+                            setSymbolRefreshing(sym, true);
+                            const price = await fetchStockPrice(sym);
+                            if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
+                            setSymbolRefreshing(sym, false);
+                          };
+                          const showPnl = hasPnLSetup && pnl !== null && pnlPct !== null && !isRefreshing;
+                          const showPnlSkeleton = hasPnLSetup && isRefreshing;
+                          // See HOLDING_ROW_STYLE for the grid these two rows form.
                           return (
                             <>
-                              {hasShares && (
-                                <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                  <span className="text-mono text-muted text-xs">TOTAL SHARES</span>
-                                  {/* Average cost sits with the quantity, NOT in the quote row below:
-                                    it is derived from stored figures alone, so it must still read when
-                                    the live price fails to fetch. The quote is the next row down, so
-                                    the avg-vs-LTP comparison stays adjacent. */}
-                                  <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
-                                    <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{totalShares.toLocaleString('en-IN', { maximumFractionDigits: 4 })}</span>
-                                    {stockAvgPrice !== null && (
-                                      <span className="text-mono text-muted" style={{ fontSize: '0.62rem', marginTop: '0.1rem' }}>
-                                        AVG ₹{stockAvgPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / SHARE
-                                      </span>
-                                    )}
+                              {(hasPnLSetup || stockAvgPrice !== null) && (
+                                <div className="flex justify-between align-center row-with-action" style={HOLDING_ROW_STYLE}>
+                                  <div className="flex align-center" style={{ gap: '0.75rem', minWidth: 0 }}>
+                                    {hasPnLSetup && ((currentPrice !== null || isRefreshing) ? (
+                                      <>
+                                        <HoldingStat label="LTP">
+                                          {isRefreshing
+                                            ? <span className="skeleton-bar" style={{ width: '4.5rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                            : <span style={holdingValueStyle('var(--accent)')}>₹{fmtPrice(currentPrice!)}</span>
+                                          }
+                                        </HoldingStat>
+                                        {isFailed && !isRefreshing && (
+                                          <span style={{ fontSize: '0.65rem', color: 'var(--danger)' }}>fetch<br />failed</span>
+                                        )}
+                                        {(!isFresh || isRefreshing) && (
+                                          <PriceRefreshButton title="Refresh price" isRefreshing={isRefreshing} isFailed={isFailed} isFresh={isFresh} onClick={refreshPrice} />
+                                        )}
+                                      </>
+                                    ) : (
+                                      <PriceNotLoaded label="LTP" failedText="Symbol not found" fetchText="Fetch" isFailed={isFailed} isRefreshing={isRefreshing} onFetch={refreshPrice} />
+                                    ))}
                                   </div>
+                                  {stockAvgPrice !== null && (
+                                    <HoldingStat label="AVG / SHARE" end>
+                                      <span style={holdingValueStyle('var(--text-primary)')}>₹{fmtPrice(stockAvgPrice)}</span>
+                                    </HoldingStat>
+                                  )}
                                 </div>
                               )}
-                              {hasPnLSetup && (
-                                (currentPrice !== null || isRefreshing) ? (
-                                  <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                    <div className="flex-col gap-0">
-                                      <span className="text-mono text-muted text-xs">LTP</span>
-                                      {isRefreshing
-                                        ? <span className="skeleton-bar" style={{ width: '4.5rem', height: '1.1rem', marginTop: '0.2rem' }} />
-                                        : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                          ₹{currentPrice!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                        </span>
-                                      }
-                                    </div>
-                                    <div className="flex align-center" style={{ gap: '0.75rem' }}>
-                                      {(pnl !== null && pnlPct !== null && !isRefreshing) && (
-                                        <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
-                                          <span className="text-mono text-muted text-xs">P&amp;L ({pnlPos ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
-                                          <span style={{ color: pnlPos ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                            {pnlPos ? '+' : '-'}₹{Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                                          </span>
-                                        </div>
-                                      )}
-                                      {isRefreshing && (
-                                        <span className="skeleton-bar" style={{ width: '5.5rem', height: '1.1rem' }} />
-                                      )}
-                                      {isFailed && !isRefreshing && (
-                                        <span style={{ fontSize: '0.65rem', color: 'var(--danger)', textAlign: 'right' }}>fetch<br />failed</span>
-                                      )}
-                                      {(!isFresh || isRefreshing) && (
-                                        <button
-                                          className="btn btn-secondary"
-                                          style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : !isFresh ? 'var(--success)' : undefined, color: !isFresh && !isRefreshing ? 'var(--success)' : undefined }}
-                                          title="Refresh price"
-                                          disabled={isRefreshing}
-                                          onClick={async () => {
-                                            const sym = acc.marketSymbol!;
-                                            setSymbolRefreshing(sym, true);
-                                            const price = await fetchStockPrice(sym);
-                                            if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
-                                            setSymbolRefreshing(sym, false);
-                                          }}
-                                        >
-                                          <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                    <span className="text-mono text-muted text-xs">LIVE P&amp;L</span>
-                                    {isFailed && !isRefreshing
-                                      ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Symbol not found · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const price = await fetchStockPrice(sym); if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
-                                      : <button
-                                        className="btn btn-secondary"
-                                        style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }}
-                                        onClick={async () => {
-                                          const sym = acc.marketSymbol!;
-                                          setSymbolRefreshing(sym, true);
-                                          const price = await fetchStockPrice(sym);
-                                          if (price !== null) setPrices(prev => ({ ...prev, [sym]: price })); else markSymbolFailed(sym);
-                                          setSymbolRefreshing(sym, false);
-                                        }}
-                                      >
-                                        Fetch
-                                      </button>
-                                    }
-                                  </div>
-                                )
+                              {(hasShares || showPnl || showPnlSkeleton) && (
+                                <div className="flex justify-between align-center row-with-action" style={HOLDING_ROW_STYLE}>
+                                  {hasShares
+                                    ? (
+                                      <HoldingStat label="TOTAL SHARES">
+                                        <span style={holdingValueStyle('var(--accent)')}>{totalShares.toLocaleString('en-IN', { maximumFractionDigits: 4 })}</span>
+                                      </HoldingStat>
+                                    )
+                                    : <div />}
+                                  {showPnl
+                                    ? <PnlStat pnl={pnl!} pct={pnlPct!} />
+                                    : showPnlSkeleton && (
+                                      <HoldingStat label="P&L" end>
+                                        <span className="skeleton-bar" style={{ width: '5.5rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                      </HoldingStat>
+                                    )}
+                                </div>
                               )}
                             </>
                           );
@@ -1925,88 +1960,69 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                           const isRefreshing = acc.marketSymbol ? refreshingSymbols.has(acc.marketSymbol) : false;
                           const isFailed = acc.marketSymbol ? failedSymbols.has(acc.marketSymbol) : false;
                           const isFresh = acc.marketSymbol ? isCommodityCacheFresh(acc.marketSymbol) : false;
+                          const refreshPrice = async () => {
+                            const sym = acc.marketSymbol!;
+                            setSymbolRefreshing(sym, true);
+                            const p = await fetchCommodityPriceINR(sym);
+                            if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym);
+                            setSymbolRefreshing(sym, false);
+                          };
+                          const pnl = commodityCurrentValue !== null && commodityEffectiveInvested !== undefined && !isRefreshing
+                            ? commodityCurrentValue - commodityEffectiveInvested
+                            : null;
+                          const pnlPct = pnl !== null && commodityEffectiveInvested! > 0 ? (pnl / commodityEffectiveInvested!) * 100 : 0;
+                          // See HOLDING_ROW_STYLE for the grid these two rows form. The price row is
+                          // top-aligned: the price can carry a source note under it (manual / estimate),
+                          // and the average opposite should line up with the price, not float mid-note.
                           return (
                             <>
-                              {commodityTotalGrams > 0 && (
-                                <div className="flex justify-between align-center" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)' }}>
-                                  <span className="text-mono text-muted text-xs">TOTAL GRAMS</span>
-                                  {/* Average cost sits with the quantity, NOT in the quote row below:
-                                    it is derived from stored figures alone, so it must still read when
-                                    the live price fails to fetch. The quote is the next row down, so
-                                    the avg-vs-LTP comparison stays adjacent. */}
-                                  <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
-                                    <span className="text-serif" style={{ color: 'var(--accent)', fontSize: '1.1rem' }}>{commodityTotalGrams.toLocaleString('en-IN', { maximumFractionDigits: 4 })} g</span>
-                                    {commodityAvgPerGram !== null && (
-                                      <span className="text-mono text-muted" style={{ fontSize: '0.62rem', marginTop: '0.1rem' }}>
-                                        AVG ₹{commodityAvgPerGram.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / G
-                                      </span>
-                                    )}
+                              {(acc.marketSymbol || commodityAvgPerGram !== null) && (
+                                <div className="flex justify-between align-start row-with-action" style={{ ...HOLDING_ROW_STYLE, flexWrap: 'nowrap', gap: '0.75rem' }}>
+                                  <div className="flex align-center" style={{ gap: '0.75rem', minWidth: 0 }}>
+                                    {acc.marketSymbol && ((commodityPricePerGram !== null || isRefreshing) ? (
+                                      <>
+                                        <HoldingStat label="PRICE / GRAM">
+                                          {isRefreshing
+                                            ? <span className="skeleton-bar" style={{ width: '4rem', height: '1.1rem', marginTop: '0.2rem' }} />
+                                            : <span style={holdingValueStyle('var(--accent)')}>
+                                              {commodityPriceSource === 'estimate' ? '≈ ' : ''}₹{fmtPrice(commodityPricePerGram!)}
+                                            </span>
+                                          }
+                                          {!isRefreshing && commodityPriceSource && (
+                                            <span className="text-mono text-muted" style={{ fontSize: '0.6rem', marginTop: '0.1rem', fontStyle: 'italic', wordBreak: 'break-word', ...(commodityVendorMissing ? { color: 'var(--warning)' } : {}) }}>
+                                              {commodityPriceSource === 'manual'
+                                                ? 'manual price'
+                                                : commodityVendorMissing
+                                                  ? `couldn't find “${commodityVendorName}” · market estimate`
+                                                  : 'approx · AI estimate'}
+                                            </span>
+                                          )}
+                                        </HoldingStat>
+                                        {commodityPriceSource === 'estimate' && (!isFresh || isRefreshing) && (
+                                          <PriceRefreshButton title="Refresh estimate" isRefreshing={isRefreshing} isFailed={isFailed} isFresh={isFresh} onClick={refreshPrice} />
+                                        )}
+                                      </>
+                                    ) : (
+                                      <PriceNotLoaded label="PRICE / GRAM" failedText="Fetch failed" fetchText="Fetch" isFailed={isFailed} isRefreshing={isRefreshing} onFetch={refreshPrice} />
+                                    ))}
                                   </div>
+                                  {commodityAvgPerGram !== null && (
+                                    <HoldingStat label="AVG / GRAM" end>
+                                      <span style={holdingValueStyle('var(--text-primary)')}>₹{fmtPrice(commodityAvgPerGram)}</span>
+                                    </HoldingStat>
+                                  )}
                                 </div>
                               )}
-                              {acc.marketSymbol && (
-                                <div className="flex justify-between align-start" style={{ padding: '0.65rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-hover)', flexWrap: 'nowrap', gap: '0.5rem' }}>
-                                  {(commodityPricePerGram !== null || isRefreshing) ? (
-                                    <>
-                                      <div className="flex-col gap-0" style={{ minWidth: 0, flexShrink: 1 }}>
-                                        <span className="text-mono text-muted text-xs">₹ / GRAM</span>
-                                        {isRefreshing
-                                          ? <span className="skeleton-bar" style={{ width: '4rem', height: '1.1rem', marginTop: '0.2rem' }} />
-                                          : <span style={{ color: 'var(--accent)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                            {commodityPriceSource === 'estimate' ? '≈ ' : ''}₹{commodityPricePerGram!.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                          </span>
-                                        }
-                                        {!isRefreshing && commodityPriceSource && (
-                                          <span className="text-mono text-muted" style={{ fontSize: '0.6rem', marginTop: '0.1rem', fontStyle: 'italic', wordBreak: 'break-word', ...(commodityVendorMissing ? { color: 'var(--warning)' } : {}) }}>
-                                            {commodityPriceSource === 'manual'
-                                              ? 'manual price'
-                                              : commodityVendorMissing
-                                                ? `couldn't find “${commodityVendorName}” · market estimate`
-                                                : 'approx · AI estimate'}
-                                          </span>
-                                        )}
-                                      </div>
-                                      <div className="flex align-center" style={{ gap: '0.75rem', flexShrink: 0 }}>
-                                        {(commodityCurrentValue !== null && commodityEffectiveInvested !== undefined && !isRefreshing) && (() => {
-                                          const pnl = commodityCurrentValue - commodityEffectiveInvested;
-                                          const pnlPct = commodityEffectiveInvested > 0 ? (pnl / commodityEffectiveInvested) * 100 : 0;
-                                          return (
-                                            <div className="flex-col gap-0" style={{ alignItems: 'flex-end' }}>
-                                              <span className="text-mono text-muted text-xs">P&amp;L ({pnl >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%)</span>
-                                              <span style={{ color: pnl >= 0 ? 'var(--success)' : 'var(--danger)', fontSize: '0.95rem', fontWeight: 700 }}>
-                                                {pnl >= 0 ? '+' : '-'}₹{Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                                              </span>
-                                            </div>
-                                          );
-                                        })()}
-                                        {commodityPriceSource === 'estimate' && (!isFresh || isRefreshing) && (
-                                          <button
-                                            className="btn btn-secondary"
-                                            style={{ width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, borderColor: isFailed && !isRefreshing ? 'var(--danger)' : !isFresh ? 'var(--success)' : undefined, color: !isFresh && !isRefreshing ? 'var(--success)' : undefined }}
-                                            title="Refresh estimate"
-                                            disabled={isRefreshing}
-                                            onClick={async () => {
-                                              const sym = acc.marketSymbol!;
-                                              setSymbolRefreshing(sym, true);
-                                              const p = await fetchCommodityPriceINR(sym);
-                                              if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym);
-                                              setSymbolRefreshing(sym, false);
-                                            }}
-                                          >
-                                            <RefreshCw size={13} className={isRefreshing ? 'icon-spin' : ''} />
-                                          </button>
-                                        )}
-                                      </div>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span className="text-mono text-muted text-xs">₹ / GRAM</span>
-                                      {isFailed && !isRefreshing
-                                        ? <span style={{ fontSize: '0.72rem', color: 'var(--danger)' }}>Fetch failed · <button style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: '0.72rem', cursor: 'pointer', padding: 0 }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Retry</button></span>
-                                        : <button className="btn btn-secondary" style={{ fontSize: '0.7rem', padding: '0.3rem 0.75rem' }} onClick={async () => { const sym = acc.marketSymbol!; setSymbolRefreshing(sym, true); const p = await fetchCommodityPriceINR(sym); if (p !== null) setPrices(prev => ({ ...prev, [sym]: p })); else markSymbolFailed(sym); setSymbolRefreshing(sym, false); }}>Fetch</button>
-                                      }
-                                    </>
-                                  )}
+                              {(commodityTotalGrams > 0 || pnl !== null) && (
+                                <div className="flex justify-between align-center row-with-action" style={HOLDING_ROW_STYLE}>
+                                  {commodityTotalGrams > 0
+                                    ? (
+                                      <HoldingStat label="TOTAL GRAMS">
+                                        <span style={holdingValueStyle('var(--accent)')}>{commodityTotalGrams.toLocaleString('en-IN', { maximumFractionDigits: 4 })} g</span>
+                                      </HoldingStat>
+                                    )
+                                    : <div />}
+                                  {pnl !== null && <PnlStat pnl={pnl} pct={pnlPct} />}
                                 </div>
                               )}
                             </>
@@ -2043,7 +2059,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
             </div>
             {!archivedCollapsed && <div className="flex-col gap-3">
               {data.accounts.filter(a => a.archived).map(acc => (
-                <div key={acc.id} className="card flex justify-between align-center" style={{ padding: '0.9rem 1rem', opacity: 0.7 }}>
+                <div key={acc.id} className="card flex justify-between align-center row-with-action" style={{ padding: '0.9rem 1rem', opacity: 0.7 }}>
                   <div className="flex-col" style={{ gap: '0.15rem' }}>
                     <span className="text-mono" style={{ fontSize: '0.9rem', fontWeight: 700 }}>{acc.name}</span>
                     <span className="text-mono text-muted text-xs" style={{ textTransform: 'capitalize' }}>{acc.type.replace(/_/g, ' ')} · deleted</span>
@@ -2186,7 +2202,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     <label>Card Opened On</label>
                     <button
                       type="button"
-                      className="input-field flex align-center justify-between"
+                      className="input-field flex align-center justify-between row-with-action"
                       style={{ textAlign: 'left', cursor: 'pointer' }}
                       onClick={() => setDatePickerTarget({ type: 'cardOpened' })}
                     >
@@ -2955,7 +2971,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                       <div className="flex-col gap-2" style={{ marginBottom: '0.5rem' }}>
                         {newAccount.cashbackRates.map((cr, idx) => (
                           <div key={cr.id} className="flex-col gap-2" style={{ padding: '0.75rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
-                            <div className="flex justify-between align-center">
+                            <div className="flex justify-between row-with-action align-center">
                               <span className="text-sm" style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{cr.name} <span className="text-muted">({cr.rate}%)</span></span>
                               <div className="flex gap-3">
                                 <button
@@ -3055,7 +3071,7 @@ export default function Accounts({ onViewStatement }: { onViewStatement: (acc: A
                     className="flex-col gap-3"
                     style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}
                   >
-                    <div className="flex justify-between align-center" style={{ flexWrap: 'nowrap', gap: '0.75rem' }}>
+                    <div className="flex justify-between row-with-action align-center" style={{ flexWrap: 'nowrap', gap: '0.75rem' }}>
                       <span className="text-sm font-bold" style={{ color: 'var(--text-primary)', minWidth: 0 }}>💳 Card Details{!newAccount.cardDetails && <span className="text-muted" style={{ fontWeight: 400 }}> (Optional)</span>}</span>
                       {newAccount.cardDetails ? (
                         <div className="flex gap-3" style={{ flexShrink: 0 }}>

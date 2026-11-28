@@ -132,7 +132,7 @@ export const TransactionPickList: React.FC<TransactionPickListProps> = ({ filter
         return (
           <div key={m} className="flex-col">
             <div
-              className="flex justify-between align-center clickable"
+              className="flex justify-between row-with-action align-center clickable"
               onClick={() => setExpandedMonths(prev => ({ ...prev, [m]: !prev[m] }))}
               style={{ padding: '0.75rem 1.5rem', background: 'var(--bg-hover)', borderBottom: '1px solid var(--border-color)' }}
             >

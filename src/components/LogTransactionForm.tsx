@@ -1609,7 +1609,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
           return (
             <div key={i} className="split-card flex-col gap-3" style={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }}>
               <div className="input-group flex-col gap-1" style={{ marginBottom: 0 }}>
-                <div className="flex justify-between align-center" style={{ minHeight: '20px', marginBottom: '0.35rem' }}>
+                <div className="flex justify-between row-with-action align-center" style={{ minHeight: '20px', marginBottom: '0.35rem' }}>
                   <label style={{ marginBottom: 0 }}>Amount</label>
                   <div className="flex" style={{ border: '1px solid var(--border-color)', borderRadius: '8px', overflow: 'hidden' }}>
                     {modes.map(mode => (
@@ -1982,7 +1982,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
       <div className="modal-body" ref={modalBodyRef}>
         <div className="input-group" onClick={() => setIsDatePickerOpen(true)}>
           <label>Date</label>
-          <div className={`input-field flex align-center justify-between gap-3 clickable ${errors.date ? 'border-danger' : ''}`}>
+          <div className={`input-field flex align-center justify-between row-with-action gap-3 clickable ${errors.date ? 'border-danger' : ''}`}>
             <span className="text-mono">{newTx.date ? format(parseISO(newTx.date), 'EEE, d MMM yyyy') : 'Select Date'}</span>
             <Calendar size={18} className="text-muted" />
           </div>
@@ -2781,7 +2781,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
 
           return (
             <div className="flex-col gap-3" style={{ marginBottom: '1rem', padding: '1rem', background: 'var(--bg-hover)', border: '1px solid var(--border-color)', borderRadius: '12px' }}>
-              <div className="flex justify-between align-center">
+              <div className="flex justify-between row-with-action align-center">
                 <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>Cashback Earned</span>
                 {showInstantUI && (
                   <div className="flex align-center" style={{ gap: '0.6rem' }}>
@@ -2903,7 +2903,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
             {/* The header's controls act on the card ON SCREEN — only one is visible at a time, and
                 the unit toggle in particular belongs to that card's source (Jewels beside CRED coins
                 is two different units on one split). */}
-            <div className="flex justify-between align-center" style={{ marginBottom: '0.85rem' }}>
+            <div className="flex justify-between row-with-action align-center" style={{ marginBottom: '0.85rem' }}>
               <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>
                 Split Payment
               </span>
@@ -3276,7 +3276,7 @@ export const LogTransactionForm: React.FC<LogTransactionFormProps> = ({
 
         {data.user?.enablePassiveTransactions && !isStatsExcludedCategory(newTx.category || '') && (
           <div ref={passiveLogRef} className="flex-col gap-3" style={{ marginBottom: '1rem', padding: '1rem', background: 'var(--bg-hover)', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-            <div className="flex justify-between align-center">
+            <div className="flex justify-between row-with-action align-center">
               <div className="flex-col">
                 <span className="text-xs font-bold text-muted uppercase" style={{ letterSpacing: '1px' }}>Passive Transaction</span>
                 <span className="text-xs text-muted" style={{ fontSize: '0.65rem' }}>Exclude from Spends & Income stats</span>

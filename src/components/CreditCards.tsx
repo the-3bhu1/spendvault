@@ -1609,7 +1609,7 @@ export default function CreditCards({ onExit, onViewStatement }: {
 
                 {fees.waiverSpend !== undefined && (
                   <div style={{ marginTop: '1rem' }}>
-                    <div className="flex justify-between align-center" style={{ gap: '0.75rem', marginBottom: '0.5rem' }}>
+                    <div className="flex justify-between row-with-action align-center" style={{ gap: '0.75rem', marginBottom: '0.5rem' }}>
                       <span className="text-mono uppercase" style={{ fontSize: '0.55rem', fontWeight: 800, letterSpacing: '1px', color: 'var(--text-muted)' }}>
                         Fee waiver
                       </span>

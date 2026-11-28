@@ -228,7 +228,7 @@ export default function UpcomingBills() {
     <div className="flex-col gap-6 animate-in bills-tab-root">
       {activeView === 'main' && (
         <>
-          <div className="flex justify-between align-center">
+          <div className="flex justify-between row-with-action align-center">
             <h2 className="text-mono" style={{ fontSize: '1.5rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>upcoming bills</h2>
             <button className="btn btn-primary flex align-center gap-2" onClick={() => setActiveView('add')}>
               <Plus size={18} strokeWidth={3} /> New Bill
@@ -324,7 +324,7 @@ export default function UpcomingBills() {
                         padding: '0.6rem 0.75rem',
                         background: 'rgba(255, 59, 48, 0.08)'
                       }}>
-                        <div className="flex align-center justify-between gap-2">
+                        <div className="flex align-center justify-between row-with-action gap-2">
                           <span className="flex align-center gap-2 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--danger)', minWidth: 0 }}>
                             <AlertCircle size={13} strokeWidth={3} style={{ flexShrink: 0 }} />
                             {namedStatements('isCC' in bill ? bill.overdueCycles : [])} unpaid
@@ -334,7 +334,7 @@ export default function UpcomingBills() {
                           </span>
                         </div>
                         {'isCC' in bill && bill.billed > 0 && (
-                          <div className="flex align-center justify-between gap-2">
+                          <div className="flex align-center justify-between row-with-action gap-2">
                             <span className="text-muted text-xs font-bold uppercase tracking-wider" style={{ minWidth: 0 }}>
                               This statement · {formatDays(daysLeft)}
                             </span>
@@ -539,7 +539,7 @@ export default function UpcomingBills() {
 
             <div className="input-group" onClick={() => setIsDatePickerOpen(true)}>
               <label>Next Due Date</label>
-            <div className="input-field flex align-center justify-between gap-3 clickable">
+            <div className="input-field flex align-center justify-between row-with-action gap-3 clickable">
               <span className="text-mono">{newBill.nextDueDate ? format(parseISO(newBill.nextDueDate), 'EEE, d MMM yyyy') : 'Select Date'}</span>
               <Calendar size={18} className="text-muted" />
             </div>

@@ -246,7 +246,7 @@ export const CycleMoveSheet: React.FC<{
  *  whichever list the row left. */
 export const CycleMoveToast: React.FC<{ message: string; onUndo: () => void }> = ({ message, onUndo }) => (
   <div
-    className="fade-in flex align-center justify-between"
+    className="fade-in flex align-center justify-between row-with-action"
     style={{
       position: 'fixed',
       left: '1rem',
